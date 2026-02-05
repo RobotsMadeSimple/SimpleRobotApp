@@ -10,7 +10,7 @@ export default function Layout() {
     
     <GluestackUIProvider mode="light">
       <SafeAreaProvider>
-        <Stack />
+        <Stack screenOptions={{ headerShown: false }} />
       </SafeAreaProvider>
     </GluestackUIProvider>
   );

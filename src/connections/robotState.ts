@@ -1,8 +1,5 @@
-// robotState.ts
-type RobotInfo = {
-  ip: string
-  port: number
-}
+import { RobotInfo } from "../models/robotModels"
+
 
 type Listener = (robot: RobotInfo | null) => void
 

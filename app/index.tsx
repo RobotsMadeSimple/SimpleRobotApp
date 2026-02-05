@@ -1,30 +1,39 @@
-import { View } from "react-native";
-import { Button, ButtonText } from "@/components/ui/button"
-import { router, Stack } from "expo-router";
-
-
-import { useEffect } from "react";
 import { robotClient } from "@/src/connections/RobotWebSocketClient";
-import { robotDiscovery } from "@/src/connections/RobotDiscoveryService";
+import { Stack } from "expo-router";
+import { useEffect } from "react";
+import { View } from "react-native";
 
+import { RobotCard } from '@/src/components/RobotCards';
+import { robotDiscovery } from '@/src/connections/RobotDiscoveryService';
+import { RobotInfo } from "@/src/models/robotModels";
+import React, { useState } from 'react';
+import { FlatList } from 'react-native';
 
+export default function Home() {
+  const [robots, setRobots] = useState<RobotInfo[]>([]);
 
-export default function Index() {
   useEffect(() => {
-    robotClient.start();
+    const unsubscribe = robotDiscovery.subscribe(setRobots);
     robotDiscovery.start();
-    return () => robotClient.disconnect();
+    robotClient.start();
+
+    return () => {
+      unsubscribe();
+      robotDiscovery.stop();
+      robotClient.disconnect();
+    };
   }, []);
 
   return (
     <>
-      <Stack.Screen options={{ title: "Home" }} />
-      <View>
-        <Button onPress={() => router.push("./robot/JogScreen")}>
-          <ButtonText>Click me</ButtonText>
-        </Button>
+      <Stack.Screen options={{ title: "Robot Selection" }} />
+      <View style={{ padding: 16 }}>
+        <FlatList
+          data={robots}
+          keyExtractor={r => r.serialNumber}
+          renderItem={({ item }) => <RobotCard robot={item} />}
+        />
       </View>
     </>
-    
   );
 }

@@ -1,14 +1,44 @@
-﻿import { subscribeRobot } from "./robotState"
-
+﻿import { RobotStatus } from "../models/robotModels";
+import { subscribeRobot } from "./robotState";
 
 type MessageHandler<T = any> = (data: T) => void;
-
+type StatusListener = (status: RobotStatus) => void;
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
 };
 
 export class RobotWebSocketClient {
+  private statusListeners: StatusListener[] = [];
+  private status: RobotStatus = {
+    connected: false,
+    moving: false,
+    x: 0,
+    y: 0,
+    z: 0,
+    rx: 0,
+    ry: 0,
+    rz: 0,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    targetRx: 0,
+    targetRy: 0,
+    targetRz: 0,
+    poseX: 0,
+    poseY: 0,
+    poseZ: 0,
+    poseRx: 0,
+    poseRy: 0,
+    poseRz: 0,
+    speedS: 0,
+    accelS: 0,
+    decelS: 0,
+    speedJ: 0,
+    accelJ: 0,
+    decelJ: 0
+  };
+
   private ws: WebSocket | null = null;
   private url?: string;
   private reconnect: boolean;
@@ -31,7 +61,7 @@ export class RobotWebSocketClient {
   start() {
     this.unsubscribe = subscribeRobot(robot => {
       if (!robot) return;
-      this.url = `ws://${robot.ip}:${robot.port}/control`;
+      this.url = `ws://${robot.ipAddress}:${robot.port}/control`;
       console.log("Found Robot ip and port, updated the url point: ", this.url);
       this.connect();
     })
@@ -49,11 +79,13 @@ export class RobotWebSocketClient {
 
     this.ws.onopen = () => {
       console.log("[RobotWS] Connected");
+      this.emitStatus({ connected: true });
       this.isConnected = true;
     };
 
     this.ws.onclose = () => {
       console.log("[RobotWS] Disconnected");
+      this.emitStatus({ connected: false });
       this.cleanup();
 
       if (this.reconnect) {
@@ -108,6 +140,23 @@ export class RobotWebSocketClient {
   }
 
   // -------------------------
+  // Status Events
+  // -------------------------
+
+  onStatus(cb: StatusListener) {
+    this.statusListeners.push(cb);
+    cb(this.status);
+    return () => {
+      this.statusListeners = this.statusListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitStatus(update: Partial<RobotStatus>) {
+    this.status = { ...this.status, ...update };
+    this.statusListeners.forEach(cb => cb(this.status));
+  }
+
+  // -------------------------
   // Messaging
   // -------------------------
 
@@ -121,7 +170,6 @@ export class RobotWebSocketClient {
     this.ws.send(JSON.stringify(data));
   }
 
-  // ⭐ Python-equivalent send_command ⭐
   sendCommand(command: string, params: Record<string, any> = {}) {
     if (!this.ws || !this.isConnected) {
       return Promise.reject("Not connected");
