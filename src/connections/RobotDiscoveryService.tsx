@@ -1,29 +1,12 @@
-﻿import Zeroconf from 'react-native-zeroconf';
-import { setSelectedRobot } from "./robotState";
-import { Platform } from 'react-native';
+﻿import { Platform } from 'react-native';
+import Zeroconf from 'react-native-zeroconf';
+import { RobotInfo } from '../models/robotModels';
 
-export type RobotService = {
-  name: string;
-  host: string;
-  port: number;
-  type: string;
-  txt: Record<string, string>;
-};
-
-type WebRobotResponse = {
-  ready: boolean;
-  name: string;
-  ip: string;
-  port: number;
-  type: string;
-  control_endpoint: string;
-  properties: Record<string, string>;
-};
 
 class RobotDiscoveryService {
   private zeroconf = new Zeroconf();
-  private robots = new Map<string, RobotService>();
-  private listeners: ((robots: RobotService[]) => void)[] = [];
+  private robots = new Map<string, RobotInfo>();
+  private listeners: ((robots: RobotInfo[]) => void)[] = [];
 
   private started = false;
   private listenersRegistered = false;
@@ -41,15 +24,15 @@ class RobotDiscoveryService {
       this.listenersRegistered = true;
 
       this.zeroconf.on('resolved', service => {
-        const robot: RobotService = {
-          name: service.name,
-          host: service.host,
+        const robot: RobotInfo = {
+          robotName: service.txt.robotName,
+          ipAddress: service.host,
           port: service.port,
-          type: service.type,
-          txt: service.txt ?? {},
+          robotType: service.txt.robotType,
+          controlEndpoint: service.txt.controlEndpoint,
+          serialNumber: service.txt.serialNumber
         };
 
-        setSelectedRobot({ ip: service.host, port: service.port });
         this.robots.set(service.name, robot);
         this.emit();
       });
@@ -64,22 +47,16 @@ class RobotDiscoveryService {
   }
 
   private async fetchFromHttp() {
-    const res = await fetch('http://localhost:3001/robot');
+    const res = await fetch('http://localhost:3001/get-robots');
     if (!res.ok) return;
 
-    const data: WebRobotResponse = await res.json();
-    if (!data.ready) return;
+    const data = await res.json();
 
-    const robot: RobotService = {
-      name: data.name,
-      host: data.ip,
-      port: data.port,
-      type: data.type,
-      txt: data.properties ?? {},
-    };
+    for (const r of data) {
+      const robot: RobotInfo = r;
+      this.robots.set(r.robotName, robot);
+    }
 
-    setSelectedRobot({ ip: data.ip, port: data.port });
-    this.robots.set(data.name, robot);
     this.emit();
   }
 
@@ -98,17 +75,17 @@ class RobotDiscoveryService {
     this.emit();
   }
 
-  subscribe(cb: (robots: RobotService[]) => void) {
-    this.listeners.push(cb);
-    cb([...this.robots.values()]);
+  subscribe(callback: (robots: RobotInfo[]) => void) {
+    this.listeners.push(callback);
+    callback([...this.robots.values()]);
     return () => {
-      this.listeners = this.listeners.filter(l => l !== cb);
+      this.listeners = this.listeners.filter(l => l !== callback);
     };
   }
 
   private emit() {
     const list = [...this.robots.values()];
-    this.listeners.forEach(cb => cb(list));
+    this.listeners.forEach(callback => callback(list));
   }
 }
 

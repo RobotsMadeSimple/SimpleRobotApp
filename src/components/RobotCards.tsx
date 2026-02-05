@@ -1,30 +1,48 @@
+import { Card } from '@/components/ui/card';
+import { router } from 'expo-router';
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { RobotService } from '../connections/RobotDiscoveryService';
+import { Pressable, StyleSheet, Text } from 'react-native';
+import { setSelectedRobot } from '../connections/robotState';
+import { RobotInfo } from '../models/robotModels';
 
-export function RobotCard({ robot }: { robot: RobotService }) {
+export function RobotCard({ robot }: { robot: RobotInfo }) {
+  function setRobot(){
+    setSelectedRobot(robot);
+    router.push(`/robot/${robot.serialNumber}`)
+  }
+
+
   return (
-    <View style={styles.card}>
-      <Text style={styles.name}>{robot.name}</Text>
+    <Pressable
+      onPress={() => setRobot()}
+      style={({ pressed }) => pressed && styles.pressed}
+    >
+      <Card style={styles.card}>
+        <Text style={styles.name}>{robot.robotName}</Text>
 
-      <Text>Type: {robot.txt.RobotType ?? 'Unknown'}</Text>
-      <Text>Host: {robot.host}:{robot.port}</Text>
-      <Text>Endpoint: {robot.txt.ControlEndpoint ?? '/'}</Text>
-    </View>
+        <Text>Type: {robot.robotType}</Text>
+        <Text>
+          Address: {robot.ipAddress}:{robot.port}
+        </Text>
+        <Text>Serial: {robot.serialNumber}</Text>
+      </Card>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#1e1e1e',
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
+  },
+  pressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
   },
   name: {
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
-    color: '#fff',
   },
 });
