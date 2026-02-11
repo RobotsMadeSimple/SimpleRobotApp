@@ -1,4 +1,4 @@
-import { JogButton } from "@/src/components/JogButton";
+import { JogButton } from "@/src/components/ui/JogButton";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";

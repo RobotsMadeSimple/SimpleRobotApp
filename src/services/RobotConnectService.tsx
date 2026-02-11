@@ -124,7 +124,9 @@ export class RobotConnectService {
 
   disconnect() {
     this.reconnect = false;
-    this.ws?.close();
+    if (this.ws?.readyState === 1){
+      this.ws?.close();
+    }
     this.cleanup();
   }
 
