@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, FlatList } from 'react-native';
-import { robotDiscovery, RobotService } from '../connections/RobotDiscoveryService';
-import { RobotCard } from '../components/RobotCards';
+import { FlatList, View } from 'react-native';
+import { RobotCard } from '../components/ui/RobotCards';
+import { RobotInfo } from '../models/robotModels';
+import { robotDiscovery } from '../services/RobotDiscoveryService';
 
 export function RobotBrowserScreen() {
-  const [robots, setRobots] = useState<RobotService[]>([]);
+  const [robots, setRobots] = useState<RobotInfo[]>([]);
 
   useEffect(() => {
     const unsub = robotDiscovery.subscribe(setRobots);
@@ -19,7 +20,7 @@ export function RobotBrowserScreen() {
     <View style={{ padding: 16 }}>
       <FlatList
         data={robots}
-        keyExtractor={r => r.name}
+        keyExtractor={r => r.robotName}
         renderItem={({ item }) => <RobotCard robot={item} />}
       />
     </View>

@@ -1,5 +1,5 @@
-﻿import { RobotStatus } from "../models/robotModels";
-import { subscribeRobot } from "./robotState";
+﻿import { subscribeRobot } from "../connections/robotState";
+import { RobotStatus } from "../models/robotModels";
 
 type MessageHandler<T = any> = (data: T) => void;
 type StatusListener = (status: RobotStatus) => void;
@@ -8,7 +8,7 @@ type PendingAck = {
   reject: (reason?: any) => void;
 };
 
-export class RobotWebSocketClient {
+export class RobotConnectService {
   private statusListeners: StatusListener[] = [];
   private status: RobotStatus = {
     connected: false,
@@ -206,4 +206,4 @@ export class RobotWebSocketClient {
 }
 
 
-export const robotClient = new RobotWebSocketClient()
+export const robotClient = new RobotConnectService()

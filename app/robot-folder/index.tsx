@@ -1,6 +1,6 @@
-import { RobotCard } from '@/src/components/RobotCards';
-import { robotDiscovery } from '@/src/connections/RobotDiscoveryService';
+import { RobotCard } from '@/src/components/ui/RobotCards';
 import { RobotInfo } from '@/src/models/robotModels';
+import { robotDiscovery } from '@/src/services/RobotDiscoveryService';
 import React, { useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
 

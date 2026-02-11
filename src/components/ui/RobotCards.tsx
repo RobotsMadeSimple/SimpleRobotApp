@@ -1,16 +1,15 @@
 import { Card } from '@/components/ui/card';
+import { setSelectedRobot } from '@/src/connections/robotState';
+import { RobotInfo } from '@/src/models/robotModels';
 import { router } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { setSelectedRobot } from '../connections/robotState';
-import { RobotInfo } from '../models/robotModels';
 
 export function RobotCard({ robot }: { robot: RobotInfo }) {
   function setRobot(){
     setSelectedRobot(robot);
     router.push(`/robot/${robot.serialNumber}`)
   }
-
 
   return (
     <Pressable

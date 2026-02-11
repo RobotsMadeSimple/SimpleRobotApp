@@ -1,7 +1,7 @@
-import { View, Text, StyleSheet } from "react-native";
-import { useRef, useState } from "react";
 import { JogButton } from "@/src/components/JogButton";
-import { robotClient } from "@/src/connections/RobotWebSocketClient";
+import { robotClient } from "@/src/services/RobotConnectService";
+import { useRef, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
 
 type JogIntent = {
   axis: "x" | "y" | "z";

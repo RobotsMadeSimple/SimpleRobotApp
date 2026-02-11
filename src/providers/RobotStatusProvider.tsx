@@ -1,4 +1,4 @@
-import { robotClient } from '@/src/connections/RobotWebSocketClient';
+import { robotClient } from '@/src/services/RobotConnectService';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { RobotStatus } from '../models/robotModels';
 
