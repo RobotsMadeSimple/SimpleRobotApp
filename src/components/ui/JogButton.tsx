@@ -1,41 +1,66 @@
-import { Pressable, StyleSheet, Text } from "react-native";
+import { ReactNode } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+
+type IconPosition = "above" | "below" | "left" | "right";
 
 type Props = {
-    label: string;
-    onStart: () => void;
-    onStop: () => void;
+  label: string;
+  icon: ReactNode;
+  iconPosition: IconPosition;
+  onStart: () => void;
+  onStop: () => void;
 };
 
-export function JogButton({ label, onStart, onStop }: Props) {
-    return (
-        <Pressable
-            onPressIn={onStart}
-            onPressOut={onStop}
-            style={({ pressed }) => [
-                styles.button,
-                pressed && styles.pressed,
-            ]}
-        >
-            <Text style={styles.text}>{label}</Text>
-        </Pressable>
-    );
+export function JogButton({
+  label,
+  icon,
+  iconPosition,
+  onStart,
+  onStop,
+}: Props) {
+  const isRow = iconPosition === "left" || iconPosition === "right";
+  const isReverse =
+    iconPosition === "below" || iconPosition === "right";
+
+  return (
+    <Pressable
+      onPressIn={onStart}
+      onPressOut={onStop}
+      style={styles.button}
+    >
+      <View
+        style={[
+          styles.content,
+          { flexDirection: isRow ? "row" : "column" },
+          isReverse && { flexDirection: isRow ? "row-reverse" : "column-reverse" },
+        ]}
+      >
+        {icon}
+        <Text style={styles.text}>{label}</Text>
+      </View>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
-    button: {
-        width: 80,
-        height: 80,
-        backgroundColor: "#333",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 8,
-    },
-    pressed: {
-        backgroundColor: "#555",
-    },
-    text: {
-        color: "#fff",
-        fontSize: 20,
-        fontWeight: "600",
-    },
+  button: {
+    width: 70,
+    height: 70,
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderColor: "#666",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  content: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  text: {
+    color: "#666",
+    fontSize: 18,
+    fontWeight: "600",
+  },
 });
+

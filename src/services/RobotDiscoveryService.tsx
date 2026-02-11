@@ -24,13 +24,14 @@ class RobotDiscoveryService {
       this.listenersRegistered = true;
 
       this.zeroconf.on('resolved', service => {
+        console.log(service.txt);
         const robot: RobotInfo = {
-          robotName: service.txt.robotName,
+          robotName: service.txt.RobotName,
           ipAddress: service.host,
           port: service.port,
-          robotType: service.txt.robotType,
-          controlEndpoint: service.txt.controlEndpoint,
-          serialNumber: service.txt.serialNumber
+          robotType: service.txt.RobotType,
+          controlEndpoint: service.txt.ControlEndpoint,
+          serialNumber: service.txt.SerialNumber
         };
 
         this.robots.set(service.name, robot);
