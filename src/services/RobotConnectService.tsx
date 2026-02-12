@@ -1,5 +1,5 @@
 ﻿import { subscribeRobot } from "../connections/robotState";
-import { RobotStatus } from "../models/robotModels";
+import { RobotInfo, RobotStatus } from "../models/robotModels";
 
 type MessageHandler<T = any> = (data: T) => void;
 type StatusListener = (status: RobotStatus) => void;
@@ -47,6 +47,7 @@ export class RobotConnectService {
 
   private messageHandlers: MessageHandler[] = [];
   private isConnected = false;
+  private statusInterval: any = null;
 
   private pendingAcks = new Map<string, PendingAck>();
 
@@ -67,6 +68,16 @@ export class RobotConnectService {
     })
   }
 
+  connectTo(robot: RobotInfo) {
+    this.url = `ws://${robot.ipAddress}:${robot.port}/control`;
+
+    if (this.ws) {
+      this.disconnect();
+    }
+
+    this.connect();
+  }
+
   connect() {
     // Validate there is a url
     if (!this.url) return;
@@ -81,11 +92,14 @@ export class RobotConnectService {
       console.log("[RobotWS] Connected");
       this.emitStatus({ connected: true });
       this.isConnected = true;
+
+      this.startStatusPolling();
     };
 
     this.ws.onclose = () => {
       console.log("[RobotWS] Disconnected");
       this.emitStatus({ connected: false });
+
       this.cleanup();
 
       if (this.reconnect) {
@@ -111,12 +125,17 @@ export class RobotConnectService {
       if (data?.type === "ack" && typeof data.id === "string") {
         const pending = this.pendingAcks.get(data.id);
         if (pending) {
+          this.emitStatus(data);
+          if (data?.type === "control") {
+            this.emitStatus(data);
+            return;
+          }
           this.pendingAcks.delete(data.id);
           pending.resolve(data);
           return;
         }
       }
-
+  
       // Forward everything else
       this.messageHandlers.forEach((cb) => cb(data));
     };
@@ -131,6 +150,8 @@ export class RobotConnectService {
   }
 
   private cleanup() {
+    this.stopStatusPolling();
+
     this.ws = null;
     this.isConnected = false;
 
@@ -200,6 +221,23 @@ export class RobotConnectService {
     return () => {
       this.messageHandlers = this.messageHandlers.filter((h) => h !== handler);
     };
+  }
+
+  private startStatusPolling() {
+    if (this.statusInterval) return;
+
+    this.statusInterval = setInterval(() => {
+      if (this.isConnected) {
+        this.sendCommand("GetStatus").catch(() => {});
+      }
+    }, 40);
+  }
+
+  private stopStatusPolling() {
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+      this.statusInterval = null;
+    }
   }
 
   get connected() {

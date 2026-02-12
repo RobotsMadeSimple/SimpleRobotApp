@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
+import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import React from "react";
 import {
@@ -10,7 +11,6 @@ import {
   Text,
   View,
 } from "react-native";
-
 const robotImages: Record<string, any> = {
   TBot: require("@/assets/images/TBot.png"),
 };
@@ -20,7 +20,8 @@ const defaultRobotImage = require("@/assets/images/no-robot.png");
 export function RobotCard({ robot }: { robot: RobotInfo }) {
   function setRobot() {
     setSelectedRobot(robot);
-    router.push(`/robot/${robot.serialNumber}`);
+    robotClient.connectTo(robot);
+    router.push(`/robot/connected-robot`);
   }
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;

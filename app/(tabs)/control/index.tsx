@@ -1,4 +1,5 @@
 import JogPad from "@/src/components/ui/JogPad";
+import { useSelectedRobot } from "@/src/providers/RobotProvider";
 import {
   History,
   MousePointerClick,
@@ -13,7 +14,6 @@ import {
   Text,
   View
 } from "react-native";
-
 function Selector({
   label,
   value,
@@ -67,6 +67,10 @@ export default function Control() {
   const [tool, setTool] = useState("Hand1");
   const [selectedStep, setSelectedStep] = useState("Slow");
   const [mode, setMode] = useState("XYZ");
+  const robot = useSelectedRobot();
+  console.log("X: " + robot?.status.x);
+
+  const format = (v: number) => (v ?? 0).toFixed(1);
 
   const stepButtons = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
 
@@ -163,19 +167,28 @@ export default function Control() {
 
       {/* Row 4 */}
       <View style={styles.row4}>
-        <Text>
-          <Text style={styles.axisLabel}>x:</Text>{" "}
-          <Text style={styles.axisValue}>1234.0</Text>
-        </Text>
-        <Text>
-          <Text style={styles.axisLabel}>y:</Text>{" "}
-          <Text style={styles.axisValue}>1234.0</Text>
-        </Text>
-        <Text>
-          <Text style={styles.axisLabel}>z:</Text>{" "}
-          <Text style={styles.axisValue}>1234.0</Text>
-        </Text>
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>X</Text>
+          <Text style={styles.axisValue}>
+            {format(robot?.status.x ?? 0)}
+          </Text>
+        </View>
+
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>Y</Text>
+          <Text style={styles.axisValue}>
+            {format(robot?.status?.y ?? 0)}
+          </Text>
+        </View>
+
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>Z</Text>
+          <Text style={styles.axisValue}>
+            {format(robot?.status?.z ?? 0)}
+          </Text>
+        </View>
       </View>
+
 
       {/* Center JogPad */}
       <View style={styles.jogWrapper}>
@@ -296,15 +309,25 @@ const styles = StyleSheet.create({
     color: "white",
   },
 
+  axisBlock: {
+    alignItems: "center",
+    width: 100,
+  },
+
   axisLabel: {
     color: "#666",
-    fontSize: 22,
+    fontSize: 18,
+    marginBottom: 4,
   },
 
   axisValue: {
     color: "#000",
     fontSize: 22,
+    fontFamily: "Courier",
+    textAlign: "center",
+    width: 90,
   },
+
 
   bottomLeft: {
     position: "absolute",
