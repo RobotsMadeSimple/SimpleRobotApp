@@ -68,7 +68,6 @@ export default function Control() {
   const [selectedStep, setSelectedStep] = useState("Slow");
   const [mode, setMode] = useState("XYZ");
   const robot = useSelectedRobot();
-  console.log("X: " + robot?.status.x);
 
   const format = (v: number) => (v ?? 0).toFixed(1);
 
