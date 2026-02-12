@@ -2,6 +2,7 @@ import JogPad from "@/src/components/ui/JogPad";
 import {
   History,
   MousePointerClick,
+  Move,
   Move3d,
   Rotate3d,
 } from "lucide-react-native";
@@ -29,7 +30,7 @@ function Selector({
   return (
     <View style={{ position: "relative" }}>
       <View style={styles.selectorGroup}>
-        <Move3d size={18} color="#666" />
+        <Move3d size={22} color="#666" />
         <Text style={styles.selectorLabel}>{label}</Text>
 
         <Pressable
@@ -64,7 +65,7 @@ function Selector({
 export default function Control() {
   const [local, setLocal] = useState("Global");
   const [tool, setTool] = useState("Hand1");
-  const [selectedStep, setSelectedStep] = useState("1mm");
+  const [selectedStep, setSelectedStep] = useState("Slow");
   const [mode, setMode] = useState("XYZ");
 
   const stepButtons = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
@@ -98,13 +99,13 @@ export default function Control() {
               key={label}
               onPress={() => setSelectedStep(label)}
               style={[
-                styles.grayButton,
+                styles.speedButton,
                 selected && styles.redSelected,
               ]}
             >
               <Text
                 style={[
-                  styles.grayText,
+                  styles.speedText,
                   selected && styles.whiteText,
                 ]}
               >
@@ -120,12 +121,12 @@ export default function Control() {
         <Pressable
           onPress={() => setMode("XYZ")}
           style={[
-            styles.grayButton,
+            styles.moveSpaceButton,
             mode === "XYZ" && styles.redSelected,
           ]}
         >
-          <Move3d
-            size={16}
+          <Move
+            size={20}
             color={mode === "XYZ" ? "white" : "#666"}
           />
           <Text
@@ -141,12 +142,12 @@ export default function Control() {
         <Pressable
           onPress={() => setMode("Joint")}
           style={[
-            styles.grayButton,
+            styles.moveSpaceButton,
             mode === "Joint" && styles.redSelected,
           ]}
         >
           <Rotate3d
-            size={16}
+            size={20}
             color={mode === "Joint" ? "white" : "#666"}
           />
           <Text
@@ -184,13 +185,13 @@ export default function Control() {
       {/* Bottom Left History */}
       <Pressable style={styles.bottomLeft}>
         <Text style={styles.grayText}>History </Text>
-        <History size={16} color="#666" />
+        <History size={25} color="#666" />
       </Pressable>
 
       {/* Bottom Right Teach */}
       <Pressable style={styles.bottomRight}>
         <Text style={styles.redText}>Teach </Text>
-        <MousePointerClick size={16} color="red" />
+        <MousePointerClick size={25} color="red" />
       </Pressable>
     </View>
   );
@@ -226,20 +227,31 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: "row",
-    justifyContent: "space-around",
-    marginTop: 12,
+    justifyContent: "space-between",
+    marginTop: 16,
   },
 
   row4: {
     flexDirection: "row",
     justifyContent: "space-evenly",
-    marginTop: 12,
+    marginTop: 20,
   },
 
   jogWrapper: {
     flex: 1,
-    justifyContent: "center",
+    paddingTop: 60,
     alignItems: "center",
+  },
+
+  speedButton: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderColor: "#999",
+    borderRadius: 6,
+    width: "16%",
   },
 
   grayButton: {
@@ -253,6 +265,18 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
 
+  moveSpaceButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 50,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: "#999",
+    borderRadius: 60,
+    marginHorizontal: 8,
+  },
+
   redSelected: {
     backgroundColor: "red",
     borderColor: "red",
@@ -260,7 +284,12 @@ const styles = StyleSheet.create({
 
   grayText: {
     color: "#666",
-    fontSize: 14,
+    fontSize: 18,
+  },
+
+  speedText: {
+    color: "#666",
+    fontSize: 15,
   },
 
   whiteText: {
@@ -269,10 +298,12 @@ const styles = StyleSheet.create({
 
   axisLabel: {
     color: "#666",
+    fontSize: 22,
   },
 
   axisValue: {
     color: "#000",
+    fontSize: 22,
   },
 
   bottomLeft: {
@@ -285,8 +316,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#999",
     borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
   },
 
   bottomRight: {
@@ -300,22 +331,23 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderColor: "red",
     borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
   },
 
   redText: {
     color: "red",
+    fontSize: 18,
   },
 
   selectorButton: {
-  borderWidth: 1.5,
-  borderColor: "#999",
-  borderRadius: 6,
-  paddingHorizontal: 12,
-  paddingVertical: 6,
-  marginLeft: 6,
-},
+    borderWidth: 1.5,
+    borderColor: "#999",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 6,
+  },
 
 dropdown: {
   position: "absolute",

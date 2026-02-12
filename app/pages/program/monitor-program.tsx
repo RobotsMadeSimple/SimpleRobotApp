@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from "react-native";
 
-export default function Program() {
+export default function IO() {
   return (
     <View style={styles.container}>
-      <Text style={styles.text}>Program Screen</Text>
+      <Text style={styles.text}>I/O Screen</Text>
     </View>
   );
 }
