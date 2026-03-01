@@ -1,5 +1,6 @@
 import { getSelectedRobot } from "@/src/connections/robotState";
 import { useRobots } from "@/src/providers/RobotProvider";
+import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
   ArrowLeftRight,
@@ -85,7 +86,7 @@ export default function ConnectedRobot() {
           </Text>
         </View>
 
-        <Pressable style={styles.backButton} onPress={router.back}>
+        <Pressable style={styles.backButton} onPress={() => {router.back(); robotClient.disconnect()}}>
           <Text style={styles.backButtonText}>Change</Text>
         </Pressable>
       </View>

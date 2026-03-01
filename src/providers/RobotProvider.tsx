@@ -10,6 +10,7 @@ type RobotWithStatus = RobotInfo & {
 
 type RobotContextType = {
   robots: RobotWithStatus[];
+  connected: boolean;
   selectedRobot: RobotWithStatus | null;
 };
 
@@ -44,6 +45,7 @@ const defaultStatus: RobotStatus = {
 
 const RobotContext = createContext<RobotContextType>({
   robots: [],
+  connected: false,
   selectedRobot: null,
 });
 
@@ -87,7 +89,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <RobotContext.Provider value={{ robots: robotsWithStatus, selectedRobot }}>
+    <RobotContext.Provider value={{ robots: robotsWithStatus, connected: status.connected, selectedRobot }}>
       {children}
     </RobotContext.Provider>
   );
