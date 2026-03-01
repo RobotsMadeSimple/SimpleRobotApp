@@ -1,5 +1,6 @@
 import JogPad from "@/src/components/ui/JogPad";
 import { useSelectedRobot } from "@/src/providers/RobotProvider";
+import { robotClient } from "@/src/services/RobotConnectService";
 import {
   History,
   MousePointerClick,
@@ -65,17 +66,17 @@ function Selector({
 export default function Control() {
   const [local, setLocal] = useState("Global");
   const [tool, setTool] = useState("Hand1");
-  const [selectedStep, setSelectedStep] = useState("Slow");
+  const [selectedSpeed, setSelectedSpeed] = useState("Slow");
   const [mode, setMode] = useState("XYZ");
   const robot = useSelectedRobot();
 
   const format = (v: number) => (v ?? 0).toFixed(1);
 
-  const stepButtons = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
+  const speedOptions = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
 
   return (
     <View style={styles.container}>
-      {/* Row 1 */}
+      {/* Row 1 - Local and Hand Selection */}
       <View style={styles.row1}>
       <Selector
         label="Local:"
@@ -93,14 +94,14 @@ export default function Control() {
     </View>
 
 
-      {/* Row 2 */}
+      {/* Row 2 - Speed Selections*/}
       <View style={styles.row}>
-        {stepButtons.map((label) => {
-          const selected = selectedStep === label;
+        {speedOptions.map((label) => {
+          const selected = selectedSpeed === label;
           return (
             <Pressable
               key={label}
-              onPress={() => setSelectedStep(label)}
+              onPress={() => setSelectedSpeed(label)}
               style={[
                 styles.speedButton,
                 selected && styles.redSelected,
@@ -119,7 +120,7 @@ export default function Control() {
         })}
       </View>
 
-      {/* Row 3 */}
+      {/* Row 3 - Jog Mode Type Linear or Joint*/}
       <View style={styles.row}>
         <Pressable
           onPress={() => setMode("XYZ")}
@@ -164,7 +165,7 @@ export default function Control() {
         </Pressable>
       </View>
 
-      {/* Row 4 */}
+      {/* Row 4 - Position View */}
       <View style={styles.row4}>
         <View style={styles.axisBlock}>
           <Text style={styles.axisLabel}>X</Text>
@@ -186,12 +187,22 @@ export default function Control() {
             {format(robot?.status?.z ?? 0)}
           </Text>
         </View>
+
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>RZ</Text>
+          <Text style={styles.axisValue}>
+            {format(robot?.status?.rz ?? 0)}
+          </Text>
+        </View>
       </View>
 
 
       {/* Center JogPad */}
       <View style={styles.jogWrapper}>
-        <JogPad />
+        <JogPad
+          jogMode={mode}
+          selectedSpeed={selectedSpeed}
+        />
       </View>
 
       {/* Bottom Left History */}
@@ -201,7 +212,7 @@ export default function Control() {
       </Pressable>
 
       {/* Bottom Right Teach */}
-      <Pressable style={styles.bottomRight}>
+      <Pressable style={styles.bottomRight} onPress={() => robotClient.sendCommand("Teach")}>
         <Text style={styles.redText}>Teach </Text>
         <MousePointerClick size={25} color="red" />
       </Pressable>
@@ -310,7 +321,7 @@ const styles = StyleSheet.create({
 
   axisBlock: {
     alignItems: "center",
-    width: 100,
+    flex: 1,
   },
 
   axisLabel: {

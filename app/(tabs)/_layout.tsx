@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import "@/global.css";
+import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
 import { RobotProvider } from "@/src/providers/RobotProvider";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -41,6 +42,7 @@ export function TabLayout() {
           fontWeight: "bold",
           fontSize: 25,
         },
+        headerRight: () => <ConnectionStatus />,
         tabBarActiveTintColor: "#2563eb",
         tabBarInactiveTintColor: "#64748b",
         tabBarStyle: isScreenNested
@@ -54,11 +56,11 @@ export function TabLayout() {
         },
         tabBarIcon: ({ color, size }) => {
           const icons: Record<string, any> = {
-            "robot": Router,
-            "program": CodeXml,
-            "control": Gamepad2,
-            "io": ArrowLeftRight,
-            "space": Move3d,
+            robot: Router,
+            program: CodeXml,
+            control: Gamepad2,
+            io: ArrowLeftRight,
+            space: Move3d,
           };
 
           const IconComponent = icons[route.name] ?? Router;

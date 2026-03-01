@@ -46,7 +46,9 @@ export class RobotConnectService {
   private unsubscribe?: () => void;
 
   private messageHandlers: MessageHandler[] = [];
-  private isConnected = false;
+  private get isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
   private statusInterval: any = null;
 
   private pendingAcks = new Map<string, PendingAck>();
@@ -71,10 +73,13 @@ export class RobotConnectService {
   connectTo(robot: RobotInfo) {
     this.url = `ws://${robot.ipAddress}:${robot.port}/control`;
 
-    if (this.ws) {
-      this.disconnect();
-    }
+    // Disconnect from any existing connections
+    this.disconnect();
 
+    // Allow the connection to reconnect if it drops
+    this.reconnect = true;
+
+    // Start connecting to the new address
     this.connect();
   }
 
@@ -83,7 +88,12 @@ export class RobotConnectService {
     if (!this.url) return;
 
     // Already a websocket connected need to close it first to reconnect
-    if (this.ws) return;
+    if (this.ws && this.connected) return;
+
+    // Be paitent if the websocket is in the middle of connecting
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      return;
+    }
 
     console.log("[RobotWS] Connecting to", this.url);
     this.ws = new WebSocket(this.url);
@@ -91,8 +101,6 @@ export class RobotConnectService {
     this.ws.onopen = () => {
       console.log("[RobotWS] Connected");
       this.emitStatus({ connected: true });
-      this.isConnected = true;
-
       this.startStatusPolling();
     };
 
@@ -153,7 +161,6 @@ export class RobotConnectService {
     this.stopStatusPolling();
 
     this.ws = null;
-    this.isConnected = false;
 
     // Reject all pending commands
     for (const [, pending] of this.pendingAcks) {
@@ -185,8 +192,7 @@ export class RobotConnectService {
 
   send<T extends object>(data: T) {
     if (!this.ws || !this.isConnected) {
-      console.warn("[RobotWS] Not connected, cannot send");
-      this.connect();
+      console.warn("[RobotWS] Not connected, cannot send");;
       return;
     }
 

@@ -1,5 +1,7 @@
 import { RobotCard } from "@/src/components/ui/RobotCards";
+import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots } from "@/src/providers/RobotProvider";
+import { router } from "expo-router";
 import { useState } from "react";
 import {
   FlatList,
@@ -29,7 +31,18 @@ export default function Robot() {
               style={styles.input}
             />
 
-            <Pressable style={styles.button}>
+            <Pressable style={styles.button} onPress={
+              () => {
+                setSelectedRobot({
+                  robotName: "",
+                  robotType: "",
+                  ipAddress: manualIp,
+                  port: 9000,
+                  serialNumber: "",
+                  controlEndpoint: "control",
+                });
+                router.push(`/robot/connected-robot`)
+              }}>
               <Text style={styles.buttonText}>Connect</Text>
             </Pressable>
           </View>
