@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { RobotInfo, RobotStatus } from "@/src/models/robotModels";
+import { Point, RobotInfo, RobotStatus, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -12,51 +12,26 @@ type RobotContextType = {
   robots: RobotWithStatus[];
   connected: boolean;
   selectedRobot: RobotWithStatus | null;
-};
-
-const defaultStatus: RobotStatus = {
-  connected: false,
-  moving: false,
-  x: 0,
-  y: 0,
-  z: 0,
-  rx: 0,
-  ry: 0,
-  rz: 0,
-  targetX: 0,
-  targetY: 0,
-  targetZ: 0,
-  targetRx: 0,
-  targetRy: 0,
-  targetRz: 0,
-  poseX: 0,
-  poseY: 0,
-  poseZ: 0,
-  poseRx: 0,
-  poseRy: 0,
-  poseRz: 0,
-  speedS: 0,
-  accelS: 0,
-  decelS: 0,
-  speedJ: 0,
-  accelJ: 0,
-  decelJ: 0,
+  points: Point[];
 };
 
 const RobotContext = createContext<RobotContextType>({
   robots: [],
   connected: false,
   selectedRobot: null,
+  points: [],
 });
 
 export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [robots, setRobots] = useState<RobotInfo[]>([]);
-  const [status, setStatus] = useState<RobotStatus>(defaultStatus);
+  const [status, setStatus] = useState<RobotStatus>(createDefaultStatus());
+  const [points, setPoints] = useState<Point[]>([]);
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubDiscovery = robotDiscovery.subscribe(setRobots);
     const unsubStatus = robotClient.onStatus(setStatus);
+    const unsubPoints = robotClient.onPoints(setPoints);
     const unsubSelected = subscribeRobot(robot =>
       setSelectedSerial(robot?.serialNumber ?? null)
     );
@@ -68,6 +43,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubDiscovery();
       unsubStatus();
       unsubSelected();
+      unsubPoints();
       robotDiscovery.stop();
       robotClient.disconnect();
     };
@@ -89,7 +65,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <RobotContext.Provider value={{ robots: robotsWithStatus, connected: status.connected, selectedRobot }}>
+    <RobotContext.Provider value={{ robots: robotsWithStatus, connected: status.connected, selectedRobot, points}}>
       {children}
     </RobotContext.Provider>
   );
@@ -97,6 +73,10 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
 
 export function useRobots() {
   return useContext(RobotContext);
+}
+
+export function usePoints(){
+  return useContext(RobotContext).points;
 }
 
 export function useSelectedRobot() {

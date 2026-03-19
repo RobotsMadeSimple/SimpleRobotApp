@@ -1,4 +1,4 @@
-import { getSelectedRobot } from "@/src/connections/robotState";
+import { getSelectedRobot, setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -22,6 +22,12 @@ const robotImages: Record<string, any> = {
 };
 
 const defaultRobotImage = require("@/assets/images/no-robot.png");
+
+function changeRobot(){
+    robotClient.disconnect();
+    setSelectedRobot(null);
+    router.back();
+  }
 
 export default function ConnectedRobot() {
   const selectedRobot = getSelectedRobot();
@@ -86,7 +92,7 @@ export default function ConnectedRobot() {
           </Text>
         </View>
 
-        <Pressable style={styles.backButton} onPress={() => {router.back(); robotClient.disconnect()}}>
+        <Pressable style={styles.backButton} onPress={changeRobot}>
           <Text style={styles.backButtonText}>Change</Text>
         </Pressable>
       </View>

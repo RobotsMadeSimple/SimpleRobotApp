@@ -1,43 +1,29 @@
 ﻿import { subscribeRobot } from "../connections/robotState";
-import { RobotInfo, RobotStatus } from "../models/robotModels";
-
+import { Point, RobotInfo, RobotStatus, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any> = (data: T) => void;
 type StatusListener = (status: RobotStatus) => void;
+type PointsListener = (points: Point[]) => void;
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
 };
 
+type MoveParams = {
+  x?: number
+  y?: number
+  z?: number
+  rz?: number
+  speed?: number
+  accel?: number
+  decel?: number
+}
+
 export class RobotConnectService {
   private statusListeners: StatusListener[] = [];
-  private status: RobotStatus = {
-    connected: false,
-    moving: false,
-    x: 0,
-    y: 0,
-    z: 0,
-    rx: 0,
-    ry: 0,
-    rz: 0,
-    targetX: 0,
-    targetY: 0,
-    targetZ: 0,
-    targetRx: 0,
-    targetRy: 0,
-    targetRz: 0,
-    poseX: 0,
-    poseY: 0,
-    poseZ: 0,
-    poseRx: 0,
-    poseRy: 0,
-    poseRz: 0,
-    speedS: 0,
-    accelS: 0,
-    decelS: 0,
-    speedJ: 0,
-    accelJ: 0,
-    decelJ: 0
-  };
+  private pointsListeners: PointsListener[] = [];
+  private status: RobotStatus = createDefaultStatus();
+  private connecting: boolean = false;
+  private points: Point[] = [];
 
   private ws: WebSocket | null = null;
   private url?: string;
@@ -66,7 +52,6 @@ export class RobotConnectService {
       if (!robot) return;
       this.url = `ws://${robot.ipAddress}:${robot.port}/control`;
       console.log("Found Robot ip and port, updated the url point: ", this.url);
-      this.connect();
     })
   }
 
@@ -95,10 +80,16 @@ export class RobotConnectService {
       return;
     }
 
+    // Avoid double connections
+    if (this.connecting)
+      return;
+
     console.log("[RobotWS] Connecting to", this.url);
     this.ws = new WebSocket(this.url);
+    this.connecting = true;
 
     this.ws.onopen = () => {
+      this.connecting = false;
       console.log("[RobotWS] Connected");
       this.emitStatus({ connected: true });
       this.startStatusPolling();
@@ -131,22 +122,70 @@ export class RobotConnectService {
 
       // Handle ACKs internally
       if (data?.type === "ack" && typeof data.id === "string") {
-        const pending = this.pendingAcks.get(data.id);
-        if (pending) {
-          this.emitStatus(data);
-          if (data?.type === "control") {
-            this.emitStatus(data);
-            return;
-          }
-          this.pendingAcks.delete(data.id);
-          pending.resolve(data);
-          return;
-        }
+        this.decodeCommand(data);
       }
   
       // Forward everything else
       this.messageHandlers.forEach((cb) => cb(data));
     };
+  }
+
+  decodeCommand(data: any){
+    const pending = this.pendingAcks.get(data.id);
+
+    if (!pending)
+      return;
+
+    switch (data.command){
+      case "GetStatus":
+        
+        this.emitStatus(data);
+        break;
+      
+      case "GetPoints":
+        console.log("GetPoints Decode");
+        this.decodePoints(data);
+        break;
+    }
+
+    this.pendingAcks.delete(data.id);
+    pending.resolve(data);
+  }
+
+  private decodePoints(data: any) {
+    if (!data.points) {
+      this.points = [];
+      return;
+    }
+
+    let parsed: any[];
+
+    try {
+      parsed = JSON.parse(data.points);
+    } catch {
+      console.warn("[RobotWS] Failed to parse points JSON");
+      this.points = [];
+      return;
+    }
+
+    if (!Array.isArray(parsed)) {
+      this.points = [];
+      return;
+    }
+
+    this.points = parsed.map((p: any): Point => ({
+      name: p.Name,
+      lastUpdatedUnixMs: p.LastUpdatedUnixMs,
+      x: p.X,
+      y: p.Y,
+      z: p.Z,
+      rx: p.RX,
+      ry: p.RY,
+      rz: p.RZ
+    }));
+
+    console.log(this.points);
+    this.emitPoints();
   }
 
   disconnect() {
@@ -161,6 +200,7 @@ export class RobotConnectService {
     this.stopStatusPolling();
 
     this.ws = null;
+    this.connecting = false;
 
     // Reject all pending commands
     for (const [, pending] of this.pendingAcks) {
@@ -182,8 +222,29 @@ export class RobotConnectService {
   }
 
   private emitStatus(update: Partial<RobotStatus>) {
+    const previousUpdate = this.status.lastPointUpdate;
+
     this.status = { ...this.status, ...update };
+
+    if (
+      update.lastPointUpdate !== previousUpdate
+    ) {
+      this.getPoints().catch(() => {});
+    }
+
     this.statusListeners.forEach(cb => cb(this.status));
+  }
+
+  onPoints(cb: PointsListener) {
+    this.pointsListeners.push(cb);
+    cb(this.points);
+    return () => {
+      this.pointsListeners = this.pointsListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitPoints() {
+    this.pointsListeners.forEach(cb => cb(this.points));
   }
 
   // -------------------------
@@ -234,7 +295,7 @@ export class RobotConnectService {
 
     this.statusInterval = setInterval(() => {
       if (this.isConnected) {
-        this.sendCommand("GetStatus").catch(() => {});
+        this.getStatus().catch(() => {});
       }
     }, 40);
   }
@@ -248,6 +309,106 @@ export class RobotConnectService {
 
   get connected() {
     return this.isConnected;
+  }
+
+  // -------------------------
+  // Available Commands
+  // -------------------------
+
+  public getStatus(){
+    return robotClient.sendCommand("GetStatus");
+  }
+
+  public getPoints(){
+    return robotClient.sendCommand("GetPoints");
+  }
+
+  public stopJog(){
+    return robotClient.sendCommand("StopJog");
+  }
+
+  public jogL({
+    x = 0,
+    y = 0,
+    z = 0,
+    rz = 0,
+    speed = 100,
+    accel = 100,
+    decel = 100
+  }: MoveParams) {
+
+    return robotClient.sendCommand("JogL", {
+      X: x,
+      Y: y,
+      Z: z,
+      RZ: rz,
+      Speed: speed,
+      Accel: accel,
+      Decel: decel
+    });
+  }
+
+  public jogJ({
+    x = 0,
+    y = 0,
+    z = 0,
+    rz = 0,
+    speed = 100,
+    accel = 100,
+    decel = 100
+  }: MoveParams) {
+
+    return robotClient.sendCommand("JogJ", {
+      X: x,
+      Y: y,
+      Z: z,
+      RZ: rz,
+      Speed: speed,
+      Accel: accel,
+      Decel: decel
+    });
+  }
+
+  public jogTool({
+    x = 0,
+    y = 0,
+    z = 0,
+    rz = 0,
+    speed = 100,
+    accel = 100,
+    decel = 100
+  }: MoveParams) {
+
+    return robotClient.sendCommand("JogTool", {
+      X: x,
+      Y: y,
+      Z: z,
+      RZ: rz,
+      Speed: speed,
+      Accel: accel,
+      Decel: decel
+    });
+  }
+
+  public offsetL({
+    x = 0,
+    y = 0,
+    z = 0,
+    rz = 0,
+    speed = 100,
+    accel = 100,
+    decel = 100
+  }: MoveParams) {
+
+    return robotClient.sendCommand("OffsetL", {
+      X: x,
+      Y: y,
+      Z: z,
+      RZ: rz,
+      Speed: speed,
+      Accel: accel,
+      Decel: decel
+    });
   }
 }
 

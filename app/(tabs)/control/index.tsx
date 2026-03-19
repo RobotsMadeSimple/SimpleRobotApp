@@ -2,11 +2,11 @@ import JogPad from "@/src/components/ui/JogPad";
 import { useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
-  History,
+  HomeIcon,
   MousePointerClick,
   Move,
   Move3d,
-  Rotate3d,
+  Rotate3d
 } from "lucide-react-native";
 import { useState } from "react";
 import {
@@ -144,6 +144,27 @@ export default function Control() {
         </Pressable>
 
         <Pressable
+          onPress={() => setMode("Tool")}
+          style={[
+            styles.moveSpaceButton,
+            mode === "Tool" && styles.redSelected,
+          ]}
+        >
+          <Move
+            size={20}
+            color={mode === "Tool" ? "white" : "#666"}
+          />
+          <Text
+            style={[
+              styles.grayText,
+              mode === "Tool" && styles.whiteText,
+            ]}
+          >
+            Tool
+          </Text>
+        </Pressable>
+
+        <Pressable
           onPress={() => setMode("Joint")}
           style={[
             styles.moveSpaceButton,
@@ -205,10 +226,10 @@ export default function Control() {
         />
       </View>
 
-      {/* Bottom Left History */}
-      <Pressable style={styles.bottomLeft}>
-        <Text style={styles.grayText}>History </Text>
-        <History size={25} color="#666" />
+      {/* Bottom Left Home Button */}
+      <Pressable style={styles.bottomLeft} onPress={() => robotClient.sendCommand("Home")}>
+        <Text style={styles.grayText}>Home </Text>
+        <HomeIcon size={25} color="#666" />
       </Pressable>
 
       {/* Bottom Right Teach */}
@@ -292,12 +313,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 50,
+    paddingHorizontal: 25,
     paddingVertical: 8,
     borderWidth: 1.5,
     borderColor: "#999",
     borderRadius: 60,
-    marginHorizontal: 8,
+    marginHorizontal: 0,
   },
 
   redSelected: {

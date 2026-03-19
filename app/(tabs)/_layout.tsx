@@ -12,19 +12,27 @@ import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import "@/global.css";
 import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
 import { RobotProvider } from "@/src/providers/RobotProvider";
+import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
+
 
 export default function Layout() {
   return (
-    <GluestackUIProvider mode="light">
-      <SafeAreaProvider>
-        <RobotProvider>
-          <StatusBar style="dark" translucent={false} />
-          <TabLayout/>
-        </RobotProvider>
-      </SafeAreaProvider>
-    </GluestackUIProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ActionSheetProvider>
+        <GluestackUIProvider mode="light">
+          <SafeAreaProvider>
+            <RobotProvider>
+              <StatusBar style="dark" translucent={false} />
+              <TabLayout/>
+            </RobotProvider>
+          </SafeAreaProvider>
+        </GluestackUIProvider>
+      </ActionSheetProvider>
+    </GestureHandlerRootView>
   );
 }
 
