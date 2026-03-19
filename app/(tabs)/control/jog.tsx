@@ -1,0 +1,319 @@
+import JogPad from "@/src/components/ui/JogPad";
+import { useSelectedRobot } from "@/src/providers/RobotProvider";
+import { robotClient } from "@/src/services/RobotConnectService";
+import {
+  Move,
+  Move3d,
+  OctagonX,
+  Rotate3d,
+} from "lucide-react-native";
+import { useState } from "react";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+function Selector({
+  label,
+  value,
+  options,
+  onSelect,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onSelect: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View style={{ position: "relative" }}>
+      <View style={styles.selectorGroup}>
+        <Move3d size={22} color="#666" />
+        <Text style={styles.selectorLabel}>{label}</Text>
+        <Pressable
+          onPress={() => setOpen(!open)}
+          style={styles.selectorButton}
+        >
+          <Text style={styles.grayText}>{value}</Text>
+        </Pressable>
+      </View>
+
+      {open && (
+        <View style={styles.dropdown}>
+          {options.map((opt) => (
+            <Pressable
+              key={opt}
+              onPress={() => {
+                onSelect(opt);
+                setOpen(false);
+              }}
+              style={styles.dropdownItem}
+            >
+              <Text style={styles.grayText}>{opt}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+export default function JogScreen() {
+  const [local, setLocal] = useState("Global");
+  const [tool, setTool] = useState("Hand1");
+  const [selectedSpeed, setSelectedSpeed] = useState("Slow");
+  const [mode, setMode] = useState("XYZ");
+  const robot = useSelectedRobot();
+
+  const format = (v: number) => (v ?? 0).toFixed(1);
+  const speedOptions = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
+
+  return (
+    <View style={styles.container}>
+      {/* Row 1 - Local and Tool Selection */}
+      <View style={styles.row1}>
+        <Selector
+          label="Local:"
+          value={local}
+          options={["Global", "Local1"]}
+          onSelect={setLocal}
+        />
+        <Selector
+          label="Tool:"
+          value={tool}
+          options={["Hand1", "Hand2"]}
+          onSelect={setTool}
+        />
+      </View>
+
+      {/* Row 2 - Speed Selections */}
+      <View style={styles.row}>
+        {speedOptions.map((label) => {
+          const selected = selectedSpeed === label;
+          return (
+            <Pressable
+              key={label}
+              onPress={() => setSelectedSpeed(label)}
+              style={[styles.speedButton, selected && styles.redSelected]}
+            >
+              <Text style={[styles.speedText, selected && styles.whiteText]}>
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Row 3 - Jog Mode */}
+      <View style={styles.row}>
+        <Pressable
+          onPress={() => setMode("XYZ")}
+          style={[styles.moveSpaceButton, mode === "XYZ" && styles.redSelected]}
+        >
+          <Move size={20} color={mode === "XYZ" ? "white" : "#666"} />
+          <Text style={[styles.grayText, mode === "XYZ" && styles.whiteText]}>XYZ</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setMode("Tool")}
+          style={[styles.moveSpaceButton, mode === "Tool" && styles.redSelected]}
+        >
+          <Move size={20} color={mode === "Tool" ? "white" : "#666"} />
+          <Text style={[styles.grayText, mode === "Tool" && styles.whiteText]}>Tool</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setMode("Joint")}
+          style={[styles.moveSpaceButton, mode === "Joint" && styles.redSelected]}
+        >
+          <Rotate3d size={20} color={mode === "Joint" ? "white" : "#666"} />
+          <Text style={[styles.grayText, mode === "Joint" && styles.whiteText]}>Joint</Text>
+        </Pressable>
+      </View>
+
+      {/* Row 4 - Position View */}
+      <View style={styles.row4}>
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>X</Text>
+          <Text style={styles.axisValue}>{format(robot?.status.x ?? 0)}</Text>
+        </View>
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>Y</Text>
+          <Text style={styles.axisValue}>{format(robot?.status?.y ?? 0)}</Text>
+        </View>
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>Z</Text>
+          <Text style={styles.axisValue}>{format(robot?.status?.z ?? 0)}</Text>
+        </View>
+        <View style={styles.axisBlock}>
+          <Text style={styles.axisLabel}>RZ</Text>
+          <Text style={styles.axisValue}>{format(robot?.status?.rz ?? 0)}</Text>
+        </View>
+      </View>
+
+      {/* JogPad */}
+      <View style={styles.jogWrapper}>
+        <JogPad jogMode={mode} selectedSpeed={selectedSpeed} />
+      </View>
+
+      {/* Stop Button */}
+      <Pressable
+        style={styles.stopButton}
+        onPress={() => robotClient.sendCommand("HardStop")}
+      >
+        <OctagonX size={26} color="white" />
+        <Text style={styles.stopText}>STOP</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 16,
+    alignItems: "stretch",
+  },
+
+  row1: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+  },
+
+  selectorGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  selectorLabel: {
+    color: "#666",
+    fontSize: 16,
+  },
+
+  selectorButton: {
+    borderWidth: 1.5,
+    borderColor: "#999",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 6,
+  },
+
+  dropdown: {
+    position: "absolute",
+    top: 36,
+    right: 0,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    backgroundColor: "white",
+    borderRadius: 6,
+    elevation: 4,
+    zIndex: 100,
+  },
+
+  dropdownItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 16,
+  },
+
+  row4: {
+    flexDirection: "row",
+    justifyContent: "space-evenly",
+    marginTop: 20,
+  },
+
+  speedButton: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderColor: "#999",
+    borderRadius: 6,
+    width: "16%",
+  },
+
+  moveSpaceButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 25,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: "#999",
+    borderRadius: 60,
+  },
+
+  redSelected: {
+    backgroundColor: "red",
+    borderColor: "red",
+  },
+
+  grayText: {
+    color: "#666",
+    fontSize: 18,
+  },
+
+  speedText: {
+    color: "#666",
+    fontSize: 15,
+  },
+
+  whiteText: {
+    color: "white",
+  },
+
+  axisBlock: {
+    alignItems: "center",
+    flex: 1,
+  },
+
+  axisLabel: {
+    color: "#666",
+    fontSize: 18,
+    marginBottom: 4,
+  },
+
+  axisValue: {
+    color: "#000",
+    fontSize: 22,
+    fontFamily: "Courier",
+    textAlign: "center",
+    width: 90,
+  },
+
+  jogWrapper: {
+    flex: 1,
+    paddingTop: 30,
+    alignItems: "center",
+  },
+
+  stopButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "red",
+    borderRadius: 8,
+    paddingVertical: 16,
+    marginBottom: 16,
+  },
+
+  stopText: {
+    color: "white",
+    fontSize: 22,
+    fontWeight: "bold",
+    letterSpacing: 2,
+  },
+});

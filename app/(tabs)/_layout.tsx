@@ -39,7 +39,7 @@ export default function Layout() {
 export function TabLayout() {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const isScreenNested = (pathname.includes("/program/"));
+  const isScreenNested = (pathname.includes("/program/") || pathname.includes("/control/"));
 
   return (
     <Tabs
