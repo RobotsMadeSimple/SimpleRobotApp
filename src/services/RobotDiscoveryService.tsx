@@ -24,7 +24,7 @@ class RobotDiscoveryService {
       this.listenersRegistered = true;
 
       this.zeroconf.on('resolved', service => {
-        console.log(service.txt);
+        console.log(`New Robot Service: ${service.host} ${service.txt}`);
         const robot: RobotInfo = {
           robotName: service.txt.RobotName,
           ipAddress: service.host,

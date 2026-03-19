@@ -68,29 +68,46 @@ export default function JogPad({
 
     setActiveJog(intent);
 
+    if (jogMode === "Tool"){
+      jogIntervalRef.current = setInterval(() => {
+        robotClient.jogTool({
+          x: intent.axis === "x" ? intent.direction : 0,
+          y: intent.axis === "y" ? intent.direction : 0,
+          z: intent.axis === "z" ? intent.direction : 0,
+          rz: intent.axis === "rz" ? intent.direction : 0,
+          speed: activeSpeed,
+          accel: 200,
+          decel: 1000
+        })
+      }, 20);
+      return;
+    }
+
     if (!selectedSpeed.includes("mm")){
       jogIntervalRef.current = setInterval(() => {
-        robotClient.sendCommand("JogL", {
-          X: intent.axis === "x" ? intent.direction : 0,
-          Y: intent.axis === "y" ? intent.direction : 0,
-          Z: intent.axis === "z" ? intent.direction : 0,
-          RZ: intent.axis === "rz" ? intent.direction : 0,
-          Speed: activeSpeed,
-          Accel: 200,
-          Decel: 1000,
-        });
+        robotClient.jogL({
+          x: intent.axis === "x" ? intent.direction : 0,
+          y: intent.axis === "y" ? intent.direction : 0,
+          z: intent.axis === "z" ? intent.direction : 0,
+          rz: intent.axis === "rz" ? intent.direction : 0,
+          speed: activeSpeed,
+          accel: 200,
+          decel: 1000
+        })
       }, 20);
+      return;
     }
     else{
-      robotClient.sendCommand("OffsetL", {
-        X: intent.axis === "x" ? activeSpeed * intent.direction : 0,
-        Y: intent.axis === "y" ? activeSpeed * intent.direction : 0,
-        Z: intent.axis === "z" ? activeSpeed * intent.direction : 0,
-        RZ: intent.axis === "rz" ? activeSpeed * intent.direction : 0,
-        Speed: 100,
-        Accel: 200,
-        Decel: 1000,
+      robotClient.offsetL({
+        x: intent.axis === "x" ? activeSpeed * intent.direction : 0,
+        y: intent.axis === "y" ? activeSpeed * intent.direction : 0,
+        z: intent.axis === "z" ? activeSpeed * intent.direction : 0,
+        rz: intent.axis === "rz" ? activeSpeed * intent.direction : 0,
+        speed: 100,
+        accel: 200,
+        decel: 1000,
       });
+      return;
     }
   };
 
@@ -100,20 +117,20 @@ export default function JogPad({
       jogIntervalRef.current = null;
     }
     setActiveJog(null);
-    robotClient.sendCommand("JogStop");
+    robotClient.stopJog();
   };
 
   return (
   <View style={styles.grid}>
     {/* Row 1 */}
 
-    {/* -RZ */}
+    {/* +RZ */}
     <View style={styles.cell}>
       <JogButton
-        label="-RZ"
+        label="+RZ"
         icon={<UndoDot size={30} color="#666" />}
         iconPosition="above"
-        onStart={() => startJog({ axis: "rz", direction: -1 })}
+        onStart={() => startJog({ axis: "rz", direction: 1 })}
         onStop={stopJog}
       />
     </View>
@@ -129,13 +146,13 @@ export default function JogPad({
       />
     </View>
 
-    {/* +RZ */}
+    {/* -RZ */}
     <View style={styles.cell}>
       <JogButton
-        label="+RZ"
+        label="-RZ"
         icon={<RedoDot size={30} color="#666" />}
         iconPosition="above"
-        onStart={() => startJog({ axis: "rz", direction: 1 })}
+        onStart={() => startJog({ axis: "rz", direction: -1 })}
         onStop={stopJog}
       />
     </View>

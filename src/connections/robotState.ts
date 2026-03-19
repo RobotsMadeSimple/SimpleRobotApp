@@ -1,4 +1,4 @@
-import { RobotInfo } from "../models/robotModels"
+import { RobotInfo } from "../models/robotModels";
 
 
 type Listener = (robot: RobotInfo | null) => void
@@ -6,7 +6,7 @@ type Listener = (robot: RobotInfo | null) => void
 let selectedRobot: RobotInfo | null = null
 const listeners = new Set<Listener>()
 
-export function setSelectedRobot(robot: RobotInfo) {
+export function setSelectedRobot(robot: RobotInfo | null) {
   selectedRobot = robot
   listeners.forEach(l => l(robot))
 }
