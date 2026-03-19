@@ -1,10 +1,13 @@
-// app/(tabs)/program/_layout.tsx
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 
 export default function ControlLayout() {
+  const pathname = usePathname();
+  const isScreenNested = pathname.includes("/control/");
+
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={{ headerShown: isScreenNested }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="jog" options={{ title: "Jog" }} />
     </Stack>
   );
 }

@@ -327,6 +327,10 @@ export class RobotConnectService {
     return robotClient.sendCommand("StopJog");
   }
 
+  public hardStop(){
+    return robotClient.sendCommand("HardStop");
+  }
+
   public jogL({
     x = 0,
     y = 0,
