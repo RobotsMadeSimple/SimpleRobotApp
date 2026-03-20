@@ -1,17 +1,24 @@
 import JogPad from "@/src/components/ui/JogPad";
-import { useSelectedRobot } from "@/src/providers/RobotProvider";
+import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
+  MousePointerClick,
   Move,
   Move3d,
   OctagonX,
+  Plus,
   Rotate3d,
+  Search,
+  X,
 } from "lucide-react-native";
 import { useState } from "react";
 import {
+  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -61,11 +68,120 @@ function Selector({
   );
 }
 
+function TeachModal({ onClose }: { onClose: () => void }) {
+  const points = usePoints();
+  const [mode, setMode] = useState<"list" | "new">("list");
+  const [newName, setNewName] = useState("");
+  const [search, setSearch] = useState("");
+
+  const filtered = points.filter((p) =>
+    p.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  function teachPoint(name: string) {
+    robotClient.sendCommand("TeachPoint", { name });
+    onClose();
+  }
+
+  function teachNew() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    robotClient.sendCommand("TeachPoint", { name: trimmed });
+    onClose();
+  }
+
+  return (
+    <Pressable style={styles.overlay} onPress={onClose}>
+      <Pressable style={styles.dialog} onPress={() => {}}>
+        {/* Header */}
+        <View style={styles.dialogHeader}>
+          <Text style={styles.dialogTitle}>
+            {mode === "list" ? "Teach Point" : "New Point"}
+          </Text>
+          <Pressable onPress={onClose}>
+            <X size={20} color="#666" />
+          </Pressable>
+        </View>
+
+        {mode === "list" ? (
+          <>
+            <View style={styles.searchRow}>
+              <Search size={16} color="#aaa" />
+              <TextInput
+                style={styles.searchInput}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search points…"
+                placeholderTextColor="#aaa"
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+              />
+            </View>
+
+            <ScrollView style={styles.pointList} keyboardShouldPersistTaps="handled">
+              {filtered.length === 0 && (
+                <Text style={styles.emptyText}>
+                  {points.length === 0 ? "No points saved yet" : "No matches"}
+                </Text>
+              )}
+              {filtered.map((p) => (
+                <Pressable
+                  key={p.name}
+                  style={styles.pointRow}
+                  onPress={() => teachPoint(p.name)}
+                >
+                  <Text style={styles.pointName}>{p.name}</Text>
+                  <Text style={styles.pointCoords}>
+                    {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <Pressable style={styles.newPointButton} onPress={() => setMode("new")}>
+              <Plus size={18} color="#2563eb" />
+              <Text style={styles.newPointText}>New Point</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Text style={styles.inputLabel}>Point name</Text>
+            <TextInput
+              style={styles.textInput}
+              value={newName}
+              onChangeText={setNewName}
+              placeholder="e.g. PickUp1"
+              placeholderTextColor="#aaa"
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={teachNew}
+            />
+            <View style={styles.newPointActions}>
+              <Pressable style={styles.backButton} onPress={() => setMode("list")}>
+                <Text style={styles.backButtonText}>Back</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.teachConfirmButton, !newName.trim() && styles.disabled]}
+                onPress={teachNew}
+                disabled={!newName.trim()}
+              >
+                <MousePointerClick size={16} color="white" />
+                <Text style={styles.teachConfirmText}>Teach Here</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+      </Pressable>
+    </Pressable>
+  );
+}
+
 export default function JogScreen() {
   const [local, setLocal] = useState("Global");
   const [tool, setTool] = useState("Hand1");
   const [selectedSpeed, setSelectedSpeed] = useState("Slow");
   const [mode, setMode] = useState("XYZ");
+  const [teachOpen, setTeachOpen] = useState(false);
   const robot = useSelectedRobot();
 
   const format = (v: number) => (v ?? 0).toFixed(1);
@@ -159,6 +275,15 @@ export default function JogScreen() {
         <JogPad jogMode={mode} selectedSpeed={selectedSpeed} />
       </View>
 
+      {/* Teach row above stop */}
+      <View style={styles.teachRow}>
+        <View style={{ flex: 1 }} />
+        <Pressable style={styles.teachButton} onPress={() => setTeachOpen(true)}>
+          <Text style={styles.teachButtonText}>Teach </Text>
+          <MousePointerClick size={20} color="red" />
+        </Pressable>
+      </View>
+
       {/* Stop Button */}
       <Pressable
         style={styles.stopButton}
@@ -167,6 +292,11 @@ export default function JogScreen() {
         <OctagonX size={26} color="white" />
         <Text style={styles.stopText}>STOP</Text>
       </Pressable>
+
+      {/* Teach Modal */}
+      <Modal visible={teachOpen} transparent animationType="fade" onRequestClose={() => setTeachOpen(false)}>
+        <TeachModal key={teachOpen ? "open" : "closed"} onClose={() => setTeachOpen(false)} />
+      </Modal>
     </View>
   );
 }
@@ -299,6 +429,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  teachRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+
+  teachButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "red",
+    borderRadius: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+  },
+
+  teachButtonText: {
+    color: "red",
+    fontSize: 18,
+    fontWeight: "600",
+  },
+
   stopButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -315,5 +469,160 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "bold",
     letterSpacing: 2,
+  },
+
+  // Modal
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  dialog: {
+    width: 300,
+    maxHeight: 420,
+    backgroundColor: "white",
+    borderRadius: 14,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+
+  dialogHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+
+  dialogTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 8,
+    backgroundColor: "#f9f9f9",
+  },
+
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#111",
+    padding: 0,
+  },
+
+  pointList: {
+    maxHeight: 200,
+  },
+
+  pointRow: {
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#eee",
+  },
+
+  pointName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#111",
+  },
+
+  pointCoords: {
+    fontSize: 12,
+    color: "#888",
+    fontFamily: "monospace",
+    marginTop: 2,
+  },
+
+  emptyText: {
+    color: "#aaa",
+    textAlign: "center",
+    paddingVertical: 20,
+    fontSize: 14,
+  },
+
+  newPointButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#eee",
+    marginTop: 4,
+  },
+
+  newPointText: {
+    fontSize: 15,
+    color: "#2563eb",
+    fontWeight: "600",
+  },
+
+  inputLabel: {
+    fontSize: 13,
+    color: "#666",
+    marginBottom: 6,
+  },
+
+  textInput: {
+    borderWidth: 1.5,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: "#111",
+    marginBottom: 16,
+  },
+
+  newPointActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  backButton: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+
+  backButtonText: {
+    color: "#444",
+    fontSize: 15,
+  },
+
+  teachConfirmButton: {
+    flex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "red",
+    borderRadius: 8,
+    paddingVertical: 11,
+  },
+
+  teachConfirmText: {
+    color: "white",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  disabled: {
+    opacity: 0.4,
   },
 });
