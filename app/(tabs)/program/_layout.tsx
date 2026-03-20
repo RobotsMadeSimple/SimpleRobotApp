@@ -1,14 +1,33 @@
-// app/(tabs)/program/_layout.tsx
-import { Stack, usePathname } from "expo-router";
+import { router, Stack } from "expo-router";
+import { ArrowLeft } from "lucide-react-native";
+import { Pressable } from "react-native";
+
+function BackButton() {
+  return (
+    <Pressable
+      onPress={() => router.back()}
+      hitSlop={12}
+      style={{ marginLeft: 4, padding: 4 }}
+    >
+      <ArrowLeft size={24} color="#111" />
+    </Pressable>
+  );
+}
 
 export default function ProgramLayout() {
-  const pathname = usePathname();
-  const isScreenNested = (pathname.includes("/program/"));
-  
   return (
-    <Stack screenOptions={{ headerShown: isScreenNested }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="monitor-program" />
+    <Stack>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="monitor-program"
+        options={{
+          title: "Monitor Program",
+          headerShown: true,
+          headerTitleAlign: "left",
+          headerTitleStyle: { fontWeight: "bold", fontSize: 22 },
+          headerLeft: () => <BackButton />,
+        }}
+      />
     </Stack>
   );
 }

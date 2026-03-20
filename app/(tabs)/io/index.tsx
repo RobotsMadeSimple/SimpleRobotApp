@@ -1,3 +1,4 @@
+import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { useSelectedRobot } from "@/src/providers/RobotProvider";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -21,25 +22,25 @@ function InputIndicator({ label, value }: { label: string; value: boolean }) {
 
 export default function IoPage() {
   const robot = useSelectedRobot();
-
-  if (!robot) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.noRobot}>No robot selected</Text>
-      </View>
-    );
-  }
-
-  const status = robot.status;
+  const status = robot?.status;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Robot Inputs</Text>
+      <NotConnectedOverlay />
 
-      <InputIndicator label="Input 1" value={status.input1} />
-      <InputIndicator label="Input 2" value={status.input2} />
-      <InputIndicator label="Input 3" value={status.input3} />
-      <InputIndicator label="Input 4" value={status.input4} />
+      {!robot ? (
+        <View style={styles.center}>
+          <Text style={styles.noRobot}>No robot selected</Text>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.title}>Robot Inputs</Text>
+          <InputIndicator label="Input 1" value={status!.input1} />
+          <InputIndicator label="Input 2" value={status!.input2} />
+          <InputIndicator label="Input 3" value={status!.input3} />
+          <InputIndicator label="Input 4" value={status!.input4} />
+        </>
+      )}
     </View>
   );
 }

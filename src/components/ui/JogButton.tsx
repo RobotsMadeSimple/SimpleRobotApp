@@ -9,6 +9,7 @@ type Props = {
   iconPosition: IconPosition;
   onStart: () => void;
   onStop: () => void;
+  size?: number;
 };
 
 export function JogButton({
@@ -17,16 +18,19 @@ export function JogButton({
   iconPosition,
   onStart,
   onStop,
+  size = 70,
 }: Props) {
   const isRow = iconPosition === "left" || iconPosition === "right";
   const isReverse =
     iconPosition === "below" || iconPosition === "right";
 
+  const fontSize = Math.round(size * 0.24);
+
   return (
     <Pressable
       onPressIn={onStart}
       onPressOut={onStop}
-      style={styles.button}
+      style={[styles.button, { width: size, height: size }]}
     >
       <View
         style={[
@@ -36,7 +40,7 @@ export function JogButton({
         ]}
       >
         {icon}
-        <Text style={styles.text}>{label}</Text>
+        <Text style={[styles.text, { fontSize }]}>{label}</Text>
       </View>
     </Pressable>
   );
@@ -44,8 +48,6 @@ export function JogButton({
 
 const styles = StyleSheet.create({
   button: {
-    width: 70,
-    height: 70,
     backgroundColor: "transparent",
     borderWidth: 1.5,
     borderColor: "#666",
@@ -59,8 +61,6 @@ const styles = StyleSheet.create({
   },
   text: {
     color: "#666",
-    fontSize: 18,
     fontWeight: "600",
   },
 });
-

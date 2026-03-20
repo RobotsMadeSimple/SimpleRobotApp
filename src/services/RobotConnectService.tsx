@@ -398,6 +398,18 @@ export class RobotConnectService {
     return robotClient.sendCommand("DeletePoint", { name });
   }
 
+  public editPoint(name: string, fields: {
+    newName?: string;
+    x?: number;
+    y?: number;
+    z?: number;
+    rx?: number;
+    ry?: number;
+    rz?: number;
+  }) {
+    return robotClient.sendCommand("EditPoint", { name, ...fields });
+  }
+
   public offsetL({
     x = 0,
     y = 0,

@@ -9,36 +9,12 @@ import {
   UndoDot
 } from "lucide-react-native";
 import { useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { useWindowDimensions, View } from "react-native";
 
 type JogIntent = {
   axis: "x" | "y" | "z" | "rz";
   direction: 1 | -1;
 };
-
-const cellSize = 80;
-
-const styles = StyleSheet.create({
-  grid: {
-    width: cellSize*4.5, // 80 * 4 + spacing
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    alignContent: "space-between",
-  },
-  cell: {
-    width: cellSize,
-    height: cellSize,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  narrowCell: {
-    width: cellSize/2,
-    height: cellSize,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
 
 type JogPadProps = {
   jogMode: string;
@@ -58,10 +34,16 @@ export default function JogPad({
   jogMode,
   selectedSpeed
 }: JogPadProps) {
+  const { width } = useWindowDimensions();
   const jogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [activeJog, setActiveJog] = useState<JogIntent | null>(null);
   const activeSpeed = speedMap[selectedSpeed];
 
+  // Scale the grid to fill the available width (container has 12px padding each side)
+  // Grid is 4.5 columns wide. Cap at 90px per cell so tablets don't get huge buttons.
+  const cellSize = Math.min((width - 24) / 4.5, 90);
+  const buttonSize = Math.round(cellSize * 0.875);
+  const iconSize = Math.round(buttonSize * 0.43);
 
   const startJog = (intent: JogIntent) => {
     if (jogIntervalRef.current) return;
@@ -120,107 +102,43 @@ export default function JogPad({
     robotClient.stopJog();
   };
 
+  const cell  = { width: cellSize,   height: cellSize,   alignItems: "center" as const, justifyContent: "center" as const };
+  const narrow = { width: cellSize/2, height: cellSize,   alignItems: "center" as const, justifyContent: "center" as const };
+  const grid  = { width: cellSize * 4.5, flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, alignContent: "space-between" as const };
+
+  const btn = (label: string, icon: React.ReactNode, pos: "above"|"below"|"left"|"right", intent: JogIntent) => (
+    <JogButton
+      label={label}
+      icon={icon}
+      iconPosition={pos}
+      onStart={() => startJog(intent)}
+      onStop={stopJog}
+      size={buttonSize}
+    />
+  );
+
   return (
-  <View style={styles.grid}>
-    {/* Row 1 */}
+    <View style={grid}>
+      {/* Row 1 */}
+      <View style={cell}>{btn("+RZ", <UndoDot   size={iconSize} color="#666" />, "above", { axis: "rz", direction:  1 })}</View>
+      <View style={cell}>{btn("-X",  <ChevronUp size={iconSize} color="#666" />, "above", { axis: "x",  direction: -1 })}</View>
+      <View style={cell}>{btn("-RZ", <RedoDot   size={iconSize} color="#666" />, "above", { axis: "rz", direction: -1 })}</View>
+      <View style={narrow} />
+      <View style={cell}>{btn("+Z",  <ChevronUp size={iconSize} color="#666" />, "above", { axis: "z",  direction:  1 })}</View>
 
-    {/* +RZ */}
-    <View style={styles.cell}>
-      <JogButton
-        label="+RZ"
-        icon={<UndoDot size={30} color="#666" />}
-        iconPosition="above"
-        onStart={() => startJog({ axis: "rz", direction: 1 })}
-        onStop={stopJog}
-      />
+      {/* Row 2 */}
+      <View style={cell}>{btn("-Y",  <ChevronLeft  size={iconSize} color="#666" />, "left",  { axis: "y", direction: -1 })}</View>
+      <View style={cell} />
+      <View style={cell}>{btn("+Y",  <ChevronRight size={iconSize} color="#666" />, "right", { axis: "y", direction:  1 })}</View>
+      <View style={narrow} />
+      <View style={cell} />
+
+      {/* Row 3 */}
+      <View style={cell} />
+      <View style={cell}>{btn("+X",  <ChevronDown size={iconSize} color="#666" />, "below", { axis: "x", direction:  1 })}</View>
+      <View style={cell} />
+      <View style={narrow} />
+      <View style={cell}>{btn("-Z",  <ChevronDown size={iconSize} color="#666" />, "below", { axis: "z", direction: -1 })}</View>
     </View>
-
-    {/* X- */}
-    <View style={styles.cell}>
-      <JogButton
-        label="-X"
-        icon={<ChevronUp size={30} color="#666" />}
-        iconPosition="above"
-        onStart={() => startJog({ axis: "x", direction: -1 })}
-        onStop={stopJog}
-      />
-    </View>
-
-    {/* -RZ */}
-    <View style={styles.cell}>
-      <JogButton
-        label="-RZ"
-        icon={<RedoDot size={30} color="#666" />}
-        iconPosition="above"
-        onStart={() => startJog({ axis: "rz", direction: -1 })}
-        onStop={stopJog}
-      />
-    </View>
-    <View style={styles.narrowCell} />
-
-    {/* Z+ (moved right) */}
-    <View style={styles.cell}>
-      <JogButton
-        label="+Z"
-        icon={<ChevronUp size={30} color="#666" />}
-        iconPosition="above"
-        onStart={() => startJog({ axis: "z", direction: 1 })}
-        onStop={stopJog}
-      />
-    </View>
-
-    {/* Row 2 */}
-    <View style={styles.cell}>
-      <JogButton
-        label="-Y"
-        icon={<ChevronLeft size={30} color="#666" />}
-        iconPosition="left"
-        onStart={() => startJog({ axis: "y", direction: -1 })}
-        onStop={stopJog}
-      />
-    </View>
-
-    <View style={styles.cell} />
-    <View style={styles.cell}>
-      <JogButton
-        label="+Y"
-        icon={<ChevronRight size={30} color="#666" />}
-        iconPosition="right"
-        onStart={() => startJog({ axis: "y", direction: 1 })}
-        onStop={stopJog}
-      />
-    </View>
-    <View style={styles.narrowCell} />
-    <View style={styles.cell} />
-
-    {/* Row 3 */}
-    <View style={styles.cell} />
-
-    {/* X+ */}
-    <View style={styles.cell}>
-      <JogButton
-        label="+X"
-        icon={<ChevronDown size={30} color="#666" />}
-        iconPosition="below"
-        onStart={() => startJog({ axis: "x", direction: 1 })}
-        onStop={stopJog}
-      />
-    </View>
-
-    <View style={styles.cell} />
-    <View style={styles.narrowCell} />
-
-    {/* Z- (moved right) */}
-    <View style={styles.cell}>
-      <JogButton
-        label="-Z"
-        icon={<ChevronDown size={30} color="#666" />}
-        iconPosition="below"
-        onStart={() => startJog({ axis: "z", direction: -1 })}
-        onStop={stopJog}
-      />
-    </View>
-  </View>
-);
-
+  );
 }
