@@ -82,3 +82,7 @@ export function usePoints(){
 export function useSelectedRobot() {
   return useContext(RobotContext).selectedRobot;
 }
+
+export function useConnected() {
+  return useContext(RobotContext).connected;
+}

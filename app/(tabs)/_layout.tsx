@@ -1,4 +1,4 @@
-import { Tabs, usePathname } from "expo-router";
+import { Tabs } from "expo-router";
 import {
   ArrowLeftRight,
   CodeXml,
@@ -6,6 +6,7 @@ import {
   Move3d,
   Router,
 } from "lucide-react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
@@ -14,10 +15,7 @@ import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
 import { RobotProvider } from "@/src/providers/RobotProvider";
 import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { StatusBar } from "expo-status-bar";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-
-
 
 export default function Layout() {
   return (
@@ -27,7 +25,7 @@ export default function Layout() {
           <SafeAreaProvider>
             <RobotProvider>
               <StatusBar style="dark" translucent={false} />
-              <TabLayout/>
+              <TabLayout />
             </RobotProvider>
           </SafeAreaProvider>
         </GluestackUIProvider>
@@ -38,30 +36,21 @@ export default function Layout() {
 
 export function TabLayout() {
   const insets = useSafeAreaInsets();
-  const pathname = usePathname();
-  const isScreenNested = (pathname.includes("/program/") || pathname.includes("/control/"));
 
   return (
     <Tabs
       screenOptions={({ route }) => ({
-        headerShown: !isScreenNested,
+        headerShown: true,
         headerTitleAlign: "left",
-        headerTitleStyle: {
-          fontWeight: "bold",
-          fontSize: 25,
-        },
+        headerTitleStyle: { fontWeight: "bold", fontSize: 25 },
         headerRight: () => <ConnectionStatus />,
         tabBarActiveTintColor: "#2563eb",
         tabBarInactiveTintColor: "#64748b",
-        tabBarStyle: isScreenNested
-          ? { display: "none" }
-          : {
-              height: 60 + insets.bottom,
-              paddingBottom: insets.bottom,
-            },
-        tabBarLabelStyle: {
-          fontSize: 12,
+        tabBarStyle: {
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
         },
+        tabBarLabelStyle: { fontSize: 12 },
         tabBarIcon: ({ color, size }) => {
           const icons: Record<string, any> = {
             robot: Router,
@@ -70,47 +59,16 @@ export function TabLayout() {
             io: ArrowLeftRight,
             space: Move3d,
           };
-
           const IconComponent = icons[route.name] ?? Router;
           return <IconComponent size={size} color={color} />;
         },
       })}
     >
-      <Tabs.Screen
-        name="robot"
-        options={{
-          title: "Robot",
-        }}
-      />
-
-      <Tabs.Screen
-        name="program"
-        options={{
-          title: "Program",
-        }}
-      />
-
-      <Tabs.Screen
-        name="control"
-        options={{
-          title: "Control",
-        }}
-      />
-
-      <Tabs.Screen
-        name="io"
-        options={{
-          title: "I/O",
-        }}
-      />
-
-      <Tabs.Screen
-        name="space"
-        options={{
-          title: "Space",
-        }}
-      />
-
+      <Tabs.Screen name="robot"   options={{ title: "Robot" }} />
+      <Tabs.Screen name="program" options={{ title: "Program" }} />
+      <Tabs.Screen name="control" options={{ title: "Control", headerShown: false }} />
+      <Tabs.Screen name="io"      options={{ title: "I/O" }} />
+      <Tabs.Screen name="space"   options={{ title: "Space" }} />
     </Tabs>
   );
 }

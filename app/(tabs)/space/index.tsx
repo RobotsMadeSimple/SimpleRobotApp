@@ -1,11 +1,12 @@
+import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { Point } from "@/src/models/robotModels";
 import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   MapPin,
-  MousePointerClick,
   Navigation,
   OctagonX,
+  Pencil,
   RotateCw,
   Trash2,
   X,
@@ -13,11 +14,14 @@ import {
 import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
+  KeyboardAvoidingView,
   LayoutRectangle,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -264,6 +268,8 @@ export default function PointsPage() {
   const [movingFromPage, setMovingFromPage] = useState(false);
   const [movingToName, setMovingToName] = useState<string | null>(null);
   const [alreadyHere, setAlreadyHere] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
+  const [editDraft, setEditDraft] = useState({ name: "", x: "", y: "", z: "", rz: "" });
 
   const AT_THRESHOLD = 0.5; // mm — within this distance counts as "already there"
 
@@ -310,9 +316,33 @@ export default function PointsPage() {
     setMovingFromPage(true);
   }
 
-  function reteach() {
+  function openEdit() {
     if (!selectedPoint) return;
-    robotClient.sendCommand("TeachPoint", { name: selectedPoint.name });
+    setEditDraft({
+      name: selectedPoint.name,
+      x: selectedPoint.x.toString(),
+      y: selectedPoint.y.toString(),
+      z: selectedPoint.z.toString(),
+      rz: selectedPoint.rz.toString(),
+    });
+    setEditVisible(true);
+  }
+
+  function saveEdit() {
+    if (!selectedPoint) return;
+    const fields: Record<string, any> = {};
+    const newName = editDraft.name.trim();
+    if (newName && newName !== selectedPoint.name) fields.newName = newName;
+    const px = parseFloat(editDraft.x);
+    const py = parseFloat(editDraft.y);
+    const pz = parseFloat(editDraft.z);
+    const prz = parseFloat(editDraft.rz);
+    if (!isNaN(px))  fields.x  = px;
+    if (!isNaN(py))  fields.y  = py;
+    if (!isNaN(pz))  fields.z  = pz;
+    if (!isNaN(prz)) fields.rz = prz;
+    robotClient.editPoint(selectedPoint.name, fields);
+    setEditVisible(false);
     closeMenu();
   }
 
@@ -346,6 +376,7 @@ export default function PointsPage() {
 
   return (
     <View style={styles.page}>
+      <NotConnectedOverlay />
       <PointsMap points={points} onPointPress={setSelectedPoint} />
 
       <FlatList
@@ -401,9 +432,9 @@ export default function PointsPage() {
                   <Text style={styles.actionText}>Joint Move</Text>
                 </Pressable>
 
-                <Pressable style={styles.actionRow} onPress={reteach}>
-                  <MousePointerClick size={18} color="#2563eb" />
-                  <Text style={styles.actionText}>Re-Teach</Text>
+                <Pressable style={styles.actionRow} onPress={openEdit}>
+                  <Pencil size={18} color="#2563eb" />
+                  <Text style={styles.actionText}>Edit Point</Text>
                 </Pressable>
 
                 <Pressable style={styles.actionRow} onPress={() => setConfirmDelete(true)}>
@@ -454,6 +485,70 @@ export default function PointsPage() {
             </Pressable>
           </View>
         </View>
+      </Modal>
+
+      {/* Edit Point modal */}
+      <Modal
+        visible={editVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <Pressable style={styles.overlay} onPress={() => setEditVisible(false)}>
+            <Pressable style={styles.editCard} onPress={() => {}}>
+
+              {/* Header */}
+              <View style={styles.editHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Pencil size={16} color="#6b7280" />
+                  <Text style={styles.editTitle}>Edit Point</Text>
+                </View>
+                <Pressable onPress={() => setEditVisible(false)} hitSlop={10}>
+                  <X size={18} color="#9ca3af" />
+                </Pressable>
+              </View>
+
+              {/* Name field */}
+              <Text style={styles.editLabel}>Name</Text>
+              <TextInput
+                style={styles.editInput}
+                value={editDraft.name}
+                onChangeText={(v) => setEditDraft((d) => ({ ...d, name: v }))}
+                autoCapitalize="none"
+                returnKeyType="next"
+              />
+
+              {/* Coordinate fields — single column */}
+              {(["x", "y", "z", "rz"] as const).map((field) => (
+                <View key={field}>
+                  <Text style={styles.editLabel}>{field.toUpperCase()}</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editDraft[field]}
+                    onChangeText={(v) => setEditDraft((d) => ({ ...d, [field]: v }))}
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                  />
+                </View>
+              ))}
+
+              {/* Actions */}
+              <View style={styles.editActions}>
+                <Pressable style={styles.editCancel} onPress={() => setEditVisible(false)}>
+                  <Text style={styles.editCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={styles.editSave} onPress={saveEdit}>
+                  <Text style={styles.editSaveText}>Save</Text>
+                </Pressable>
+              </View>
+
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Already at position popup */}
@@ -827,6 +922,87 @@ const styles = StyleSheet.create({
   alreadyHereButtonText: {
     color: "white",
     fontSize: 15,
+    fontWeight: "600",
+  },
+
+  // ── Edit Point modal ──────────────────────────────────────────────────────
+  editCard: {
+    width: 300,
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
+  editHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+
+  editTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111",
+  },
+
+  editLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#6b7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+
+  editInput: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: "#111",
+    backgroundColor: "#f9fafb",
+    marginBottom: 12,
+  },
+
+  editActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+  },
+
+  editCancel: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+
+  editCancelText: {
+    color: "#6b7280",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+
+  editSave: {
+    flex: 1,
+    backgroundColor: "#2563eb",
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+
+  editSaveText: {
+    color: "white",
+    fontSize: 14,
     fontWeight: "600",
   },
 });

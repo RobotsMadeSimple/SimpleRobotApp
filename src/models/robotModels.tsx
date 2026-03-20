@@ -56,7 +56,10 @@ export type RobotStatus = {
   input1: boolean,
   input2: boolean,
   input3: boolean,
-  input4: boolean
+  input4: boolean,
+
+  homingState: string,
+  driverConnected: boolean,
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -93,5 +96,8 @@ export function createDefaultStatus(): RobotStatus {
     input2: false,
     input3: false,
     input4: false,
+
+    homingState: "WaitingForStart",
+    driverConnected: false,
   };
 }

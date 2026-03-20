@@ -1,11 +1,10 @@
-// app/(tabs)/program/_layout.tsx
 import { Stack } from "expo-router";
 
 export default function RobotLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="connected-robot" />
+    <Stack>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="connected-robot" options={{ headerShown: false }} />
     </Stack>
   );
 }

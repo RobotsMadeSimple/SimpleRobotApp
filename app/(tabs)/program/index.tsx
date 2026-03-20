@@ -1,9 +1,11 @@
+import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { router } from 'expo-router';
 import { Button, StyleSheet, Text, View } from "react-native";
 
 export default function Program() {
   return (
     <View style={styles.container}>
+      <NotConnectedOverlay />
       <Text style={styles.text}>Program Screen</Text>
       <Button title="outline" onPress={() => router.push(`/program/monitor-program`)}>
         </Button>
