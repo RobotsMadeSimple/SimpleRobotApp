@@ -394,6 +394,10 @@ export class RobotConnectService {
     });
   }
 
+  public deletePoint(name: string) {
+    return robotClient.sendCommand("DeletePoint", { name });
+  }
+
   public offsetL({
     x = 0,
     y = 0,

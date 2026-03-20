@@ -1,6 +1,15 @@
 import { Point } from "@/src/models/robotModels";
 import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import {
+  MapPin,
+  MousePointerClick,
+  Navigation,
+  OctagonX,
+  RotateCw,
+  Trash2,
+  X,
+} from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
@@ -229,6 +238,18 @@ function PointsMap({
         </View>
       </GestureDetector>
 
+      {/* Robot position readout */}
+      {robot && (
+        <View style={styles.posOverlay}>
+          <Text style={styles.posText}>
+            X <Text style={styles.posVal}>{(robot.status.x ?? 0).toFixed(1)}</Text>
+            {"  "}Y <Text style={styles.posVal}>{(robot.status.y ?? 0).toFixed(1)}</Text>
+            {"  "}Z <Text style={styles.posVal}>{(robot.status.z ?? 0).toFixed(1)}</Text>
+            {"  "}RZ <Text style={styles.posVal}>{(robot.status.rz ?? 0).toFixed(1)}</Text>
+          </Text>
+        </View>
+      )}
+
       {/* Corner hint */}
       <Text style={styles.hint}>Pinch to zoom · drag to pan · tap a point</Text>
     </View>
@@ -237,21 +258,67 @@ function PointsMap({
 
 export default function PointsPage() {
   const points = usePoints();
+  const robot = useSelectedRobot();
   const [selectedPoint, setSelectedPoint] = useState<Point | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [movingFromPage, setMovingFromPage] = useState(false);
+  const [movingToName, setMovingToName] = useState<string | null>(null);
+  const [alreadyHere, setAlreadyHere] = useState(false);
+
+  const AT_THRESHOLD = 0.5; // mm — within this distance counts as "already there"
+
+  function isAtPoint(p: Point) {
+    if (!robot) return false;
+    const s = robot.status;
+    return (
+      Math.abs(s.x - p.x) < AT_THRESHOLD &&
+      Math.abs(s.y - p.y) < AT_THRESHOLD &&
+      Math.abs(s.z - p.z) < AT_THRESHOLD
+    );
+  }
+
+  // Dismiss the stop overlay once the robot finishes moving
+  useEffect(() => {
+    if (movingFromPage && !robot?.status.moving) {
+      setMovingFromPage(false);
+      setMovingToName(null);
+    }
+  }, [robot?.status.moving]);
+
+  useEffect(() => { setConfirmDelete(false); }, [selectedPoint]);
 
   function closeMenu() {
     setSelectedPoint(null);
+    setConfirmDelete(false);
   }
 
-  function moveTo() {
+  function moveL() {
     if (!selectedPoint) return;
-    robotClient.sendCommand("MoveToPoint", { name: selectedPoint.name });
+    if (isAtPoint(selectedPoint)) { setAlreadyHere(true); return; }
+    setMovingToName(selectedPoint.name);
+    robotClient.sendCommand("MoveL", { name: selectedPoint.name });
     closeMenu();
+    setMovingFromPage(true);
+  }
+
+  function moveJ() {
+    if (!selectedPoint) return;
+    if (isAtPoint(selectedPoint)) { setAlreadyHere(true); return; }
+    setMovingToName(selectedPoint.name);
+    robotClient.sendCommand("MoveJ", { name: selectedPoint.name });
+    closeMenu();
+    setMovingFromPage(true);
   }
 
   function reteach() {
     if (!selectedPoint) return;
     robotClient.sendCommand("TeachPoint", { name: selectedPoint.name });
+    closeMenu();
+  }
+
+  function deletePoint() {
+    if (!selectedPoint) return;
+    robotClient.deletePoint(selectedPoint.name);
     closeMenu();
   }
 
@@ -300,28 +367,109 @@ export default function PointsPage() {
         onRequestClose={closeMenu}
       >
         <Pressable style={styles.overlay} onPress={closeMenu}>
-          <View style={styles.dialog}>
-            <Text style={styles.dialogTitle}>{selectedPoint?.name}</Text>
-            <View style={styles.coords}>
-              <Text style={styles.coordText}>
-                X {selectedPoint?.x.toFixed(1)}{"  "}
-                Y {selectedPoint?.y.toFixed(1)}{"  "}
-                Z {selectedPoint?.z.toFixed(1)}
-              </Text>
+          <Pressable style={styles.dialog} onPress={() => {}}>
+
+            {/* Header */}
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MapPin size={16} color="#6b7280" style={{ marginTop: 1 }} />
+                <Text style={styles.dialogTitle}>{selectedPoint?.name}</Text>
+              </View>
+              <Pressable onPress={closeMenu} hitSlop={10}>
+                <X size={18} color="#9ca3af" />
+              </Pressable>
             </View>
 
-            <Pressable style={styles.button} onPress={moveTo}>
-              <Text style={styles.buttonText}>Move To</Text>
-            </Pressable>
+            <Text style={styles.coordText}>
+              X {selectedPoint?.x.toFixed(1)}{"  "}
+              Y {selectedPoint?.y.toFixed(1)}{"  "}
+              Z {selectedPoint?.z.toFixed(1)}{"  "}
+              RZ {selectedPoint?.rz.toFixed(1)}
+            </Text>
 
-            <Pressable style={styles.button} onPress={reteach}>
-              <Text style={styles.buttonText}>Re-Teach</Text>
-            </Pressable>
+            <View style={styles.divider} />
 
-            <Pressable style={styles.cancel} onPress={closeMenu}>
-              <Text style={styles.cancelText}>Cancel</Text>
+            {!confirmDelete ? (
+              <>
+                <Pressable style={styles.actionRow} onPress={moveL}>
+                  <Navigation size={18} color="#2563eb" />
+                  <Text style={styles.actionText}>Line Move</Text>
+                </Pressable>
+
+                <Pressable style={styles.actionRow} onPress={moveJ}>
+                  <RotateCw size={18} color="#2563eb" />
+                  <Text style={styles.actionText}>Joint Move</Text>
+                </Pressable>
+
+                <Pressable style={styles.actionRow} onPress={reteach}>
+                  <MousePointerClick size={18} color="#2563eb" />
+                  <Text style={styles.actionText}>Re-Teach</Text>
+                </Pressable>
+
+                <Pressable style={styles.actionRow} onPress={() => setConfirmDelete(true)}>
+                  <Trash2 size={18} color="#dc2626" />
+                  <Text style={styles.deleteActionText}>Delete</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.confirmText}>
+                  Delete <Text style={{ fontWeight: "700" }}>{selectedPoint?.name}</Text>? This cannot be undone.
+                </Text>
+                <View style={styles.confirmButtons}>
+                  <Pressable style={styles.confirmCancel} onPress={() => setConfirmDelete(false)}>
+                    <Text style={styles.confirmCancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable style={styles.confirmDelete} onPress={deletePoint}>
+                    <Trash2 size={15} color="white" />
+                    <Text style={styles.confirmDeleteText}>Delete</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Move stop overlay */}
+      <Modal visible={movingFromPage} transparent animationType="fade">
+        <View style={styles.stopOverlay}>
+          <View style={styles.stopCard}>
+            <Navigation size={28} color="#2563eb" />
+            <Text style={styles.stopTitle}>Moving to point</Text>
+            {movingToName && (
+              <Text style={styles.stopPointName}>{movingToName}</Text>
+            )}
+            <Pressable
+              style={styles.stopButton}
+              onPress={() => {
+                robotClient.sendCommand("HardStop");
+                setMovingFromPage(false);
+                setMovingToName(null);
+              }}
+            >
+              <OctagonX size={22} color="white" />
+              <Text style={styles.stopButtonText}>STOP</Text>
             </Pressable>
           </View>
+        </View>
+      </Modal>
+
+      {/* Already at position popup */}
+      <Modal visible={alreadyHere} transparent animationType="fade" onRequestClose={() => setAlreadyHere(false)}>
+        <Pressable style={styles.overlay} onPress={() => setAlreadyHere(false)}>
+          <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
+            <MapPin size={28} color="#2563eb" />
+            <Text style={styles.alreadyHereTitle}>Already Here</Text>
+            <Text style={styles.alreadyHereBody}>
+              The robot is already at{"\n"}
+              <Text style={{ fontWeight: "700" }}>{selectedPoint?.name}</Text>
+            </Text>
+            <Pressable style={styles.alreadyHereButton} onPress={() => setAlreadyHere(false)}>
+              <Text style={styles.alreadyHereButtonText}>OK</Text>
+            </Pressable>
+          </Pressable>
         </Pressable>
       </Modal>
     </View>
@@ -386,6 +534,27 @@ const styles = StyleSheet.create({
     borderColor: "#93c5fd",
   },
 
+  posOverlay: {
+    position: "absolute",
+    top: 8,
+    left: 10,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+
+  posText: {
+    fontSize: 11,
+    color: "#cbd5e1",
+    fontFamily: "monospace",
+  },
+
+  posVal: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+
   hint: {
     position: "absolute",
     bottom: 6,
@@ -448,58 +617,216 @@ const styles = StyleSheet.create({
   // ── Modal ─────────────────────────────────────────────────────────────────
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
     alignItems: "center",
   },
 
   dialog: {
-    width: 270,
-    backgroundColor: "white",
-    borderRadius: 14,
-    padding: 20,
+    width: 280,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
     shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
   },
 
-  dialogTitle: {
-    fontSize: 17,
-    fontWeight: "700",
+  dialogHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 4,
   },
 
-  coords: {
-    marginBottom: 16,
+  dialogTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  dialogTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111",
   },
 
   coordText: {
-    fontSize: 12,
-    color: "#666",
+    fontSize: 11,
+    color: "#9ca3af",
     fontFamily: "monospace",
+    marginBottom: 14,
   },
 
-  button: {
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#eee",
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#e5e7eb",
+    marginBottom: 4,
   },
 
-  buttonText: {
-    fontSize: 16,
-    color: "#2563eb",
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#f3f4f6",
   },
 
-  cancel: {
-    marginTop: 4,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#eee",
-  },
-
-  cancelText: {
-    color: "#999",
+  actionText: {
     fontSize: 15,
+    color: "#2563eb",
+    fontWeight: "500",
+  },
+
+  deleteActionText: {
+    fontSize: 15,
+    color: "#dc2626",
+    fontWeight: "500",
+  },
+
+  confirmText: {
+    fontSize: 14,
+    color: "#374151",
+    marginVertical: 12,
+    lineHeight: 20,
+  },
+
+  confirmButtons: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+
+  confirmCancel: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+
+  confirmCancelText: {
+    color: "#6b7280",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+
+  confirmDelete: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#dc2626",
+    borderRadius: 8,
+    paddingVertical: 10,
+  },
+
+  confirmDeleteText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  // ── Stop overlay ──────────────────────────────────────────────────────────
+  stopOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  stopCard: {
+    width: 240,
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    gap: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
+  stopTitle: {
+    fontSize: 15,
+    color: "#374151",
+    fontWeight: "600",
+    marginTop: 4,
+  },
+
+  stopPointName: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111",
+    marginBottom: 8,
+  },
+
+  stopButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#dc2626",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 36,
+    marginTop: 8,
+  },
+
+  stopButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "bold",
+    letterSpacing: 2,
+  },
+
+  alreadyHereCard: {
+    width: 220,
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    gap: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
+  alreadyHereTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111",
+    marginTop: 4,
+  },
+
+  alreadyHereBody: {
+    fontSize: 13,
+    color: "#6b7280",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+
+  alreadyHereButton: {
+    backgroundColor: "#2563eb",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 36,
+    marginTop: 4,
+  },
+
+  alreadyHereButtonText: {
+    color: "white",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

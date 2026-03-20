@@ -4,7 +4,6 @@ import { router } from "expo-router";
 import {
   Gamepad2,
   HomeIcon,
-  MousePointerClick,
   OctagonX,
   RotateCcw,
 } from "lucide-react-native";
@@ -44,40 +43,39 @@ export default function Control() {
       {/* Action Buttons */}
       <View style={styles.actionRow}>
         <Pressable
-          style={styles.jogButton}
+          style={styles.outlineButton}
           onPress={() => router.push("/control/jog")}
         >
-          <Gamepad2 size={26} color="white" />
-          <Text style={styles.jogButtonText}>Jog</Text>
+          <Gamepad2 size={22} color="#222" />
+          <Text style={styles.outlineButtonText}>Jog</Text>
         </Pressable>
 
         <Pressable
-          style={styles.stopButton}
-          onPress={() => robotClient.sendCommand("HardStop")}
-        >
-          <OctagonX size={26} color="white" />
-          <Text style={styles.stopButtonText}>Stop</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.resetButton}
+          style={styles.outlineButton}
           onPress={() => robotClient.sendCommand("Reset")}
         >
-          <RotateCcw size={26} color="white" />
-          <Text style={styles.resetButtonText}>Reset</Text>
+          <RotateCcw size={22} color="#222" />
+          <Text style={styles.outlineButtonText}>Reset</Text>
+        </Pressable>
+
+        <Pressable
+          style={styles.outlineButton}
+          onPress={() => robotClient.sendCommand("Home")}
+        >
+          <HomeIcon size={22} color="#222" />
+          <Text style={styles.outlineButtonText}>Home</Text>
         </Pressable>
       </View>
 
-      {/* Bottom Left Home Button */}
-      <Pressable style={styles.bottomLeft} onPress={() => robotClient.sendCommand("Home")}>
-        <Text style={styles.grayText}>Home </Text>
-        <HomeIcon size={25} color="#666" />
-      </Pressable>
+      <View style={{ flex: 1 }} />
 
-      {/* Bottom Right Teach */}
-      <Pressable style={styles.bottomRight} onPress={() => robotClient.sendCommand("Teach")}>
-        <Text style={styles.redText}>Teach </Text>
-        <MousePointerClick size={25} color="red" />
+      {/* Stop Button */}
+      <Pressable
+        style={styles.stopButton}
+        onPress={() => robotClient.sendCommand("HardStop")}
+      >
+        <OctagonX size={26} color="white" />
+        <Text style={styles.stopText}>STOP</Text>
       </Pressable>
     </View>
   );
@@ -117,94 +115,43 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: "row",
     justifyContent: "center",
-    gap: 16,
-    marginTop: 32,
+    gap: 12,
+    marginTop: 28,
   },
 
-  jogButton: {
+  outlineButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#2563eb",
+    borderWidth: 1.5,
+    borderColor: "#444",
     borderRadius: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    backgroundColor: "transparent",
   },
 
-  jogButtonText: {
-    color: "white",
-    fontSize: 18,
+  outlineButtonText: {
+    color: "#222",
+    fontSize: 17,
     fontWeight: "600",
   },
 
   stopButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "center",
+    gap: 10,
     backgroundColor: "red",
     borderRadius: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
+    paddingVertical: 16,
+    marginBottom: 16,
   },
 
-  stopButtonText: {
+  stopText: {
     color: "white",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-
-  resetButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#f59e0b",
-    borderRadius: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
-
-  resetButtonText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-
-  bottomLeft: {
-    position: "absolute",
-    bottom: 20,
-    left: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: "#999",
-    borderRadius: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-  },
-
-  bottomRight: {
-    position: "absolute",
-    bottom: 20,
-    right: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: "red",
-    borderRadius: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-  },
-
-  grayText: {
-    color: "#666",
-    fontSize: 18,
-  },
-
-  redText: {
-    color: "red",
-    fontSize: 18,
+    fontSize: 22,
+    fontWeight: "bold",
+    letterSpacing: 2,
   },
 });
