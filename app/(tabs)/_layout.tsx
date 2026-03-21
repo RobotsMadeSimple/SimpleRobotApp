@@ -66,7 +66,7 @@ export function TabLayout() {
     >
       <Tabs.Screen name="robot"   options={{ title: "Robot" }} />
       <Tabs.Screen name="program" options={{ title: "Program" }} />
-      <Tabs.Screen name="control" options={{ title: "Control", headerShown: false }} />
+      <Tabs.Screen name="control" options={{ title: "Control" }} />
       <Tabs.Screen name="io"      options={{ title: "I/O" }} />
       <Tabs.Screen name="space"   options={{ title: "Space" }} />
     </Tabs>

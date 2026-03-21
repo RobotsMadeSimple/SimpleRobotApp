@@ -9,7 +9,7 @@ function BackButton() {
       hitSlop={12}
       style={{ marginLeft: 4, padding: 4 }}
     >
-      <ArrowLeft size={24} color="#111" />
+      <ArrowLeft size={20} color="#111" />
     </Pressable>
   );
 }
@@ -25,6 +25,7 @@ export default function ProgramLayout() {
           headerShown: true,
           headerTitleAlign: "left",
           headerTitleStyle: { fontWeight: "bold", fontSize: 22 },
+
           headerLeft: () => <BackButton />,
         }}
       />

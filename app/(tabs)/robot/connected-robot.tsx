@@ -4,6 +4,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
   ArrowLeftRight,
+  ChevronRight,
   CodeXml,
   Gamepad2,
   Info,
@@ -11,9 +12,10 @@ import {
 } from "lucide-react-native";
 import {
   Image,
-  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -23,162 +25,263 @@ const robotImages: Record<string, any> = {
 
 const defaultRobotImage = require("@/assets/images/no-robot.png");
 
-function changeRobot(){
-    robotClient.disconnect();
-    setSelectedRobot(null);
-    router.back();
-  }
+function changeRobot() {
+  robotClient.disconnect();
+  setSelectedRobot(null);
+  router.replace("/robot");
+}
+
+const MENU_ITEMS = [
+  {
+    label: "Monitor Program",
+    description: "View and manage running programs",
+    icon: CodeXml,
+    tileColor: "#eff6ff",
+    iconColor: "#2563eb",
+    onPress: () => router.push("/program"),
+  },
+  {
+    label: "Jog and Teach",
+    description: "Manually move the robot and save points",
+    icon: Gamepad2,
+    tileColor: "#f0fdf4",
+    iconColor: "#16a34a",
+    onPress: () => router.push("/control"),
+  },
+  {
+    label: "Points, Tools & Locals",
+    description: "Manage saved positions and tool frames",
+    icon: Move3d,
+    tileColor: "#f5f3ff",
+    iconColor: "#7c3aed",
+    onPress: () => router.push("/space"),
+  },
+  {
+    label: "Inputs and Outputs",
+    description: "Monitor and control digital I/O",
+    icon: ArrowLeftRight,
+    tileColor: "#fff7ed",
+    iconColor: "#ea580c",
+    onPress: () => router.push("/io"),
+  },
+  {
+    label: "About Robot",
+    description: "Serial number, firmware and diagnostics",
+    icon: Info,
+    tileColor: "#f9fafb",
+    iconColor: "#6b7280",
+    onPress: () => router.push("/robot/about"),
+  },
+];
 
 export default function ConnectedRobot() {
   const selectedRobot = getSelectedRobot();
   const { robots } = useRobots();
 
   const robot =
-    robots.find(r => r.serialNumber === selectedRobot?.serialNumber) ??
+    robots.find((r) => r.serialNumber === selectedRobot?.serialNumber) ??
     selectedRobot;
 
   if (!robot) {
     return (
       <View style={styles.center}>
-        <Text>No robot selected</Text>
+        <Text style={styles.centerText}>No robot selected</Text>
       </View>
     );
   }
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
 
-  const menuItems = [
-    {
-      label: "Monitor Program",
-      icon: <CodeXml size={30} color="#111" />,
-      onPress: () => router.push("/program"),
-    },
-    {
-      label: "Jog and Teach",
-      icon: <Gamepad2 size={30} color="#111" />,
-      onPress: () => router.push("/control"),
-    },
-    {
-      label: "Points, Tools and Locals",
-      icon: <Move3d size={30} color="#111" />,
-      onPress: () => router.push("/space"),
-    },
-    {
-      label: "Inputs and Outputs",
-      icon: <ArrowLeftRight size={30} color="#111" />,
-      onPress: () => router.push("/io"),
-    },
-    {
-      label: "About Robot",
-      icon: <Info size={30} color="#111" />,
-      onPress: () => router.push("/robot/info"),
-    },
-  ];
-
   return (
-    <View style={styles.container}>
-      {/* Top Row */}
-      <View style={styles.headerRow}>
-        <Image
-          source={imageSource}
-          style={styles.image}
-          resizeMode="contain"
-        />
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Robot info card */}
+      <Text style={styles.sectionLabel}>CONNECTED ROBOT</Text>
+      <View style={styles.card}>
+        <View style={styles.robotRow}>
+          <View style={styles.imageWrapper}>
+            <Image source={imageSource} style={styles.robotImage} resizeMode="contain" />
+          </View>
 
-        <View style={styles.info}>
-          <Text style={styles.title}>{robot.robotName}</Text>
-          <Text style={styles.subtext}>
-            {robot.ipAddress}:{robot.port}
-          </Text>
+          <View style={styles.robotInfo}>
+            <Text style={styles.robotName} numberOfLines={1}>{robot.robotName}</Text>
+            {!!robot.robotType && (
+              <View style={styles.typeBadge}>
+                <Text style={styles.typeText}>{robot.robotType}</Text>
+              </View>
+            )}
+            <Text style={styles.robotIp} numberOfLines={1}>
+              {robot.ipAddress}:{robot.port}
+            </Text>
+          </View>
         </View>
 
-        <Pressable style={styles.backButton} onPress={changeRobot}>
-          <Text style={styles.backButtonText}>Change</Text>
-        </Pressable>
+        <View style={styles.cardSeparator} />
+
+        <TouchableOpacity style={styles.changeBtn} onPress={changeRobot} activeOpacity={0.8}>
+          <Text style={styles.changeBtnText}>Change Robot</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Options */}
-      <View style={styles.menu}>
-        {menuItems.map((item, i) => (
-          <Pressable
-            key={i}
-            style={styles.menuItem}
-            onPress={item.onPress}
-          >
-            <View style={styles.menuIcon}>{item.icon}</View>
-            <Text style={styles.menuText}>{item.label}</Text>
-          </Pressable>
-        ))}
+      {/* Navigation menu */}
+      <Text style={[styles.sectionLabel, { marginTop: 20 }]}>NAVIGATE TO</Text>
+      <View style={styles.card}>
+        {MENU_ITEMS.map((item, i) => {
+          const Icon = item.icon;
+          const isLast = i === MENU_ITEMS.length - 1;
+          return (
+            <TouchableOpacity
+              key={i}
+              style={[styles.menuRow, !isLast && styles.menuRowBorder]}
+              onPress={item.onPress}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.iconTile, { backgroundColor: item.tileColor }]}>
+                <Icon size={20} color={item.iconColor} />
+              </View>
+
+              <View style={styles.menuText}>
+                <Text style={styles.menuLabel}>{item.label}</Text>
+                <Text style={styles.menuDesc} numberOfLines={1}>{item.description}</Text>
+              </View>
+
+              <ChevronRight size={18} color="#d1d5db" />
+            </TouchableOpacity>
+          );
+        })}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: "#fff",
+    backgroundColor: "#f3f4f6",
+  },
+  content: {
+    padding: 16,
+    paddingBottom: 32,
   },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#f3f4f6",
   },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 30,
+  centerText: {
+    fontSize: 15,
+    color: "#6b7280",
   },
-  image: {
-    width: 120,
-    height: 120,
-    marginRight: 16,
-  },
-  info: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  title: {
-    fontSize: 20,
+  sectionLabel: {
+    fontSize: 11,
     fontWeight: "700",
-    color: "#000",
+    color: "#6b7280",
+    letterSpacing: 0.8,
+    marginBottom: 8,
   },
-  subtext: {
-    fontSize: 14,
-    color: "#9ca3af",
-    marginTop: 4,
+  card: {
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+    overflow: "hidden",
   },
-  backButton: {
-    backgroundColor: "#dc2626",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    justifyContent: "center",
-  },
-  backButtonText: {
-    color: "#fff",
-    fontWeight: "600",
-  },
-  menu: {
-    marginTop: 10,
-  },
-  menuItem: {
+
+  // ── Robot info ─────────────────────────────────────────────────────────────
+  robotRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 16,
-    borderBottomWidth: 1,
+    padding: 16,
+    gap: 14,
+  },
+  imageWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  robotImage: {
+    width: 66,
+    height: 66,
+  },
+  robotInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  robotName: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  typeBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#eff6ff",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  typeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563eb",
+  },
+  robotIp: {
+    fontSize: 13,
+    color: "#9ca3af",
+  },
+  cardSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#e5e7eb",
+  },
+  changeBtn: {
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  changeBtnText: {
+    color: "#dc2626",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  // ── Menu rows ──────────────────────────────────────────────────────────────
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  menuRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#e5e7eb",
   },
-  menuIcon: {
-    width: 30,
+  iconTile: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
   },
   menuText: {
-    paddingLeft: 16,
-    fontSize: 16,
-    color: "#111",
+    flex: 1,
+    gap: 2,
   },
-  pressed: {
-    opacity: 0.6,
+  menuLabel: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  menuDesc: {
+    fontSize: 12,
+    color: "#9ca3af",
   },
 });

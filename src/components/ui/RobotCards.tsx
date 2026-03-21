@@ -1,16 +1,17 @@
-import { Card } from "@/components/ui/card";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
+import { Router } from "lucide-react-native";
 import React from "react";
 import {
   Image,
-  Pressable,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
+
 const robotImages: Record<string, any> = {
   TBot: require("@/assets/images/TBot.png"),
 };
@@ -27,86 +28,89 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
 
   return (
-    <Pressable
-      onPress={setRobot}
-      style={({ pressed }) => [pressed && styles.pressed]}
-    >
-      <Card style={styles.card}>
-        <View style={styles.row}>
-          <View style={styles.imageWrapper}>
-            <Image
-              source={imageSource}
-              style={styles.image}
-              resizeMode="contain"
-            />
-          </View>
-
-          <View style={styles.info}>
-            <Text style={styles.title}>{robot.robotName}</Text>
-            <Text style={styles.subtext}>
-              {robot.ipAddress}:{robot.port}
-            </Text>
-          </View>
-
-          <Pressable style={styles.button} onPress={setRobot}>
-            <Text style={styles.buttonText}>Connect</Text>
-          </Pressable>
+    <TouchableOpacity onPress={setRobot} activeOpacity={0.75} style={styles.card}>
+      <View style={styles.row}>
+        {/* Robot image */}
+        <View style={styles.imageWrapper}>
+          <Image source={imageSource} style={styles.image} resizeMode="contain" />
         </View>
-      </Card>
-    </Pressable>
+
+        {/* Info */}
+        <View style={styles.info}>
+          <Text style={styles.title} numberOfLines={1}>{robot.robotName}</Text>
+          <Text style={styles.type} numberOfLines={1}>{robot.robotType}</Text>
+          <Text style={styles.subtext} numberOfLines={1}>
+            {robot.ipAddress}:{robot.port}
+          </Text>
+        </View>
+
+        {/* Connect button */}
+        <View style={styles.connectBadge}>
+          <Text style={styles.connectText}>Connect</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#ffffff",
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 12,
     shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
-  },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 12,
   },
   imageWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
   },
   image: {
-    width: 100,
-    height: 100,
+    width: 52,
+    height: 52,
   },
   info: {
     flex: 1,
     justifyContent: "center",
+    gap: 2,
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "700",
+    color: "#111827",
+  },
+  type: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#2563eb",
   },
   subtext: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#9ca3af",
-    marginTop: 2,
   },
-  button: {
-    backgroundColor: "#dc2626",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  connectBadge: {
+    backgroundColor: "#eff6ff",
     borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignSelf: "center",
   },
-  buttonText: {
-    color: "#ffffff",
+  connectText: {
+    color: "#2563eb",
     fontWeight: "600",
+    fontSize: 13,
   },
 });
