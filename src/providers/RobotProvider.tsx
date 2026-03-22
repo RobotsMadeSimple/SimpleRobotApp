@@ -13,6 +13,7 @@ type RobotContextType = {
   connected: boolean;
   selectedRobot: RobotWithStatus | null;
   points: Point[];
+  status: RobotStatus;
 };
 
 const RobotContext = createContext<RobotContextType>({
@@ -20,6 +21,7 @@ const RobotContext = createContext<RobotContextType>({
   connected: false,
   selectedRobot: null,
   points: [],
+  status: createDefaultStatus(),
 });
 
 export function RobotProvider({ children }: { children: React.ReactNode }) {
@@ -65,7 +67,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <RobotContext.Provider value={{ robots: robotsWithStatus, connected: status.connected, selectedRobot, points}}>
+    <RobotContext.Provider value={{ robots: robotsWithStatus, connected: status.connected, selectedRobot, points, status }}>
       {children}
     </RobotContext.Provider>
   );
@@ -85,4 +87,8 @@ export function useSelectedRobot() {
 
 export function useConnected() {
   return useContext(RobotContext).connected;
+}
+
+export function useRobotStatus() {
+  return useContext(RobotContext).status;
 }

@@ -1,5 +1,5 @@
 ﻿import { subscribeRobot } from "../connections/robotState";
-import { Point, RobotInfo, RobotStatus, createDefaultStatus } from "../models/robotModels";
+import { Point, ProgramStatus, RobotInfo, RobotStatus, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any> = (data: T) => void;
 type StatusListener = (status: RobotStatus) => void;
 type PointsListener = (points: Point[]) => void;
@@ -408,6 +408,73 @@ export class RobotConnectService {
     rz?: number;
   }) {
     return robotClient.sendCommand("EditPoint", { name, ...fields });
+  }
+
+  // ── Program cycle ───────────────────────────────────────────────────────────
+
+  /** Register or update program definitions. Only non-null fields overwrite existing data. */
+  public setAvailablePrograms(
+    programs: { name: string; description?: string; image?: string }[]
+  ) {
+    return robotClient.sendCommand('SetAvailablePrograms', { programs });
+  }
+
+  /** Push a sparse status update for a named program immediately. */
+  public setProgramStatus(update: {
+    programName: string;
+    programStatus?: ProgramStatus;
+    currentStepNumber?: number;
+    maxStepCount?: number;
+    stepDescription?: string;
+    errorDescription?: string;
+    warningDescription?: string;
+  }) {
+    return robotClient.sendCommand('SetProgramStatus', update);
+  }
+
+  /** Returns a map of programName → base-64 image string (null if no image). */
+  public async getProgramImages(): Promise<Record<string, string | null>> {
+    const data: any = await robotClient.sendCommand('GetProgramImages');
+    return data?.images ?? {};
+  }
+
+  /**
+   * Returns a slice of a program's log list.
+   * Omit `start` / `end` to fetch all entries.
+   * Use `start = previousTotalCount` on repeat calls to receive only new entries.
+   */
+  public async getProgramLogs(
+    programName: string,
+    start?: number,
+    end?: number
+  ): Promise<{ programName: string; totalCount: number; start: number; logs: string[] }> {
+    const data: any = await robotClient.sendCommand('GetProgramLogs', {
+      programName,
+      ...(start !== undefined && { start }),
+      ...(end   !== undefined && { end }),
+    });
+    return {
+      programName: data?.programName ?? programName,
+      totalCount:  data?.totalCount  ?? 0,
+      start:       data?.start       ?? 0,
+      logs:        Array.isArray(data?.logs) ? data.logs : [],
+    };
+  }
+
+  public startProgram(programName: string) {
+    return robotClient.sendCommand('StartProgram', { programName });
+  }
+
+  public stopProgram(programName: string) {
+    return robotClient.sendCommand('StopProgram', { programName });
+  }
+
+  public resetProgram(programName: string) {
+    return robotClient.sendCommand('ResetProgram', { programName });
+  }
+
+  public abortProgram(programName: string) {
+    return robotClient.sendCommand('AbortProgram', { programName });
   }
 
   public offsetL({

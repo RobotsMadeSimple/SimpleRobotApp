@@ -1,3 +1,27 @@
+// ── Program cycle ─────────────────────────────────────────────────────────────
+
+export type ProgramStatus =
+  | 'Ready' | 'Starting' | 'Running' | 'Finishing'
+  | 'Stopping' | 'Stopped' | 'Complete' | 'Error';
+
+export type ProgramSummary = {
+  name: string;
+  description: string;
+  status: ProgramStatus;
+  currentStepDescription: string;
+  currentStepNumber: number;
+  maxStepCount: number;
+  errorDescription: string;
+  warningDescription: string;
+  /** Flag set by mobile app — external program reads and consumes this */
+  start: boolean;
+  stop: boolean;
+  reset: boolean;
+  abort: boolean;
+};
+
+// ── Robot info / status ───────────────────────────────────────────────────────
+
 export type RobotInfo = {
   robotName: string;
   robotType: string;
@@ -60,6 +84,8 @@ export type RobotStatus = {
 
   homingState: string,
   driverConnected: boolean,
+
+  programs: ProgramSummary[],
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -99,5 +125,7 @@ export function createDefaultStatus(): RobotStatus {
 
     homingState: "WaitingForStart",
     driverConnected: false,
+
+    programs: [],
   };
 }

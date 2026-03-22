@@ -196,77 +196,85 @@ export default function JogScreen() {
 
   return (
     <View style={styles.container}>
-      <Tabs.Screen options={{ tabBarStyle: { display: "none" } }} />
+      <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
 
-      {/* ── Position card ── */}
-      <View style={styles.card}>
-        <View style={styles.coordRow}>
-          {coords.map(({ label, value }) => (
-            <View key={label} style={styles.coordCell}>
-              <Text style={styles.coordLabel}>{label}</Text>
-              <Text style={styles.coordValue}>{fmt(value)}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      {/* ── Controls card (selectors + mode + speed all together) ── */}
-      <View style={styles.card}>
-
-        {/* Local / Tool row */}
-        <View style={styles.selectorsRow}>
-          <Selector label="LOCAL" value={local} options={["Global", "Local1"]} onSelect={setLocal} />
-          <View style={styles.cardDivider} />
-          <Selector label="TOOL"  value={tool}  options={["Hand1",  "Hand2"]}  onSelect={setTool}  />
+      {/* ── Scrollable area: position + controls + jogpad ── */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Position card */}
+        <View style={styles.card}>
+          <View style={styles.coordRow}>
+            {coords.map(({ label, value }) => (
+              <View key={label} style={styles.coordCell}>
+                <Text style={styles.coordLabel}>{label}</Text>
+                <Text style={styles.coordValue}>{fmt(value)}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
-        <View style={styles.cardSeparator} />
+        {/* Controls card (selectors + mode + speed) */}
+        <View style={styles.card}>
 
-        {/* Jog mode */}
-        <View style={styles.segmentRow}>
-          {jogModes.map(({ key, icon }) => {
-            const active = mode === key;
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[styles.segment, active && styles.segmentActive]}
-                onPress={() => setMode(key)}
-                activeOpacity={0.8}
-              >
-                {icon(active)}
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          {/* Local / Tool row */}
+          <View style={styles.selectorsRow}>
+            <Selector label="LOCAL" value={local} options={["Global", "Local1"]} onSelect={setLocal} />
+            <View style={styles.cardDivider} />
+            <Selector label="TOOL"  value={tool}  options={["Hand1",  "Hand2"]}  onSelect={setTool}  />
+          </View>
+
+          <View style={styles.cardSeparator} />
+
+          {/* Jog mode */}
+          <View style={styles.segmentRow}>
+            {jogModes.map(({ key, icon }) => {
+              const active = mode === key;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  onPress={() => setMode(key)}
+                  activeOpacity={0.8}
+                >
+                  {icon(active)}
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.cardSeparator} />
+
+          {/* Speed */}
+          <View style={styles.chipRow}>
+            {speedOptions.map((spd) => {
+              const active = selectedSpeed === spd;
+              return (
+                <TouchableOpacity
+                  key={spd}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setSelectedSpeed(spd)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
         </View>
 
-        <View style={styles.cardSeparator} />
-
-        {/* Speed */}
-        <View style={styles.chipRow}>
-          {speedOptions.map((spd) => {
-            const active = selectedSpeed === spd;
-            return (
-              <TouchableOpacity
-                key={spd}
-                style={[styles.chip, active && styles.chipActive]}
-                onPress={() => setSelectedSpeed(spd)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
-              </TouchableOpacity>
-            );
-          })}
+        {/* JogPad */}
+        <View style={styles.jogWrapper}>
+          <JogPad jogMode={mode} selectedSpeed={selectedSpeed} />
         </View>
+      </ScrollView>
 
-      </View>
-
-      {/* ── JogPad ── */}
-      <View style={styles.jogWrapper}>
-        <JogPad jogMode={mode} selectedSpeed={selectedSpeed} />
-      </View>
-
-      {/* ── Bottom row: STOP on left (wide), Teach on right ── */}
+      {/* ── Fixed bottom row: STOP + Teach ── */}
       <View style={styles.bottomRow}>
         <TouchableOpacity style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")} activeOpacity={0.8}>
           <OctagonX size={22} color="white" />
@@ -297,8 +305,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f3f4f6",
+  },
+
+  scroll: {
+    flex: 1,
+  },
+
+  scrollContent: {
     padding: 12,
     gap: 10,
+    paddingBottom: 16,
   },
 
   // ── Card ──────────────────────────────────────────────────────────────────
@@ -487,16 +503,21 @@ const styles = StyleSheet.create({
 
   // ── JogPad ────────────────────────────────────────────────────────────────
   jogWrapper: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 6,
   },
 
-  // ── Bottom row ────────────────────────────────────────────────────────────
+  // ── Bottom row (fixed) ────────────────────────────────────────────────────
   bottomRow: {
     flexDirection: "row",
     gap: 10,
-    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 14,
+    backgroundColor: "#f3f4f6",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e7eb",
   },
 
   stopButton: {
