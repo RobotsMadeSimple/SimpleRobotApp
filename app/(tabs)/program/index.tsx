@@ -1,9 +1,9 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useRobotStatus } from "@/src/providers/RobotProvider";
+import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
+import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box } from "lucide-react-native";
+import { Box, Cpu, Plus } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -75,9 +75,11 @@ function getButtons(p: ProgramSummary): ActionBtn[] {
 function ProgramCard({
   p,
   image,
+  isBuilt,
 }: {
   p: ProgramSummary;
   image: string | null;
+  isBuilt?: boolean;
 }) {
   const theme = STATUS_THEME[p.status] ?? STATUS_THEME.Ready;
   const pct =
@@ -97,7 +99,6 @@ function ProgramCard({
     }).start();
   }, [pct]);
 
-  // Status bar label — append error/warning if present
   const alert = p.errorDescription || p.warningDescription;
   const statusLabel = alert ? `${p.status}  ·  ${alert}` : p.status;
 
@@ -121,6 +122,14 @@ function ProgramCard({
         >
           {statusLabel}
         </Text>
+
+        {/* BUILT badge — only for controller-stored programs */}
+        {isBuilt && (
+          <View style={styles.builtBadge}>
+            <Cpu size={10} color="#2563eb" />
+            <Text style={styles.builtBadgeText}>BUILT</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.cardBody}>
@@ -201,22 +210,60 @@ function ProgramCard({
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function syntheticSummary(bp: BuiltProgram): ProgramSummary {
+  return {
+    name: bp.name,
+    description: bp.description,
+    status: "Ready",
+    currentStepDescription: "",
+    currentStepNumber: 0,
+    maxStepCount: bp.steps.length,
+    errorDescription: "",
+    warningDescription: "",
+    start: false,
+    stop: false,
+    reset: false,
+    abort: false,
+  };
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function ProgramScreen() {
-  const status = useRobotStatus();
-  const programs = status.programs;
+  const programSummaries = useProgramSummaries();
+  const builtPrograms    = useBuiltPrograms();
   const [images, setImages] = useState<Record<string, string | null>>({});
 
-  // Re-fetch images whenever the set of registered programs changes
-  const programKeys = programs.map((p) => p.name).join(",");
+  // Set of built program names for quick lookup
+  const builtNames = new Set(builtPrograms.map((p) => p.name));
+
+  // Build unified list:
+  //   1. All built programs (live data if executing, synthetic if idle)
+  //   2. External programs not in the built set
+  const builtCards: { summary: ProgramSummary; isBuilt: true }[] =
+    builtPrograms.map((bp) => {
+      const live = programSummaries.find((p) => p.name === bp.name);
+      return { summary: live ?? syntheticSummary(bp), isBuilt: true };
+    });
+
+  const externalCards: { summary: ProgramSummary; isBuilt: false }[] =
+    programSummaries
+      .filter((p) => !builtNames.has(p.name))
+      .map((p) => ({ summary: p, isBuilt: false }));
+
+  const allCards = [...builtCards, ...externalCards];
+
+  // Re-fetch images whenever any card's name changes
+  const allNames = allCards.map((c) => c.summary.name).join(",");
   useEffect(() => {
-    if (programs.length === 0) return;
+    if (allCards.length === 0) return;
     robotClient
       .getProgramImages()
       .then(setImages)
       .catch(() => {});
-  }, [programKeys]);
+  }, [allNames]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -226,19 +273,35 @@ export default function ProgramScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {programs.length === 0 ? (
+        {/* ── Program list ── */}
+        {allCards.length === 0 ? (
           <View style={styles.empty}>
             <Box size={44} color="#d1d5db" />
             <Text style={styles.emptyTitle}>No Programs</Text>
             <Text style={styles.emptySubtitle}>
-              Programs registered by the external controller will appear here.
+              Create a program below, or register one from the external controller.
             </Text>
           </View>
         ) : (
-          programs.map((p) => (
-            <ProgramCard key={p.name} p={p} image={images[p.name] ?? null} />
+          allCards.map((c) => (
+            <ProgramCard
+              key={c.summary.name}
+              p={c.summary}
+              image={images[c.summary.name] ?? null}
+              isBuilt={c.isBuilt}
+            />
           ))
         )}
+
+        {/* ── New Program button — always at bottom ── */}
+        <TouchableOpacity
+          style={styles.addCard}
+          onPress={() => router.push("/program/builder")}
+          activeOpacity={0.7}
+        >
+          <Plus size={16} color="#2563eb" />
+          <Text style={styles.addCardText}>New Program</Text>
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -247,8 +310,8 @@ export default function ProgramScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: "#f3f4f6" },
-  content: { padding: 16, paddingBottom: 32, gap: 12 },
+  scroll:   { flex: 1, backgroundColor: "#f3f4f6" },
+  content:  { padding: 16, paddingBottom: 32, gap: 12 },
 
   // Card shell
   card: {
@@ -272,8 +335,25 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#e5e7eb",
   },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusDot:  { width: 7, height: 7, borderRadius: 4 },
   statusText: { flex: 1, fontSize: 12, fontWeight: "600", letterSpacing: 0.4 },
+
+  // BUILT badge
+  builtBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#eff6ff",
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  builtBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#2563eb",
+    letterSpacing: 0.4,
+  },
 
   // Card body
   cardBody: { padding: 14, gap: 12 },
@@ -281,7 +361,7 @@ const styles = StyleSheet.create({
   // Header row
   headerRow: { flexDirection: "row", gap: 12, alignItems: "center" },
   imageWrap: { width: 72, height: 72, borderRadius: 10, overflow: "hidden" },
-  image: { width: 72, height: 72 },
+  image:     { width: 72, height: 72 },
   imageFallback: {
     width: 72,
     height: 72,
@@ -290,7 +370,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  infoCol: { flex: 1, gap: 4, justifyContent: "center" },
+  infoCol:     { flex: 1, gap: 4, justifyContent: "center" },
   programName: { fontSize: 16, fontWeight: "700", color: "#111827" },
   programDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
 
@@ -334,11 +414,30 @@ const styles = StyleSheet.create({
   },
   actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 
+  // New Program button
+  addCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#2563eb",
+    borderRadius: 14,
+    paddingVertical: 14,
+    backgroundColor: "transparent",
+  },
+  addCardText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2563eb",
+  },
+
   // Empty state
   empty: {
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 80,
+    paddingTop: 60,
+    paddingBottom: 24,
     gap: 12,
   },
   emptyTitle: { fontSize: 18, fontWeight: "700", color: "#374151" },

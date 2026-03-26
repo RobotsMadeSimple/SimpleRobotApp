@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { Point, RobotInfo, RobotStatus, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -13,6 +13,9 @@ type RobotContextType = {
   connected: boolean;
   selectedRobot: RobotWithStatus | null;
   points: Point[];
+  tools: Tool[];
+  builtPrograms: BuiltProgram[];
+  programSummaries: ProgramSummary[];
   status: RobotStatus;
 };
 
@@ -21,20 +24,27 @@ const RobotContext = createContext<RobotContextType>({
   connected: false,
   selectedRobot: null,
   points: [],
+  tools: [],
+  builtPrograms: [],
+  programSummaries: [],
   status: createDefaultStatus(),
 });
 
 export function RobotProvider({ children }: { children: React.ReactNode }) {
-  const [robots, setRobots] = useState<RobotInfo[]>([]);
-  const [status, setStatus] = useState<RobotStatus>(createDefaultStatus());
-  const [points, setPoints] = useState<Point[]>([]);
+  const [robots,         setRobots]        = useState<RobotInfo[]>([]);
+  const [status,         setStatus]        = useState<RobotStatus>(createDefaultStatus());
+  const [points,         setPoints]        = useState<Point[]>([]);
+  const [tools,          setTools]         = useState<Tool[]>([]);
+  const [builtPrograms,  setBuiltPrograms] = useState<BuiltProgram[]>([]);
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubDiscovery = robotDiscovery.subscribe(setRobots);
-    const unsubStatus = robotClient.onStatus(setStatus);
-    const unsubPoints = robotClient.onPoints(setPoints);
-    const unsubSelected = subscribeRobot(robot =>
+    const unsubDiscovery     = robotDiscovery.subscribe(setRobots);
+    const unsubStatus        = robotClient.onStatus(setStatus);
+    const unsubPoints        = robotClient.onPoints(setPoints);
+    const unsubTools         = robotClient.onTools(setTools);
+    const unsubBuiltPrograms = robotClient.onBuiltPrograms(setBuiltPrograms);
+    const unsubSelected      = subscribeRobot(robot =>
       setSelectedSerial(robot?.serialNumber ?? null)
     );
 
@@ -46,28 +56,34 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubStatus();
       unsubSelected();
       unsubPoints();
+      unsubTools();
+      unsubBuiltPrograms();
       robotDiscovery.stop();
       robotClient.disconnect();
     };
   }, []);
 
   const robotsWithStatus: RobotWithStatus[] = useMemo(
-    () =>
-      robots.map(r => ({
-        ...r,
-        status,
-      })),
+    () => robots.map(r => ({ ...r, status })),
     [robots, status]
   );
 
   const selectedRobot = useMemo(
-    () =>
-      robotsWithStatus.find(r => r.serialNumber === selectedSerial) ?? null,
+    () => robotsWithStatus.find(r => r.serialNumber === selectedSerial) ?? null,
     [robotsWithStatus, selectedSerial]
   );
 
   return (
-    <RobotContext.Provider value={{ robots: robotsWithStatus, connected: status.connected, selectedRobot, points, status }}>
+    <RobotContext.Provider value={{
+      robots: robotsWithStatus,
+      connected: status.connected,
+      selectedRobot,
+      points,
+      tools,
+      builtPrograms,
+      programSummaries: status.programs,
+      status,
+    }}>
       {children}
     </RobotContext.Provider>
   );
@@ -77,8 +93,20 @@ export function useRobots() {
   return useContext(RobotContext);
 }
 
-export function usePoints(){
+export function usePoints() {
   return useContext(RobotContext).points;
+}
+
+export function useTools() {
+  return useContext(RobotContext).tools;
+}
+
+export function useBuiltPrograms() {
+  return useContext(RobotContext).builtPrograms;
+}
+
+export function useProgramSummaries() {
+  return useContext(RobotContext).programSummaries;
 }
 
 export function useSelectedRobot() {

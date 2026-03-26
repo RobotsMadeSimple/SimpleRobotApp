@@ -1,3 +1,41 @@
+// ── Program builder ───────────────────────────────────────────────────────────
+
+export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate';
+
+export type ProgramStep = {
+  id: string;
+  type: StepType;
+  name?: string;
+  pointName?: string;
+  speed?: number;
+  accel?: number;
+  decel?: number;
+  // Position offset added directly to the target point (mm / deg)
+  offsetX?: number;
+  offsetY?: number;
+  offsetZ?: number;
+  offsetRX?: number;
+  offsetRY?: number;
+  offsetRZ?: number;
+  // Tool applied as a TCP offset at execution time
+  toolName?: string;
+  outputNumber?: number;
+  outputValue?: boolean;
+  waitMs?: number;
+  loopCount?: number;
+  loopSteps?: ProgramStep[];
+  statusMessage?: string;
+  statusWarning?: string;
+  statusError?: string;
+};
+
+export type BuiltProgram = {
+  name: string;
+  description: string;
+  steps: ProgramStep[];
+  lastUpdatedUnixMs: number;
+};
+
 // ── Program cycle ─────────────────────────────────────────────────────────────
 
 export type ProgramStatus =
@@ -33,6 +71,18 @@ export type RobotInfo = {
 
 export type Point = {
   name: string
+  lastUpdatedUnixMs: number
+  x: number
+  y: number
+  z: number
+  rx: number
+  ry: number
+  rz: number
+}
+
+export type Tool = {
+  name: string
+  description: string
   lastUpdatedUnixMs: number
   x: number
   y: number
@@ -86,6 +136,11 @@ export type RobotStatus = {
   driverConnected: boolean,
 
   programs: ProgramSummary[],
+
+  lastToolUpdate: number,
+  activeTool: string,
+
+  lastBuiltProgramUpdate: number,
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -127,5 +182,10 @@ export function createDefaultStatus(): RobotStatus {
     driverConnected: false,
 
     programs: [],
+
+    lastToolUpdate: 0,
+    activeTool: "",
+
+    lastBuiltProgramUpdate: 0,
   };
 }

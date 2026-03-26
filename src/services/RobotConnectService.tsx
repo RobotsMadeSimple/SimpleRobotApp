@@ -1,8 +1,10 @@
 ﻿import { subscribeRobot } from "../connections/robotState";
-import { Point, ProgramStatus, RobotInfo, RobotStatus, createDefaultStatus } from "../models/robotModels";
+import { BuiltProgram, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any> = (data: T) => void;
-type StatusListener = (status: RobotStatus) => void;
-type PointsListener = (points: Point[]) => void;
+type StatusListener            = (status: RobotStatus)      => void;
+type PointsListener            = (points: Point[])          => void;
+type ToolsListener             = (tools: Tool[])            => void;
+type BuiltProgramsListener     = (programs: BuiltProgram[]) => void;
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
@@ -19,11 +21,15 @@ type MoveParams = {
 }
 
 export class RobotConnectService {
-  private statusListeners: StatusListener[] = [];
-  private pointsListeners: PointsListener[] = [];
-  private status: RobotStatus = createDefaultStatus();
-  private connecting: boolean = false;
-  private points: Point[] = [];
+  private statusListeners:        StatusListener[]        = [];
+  private pointsListeners:        PointsListener[]        = [];
+  private toolsListeners:         ToolsListener[]         = [];
+  private builtProgramsListeners: BuiltProgramsListener[] = [];
+  private status:       RobotStatus    = createDefaultStatus();
+  private connecting:   boolean        = false;
+  private points:       Point[]        = [];
+  private tools:        Tool[]         = [];
+  private builtPrograms: BuiltProgram[] = [];
 
   private ws: WebSocket | null = null;
   private url?: string;
@@ -93,6 +99,11 @@ export class RobotConnectService {
       console.log("[RobotWS] Connected");
       this.emitStatus({ connected: true });
       this.startStatusPolling();
+      // Eagerly load all repositories on connect so initial data is available
+      // regardless of whether lastXxxUpdate timestamps have changed.
+      this.getPoints().catch(() => {});
+      this.getTools().catch(() => {});
+      this.getBuiltPrograms().catch(() => {});
     };
 
     this.ws.onclose = () => {
@@ -138,13 +149,26 @@ export class RobotConnectService {
 
     switch (data.command){
       case "GetStatus":
-        
+        if (typeof data.programs === "string") {
+          try { data.programs = JSON.parse(data.programs); } catch { data.programs = []; }
+        }
+        if (!Array.isArray(data.programs)) {
+          data.programs = [];
+        }
         this.emitStatus(data);
         break;
       
       case "GetPoints":
         console.log("GetPoints Decode");
         this.decodePoints(data);
+        break;
+
+      case "GetTools":
+        this.decodeTools(data);
+        break;
+
+      case "GetBuiltPrograms":
+        this.decodeBuiltPrograms(data);
         break;
     }
 
@@ -184,7 +208,6 @@ export class RobotConnectService {
       rz: p.RZ
     }));
 
-    console.log(this.points);
     this.emitPoints();
   }
 
@@ -222,16 +245,14 @@ export class RobotConnectService {
   }
 
   private emitStatus(update: Partial<RobotStatus>) {
-    const previousUpdate = this.status.lastPointUpdate;
+    const prev = this.status;
 
-    this.status = { ...this.status, ...update };
+    // One-shot fetches when the controller signals a repository change
+    if (update.lastPointUpdate        !== undefined && update.lastPointUpdate        !== prev.lastPointUpdate)        this.getPoints().catch(() => {});
+    if (update.lastToolUpdate         !== undefined && update.lastToolUpdate         !== prev.lastToolUpdate)         this.getTools().catch(() => {});
+    if (update.lastBuiltProgramUpdate !== undefined && update.lastBuiltProgramUpdate !== prev.lastBuiltProgramUpdate) this.getBuiltPrograms().catch(() => {});
 
-    if (
-      update.lastPointUpdate !== previousUpdate
-    ) {
-      this.getPoints().catch(() => {});
-    }
-
+    this.status = { ...prev, ...update };
     this.statusListeners.forEach(cb => cb(this.status));
   }
 
@@ -245,6 +266,54 @@ export class RobotConnectService {
 
   private emitPoints() {
     this.pointsListeners.forEach(cb => cb(this.points));
+  }
+
+  onTools(cb: ToolsListener) {
+    this.toolsListeners.push(cb);
+    cb(this.tools);
+    return () => {
+      this.toolsListeners = this.toolsListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitTools() {
+    this.toolsListeners.forEach(cb => cb(this.tools));
+  }
+
+  onBuiltPrograms(cb: BuiltProgramsListener) {
+    this.builtProgramsListeners.push(cb);
+    cb(this.builtPrograms);
+    return () => {
+      this.builtProgramsListeners = this.builtProgramsListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitBuiltPrograms() {
+    this.builtProgramsListeners.forEach(cb => cb(this.builtPrograms));
+  }
+
+  private decodeTools(data: any) {
+    if (!data.tools) { this.tools = []; this.emitTools(); return; }
+
+    let parsed: any[];
+    try { parsed = JSON.parse(data.tools); }
+    catch { this.tools = []; this.emitTools(); return; }
+
+    if (!Array.isArray(parsed)) { this.tools = []; this.emitTools(); return; }
+
+    this.tools = parsed.map((t: any): Tool => ({
+      name:              t.Name              ?? t.name              ?? "",
+      description:       t.Description       ?? t.description       ?? "",
+      lastUpdatedUnixMs: t.LastUpdatedUnixMs ?? t.lastUpdatedUnixMs ?? 0,
+      x:  t.X  ?? t.x  ?? 0,
+      y:  t.Y  ?? t.y  ?? 0,
+      z:  t.Z  ?? t.z  ?? 0,
+      rx: t.RX ?? t.rx ?? 0,
+      ry: t.RY ?? t.ry ?? 0,
+      rz: t.RZ ?? t.rz ?? 0,
+    }));
+
+    this.emitTools();
   }
 
   // -------------------------
@@ -315,111 +384,56 @@ export class RobotConnectService {
   // Available Commands
   // -------------------------
 
-  public getStatus(){
-    return robotClient.sendCommand("GetStatus");
+  public getStatus() {
+    return this.sendCommand("GetStatus");
   }
 
-  public getPoints(){
-    return robotClient.sendCommand("GetPoints");
+  public getPoints() {
+    return this.sendCommand("GetPoints");
   }
 
-  public stopJog(){
-    return robotClient.sendCommand("StopJog");
+  public stopJog() {
+    return this.sendCommand("StopJog");
   }
 
-  public hardStop(){
-    return robotClient.sendCommand("HardStop");
+  public hardStop() {
+    return this.sendCommand("HardStop");
   }
 
-  public jogL({
-    x = 0,
-    y = 0,
-    z = 0,
-    rz = 0,
-    speed = 100,
-    accel = 100,
-    decel = 100
-  }: MoveParams) {
-
-    return robotClient.sendCommand("JogL", {
-      X: x,
-      Y: y,
-      Z: z,
-      RZ: rz,
-      Speed: speed,
-      Accel: accel,
-      Decel: decel
-    });
+  public jogL({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
+    return this.sendCommand("JogL", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
-  public jogJ({
-    x = 0,
-    y = 0,
-    z = 0,
-    rz = 0,
-    speed = 100,
-    accel = 100,
-    decel = 100
-  }: MoveParams) {
-
-    return robotClient.sendCommand("JogJ", {
-      X: x,
-      Y: y,
-      Z: z,
-      RZ: rz,
-      Speed: speed,
-      Accel: accel,
-      Decel: decel
-    });
+  public jogJ({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
+    return this.sendCommand("JogJ", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
-  public jogTool({
-    x = 0,
-    y = 0,
-    z = 0,
-    rz = 0,
-    speed = 100,
-    accel = 100,
-    decel = 100
-  }: MoveParams) {
+  public jogTool({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
+    return this.sendCommand("JogTool", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+  }
 
-    return robotClient.sendCommand("JogTool", {
-      X: x,
-      Y: y,
-      Z: z,
-      RZ: rz,
-      Speed: speed,
-      Accel: accel,
-      Decel: decel
-    });
+  public offsetL({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
+    return this.sendCommand("OffsetL", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public deletePoint(name: string) {
-    return robotClient.sendCommand("DeletePoint", { name });
+    return this.sendCommand("DeletePoint", { name });
   }
 
   public editPoint(name: string, fields: {
     newName?: string;
-    x?: number;
-    y?: number;
-    z?: number;
-    rx?: number;
-    ry?: number;
-    rz?: number;
+    x?: number; y?: number; z?: number;
+    rx?: number; ry?: number; rz?: number;
   }) {
-    return robotClient.sendCommand("EditPoint", { name, ...fields });
+    return this.sendCommand("EditPoint", { name, ...fields });
   }
 
   // ── Program cycle ───────────────────────────────────────────────────────────
 
-  /** Register or update program definitions. Only non-null fields overwrite existing data. */
-  public setAvailablePrograms(
-    programs: { name: string; description?: string; image?: string }[]
-  ) {
-    return robotClient.sendCommand('SetAvailablePrograms', { programs });
+  public setAvailablePrograms(programs: { name: string; description?: string; image?: string }[]) {
+    return this.sendCommand('SetAvailablePrograms', { programs });
   }
 
-  /** Push a sparse status update for a named program immediately. */
   public setProgramStatus(update: {
     programName: string;
     programStatus?: ProgramStatus;
@@ -429,26 +443,20 @@ export class RobotConnectService {
     errorDescription?: string;
     warningDescription?: string;
   }) {
-    return robotClient.sendCommand('SetProgramStatus', update);
+    return this.sendCommand('SetProgramStatus', update);
   }
 
-  /** Returns a map of programName → base-64 image string (null if no image). */
   public async getProgramImages(): Promise<Record<string, string | null>> {
-    const data: any = await robotClient.sendCommand('GetProgramImages');
+    const data: any = await this.sendCommand('GetProgramImages');
     return data?.images ?? {};
   }
 
-  /**
-   * Returns a slice of a program's log list.
-   * Omit `start` / `end` to fetch all entries.
-   * Use `start = previousTotalCount` on repeat calls to receive only new entries.
-   */
   public async getProgramLogs(
     programName: string,
     start?: number,
     end?: number
   ): Promise<{ programName: string; totalCount: number; start: number; logs: string[] }> {
-    const data: any = await robotClient.sendCommand('GetProgramLogs', {
+    const data: any = await this.sendCommand('GetProgramLogs', {
       programName,
       ...(start !== undefined && { start }),
       ...(end   !== undefined && { end }),
@@ -462,40 +470,94 @@ export class RobotConnectService {
   }
 
   public startProgram(programName: string) {
-    return robotClient.sendCommand('StartProgram', { programName });
+    return this.sendCommand('StartProgram', { programName });
   }
 
   public stopProgram(programName: string) {
-    return robotClient.sendCommand('StopProgram', { programName });
+    return this.sendCommand('StopProgram', { programName });
   }
 
   public resetProgram(programName: string) {
-    return robotClient.sendCommand('ResetProgram', { programName });
+    return this.sendCommand('ResetProgram', { programName });
   }
 
   public abortProgram(programName: string) {
-    return robotClient.sendCommand('AbortProgram', { programName });
+    return this.sendCommand('AbortProgram', { programName });
   }
 
-  public offsetL({
-    x = 0,
-    y = 0,
-    z = 0,
-    rz = 0,
-    speed = 100,
-    accel = 100,
-    decel = 100
-  }: MoveParams) {
+  // ── Tool repository ───────────────────────────────────────────────────────
 
-    return robotClient.sendCommand("OffsetL", {
-      X: x,
-      Y: y,
-      Z: z,
-      RZ: rz,
-      Speed: speed,
-      Accel: accel,
-      Decel: decel
+  public getTools() {
+    return this.sendCommand("GetTools");
+  }
+
+  public createTool(tool: {
+    name: string;
+    description?: string;
+    x?: number; y?: number; z?: number;
+    rx?: number; ry?: number; rz?: number;
+  }) {
+    return this.sendCommand("CreateTool", { ...tool });
+  }
+
+  public editTool(name: string, fields: {
+    newName?: string;
+    description?: string;
+    x?: number; y?: number; z?: number;
+    rx?: number; ry?: number; rz?: number;
+  }) {
+    return this.sendCommand("EditTool", { name, ...fields });
+  }
+
+  public deleteTool(name: string) {
+    return this.sendCommand("DeleteTool", { name });
+  }
+
+  public setActiveTool(name: string) {
+    return this.sendCommand("SetActiveTool", { name });
+  }
+
+  // ── Built program repository ──────────────────────────────────────────────
+
+  private decodeBuiltPrograms(data: any) {
+    if (!data.programs) { this.builtPrograms = []; this.emitBuiltPrograms(); return; }
+
+    let parsed: any[];
+    try { parsed = JSON.parse(data.programs); }
+    catch { this.builtPrograms = []; this.emitBuiltPrograms(); return; }
+
+    if (!Array.isArray(parsed)) { this.builtPrograms = []; this.emitBuiltPrograms(); return; }
+
+    this.builtPrograms = parsed as BuiltProgram[];
+    this.emitBuiltPrograms();
+  }
+
+  public getBuiltPrograms() {
+    return this.sendCommand("GetBuiltPrograms");
+  }
+
+  public saveBuiltProgram(program: BuiltProgram) {
+    return this.sendCommand("SaveBuiltProgram", {
+      name:        program.name,
+      description: program.description,
+      steps:       program.steps,
     });
+  }
+
+  public deleteBuiltProgram(name: string) {
+    return this.sendCommand("DeleteBuiltProgram", { name });
+  }
+
+  public saveProgramImage(name: string, imageBase64: string) {
+    return this.sendCommand("SaveBuiltProgramImage", { name, image: imageBase64 });
+  }
+
+  public executeBuiltProgram(name: string) {
+    return this.sendCommand("ExecuteBuiltProgram", { name });
+  }
+
+  public stopBuiltProgram(name: string) {
+    return this.sendCommand("StopBuiltProgram", { name });
   }
 }
 

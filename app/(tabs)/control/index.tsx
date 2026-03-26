@@ -10,7 +10,6 @@ import {
   OctagonX,
   RotateCcw,
   Settings2,
-  Wrench,
   Zap,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -84,7 +83,6 @@ export default function Control() {
 
   const settings = [
     { label: "Speed & Acceleration", sub: "Set move speeds and ramp rates",  icon: <Zap      size={20} color="#9ca3af" />, iconBg: "#f3f4f6" },
-    { label: "Tool Offset",          sub: "Configure TCP tool frame",         icon: <Wrench   size={20} color="#9ca3af" />, iconBg: "#f3f4f6" },
     { label: "Advanced",             sub: "Driver and controller options",    icon: <Settings2 size={20} color="#9ca3af" />, iconBg: "#f3f4f6" },
   ];
 

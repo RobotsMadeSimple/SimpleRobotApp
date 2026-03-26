@@ -202,16 +202,16 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   imageWrapper: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
+    width: 120,
+    height: 120,
+    borderRadius: 16,
     backgroundColor: "#ffffff",
     justifyContent: "center",
     alignItems: "center",
   },
   robotImage: {
-    width: 66,
-    height: 66,
+    width: 120,
+    height: 120,
   },
   robotInfo: {
     flex: 1,

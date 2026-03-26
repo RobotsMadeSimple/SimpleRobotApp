@@ -1,17 +1,21 @@
 import JogPad from "@/src/components/ui/JogPad";
-import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { Tabs } from "expo-router";
+import { router, Tabs } from "expo-router";
 import {
+  ArrowRight,
+  ChevronDown,
+  Grid2X2,
   MousePointerClick,
   Move,
   OctagonX,
   Plus,
   Rotate3d,
   Search,
+  Wrench,
   X,
 } from "lucide-react-native";
-import { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Modal,
   ScrollView,
@@ -22,43 +26,118 @@ import {
   View,
 } from "react-native";
 
+// ── Picker modal ──────────────────────────────────────────────────────────────
+function PickerModal({
+  visible,
+  title,
+  options,
+  value,
+  onSelect,
+  onClose,
+  viewLabel,
+  viewRoute,
+}: {
+  visible: boolean;
+  title: string;
+  options: string[];
+  value: string;
+  onSelect: (v: string) => void;
+  onClose: () => void;
+  viewLabel?: string;
+  viewRoute?: string;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.pickerOverlay} onPress={onClose} activeOpacity={1}>
+        <TouchableOpacity style={styles.pickerCard} onPress={() => {}} activeOpacity={1}>
+          <View style={styles.dialogHeader}>
+            <Text style={styles.dialogTitle}>{title}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color="#9ca3af" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {options.map((opt, i) => {
+              const active = opt === value;
+              const isLast = i === options.length - 1;
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.pickerRow, !isLast && styles.pickerRowBorder, active && styles.pickerRowActive]}
+                  onPress={() => { onSelect(opt); onClose(); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.radioRing, active && styles.radioRingActive]}>
+                    {active && <View style={styles.radioDot} />}
+                  </View>
+                  <Text style={[styles.pickerRowText, active && styles.pickerRowTextActive]}>
+                    {opt}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {viewLabel && viewRoute && (
+            <TouchableOpacity
+              style={styles.pickerViewLink}
+              onPress={() => { onClose(); router.push(viewRoute as any); }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pickerViewLinkText}>{viewLabel}</Text>
+              <ArrowRight size={14} color="#2563eb" />
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
 // ── Selector ──────────────────────────────────────────────────────────────────
 function Selector({
   label,
   value,
   options,
   onSelect,
+  icon,
+  viewLabel,
+  viewRoute,
 }: {
   label: string;
   value: string;
   options: string[];
   onSelect: (v: string) => void;
+  icon?: React.ReactNode;
+  viewLabel?: string;
+  viewRoute?: string;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <View style={styles.selectorWrap}>
-      <TouchableOpacity style={styles.selectorBtn} onPress={() => setOpen(!open)} activeOpacity={0.7}>
-        <Text style={styles.selectorLabel}>{label}</Text>
-        <Text style={styles.selectorValue}>{value}</Text>
+      <TouchableOpacity style={styles.selectorBtn} onPress={() => setOpen(true)} activeOpacity={0.7}>
+        {icon && <View style={styles.selectorIcon}>{icon}</View>}
+        <View style={styles.selectorTextStack}>
+          <Text style={styles.selectorLabel}>{label}</Text>
+          <View style={styles.selectorValueRow}>
+            <Text style={styles.selectorValue}>{value}</Text>
+            <ChevronDown size={13} color="#9ca3af" />
+          </View>
+        </View>
       </TouchableOpacity>
 
-      {open && (
-        <View style={styles.dropdown}>
-          {options.map((opt) => (
-            <TouchableOpacity
-              key={opt}
-              style={styles.dropdownItem}
-              onPress={() => { onSelect(opt); setOpen(false); }}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.dropdownText, opt === value && styles.dropdownTextActive]}>
-                {opt}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      <PickerModal
+        visible={open}
+        title={label}
+        options={options}
+        value={value}
+        onSelect={onSelect}
+        onClose={() => setOpen(false)}
+        viewLabel={viewLabel}
+        viewRoute={viewRoute}
+      />
     </View>
   );
 }
@@ -171,12 +250,22 @@ function TeachModal({ onClose }: { onClose: () => void }) {
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function JogScreen() {
   const [local, setLocal]               = useState("Global");
-  const [tool, setTool]                 = useState("Hand1");
   const [selectedSpeed, setSelectedSpeed] = useState("Slow");
   const [mode, setMode]                 = useState("XYZ");
   const [teachOpen, setTeachOpen]       = useState(false);
-  const robot = useSelectedRobot();
-  const s = robot?.status;
+
+  const tools      = useTools();
+  const status     = useRobotStatus();
+  const activeTool = status.activeTool;
+
+  const [tool, setToolLocal] = useState(activeTool || "None");
+
+  function setTool(name: string) {
+    setToolLocal(name);
+    robotClient.setActiveTool(name);
+  }
+
+  const s = status;
 
   const fmt          = (v?: number) => (v ?? 0).toFixed(1);
   const speedOptions = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
@@ -186,6 +275,11 @@ export default function JogScreen() {
     { key: "Tool",  icon: (active: boolean) => <Move    size={17} color={active ? "#fff" : "#6b7280"} /> },
     { key: "Joint", icon: (active: boolean) => <Rotate3d size={17} color={active ? "#fff" : "#6b7280"} /> },
   ];
+
+  // Keep local selector in sync when active tool changes externally
+  useEffect(() => {
+    setToolLocal(activeTool || "None");
+  }, [activeTool]);
 
   const coords = [
     { label: "X",  value: s?.x  },
@@ -222,9 +316,25 @@ export default function JogScreen() {
 
           {/* Local / Tool row */}
           <View style={styles.selectorsRow}>
-            <Selector label="LOCAL" value={local} options={["Global", "Local1"]} onSelect={setLocal} />
+            <Selector
+              label="LOCAL"
+              value={local}
+              options={["Global", "Local1"]}
+              onSelect={setLocal}
+              icon={<Grid2X2 size={15} color="#6b7280" />}
+              viewLabel="View Locals"
+              viewRoute="/space/locals"
+            />
             <View style={styles.cardDivider} />
-            <Selector label="TOOL"  value={tool}  options={["Hand1",  "Hand2"]}  onSelect={setTool}  />
+            <Selector
+              label="TOOL"
+              value={tool || "None"}
+              options={["None", ...tools.map(t => t.name)]}
+              onSelect={setTool}
+              icon={<Wrench size={15} color="#6b7280" />}
+              viewLabel="View Tools"
+              viewRoute="/space/tools"
+            />
           </View>
 
           <View style={styles.cardSeparator} />
@@ -395,11 +505,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
 
+  selectorIcon: {
+    opacity: 0.7,
+  },
+
+  selectorTextStack: {
+    alignItems: "flex-start",
+    gap: 2,
+  },
+
   selectorLabel: {
     fontSize: 11,
     fontWeight: "700",
     color: "#9ca3af",
     letterSpacing: 0.8,
+  },
+
+  selectorValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
 
   selectorValue: {
@@ -408,37 +533,91 @@ const styles = StyleSheet.create({
     color: "#111",
   },
 
-  dropdown: {
-    position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
+  // ── Picker modal ──────────────────────────────────────────────────────────
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+  },
+
+  pickerCard: {
+    width: "100%",
+    maxWidth: 340,
+    maxHeight: "70%",
     backgroundColor: "#fff",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    elevation: 8,
+    borderRadius: 18,
+    padding: 20,
     shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    zIndex: 100,
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
   },
 
-  dropdownItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+  pickerViewLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e7eb",
+  },
+
+  pickerViewLinkText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#2563eb",
+  },
+
+  pickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 13,
+  },
+
+  pickerRowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: "#e5e7eb",
   },
 
-  dropdownText: {
-    fontSize: 14,
+  pickerRowActive: {
+    // no background tint needed — radio dot communicates state
+  },
+
+  pickerRowText: {
+    fontSize: 15,
+    fontWeight: "500",
     color: "#374151",
   },
 
-  dropdownTextActive: {
+  pickerRowTextActive: {
+    fontWeight: "700",
     color: "#2563eb",
-    fontWeight: "600",
+  },
+
+  radioRing: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#d1d5db",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  radioRingActive: {
+    borderColor: "#2563eb",
+  },
+
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#2563eb",
   },
 
   // ── Segmented control ─────────────────────────────────────────────────────
