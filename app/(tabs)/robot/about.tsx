@@ -284,8 +284,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   heroImage: {
-    width: 90,
-    height: 90,
+    width: 110,
+    height: 110,
   },
   heroName: {
     fontSize: 22,

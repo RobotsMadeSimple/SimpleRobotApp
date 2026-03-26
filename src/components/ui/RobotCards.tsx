@@ -71,16 +71,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   imageWrapper: {
-    width: 64,
-    height: 64,
-    borderRadius: 10,
+    width: 96,
+    height: 96,
+    borderRadius: 12,
     backgroundColor: "#ffffff",
     justifyContent: "center",
     alignItems: "center",
   },
   image: {
-    width: 52,
-    height: 52,
+    width: 96,
+    height: 96,
   },
   info: {
     flex: 1,
