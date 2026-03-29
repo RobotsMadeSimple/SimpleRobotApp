@@ -1,50 +1,94 @@
-# Welcome to your Expo app 👋
+# RobotReact
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The mobile and web control app for **Tibert** — an open-source, workbench-sized 4-axis robot arm built for pick and place, machine tending, and small business automation. Part of the [Robots Made Simple](https://github.com/RobotsMadeSimple) ecosystem.
 
-## Get started
+---
 
-1. Install dependencies
+## What It Does
 
-   ```bash
-   npm install
-   ```
+RobotReact is an Expo/React Native app that connects to [RobotController](https://github.com/RobotsMadeSimple/RobotController) over WebSocket. It provides:
 
-2. Start the app
+- **Auto-discovery** — finds the robot automatically on your local network via mDNS
+- **Live status** — real-time robot state, position, and program status
+- **Jogging** — manually move individual axes
+- **Program editor** — create and manage automation programs
+- **Point teaching** — save robot positions directly from the app
+- **IO dashboard** — view inputs, toggle outputs, configure Arduino Nano pins
+- **NeoPixel control** — set status light colors per device
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## Requirements
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- [Node.js 18+](https://nodejs.org/)
+- [Expo CLI](https://docs.expo.dev/get-started/installation/)
+- Android device or emulator, or a web browser
+- A running instance of [RobotController](https://github.com/RobotsMadeSimple/RobotController) on your network
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
-
-When you're ready, run:
+## Getting Started
 
 ```bash
-npm run reset-project
+git clone https://github.com/RobotsMadeSimple/RobotReact.git
+cd RobotReact
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Press `a` to open on Android or `w` to open in a browser.
 
-## Learn more
+The app will automatically discover your robot on the local network. If discovery fails, you can enter the robot's IP address manually.
 
-To learn more about developing your project with Expo, look at the following resources:
+---
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Platform Support
 
-## Join the community
+| Platform | Status |
+|---|---|
+| Android | ✅ Tested |
+| Web | ✅ Tested |
+| iOS | Untested |
 
-Join our community of developers creating universal apps.
+---
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## App Structure
+
+```
+app/
+├── (tabs)/
+│   ├── index.tsx         — Robot status and controls
+│   ├── jog.tsx           — Manual axis jogging
+│   ├── programs.tsx      — Program list and editor
+│   └── io/
+│       ├── index.tsx     — IO dashboard
+│       └── configure.tsx — Nano pin configuration
+```
+
+---
+
+## Connecting to the Robot
+
+RobotReact connects to [RobotController](https://github.com/RobotsMadeSimple/RobotController) via WebSocket on port `9000`. Make sure:
+
+1. RobotController is running on the same network
+2. Port `9000` is accessible
+3. Both devices are on the same subnet (for mDNS auto-discovery)
+
+---
+
+## Ecosystem
+
+Robots Made Simple is a fully open-source automation ecosystem. RobotReact is the universal UI across all devices:
+
+- **[RobotController](https://github.com/RobotsMadeSimple/RobotController)** — Core control platform and WebSocket server
+- **[ArduinoNano](https://github.com/RobotsMadeSimple/ArduinoNano)** — Edge device firmware
+- Workstations, tooling, and more — coming soon
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+Copyright (c) 2026 RobotsMadeSimple
