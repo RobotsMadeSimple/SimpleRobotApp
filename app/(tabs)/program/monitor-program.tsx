@@ -363,6 +363,7 @@ export default function MonitorProgramScreen() {
                         style: "destructive",
                         onPress: async () => {
                           await robotClient.deleteBuiltProgram(programName).catch(() => {});
+                          robotClient.getBuiltPrograms().catch(() => {});
                           router.back();
                         },
                       },

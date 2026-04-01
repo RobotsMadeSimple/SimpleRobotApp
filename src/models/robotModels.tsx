@@ -1,3 +1,26 @@
+// ── Nano IO ───────────────────────────────────────────────────────────────────
+
+export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured';
+
+export type NanoPinState = {
+  pin: number;
+  type: PinType;
+  value: boolean;
+  name: string;
+  nanoId: string;
+  nanoName: string;
+  pixelCount: number;
+};
+
+export type NanoState = {
+  id: string;
+  name: string;
+  connected: boolean;
+  pins: NanoPinState[];
+};
+
+export type NeoPixelColor = { r: number; g: number; b: number };
+
 // ── Program builder ───────────────────────────────────────────────────────────
 
 export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate';
@@ -17,8 +40,13 @@ export type ProgramStep = {
   offsetRX?: number;
   offsetRY?: number;
   offsetRZ?: number;
-  // Tool applied as a TCP offset at execution time
-  toolName?: string;
+  // Local tool offset applied at execution time (mm / deg)
+  toolOffsetX?: number;
+  toolOffsetY?: number;
+  toolOffsetZ?: number;
+  toolOffsetRX?: number;
+  toolOffsetRY?: number;
+  toolOffsetRZ?: number;
   outputNumber?: number;
   outputValue?: boolean;
   waitMs?: number;
@@ -132,6 +160,11 @@ export type RobotStatus = {
   input3: boolean,
   input4: boolean,
 
+  output1: boolean,
+  output2: boolean,
+  output3: boolean,
+  output4: boolean,
+
   homingState: string,
   driverConnected: boolean,
 
@@ -177,6 +210,11 @@ export function createDefaultStatus(): RobotStatus {
     input2: false,
     input3: false,
     input4: false,
+
+    output1: false,
+    output2: false,
+    output3: false,
+    output4: false,
 
     homingState: "WaitingForStart",
     driverConnected: false,

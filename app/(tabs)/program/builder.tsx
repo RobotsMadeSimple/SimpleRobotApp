@@ -3,6 +3,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ProgramStep, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
+  ArrowLeft,
   ArrowRight,
   Camera,
   Check,
@@ -46,6 +47,35 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Controlled numeric input that accepts negative numbers and decimals only. */
+function SignedNumberInput({
+  value,
+  onChange,
+  style,
+}: {
+  value: number | undefined;
+  onChange: (n: number) => void;
+  style: any;
+}) {
+  const [text, setText] = useState(String(value ?? 0));
+  return (
+    <TextInput
+      style={style}
+      value={text}
+      onChangeText={raw => {
+        // Strip anything that's not a digit, decimal point, or minus sign
+        // Minus is only valid at the start
+        const s = raw.replace(/[^0-9.\-]/g, '').replace(/(?!^)-/g, '');
+        setText(s);
+        const n = parseFloat(s);
+        if (!isNaN(n)) onChange(n);
+      }}
+      keyboardType="numbers-and-punctuation"
+      selectTextOnFocus
+    />
+  );
+}
+
 function newId() {
   return typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -56,10 +86,11 @@ function stepLabel(step: ProgramStep): string {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
-      const hasOffset = step.offsetX || step.offsetY || step.offsetZ || step.offsetRX || step.offsetRY || step.offsetRZ;
+      const hasOffset    = step.offsetX || step.offsetY || step.offsetZ || step.offsetRX || step.offsetRY || step.offsetRZ;
+      const hasToolOff   = step.toolOffsetX || step.toolOffsetY || step.toolOffsetZ || step.toolOffsetRX || step.toolOffsetRY || step.toolOffsetRZ;
       const suffix = [
-        step.toolName  ? `tool:${step.toolName}` : null,
-        hasOffset      ? "offset" : null,
+        hasToolOff ? "toolOffset" : null,
+        hasOffset  ? "offset"     : null,
       ].filter(Boolean).join("  ");
       const base = `${step.type}  →  ${step.pointName ?? "—"}`;
       return suffix ? `${base}  (${suffix})` : base;
@@ -156,6 +187,8 @@ function StepTypePicker({
 
 // ── Step config modal ─────────────────────────────────────────────────────────
 
+type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset";
+
 function StepConfigModal({
   visible,
   step,
@@ -167,206 +200,184 @@ function StepConfigModal({
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
 }) {
-  const points = usePoints();
-  const tools  = useTools();
-  const [draft, setDraft] = useState<ProgramStep | null>(null);
-  const [showOptStatus, setShowOptStatus] = useState(false);
-  const [showOffset,    setShowOffset]    = useState(false);
-  const [showToolOff,   setShowToolOff]   = useState(false);
-  // Raw string for the Wait duration — allows the field to be fully cleared
-  const [waitMsText, setWaitMsText] = useState("");
+  const points   = usePoints();
+  const [draft, setDraft]       = useState<ProgramStep | null>(null);
+  const [waitMsText, setWaitMs] = useState("");
+  const [subPage, setSubPage]   = useState<SubPage>(null);
 
   useEffect(() => {
     if (step) {
       setDraft({ ...step });
-      setWaitMsText(step.waitMs !== undefined ? String(step.waitMs) : "");
-      setShowOptStatus(!!(step.statusMessage || step.statusWarning || step.statusError));
-      setShowOffset(!!(step.offsetX || step.offsetY || step.offsetZ || step.offsetRX || step.offsetRY || step.offsetRZ));
-      setShowToolOff(!!step.toolName);
+      setWaitMs(step.waitMs !== undefined ? String(step.waitMs) : "");
     } else {
       setDraft(null);
-      setWaitMsText("");
-      setShowOptStatus(false);
-      setShowOffset(false);
-      setShowToolOff(false);
+      setWaitMs("");
     }
+    setSubPage(null);
   }, [step]);
 
   if (!draft) return null;
 
   const set = (fields: Partial<ProgramStep>) => setDraft(d => d ? { ...d, ...fields } : d);
-  const isStatusStep = draft.type === "StatusUpdate";
 
-  function renderBody() {
+  const hasOffset  = draft.offsetX || draft.offsetY || draft.offsetZ ||
+                     draft.offsetRX || draft.offsetRY || draft.offsetRZ;
+  const hasToolOff = draft.toolOffsetX || draft.toolOffsetY || draft.toolOffsetZ ||
+                     draft.toolOffsetRX || draft.toolOffsetRY || draft.toolOffsetRZ;
+
+  // ── Sub-page content ──────────────────────────────────────────────────────
+
+  function renderSubPage() {
+    switch (subPage) {
+      case "point":
+        return (
+          <>
+            {points.length === 0 && <Text style={ms.emptyHint}>No points saved yet.</Text>}
+            {points.map((p, i) => {
+              const active = draft!.pointName === p.name;
+              return (
+                <TouchableOpacity
+                  key={p.name}
+                  style={[ms.row, i < points.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => { set({ pointName: p.name }); setSubPage(null); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
+                    <Text style={ms.rowDesc}>{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </>
+        );
+
+      case "speed":
+        return (
+          <>
+            <Text style={ms.fieldLabel}>SPEED  (mm/s)</Text>
+            <TextInput style={ms.input} value={String(draft!.speed ?? 100)}
+              onChangeText={v => set({ speed: parseFloat(v) || 100 })}
+              keyboardType="numeric" selectTextOnFocus autoFocus />
+            <View style={ms.twoCol}>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
+                <TextInput style={ms.input} value={String(draft!.accel ?? 100)}
+                  onChangeText={v => set({ accel: parseFloat(v) || 100 })}
+                  keyboardType="numeric" selectTextOnFocus />
+              </View>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
+                <TextInput style={ms.input} value={String(draft!.decel ?? 100)}
+                  onChangeText={v => set({ decel: parseFloat(v) || 100 })}
+                  keyboardType="numeric" selectTextOnFocus />
+              </View>
+            </View>
+          </>
+        );
+
+      case "posOffset":
+        return (
+          <>
+            <View style={ms.twoCol}>
+              {(["offsetX","offsetY","offsetZ"] as const).map(k => (
+                <View key={k} style={ms.twoColItem}>
+                  <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (mm)</Text>
+                  <SignedNumberInput key={draft!.id + k} style={ms.input}
+                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                </View>
+              ))}
+            </View>
+            <View style={[ms.twoCol, { marginTop: 8 }]}>
+              {(["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
+                <View key={k} style={ms.twoColItem}>
+                  <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
+                  <SignedNumberInput key={draft!.id + k} style={ms.input}
+                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                </View>
+              ))}
+            </View>
+            <TouchableOpacity
+              onPress={() => set({ offsetX:undefined,offsetY:undefined,offsetZ:undefined,offsetRX:undefined,offsetRY:undefined,offsetRZ:undefined })}
+              style={{ marginTop: 12 }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
+            </TouchableOpacity>
+          </>
+        );
+
+      case "toolOffset":
+        return (
+          <>
+            <View style={ms.twoCol}>
+              {(["toolOffsetX","toolOffsetY","toolOffsetZ"] as const).map(k => (
+                <View key={k} style={ms.twoColItem}>
+                  <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (mm)</Text>
+                  <SignedNumberInput key={draft!.id + k} style={ms.input}
+                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                </View>
+              ))}
+            </View>
+            <View style={[ms.twoCol, { marginTop: 8 }]}>
+              {(["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
+                <View key={k} style={ms.twoColItem}>
+                  <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
+                  <SignedNumberInput key={draft!.id + k} style={ms.input}
+                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                </View>
+              ))}
+            </View>
+            <TouchableOpacity
+              onPress={() => set({ toolOffsetX:undefined,toolOffsetY:undefined,toolOffsetZ:undefined,toolOffsetRX:undefined,toolOffsetRY:undefined,toolOffsetRZ:undefined })}
+              style={{ marginTop: 12 }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
+            </TouchableOpacity>
+          </>
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  // ── Main body (non-move steps stay inline) ────────────────────────────────
+
+  function renderMainBody() {
     switch (draft!.type) {
       case "MoveL":
       case "MoveJ":
         return (
           <>
-            <Text style={ms.fieldLabel}>POINT</Text>
-            <ScrollView style={{ maxHeight: 160 }} showsVerticalScrollIndicator={false}>
-              {points.length === 0 && (
-                <Text style={ms.emptyHint}>No points saved yet.</Text>
-              )}
-              {points.map((p, i) => {
-                const active = draft!.pointName === p.name;
-                return (
-                  <TouchableOpacity
-                    key={p.name}
-                    style={[ms.row, i < points.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                    onPress={() => set({ pointName: p.name })}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                      {active && <View style={ms.radioDot} />}
-                    </View>
-                    <View style={ms.rowText}>
-                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
-                      <Text style={ms.rowDesc}>
-                        {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>SPEED  (mm/s)</Text>
-            <TextInput
-              style={ms.input}
-              value={String(draft!.speed ?? 100)}
-              onChangeText={v => set({ speed: parseFloat(v) || 100 })}
-              keyboardType="numeric"
-              selectTextOnFocus
-            />
-
-            <View style={ms.twoCol}>
-              <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
-                <TextInput
-                  style={ms.input}
-                  value={String(draft!.accel ?? 100)}
-                  onChangeText={v => set({ accel: parseFloat(v) || 100 })}
-                  keyboardType="numeric"
-                  selectTextOnFocus
-                />
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Point</Text>
+                <Text style={ms.subRowValue}>{draft!.pointName ?? "Not set"}</Text>
               </View>
-              <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
-                <TextInput
-                  style={ms.input}
-                  value={String(draft!.decel ?? 100)}
-                  onChangeText={v => set({ decel: parseFloat(v) || 100 })}
-                  keyboardType="numeric"
-                  selectTextOnFocus
-                />
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("speed")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Speed &amp; Accel</Text>
+                <Text style={ms.subRowValue}>{draft!.speed ?? 100} mm/s</Text>
               </View>
-            </View>
-
-            {/* ── Position Offset ── */}
-            <View style={ms.optStatusWrap}>
-              <TouchableOpacity
-                style={ms.optStatusToggle}
-                onPress={() => setShowOffset(v => !v)}
-                activeOpacity={0.7}
-              >
-                <ArrowRight size={14} color="#6b7280" />
-                <Text style={ms.optStatusToggleText}>Position offset</Text>
-                {showOffset ? <ChevronUp size={14} color="#9ca3af" /> : <ChevronDown size={14} color="#9ca3af" />}
-              </TouchableOpacity>
-              {showOffset && (
-                <View style={ms.optStatusBody}>
-                  <View style={ms.twoCol}>
-                    {(["offsetX","offsetY","offsetZ"] as const).map(k => (
-                      <View key={k} style={ms.twoColItem}>
-                        <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (mm)</Text>
-                        <TextInput
-                          style={ms.input}
-                          value={String(draft![k] ?? 0)}
-                          onChangeText={v => set({ [k]: parseFloat(v) || 0 })}
-                          keyboardType="numeric"
-                          selectTextOnFocus
-                        />
-                      </View>
-                    ))}
-                  </View>
-                  <View style={[ms.twoCol, { marginTop: 8 }]}>
-                    {(["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
-                      <View key={k} style={ms.twoColItem}>
-                        <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
-                        <TextInput
-                          style={ms.input}
-                          value={String(draft![k] ?? 0)}
-                          onChangeText={v => set({ [k]: parseFloat(v) || 0 })}
-                          keyboardType="numeric"
-                          selectTextOnFocus
-                        />
-                      </View>
-                    ))}
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => set({ offsetX:undefined,offsetY:undefined,offsetZ:undefined,offsetRX:undefined,offsetRY:undefined,offsetRZ:undefined })}
-                    style={{ marginTop: 8 }} activeOpacity={0.7}
-                  >
-                    <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-
-            {/* ── Tool Offset ── */}
-            <View style={ms.optStatusWrap}>
-              <TouchableOpacity
-                style={ms.optStatusToggle}
-                onPress={() => setShowToolOff(v => !v)}
-                activeOpacity={0.7}
-              >
-                <Wrench size={14} color="#6b7280" />
-                <Text style={ms.optStatusToggleText}>
-                  Tool offset{draft!.toolName ? `:  ${draft!.toolName}` : ""}
-                </Text>
-                {showToolOff ? <ChevronUp size={14} color="#9ca3af" /> : <ChevronDown size={14} color="#9ca3af" />}
-              </TouchableOpacity>
-              {showToolOff && (
-                <View style={ms.optStatusBody}>
-                  {tools.length === 0 && (
-                    <Text style={ms.emptyHint}>No tools saved yet.</Text>
-                  )}
-                  {/* None option */}
-                  <TouchableOpacity
-                    style={[ms.row, tools.length > 0 && ms.rowBorder, !draft!.toolName && ms.rowActive]}
-                    onPress={() => set({ toolName: undefined })}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[ms.radioRing, !draft!.toolName && ms.radioRingActive]}>
-                      {!draft!.toolName && <View style={ms.radioDot} />}
-                    </View>
-                    <Text style={[ms.rowLabel, !draft!.toolName && ms.rowLabelActive]}>None</Text>
-                  </TouchableOpacity>
-                  {tools.map((t, i) => {
-                    const active = draft!.toolName === t.name;
-                    return (
-                      <TouchableOpacity
-                        key={t.name}
-                        style={[ms.row, i < tools.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                        onPress={() => set({ toolName: t.name })}
-                        activeOpacity={0.7}
-                      >
-                        <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                          {active && <View style={ms.radioDot} />}
-                        </View>
-                        <View style={ms.rowText}>
-                          <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{t.name}</Text>
-                          <Text style={ms.rowDesc}>
-                            {t.x.toFixed(1)}, {t.y.toFixed(1)}, {t.z.toFixed(1)}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOffset")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Position Offset</Text>
+                <Text style={ms.subRowValue}>{hasOffset ? "Set" : "None"}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[ms.subRow, { borderBottomWidth: 0 }]} onPress={() => setSubPage("toolOffset")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Tool Offset</Text>
+                <Text style={ms.subRowValue}>{hasToolOff ? "Set" : "None"}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
           </>
         );
 
@@ -378,12 +389,8 @@ function StepConfigModal({
               {[1, 2, 3, 4].map(n => {
                 const active = (draft!.outputNumber ?? 1) === n;
                 return (
-                  <TouchableOpacity
-                    key={n}
-                    style={[ms.seg, active && ms.segActive]}
-                    onPress={() => set({ outputNumber: n })}
-                    activeOpacity={0.8}
-                  >
+                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                    onPress={() => set({ outputNumber: n })} activeOpacity={0.8}>
                     <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
                   </TouchableOpacity>
                 );
@@ -392,11 +399,8 @@ function StepConfigModal({
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE</Text>
             <View style={ms.switchRow}>
               <Text style={ms.switchLabel}>{draft!.outputValue ? "ON" : "OFF"}</Text>
-              <Switch
-                value={draft!.outputValue ?? false}
-                onValueChange={v => set({ outputValue: v })}
-                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
-              />
+              <Switch value={draft!.outputValue ?? false} onValueChange={v => set({ outputValue: v })}
+                trackColor={{ false: "#e5e7eb", true: "#2563eb" }} />
             </View>
           </>
         );
@@ -405,20 +409,10 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>DURATION  (ms)</Text>
-            <TextInput
-              style={ms.input}
-              value={waitMsText}
-              onChangeText={v => {
-                // Allow digits only; keep empty string so the user can clear and retype
-                if (v === "" || /^\d+$/.test(v)) setWaitMsText(v);
-              }}
-              keyboardType="numeric"
-              selectTextOnFocus
-              autoFocus
-            />
-            {waitMsText === "" && (
-              <Text style={ms.fieldError}>Enter a duration to save this step.</Text>
-            )}
+            <TextInput style={ms.input} value={waitMsText}
+              onChangeText={v => { if (v === "" || /^\d+$/.test(v)) setWaitMs(v); }}
+              keyboardType="numeric" selectTextOnFocus autoFocus />
+            {waitMsText === "" && <Text style={ms.fieldError}>Enter a duration to save this step.</Text>}
           </>
         );
 
@@ -426,17 +420,10 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>REPEAT COUNT  (0 = infinite)</Text>
-            <TextInput
-              style={ms.input}
-              value={String(draft!.loopCount ?? 1)}
+            <TextInput style={ms.input} value={String(draft!.loopCount ?? 1)}
               onChangeText={v => set({ loopCount: parseInt(v) || 0 })}
-              keyboardType="numeric"
-              selectTextOnFocus
-              autoFocus
-            />
-            <Text style={ms.hintText}>
-              Add steps inside this loop from the builder after saving.
-            </Text>
+              keyboardType="numeric" selectTextOnFocus autoFocus />
+            <Text style={ms.hintText}>Add steps inside this loop from the builder after saving.</Text>
           </>
         );
 
@@ -444,37 +431,11 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>STEP MESSAGE</Text>
-            <TextInput
-              style={ms.input}
-              value={draft!.statusMessage ?? ""}
+            <TextInput style={ms.input} value={draft!.statusMessage ?? ""}
               onChangeText={v => set({ statusMessage: v })}
-              placeholder="e.g. Picking part from tray…"
-              placeholderTextColor="#c4c4c4"
-              returnKeyType="next"
-              autoFocus
-            />
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>WARNING  (optional)</Text>
-            <TextInput
-              style={ms.input}
-              value={draft!.statusWarning ?? ""}
-              onChangeText={v => set({ statusWarning: v || undefined })}
-              placeholder="Leave blank for none"
-              placeholderTextColor="#c4c4c4"
-              returnKeyType="next"
-            />
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ERROR  (optional)</Text>
-            <TextInput
-              style={ms.input}
-              value={draft!.statusError ?? ""}
-              onChangeText={v => set({ statusError: v || undefined })}
-              placeholder="Leave blank for none"
-              placeholderTextColor="#c4c4c4"
-              returnKeyType="done"
-            />
-            <Text style={ms.hintText}>
-              The message appears as the current step description in the monitor.
-              Setting an error will turn the program status to Error.
-            </Text>
+              placeholder="e.g. Picking part from tray…" placeholderTextColor="#c4c4c4"
+              returnKeyType="done" autoFocus />
+            <Text style={ms.hintText}>Appears as the current step description in the monitor.</Text>
           </>
         );
 
@@ -483,107 +444,89 @@ function StepConfigModal({
     }
   }
 
+  const subPageTitle: Record<NonNullable<SubPage>, string> = {
+    point: "Select Point", speed: "Speed & Accel",
+    posOffset: "Position Offset", toolOffset: "Tool Offset",
+  };
+
+  const isMove = draft.type === "MoveL" || draft.type === "MoveJ";
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        <Pressable style={ms.overlay} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <Pressable style={ms.overlay} onPress={() => subPage ? setSubPage(null) : onClose()}>
           <Pressable style={ms.card} onPress={() => {}}>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <View style={ms.header}>
-                <Text style={ms.title}>Configure Step</Text>
-                <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-                  <X size={18} color="#9ca3af" />
+            {/* Header */}
+            <View style={ms.header}>
+              {subPage ? (
+                <TouchableOpacity onPress={() => setSubPage(null)} hitSlop={12} activeOpacity={0.7}>
+                  <ArrowLeft size={18} color="#111" />
                 </TouchableOpacity>
-              </View>
+              ) : <View style={{ width: 18 }} />}
+              <Text style={ms.title}>{subPage ? subPageTitle[subPage] : "Configure Step"}</Text>
+              <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+                <X size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
 
-              {/* Step name — available on every step type */}
-              <Text style={ms.fieldLabel}>STEP NAME  (optional)</Text>
-              <TextInput
-                style={[ms.input, { marginBottom: 14 }]}
-                value={draft!.name ?? ""}
-                onChangeText={v => set({ name: v || undefined })}
-                placeholder="e.g. Pick part, Place on conveyor…"
-                placeholderTextColor="#c4c4c4"
-                returnKeyType="next"
-              />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {subPage ? (
+                renderSubPage()
+              ) : (
+                <>
+                  {/* Step name — all step types */}
+                  <Text style={ms.fieldLabel}>STEP NAME  (optional)</Text>
+                  <TextInput style={[ms.input, { marginBottom: 14 }]}
+                    value={draft!.name ?? ""} onChangeText={v => set({ name: v || undefined })}
+                    placeholder="e.g. Pick part, Place on conveyor…" placeholderTextColor="#c4c4c4"
+                    returnKeyType="next" />
 
-              {renderBody()}
-
-              {/* ── Optional status update (not shown for StatusUpdate steps) ── */}
-              {!isStatusStep && (
-                <View style={ms.optStatusWrap}>
-                  <TouchableOpacity
-                    style={ms.optStatusToggle}
-                    onPress={() => setShowOptStatus(v => !v)}
-                    activeOpacity={0.7}
-                  >
-                    <MessageSquare size={14} color="#6b7280" />
-                    <Text style={ms.optStatusToggleText}>Update status</Text>
-                    {showOptStatus
-                      ? <ChevronUp size={14} color="#9ca3af" />
-                      : <ChevronDown size={14} color="#9ca3af" />}
-                  </TouchableOpacity>
-
-                  {showOptStatus && (
-                    <View style={ms.optStatusBody}>
-                      <Text style={ms.fieldLabel}>STEP MESSAGE</Text>
-                      <TextInput
-                        style={ms.input}
-                        value={draft!.statusMessage ?? ""}
-                        onChangeText={v => set({ statusMessage: v || undefined })}
-                        placeholder="Shown in monitor while this step runs"
-                        placeholderTextColor="#c4c4c4"
-                        returnKeyType="next"
-                      />
-                      <Text style={[ms.fieldLabel, { marginTop: 10 }]}>WARNING  (optional)</Text>
-                      <TextInput
-                        style={ms.input}
-                        value={draft!.statusWarning ?? ""}
-                        onChangeText={v => set({ statusWarning: v || undefined })}
-                        placeholder="Leave blank for none"
-                        placeholderTextColor="#c4c4c4"
-                        returnKeyType="next"
-                      />
-                      <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ERROR  (optional)</Text>
-                      <TextInput
-                        style={ms.input}
-                        value={draft!.statusError ?? ""}
-                        onChangeText={v => set({ statusError: v || undefined })}
-                        placeholder="Leave blank for none"
-                        placeholderTextColor="#c4c4c4"
-                        returnKeyType="done"
-                      />
-                    </View>
+                  {/* Status description — move steps only */}
+                  {isMove && (
+                    <>
+                      <Text style={ms.fieldLabel}>STATUS DESCRIPTION  (optional)</Text>
+                      <TextInput style={[ms.input, { marginBottom: 14 }]}
+                        value={draft!.statusMessage ?? ""} onChangeText={v => set({ statusMessage: v || undefined })}
+                        placeholder="Shown in monitor while this step runs" placeholderTextColor="#c4c4c4"
+                        returnKeyType="next" />
+                    </>
                   )}
-                </View>
+
+                  {/* Sub-row buttons for moves, inline body for everything else */}
+                  {isMove ? (
+                    <View style={ms.subRowCard}>{renderMainBody()}</View>
+                  ) : (
+                    renderMainBody()
+                  )}
+                </>
               )}
             </ScrollView>
 
-            <View style={ms.actions}>
-              <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
-                <Text style={ms.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={ms.saveBtn}
-                onPress={() => {
-                  if (draft!.type === "Wait") {
-                    const ms = parseInt(waitMsText);
-                    if (!waitMsText || isNaN(ms) || ms <= 0) return; // blocked — error hint shown
-                    onSave({ ...draft!, waitMs: ms });
-                  } else {
-                    onSave(draft!);
-                  }
-                  onClose();
-                }}
-                activeOpacity={0.7}
-              >
-                <Check size={15} color="white" />
-                <Text style={ms.saveText}>Save</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Actions — only on main page */}
+            {!subPage && (
+              <View style={ms.actions}>
+                <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+                  <Text style={ms.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={ms.saveBtn}
+                  onPress={() => {
+                    if (draft!.type === "Wait") {
+                      const ms = parseInt(waitMsText);
+                      if (!waitMsText || isNaN(ms) || ms <= 0) return;
+                      onSave({ ...draft!, waitMs: ms });
+                    } else {
+                      onSave(draft!);
+                    }
+                    onClose();
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Check size={15} color="white" />
+                  <Text style={ms.saveText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </Pressable>
         </Pressable>
       </KeyboardAvoidingView>
@@ -1077,7 +1020,8 @@ export default function BuilderScreen() {
       speed: 100, accel: 100, decel: 100,
       offsetX: undefined, offsetY: undefined, offsetZ: undefined,
       offsetRX: undefined, offsetRY: undefined, offsetRZ: undefined,
-      toolName: undefined,
+      toolOffsetX: undefined, toolOffsetY: undefined, toolOffsetZ: undefined,
+      toolOffsetRX: undefined, toolOffsetRY: undefined, toolOffsetRZ: undefined,
       outputNumber: 1, outputValue: false,
       waitMs: 500,
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
@@ -1315,18 +1259,12 @@ export default function BuilderScreen() {
 
       {/* Bottom bar */}
       <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.stopBtn} onPress={() => robotClient.stopBuiltProgram(programName.trim())} activeOpacity={0.8}>
-          <OctagonX size={18} color="#dc2626" />
-        </TouchableOpacity>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.8}>
           <Wrench size={16} color="#2563eb" />
           <Text style={styles.saveBtnText}>Save</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.runBtn} onPress={handleRun} activeOpacity={0.8}>
-          <Play size={16} color="white" />
-          <Text style={styles.runBtnText}>Run</Text>
-        </TouchableOpacity>
       </View>
+
 
       <StepTypePicker
         visible={typePickerOpen}
@@ -1488,7 +1426,7 @@ const styles = StyleSheet.create({
   addCardText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
 
   bottomBar: {
-    flexDirection: "row", gap: 10, paddingHorizontal: 16,
+    flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16,
     paddingTop: 10, paddingBottom: 14,
     backgroundColor: "#f3f4f6",
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
@@ -1498,7 +1436,7 @@ const styles = StyleSheet.create({
     justifyContent: "center", alignItems: "center",
   },
   saveBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    width: "33%", flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 7, borderWidth: 1.5, borderColor: "#2563eb", borderRadius: 12,
     paddingVertical: 13, backgroundColor: "#eff6ff",
   },
@@ -1597,4 +1535,19 @@ const ms = StyleSheet.create({
   },
   optStatusToggleText: { flex: 1, fontSize: 13, color: "#6b7280", fontWeight: "600" },
   optStatusBody: { paddingBottom: 4 },
+
+  // Sub-row navigation buttons (used on move step main page)
+  subRowCard: {
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "#e5e7eb",
+    borderRadius: 12, overflow: "hidden", marginTop: 8,
+  },
+  subRow: {
+    flexDirection: "row", alignItems: "center",
+    paddingVertical: 13, paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb",
+    backgroundColor: "#fff",
+  },
+  subRowLeft: { flex: 1 },
+  subRowLabel: { fontSize: 14, fontWeight: "600", color: "#111827" },
+  subRowValue: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
 });

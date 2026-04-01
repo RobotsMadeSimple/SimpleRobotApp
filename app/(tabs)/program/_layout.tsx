@@ -28,16 +28,7 @@ export default function ProgramLayout() {
           headerLeft: () => <BackButton />,
         }}
       />
-      <Stack.Screen
-        name="builder"
-        options={{
-          title: "Program Builder",
-          headerShown: true,
-          headerTitleAlign: "left",
-          headerTitleStyle: { fontWeight: "bold", fontSize: 22 },
-          headerLeft: () => <BackButton />,
-        }}
-      />
+      <Stack.Screen name="builder" options={{ headerShown: false }} />
     </Stack>
   );
 }
