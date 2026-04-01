@@ -1,10 +1,11 @@
 ﻿import { subscribeRobot } from "../connections/robotState";
-import { BuiltProgram, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, createDefaultStatus } from "../models/robotModels";
-type MessageHandler<T = any> = (data: T) => void;
-type StatusListener            = (status: RobotStatus)      => void;
-type PointsListener            = (points: Point[])          => void;
-type ToolsListener             = (tools: Tool[])            => void;
-type BuiltProgramsListener     = (programs: BuiltProgram[]) => void;
+import { BuiltProgram, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, createDefaultStatus } from "../models/robotModels";
+type MessageHandler<T = any>  = (data: T) => void;
+type StatusListener           = (status: RobotStatus)      => void;
+type PointsListener           = (points: Point[])          => void;
+type ToolsListener            = (tools: Tool[])            => void;
+type BuiltProgramsListener    = (programs: BuiltProgram[]) => void;
+type NanoIOListener           = (nanos: NanoState[])       => void;
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
@@ -25,11 +26,13 @@ export class RobotConnectService {
   private pointsListeners:        PointsListener[]        = [];
   private toolsListeners:         ToolsListener[]         = [];
   private builtProgramsListeners: BuiltProgramsListener[] = [];
+  private nanoIOListeners:        NanoIOListener[]        = [];
   private status:       RobotStatus    = createDefaultStatus();
   private connecting:   boolean        = false;
   private points:       Point[]        = [];
   private tools:        Tool[]         = [];
   private builtPrograms: BuiltProgram[] = [];
+  private nanoIO:       NanoState[]    = [];
 
   private ws: WebSocket | null = null;
   private url?: string;
@@ -104,6 +107,7 @@ export class RobotConnectService {
       this.getPoints().catch(() => {});
       this.getTools().catch(() => {});
       this.getBuiltPrograms().catch(() => {});
+      this.getIO().catch(() => {});
     };
 
     this.ws.onclose = () => {
@@ -170,10 +174,27 @@ export class RobotConnectService {
       case "GetBuiltPrograms":
         this.decodeBuiltPrograms(data);
         break;
+
+      case "GetIO":
+        this.decodeNanoIO(data);
+        break;
     }
 
     this.pendingAcks.delete(data.id);
     pending.resolve(data);
+  }
+
+  private decodeNanoIO(data: any) {
+    if (!data.nanos) { this.nanoIO = []; this.emitNanoIO(); return; }
+
+    let parsed: any[];
+    try { parsed = JSON.parse(data.nanos); }
+    catch { this.nanoIO = []; this.emitNanoIO(); return; }
+
+    if (!Array.isArray(parsed)) { this.nanoIO = []; this.emitNanoIO(); return; }
+
+    this.nanoIO = parsed as NanoState[];
+    this.emitNanoIO();
   }
 
   private decodePoints(data: any) {
@@ -292,6 +313,18 @@ export class RobotConnectService {
     this.builtProgramsListeners.forEach(cb => cb(this.builtPrograms));
   }
 
+  onNanoIO(cb: NanoIOListener) {
+    this.nanoIOListeners.push(cb);
+    cb(this.nanoIO);
+    return () => {
+      this.nanoIOListeners = this.nanoIOListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitNanoIO() {
+    this.nanoIOListeners.forEach(cb => cb(this.nanoIO));
+  }
+
   private decodeTools(data: any) {
     if (!data.tools) { this.tools = []; this.emitTools(); return; }
 
@@ -347,7 +380,15 @@ export class RobotConnectService {
     };
 
     return new Promise((resolve, reject) => {
-      this.pendingAcks.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pendingAcks.delete(id);
+        reject(`Command "${command}" timed out`);
+      }, 10000);
+
+      this.pendingAcks.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject:  (reason) => { clearTimeout(timer); reject(reason); },
+      });
       this.ws!.send(JSON.stringify(message));
     });
   }
@@ -558,6 +599,37 @@ export class RobotConnectService {
 
   public stopBuiltProgram(name: string) {
     return this.sendCommand("StopBuiltProgram", { name });
+  }
+
+  // ── STB4100 (Robot IO Board) ───────────────────────────────────────────────
+
+  /** output: 1-4, value: true/false */
+  public setSTBOutput(output: number, value: boolean) {
+    return this.sendCommand("SetSTBOutput", { pin: output, value });
+  }
+
+  // ── Nano IO ────────────────────────────────────────────────────────────────
+
+  public getIO() {
+    return this.sendCommand("GetIO");
+  }
+
+  public setNanoOutput(nanoId: string, pin: number, value: boolean) {
+    return this.sendCommand("SetNanoOutput", { nanoId, pin, value });
+  }
+
+  public setNeoPixel(nanoId: string, pin: number, colors: NeoPixelColor[]) {
+    return this.sendCommand("SetNeoPixel", { nanoId, pin, colors });
+  }
+
+  public renameNanoPin(nanoId: string, pin: number, name: string) {
+    return this.sendCommand("RenameNanoPin", { nanoId, pin, name })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  public configureNanoPin(nanoId: string, pin: number, type: string, pixelCount = 8) {
+    return this.sendCommand("ConfigureNanoPin", { nanoId, pin, type, pixelCount })
+      .then(() => this.getIO().catch(() => {}));
   }
 }
 

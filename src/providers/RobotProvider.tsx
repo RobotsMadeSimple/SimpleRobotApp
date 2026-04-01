@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { BuiltProgram, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, NanoState, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -17,6 +17,7 @@ type RobotContextType = {
   builtPrograms: BuiltProgram[];
   programSummaries: ProgramSummary[];
   status: RobotStatus;
+  nanoIO: NanoState[];
 };
 
 const RobotContext = createContext<RobotContextType>({
@@ -28,6 +29,7 @@ const RobotContext = createContext<RobotContextType>({
   builtPrograms: [],
   programSummaries: [],
   status: createDefaultStatus(),
+  nanoIO: [],
 });
 
 export function RobotProvider({ children }: { children: React.ReactNode }) {
@@ -36,6 +38,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [points,         setPoints]        = useState<Point[]>([]);
   const [tools,          setTools]         = useState<Tool[]>([]);
   const [builtPrograms,  setBuiltPrograms] = useState<BuiltProgram[]>([]);
+  const [nanoIO,         setNanoIO]        = useState<NanoState[]>([]);
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,6 +47,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     const unsubPoints        = robotClient.onPoints(setPoints);
     const unsubTools         = robotClient.onTools(setTools);
     const unsubBuiltPrograms = robotClient.onBuiltPrograms(setBuiltPrograms);
+    const unsubNanoIO        = robotClient.onNanoIO(setNanoIO);
     const unsubSelected      = subscribeRobot(robot =>
       setSelectedSerial(robot?.serialNumber ?? null)
     );
@@ -58,6 +62,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubPoints();
       unsubTools();
       unsubBuiltPrograms();
+      unsubNanoIO();
       robotDiscovery.stop();
       robotClient.disconnect();
     };
@@ -83,6 +88,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       builtPrograms,
       programSummaries: status.programs,
       status,
+      nanoIO,
     }}>
       {children}
     </RobotContext.Provider>
@@ -119,4 +125,8 @@ export function useConnected() {
 
 export function useRobotStatus() {
   return useContext(RobotContext).status;
+}
+
+export function useNanoIO() {
+  return useContext(RobotContext).nanoIO;
 }
