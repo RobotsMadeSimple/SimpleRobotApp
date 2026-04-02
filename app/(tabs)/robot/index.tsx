@@ -1,6 +1,7 @@
 import { RobotCard } from "@/src/components/ui/RobotCards";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { robotClient } from "@/src/services/RobotConnectService";
 import { Redirect, router } from "expo-router";
 import { Wifi, WifiOff } from "lucide-react-native";
 import { useState } from "react";
@@ -25,14 +26,16 @@ export default function Robot() {
 
   function connectManual() {
     if (!manualIp.trim()) return;
-    setSelectedRobot({
+    const robot = {
       robotName: "Manual",
       robotType: "",
       ipAddress: manualIp.trim(),
       port: 9000,
       serialNumber: "",
       controlEndpoint: "control",
-    });
+    };
+    setSelectedRobot(robot);
+    robotClient.connectTo(robot);
     router.push(`/robot/connected-robot`);
   }
 

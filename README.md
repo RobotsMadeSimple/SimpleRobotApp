@@ -23,7 +23,7 @@ RobotReact is an Expo/React Native app that connects to [RobotController](https:
 - [Node.js 18+](https://nodejs.org/)
 - [Expo CLI](https://docs.expo.dev/get-started/installation/)
 - Android device or emulator, or a web browser
-- A running instance of [RobotController](https://github.com/RobotsMadeSimple/RobotController) on your network
+- A running instance of [RobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) on your network
 
 ---
 
@@ -48,7 +48,26 @@ The app will automatically discover your robot on the local network. If discover
 |---|---|
 | Android | ✅ Tested |
 | Web | ✅ Tested |
+| Windows (Electron) | ✅ Supported |
 | iOS | Untested |
+
+---
+
+## Running as a Desktop App (Windows)
+
+RobotReact can run as a native Windows desktop app via Electron.
+
+**Open in a window (development):**
+```bash
+npm run electron
+```
+
+**Build a distributable `.exe` installer:**
+```bash
+npm run electron:build
+```
+
+The installer is output to the `release/` folder.
 
 ---
 

@@ -8,7 +8,31 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "electron": "npx expo export --platform web && electron .",
+    "electron:build": "npx expo export --platform web && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.robotsmadesimple.app",
+    "productName": "Robots Made Simple",
+    "extraMetadata": {
+      "main": "electron.js"
+    },
+    "asar": false,
+    "files": [
+      "dist/**",
+      "electron.js",
+      "!node_modules/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/images/icon.png",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@expo/html-elements": "^0.10.1",
@@ -59,6 +83,8 @@
   "devDependencies": {
     "@types/react": "~19.1.0",
     "babel-plugin-module-resolver": "^5.0.0",
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "prettier-plugin-tailwindcss": "^0.5.11",
