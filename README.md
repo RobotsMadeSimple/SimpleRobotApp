@@ -23,7 +23,7 @@ RobotReact is an Expo/React Native app that connects to [SimpleRobotController](
 - [Node.js 18+](https://nodejs.org/)
 - [Expo CLI](https://docs.expo.dev/get-started/installation/)
 - Android device or emulator, or a web browser
-- A running instance of [SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleSimpleRobotController) on your network
+- A running instance of [SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) on your network
 
 ---
 
