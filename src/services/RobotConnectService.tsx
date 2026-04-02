@@ -1,4 +1,4 @@
-﻿import { subscribeRobot } from "../connections/robotState";
+﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { BuiltProgram, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)      => void;
@@ -108,6 +108,16 @@ export class RobotConnectService {
       this.getTools().catch(() => {});
       this.getBuiltPrograms().catch(() => {});
       this.getIO().catch(() => {});
+      this.getRobotInfo().then((info: any) => {
+        const selected = getSelectedRobot();
+        if (!selected) return;
+        setSelectedRobot({
+          ...selected,
+          robotName:    info.robotName    || selected.robotName,
+          robotType:    info.robotType    || selected.robotType,
+          serialNumber: info.serialNumber || selected.serialNumber,
+        });
+      }).catch(() => {});
     };
 
     this.ws.onclose = () => {
@@ -427,6 +437,10 @@ export class RobotConnectService {
 
   public getStatus() {
     return this.sendCommand("GetStatus");
+  }
+
+  public getRobotInfo() {
+    return this.sendCommand("GetRobotInfo");
   }
 
   public getPoints() {
