@@ -1,12 +1,12 @@
-# RobotReact
+# SimpleRobotApp
 
-The mobile and web control app for **Tibert** — an open-source, workbench-sized 4-axis robot arm built for pick and place, machine tending, and small business automation. Part of the [Robots Made Simple](https://github.com/RobotsMadeSimple) ecosystem.
+The mobile and web control app for **ASTRO** — an open-source, workbench-sized 4-axis robot arm built for pick and place, machine tending, and small business automation. Part of the [Robots Made Simple](https://github.com/RobotsMadeSimple) ecosystem.
 
 ---
 
 ## What It Does
 
-RobotReact is an Expo/React Native app that connects to [RobotController](https://github.com/RobotsMadeSimple/RobotController) over WebSocket. It provides:
+RobotReact is an Expo/React Native app that connects to [SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) over WebSocket. It provides:
 
 - **Auto-discovery** — finds the robot automatically on your local network via mDNS
 - **Live status** — real-time robot state, position, and program status
@@ -23,15 +23,15 @@ RobotReact is an Expo/React Native app that connects to [RobotController](https:
 - [Node.js 18+](https://nodejs.org/)
 - [Expo CLI](https://docs.expo.dev/get-started/installation/)
 - Android device or emulator, or a web browser
-- A running instance of [RobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) on your network
+- A running instance of [SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) on your network
 
 ---
 
 ## Getting Started
 
 ```bash
-git clone https://github.com/RobotsMadeSimple/RobotReact.git
-cd RobotReact
+git clone https://github.com/RobotsMadeSimple/SimpleRobotApp.git
+cd SimpleRobotApp
 npm install
 npx expo start
 ```
@@ -88,9 +88,9 @@ app/
 
 ## Connecting to the Robot
 
-RobotReact connects to [RobotController](https://github.com/RobotsMadeSimple/RobotController) via WebSocket on port `9000`. Make sure:
+RobotReact connects to [SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) via WebSocket on port `9000`. Make sure:
 
-1. RobotController is running on the same network
+1. SimpleRobotController is running on the same network
 2. Port `9000` is accessible
 3. Both devices are on the same subnet (for mDNS auto-discovery)
 
@@ -100,7 +100,7 @@ RobotReact connects to [RobotController](https://github.com/RobotsMadeSimple/Rob
 
 Robots Made Simple is a fully open-source automation ecosystem. RobotReact is the universal UI across all devices:
 
-- **[RobotController](https://github.com/RobotsMadeSimple/RobotController)** — Core control platform and WebSocket server
+- **[SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleRobotController)** — Core control platform and WebSocket server
 - **[ArduinoNano](https://github.com/RobotsMadeSimple/ArduinoNano)** — Edge device firmware
 - Workstations, tooling, and more — coming soon
 

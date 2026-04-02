@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "react-robot",
-    "slug": "react-robot",
+    "name": "Simple Robot App",
+    "slug": "simple-robot-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
