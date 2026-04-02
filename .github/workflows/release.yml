@@ -14,6 +14,8 @@ jobs:
   electron:
     name: Build Electron (Windows)
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -30,6 +32,8 @@ jobs:
 
       - name: Build Electron installer
         run: npm run electron:build
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
@@ -40,6 +44,8 @@ jobs:
   android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
