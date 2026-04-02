@@ -1,5 +1,5 @@
 {
-  "name": "react-robot",
+  "name": "simple-robot-app",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "com.robotsmadesimple.app",
-    "productName": "Robots Made Simple",
+    "productName": "Simple Robot App",
     "extraMetadata": {
       "main": "electron.js"
     },
