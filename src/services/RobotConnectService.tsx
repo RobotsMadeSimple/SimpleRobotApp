@@ -1,11 +1,12 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { BuiltProgram, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
-type StatusListener           = (status: RobotStatus)      => void;
-type PointsListener           = (points: Point[])          => void;
-type ToolsListener            = (tools: Tool[])            => void;
-type BuiltProgramsListener    = (programs: BuiltProgram[]) => void;
-type NanoIOListener           = (nanos: NanoState[])       => void;
+type StatusListener           = (status: RobotStatus)                    => void;
+type PointsListener           = (points: Point[])                        => void;
+type ToolsListener            = (tools: Tool[])                          => void;
+type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
+type NanoIOListener           = (nanos: NanoState[])                     => void;
+type ProgramImagesListener    = (images: Record<string, string | null>)  => void;
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
@@ -25,14 +26,16 @@ export class RobotConnectService {
   private statusListeners:        StatusListener[]        = [];
   private pointsListeners:        PointsListener[]        = [];
   private toolsListeners:         ToolsListener[]         = [];
-  private builtProgramsListeners: BuiltProgramsListener[] = [];
-  private nanoIOListeners:        NanoIOListener[]        = [];
+  private builtProgramsListeners:  BuiltProgramsListener[]  = [];
+  private nanoIOListeners:         NanoIOListener[]         = [];
+  private programImagesListeners:  ProgramImagesListener[]  = [];
   private status:       RobotStatus    = createDefaultStatus();
   private connecting:   boolean        = false;
   private points:       Point[]        = [];
   private tools:        Tool[]         = [];
-  private builtPrograms: BuiltProgram[] = [];
-  private nanoIO:       NanoState[]    = [];
+  private builtPrograms:  BuiltProgram[]                = [];
+  private nanoIO:         NanoState[]                   = [];
+  private programImages:  Record<string, string | null> = {};
 
   private ws: WebSocket | null = null;
   private url?: string;
@@ -323,6 +326,18 @@ export class RobotConnectService {
     this.builtProgramsListeners.forEach(cb => cb(this.builtPrograms));
   }
 
+  onProgramImages(cb: ProgramImagesListener) {
+    this.programImagesListeners.push(cb);
+    cb(this.programImages);
+    return () => {
+      this.programImagesListeners = this.programImagesListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitProgramImages() {
+    this.programImagesListeners.forEach(cb => cb(this.programImages));
+  }
+
   onNanoIO(cb: NanoIOListener) {
     this.nanoIOListeners.push(cb);
     cb(this.nanoIO);
@@ -503,7 +518,9 @@ export class RobotConnectService {
 
   public async getProgramImages(): Promise<Record<string, string | null>> {
     const data: any = await this.sendCommand('GetProgramImages');
-    return data?.images ?? {};
+    this.programImages = data?.images ?? {};
+    this.emitProgramImages();
+    return this.programImages;
   }
 
   public async getProgramLogs(
@@ -604,7 +621,8 @@ export class RobotConnectService {
   }
 
   public saveProgramImage(name: string, imageBase64: string) {
-    return this.sendCommand("SaveBuiltProgramImage", { name, image: imageBase64 });
+    return this.sendCommand("SaveBuiltProgramImage", { name, image: imageBase64 })
+      .then(() => this.getProgramImages().catch(() => {}));
   }
 
   public executeBuiltProgram(name: string) {
@@ -644,6 +662,14 @@ export class RobotConnectService {
   public configureNanoPin(nanoId: string, pin: number, type: string, pixelCount = 8) {
     return this.sendCommand("ConfigureNanoPin", { nanoId, pin, type, pixelCount })
       .then(() => this.getIO().catch(() => {}));
+  }
+
+  public setRobotIdentity(fields: { robotName?: string; robotType?: string }) {
+    return this.sendCommand("SetRobotIdentity", fields);
+  }
+
+  public restartController() {
+    return this.sendCommand("RestartController");
   }
 }
 

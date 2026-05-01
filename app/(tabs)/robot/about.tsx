@@ -1,12 +1,15 @@
-import { getSelectedRobot } from "@/src/connections/robotState";
-import { useRobots } from "@/src/providers/RobotProvider";
+import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "@/src/connections/robotState";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
+import { robotClient } from "@/src/services/RobotConnectService";
+import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import {
   Activity,
   Cpu,
   Gauge,
   Hash,
   Network,
+  Pencil,
+  RefreshCw,
   Server,
   Tag,
   Wifi,
@@ -14,10 +17,12 @@ import {
   Zap,
 } from "lucide-react-native";
 import { Tabs } from "expo-router";
-import { Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Picker } from "@react-native-picker/picker";
+import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 const robotImages: Record<string, any> = {
-  TBot: require("@/assets/images/TBot.png"),
+  ASTRO: require("@/assets/images/ASTRO.png"),
 };
 const defaultRobotImage = require("@/assets/images/no-robot.png");
 
@@ -99,13 +104,51 @@ function SpeedRow({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AboutRobot() {
-  const selectedRobot = getSelectedRobot();
-  const { robots } = useRobots();
+  const [robot, setRobot] = useState(getSelectedRobot());
   const status = useRobotStatus();
 
-  const robot =
-    robots.find((r) => r.serialNumber === selectedRobot?.serialNumber) ??
-    selectedRobot;
+  useEffect(() => subscribeRobot(setRobot), []);
+
+  const [editVisible, setEditVisible] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editType, setEditType] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [restartVisible, setRestartVisible] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  async function confirmRestart() {
+    setRestarting(true);
+    try {
+      await robotClient.restartController();
+    } finally {
+      setRestarting(false);
+      setRestartVisible(false);
+    }
+  }
+
+  function openEdit() {
+    setEditName(robot?.robotName ?? "");
+    setEditType(robot?.robotType ?? "");
+    setEditVisible(true);
+  }
+
+  async function saveEdit() {
+    if (!robot) return;
+    setSaving(true);
+    try {
+      await robotClient.setRobotIdentity({
+        robotName: editName !== robot.robotName ? editName : undefined,
+        robotType: editType !== robot.robotType ? editType : undefined,
+      });
+      const updated = { ...robot, robotName: editName, robotType: editType };
+      setSelectedRobot(updated);
+      robotDiscovery.updateRobot(robot.serialNumber, updated);
+      setEditVisible(false);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (!robot) {
     return (
@@ -139,7 +182,13 @@ export default function AboutRobot() {
       </View>
 
       {/* Identity */}
-      <Text style={styles.sectionLabel}>IDENTITY</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionLabel}>IDENTITY</Text>
+        <TouchableOpacity onPress={openEdit} style={styles.editButton}>
+          <Pencil size={14} color="#2563eb" />
+          <Text style={styles.editButtonText}>Edit</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.card}>
         <InfoRow
           icon={<Tag size={16} color="#2563eb" />}
@@ -181,7 +230,7 @@ export default function AboutRobot() {
           icon={<Zap size={16} color="#0891b2" />}
           tileBg="#ecfeff"
           label="Endpoint"
-          value={`/${robot.controlEndpoint}`}
+          value={robot.controlEndpoint}
           last
         />
       </View>
@@ -233,6 +282,73 @@ export default function AboutRobot() {
           last
         />
       </View>
+      {/* Restart */}
+      <TouchableOpacity style={styles.restartButton} onPress={() => setRestartVisible(true)}>
+        <RefreshCw size={15} color="#dc2626" />
+        <Text style={styles.restartButtonText}>Restart Controller</Text>
+      </TouchableOpacity>
+
+      <Modal visible={restartVisible} transparent animationType="fade" onRequestClose={() => setRestartVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Restart Controller?</Text>
+            <Text style={styles.restartWarning}>
+              The robot will disconnect briefly while the controller restarts. Motion will stop.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setRestartVisible(false)}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.restartConfirmButton, restarting && { opacity: 0.6 }]}
+                onPress={confirmRestart}
+                disabled={restarting}
+              >
+                <Text style={styles.saveButtonText}>{restarting ? "Restarting…" : "Restart"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={editVisible} transparent animationType="fade" onRequestClose={() => setEditVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Robot Identity</Text>
+
+            <Text style={styles.editLabel}>ROBOT NAME</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Robot name"
+              placeholderTextColor="#9ca3af"
+            />
+
+            <Text style={styles.editLabel}>ROBOT TYPE</Text>
+            <View style={styles.pickerWrapper}>
+              <Picker
+                selectedValue={editType}
+                onValueChange={setEditType}
+                style={styles.picker}
+                dropdownIconColor="#6b7280"
+              >
+                <Picker.Item label="ASTRO" value="ASTRO" />
+              </Picker>
+            </View>
+
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setEditVisible(false)}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={saveEdit} disabled={saving}>
+                <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -305,12 +421,144 @@ const styles = StyleSheet.create({
   },
 
   // Section label
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
   sectionLabel: {
     fontSize: 11,
     fontWeight: "700",
     color: "#6b7280",
     letterSpacing: 0.8,
-    marginBottom: 8,
+  },
+  editButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  editButtonText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563eb",
+  },
+
+  // Restart button
+  restartButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fff5f5",
+    marginBottom: 20,
+  },
+  restartButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#dc2626",
+  },
+  restartWarning: {
+    fontSize: 13,
+    color: "#6b7280",
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  restartConfirmButton: {
+    flex: 1,
+    backgroundColor: "#dc2626",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+
+  // Edit modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    padding: 20,
+    width: 300,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 16,
+  },
+  editLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#6b7280",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  editInput: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: "#111827",
+    backgroundColor: "#f9fafb",
+    marginBottom: 12,
+  },
+  pickerWrapper: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    backgroundColor: "#f9fafb",
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  picker: {
+    color: "#111827",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+  cancelButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: "#2563eb",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  saveButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#ffffff",
   },
 
   // Card
