@@ -254,16 +254,7 @@ export default function ProgramScreen() {
       .map((p) => ({ summary: p, isBuilt: false }));
 
   const allCards = [...builtCards, ...externalCards];
-
-  // Re-fetch images whenever any card's name changes
-  const allNames = allCards.map((c) => c.summary.name).join(",");
-  useEffect(() => {
-    if (allCards.length === 0) return;
-    robotClient
-      .getProgramImages()
-      .then(setImages)
-      .catch(() => {});
-  }, [allNames]);
+  useEffect(() => robotClient.onProgramImages(setImages), []);
 
   return (
     <View style={{ flex: 1 }}>

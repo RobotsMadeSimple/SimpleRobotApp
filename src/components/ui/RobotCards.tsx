@@ -13,7 +13,7 @@ import {
 } from "react-native";
 
 const robotImages: Record<string, any> = {
-  TBot: require("@/assets/images/TBot.png"),
+  ASTRO: require("@/assets/images/ASTRO.png"),
 };
 
 const defaultRobotImage = require("@/assets/images/no-robot.png");

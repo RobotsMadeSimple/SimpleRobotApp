@@ -1,4 +1,4 @@
-﻿import { Platform } from 'react-native';
+import { Platform } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
 import { RobotInfo } from '../models/robotModels';
 
@@ -48,17 +48,15 @@ class RobotDiscoveryService {
   }
 
   private async fetchFromHttp() {
-    const res = await fetch('http://localhost:3001/get-robots');
-    if (!res.ok) return;
-
-    const data = await res.json();
-
-    for (const r of data) {
-      const robot: RobotInfo = r;
-      this.robots.set(r.robotName, robot);
-    }
-
-    this.emit();
+    try {
+      const res = await fetch('http://localhost:3001/get-robots');
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const r of data) {
+        this.robots.set(r.robotName, r as RobotInfo);
+      }
+      this.emit();
+    } catch {}
   }
 
   stop() {
@@ -74,6 +72,18 @@ class RobotDiscoveryService {
     this.zeroconf.stop();
     this.robots.clear();
     this.emit();
+  }
+
+  updateRobot(serialNumber: string, fields: Partial<RobotInfo>) {
+    for (const [key, robot] of this.robots) {
+      if (robot.serialNumber === serialNumber) {
+        const updated = { ...robot, ...fields };
+        this.robots.delete(key);
+        this.robots.set(fields.serialNumber ?? key, updated);
+        this.emit();
+        break;
+      }
+    }
   }
 
   subscribe(callback: (robots: RobotInfo[]) => void) {
