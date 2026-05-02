@@ -16,6 +16,7 @@ import {
   WifiOff,
   Zap,
 } from "lucide-react-native";
+
 import { Tabs } from "expo-router";
 import { useEffect, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
@@ -67,40 +68,6 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function SpeedRow({
-  label,
-  speed,
-  accel,
-  decel,
-  last = false,
-}: {
-  label: string;
-  speed: number;
-  accel: number;
-  decel: number;
-  last?: boolean;
-}) {
-  return (
-    <View style={[styles.speedRow, !last && styles.infoRowBorder]}>
-      <Text style={styles.speedLabel}>{label}</Text>
-      <View style={styles.speedValues}>
-        <View style={styles.speedChip}>
-          <Text style={styles.speedChipKey}>Spd</Text>
-          <Text style={styles.speedChipVal}>{speed.toFixed(0)}</Text>
-        </View>
-        <View style={styles.speedChip}>
-          <Text style={styles.speedChipKey}>Acc</Text>
-          <Text style={styles.speedChipVal}>{accel.toFixed(0)}</Text>
-        </View>
-        <View style={styles.speedChip}>
-          <Text style={styles.speedChipKey}>Dec</Text>
-          <Text style={styles.speedChipVal}>{decel.toFixed(0)}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AboutRobot() {
@@ -116,6 +83,7 @@ export default function AboutRobot() {
 
   const [restartVisible, setRestartVisible] = useState(false);
   const [restarting, setRestarting] = useState(false);
+
 
   async function confirmRestart() {
     setRestarting(true);
@@ -265,23 +233,6 @@ export default function AboutRobot() {
         />
       </View>
 
-      {/* Motion parameters */}
-      <Text style={styles.sectionLabel}>MOTION PARAMETERS</Text>
-      <View style={styles.card}>
-        <SpeedRow
-          label="Linear (mm/s)"
-          speed={status.speedS}
-          accel={status.accelS}
-          decel={status.decelS}
-        />
-        <SpeedRow
-          label="Joint (°/s)"
-          speed={status.speedJ}
-          accel={status.accelJ}
-          decel={status.decelJ}
-          last
-        />
-      </View>
       {/* Restart */}
       <TouchableOpacity style={styles.restartButton} onPress={() => setRestartVisible(true)}>
         <RefreshCw size={15} color="#dc2626" />
@@ -337,7 +288,6 @@ export default function AboutRobot() {
               </Picker>
             </View>
 
-
             <View style={styles.modalButtons}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setEditVisible(false)}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -349,6 +299,7 @@ export default function AboutRobot() {
           </View>
         </View>
       </Modal>
+
     </ScrollView>
   );
 }
@@ -432,6 +383,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#6b7280",
     letterSpacing: 0.8,
+    marginBottom: 8,
   },
   editButton: {
     flexDirection: "row",
@@ -622,41 +574,4 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // Speed rows
-  speedRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    gap: 8,
-  },
-  speedLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#374151",
-    marginBottom: 4,
-  },
-  speedValues: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  speedChip: {
-    flex: 1,
-    backgroundColor: "#f9fafb",
-    borderRadius: 8,
-    paddingVertical: 7,
-    alignItems: "center",
-    gap: 2,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-  },
-  speedChipKey: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.5,
-  },
-  speedChipVal: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#111827",
-  },
 });

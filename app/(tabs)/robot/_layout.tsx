@@ -26,9 +26,12 @@ export default function RobotLayout() {
           headerShown: true,
           headerTitleAlign: "left",
           headerTitleStyle: { fontWeight: "bold", fontSize: 22 },
-
           headerLeft: () => <BackButton />,
         }}
+      />
+      <Stack.Screen
+        name="config"
+        options={{ headerShown: false }}
       />
     </Stack>
   );
