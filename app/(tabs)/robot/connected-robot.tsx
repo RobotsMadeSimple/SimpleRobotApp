@@ -9,6 +9,7 @@ import {
   Gamepad2,
   Info,
   Move3d,
+  Settings2,
 } from "lucide-react-native";
 import {
   Image,
@@ -63,6 +64,14 @@ const MENU_ITEMS = [
     tileColor: "#fff7ed",
     iconColor: "#ea580c",
     onPress: () => router.push("/io"),
+  },
+  {
+    label: "Configure",
+    description: "Homing offsets, speeds and motion settings",
+    icon: Settings2,
+    tileColor: "#fdf4ff",
+    iconColor: "#9333ea",
+    onPress: () => router.push("/robot/config"),
   },
   {
     label: "About Robot",

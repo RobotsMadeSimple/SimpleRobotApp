@@ -671,6 +671,24 @@ export class RobotConnectService {
   public restartController() {
     return this.sendCommand("RestartController");
   }
+
+  public getRobotConfig(): Promise<{
+    homingSpeed: number;
+    j1HomeOffsetDeg: number;
+    verticalHomePosition: number;
+    horizontalHomePosition: number;
+  }> {
+    return this.sendCommand("GetRobotConfig") as any;
+  }
+
+  public setRobotConfig(fields: {
+    homingSpeed?: number;
+    j1HomeOffsetDeg?: number;
+    verticalHomePosition?: number;
+    horizontalHomePosition?: number;
+  }) {
+    return this.sendCommand("SetRobotConfig", fields);
+  }
 }
 
 
