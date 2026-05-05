@@ -35,11 +35,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
 
+      - name: Rename installer to fixed filename
+        run: Get-ChildItem dist\*.exe | Select-Object -First 1 | Rename-Item -NewName "SimpleRobotApp-Setup.exe"
+        shell: pwsh
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist/*.exe
+          files: dist/SimpleRobotApp-Setup.exe
 
   android:
     name: Build Android APK
