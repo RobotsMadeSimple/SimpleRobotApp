@@ -5,18 +5,21 @@ import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   Cpu,
 } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -65,14 +68,9 @@ type PinEdit = {
   dirty: boolean;       // changed from the server snapshot
 };
 
-const TYPE_CYCLE: Array<PinType | "Unconfigured"> = [
+const TYPE_OPTIONS: Array<PinType | "Unconfigured"> = [
   "Unconfigured", "Input", "Output", "Neopixel",
 ];
-
-function nextType(current: PinType | "Unconfigured"): PinType | "Unconfigured" {
-  const idx = TYPE_CYCLE.indexOf(current);
-  return TYPE_CYCLE[(idx + 1) % TYPE_CYCLE.length];
-}
 
 function typeColor(type: PinType | "Unconfigured") {
   if (type === "Input")    return { fg: "#2563eb", bg: "#eff6ff" };
@@ -88,6 +86,57 @@ function typeLabel(type: PinType | "Unconfigured") {
   return "—";
 }
 
+function TypeDropdown({
+  value,
+  onChange,
+}: {
+  value: PinType | "Unconfigured";
+  onChange: (v: PinType | "Unconfigured") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { fg, bg } = typeColor(value);
+
+  return (
+    <>
+      <Pressable
+        style={[styles.typeChip, { backgroundColor: bg, borderColor: fg }]}
+        onPress={() => setOpen(true)}
+        hitSlop={4}
+      >
+        <Text style={[styles.typeChipText, { color: fg }]}>{typeLabel(value)}</Text>
+        <ChevronDown size={9} color={fg} />
+      </Pressable>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.typeModalOverlay} onPress={() => setOpen(false)}>
+          <View style={styles.typeMenuCard}>
+            {TYPE_OPTIONS.map(opt => {
+              const { fg: ofg, bg: obg } = typeColor(opt);
+              const selected = opt === value;
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.typeMenuItem, selected && { backgroundColor: obg }]}
+                  onPress={() => { onChange(opt); setOpen(false); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.typeMenuChip, { backgroundColor: obg, borderColor: ofg }]}>
+                    <Text style={[styles.typeMenuChipText, { color: ofg }]}>{typeLabel(opt)}</Text>
+                  </View>
+                  <Text style={[styles.typeMenuLabel, selected && { color: ofg, fontWeight: "700" }]}>
+                    {opt === "Unconfigured" ? "Unconfigured" : opt}
+                  </Text>
+                  {selected && <View style={[styles.typeMenuDot, { backgroundColor: ofg }]} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Single pin row
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,7 +150,6 @@ function PinRow({
   edit: PinEdit;
   onChange: (updated: Partial<PinEdit>) => void;
 }) {
-  const { fg, bg } = typeColor(edit.type);
   const isConfigured = edit.type !== "Unconfigured";
 
   return (
@@ -112,16 +160,11 @@ function PinRow({
         {def.note && <Text style={styles.pinNote}>{def.note}</Text>}
       </View>
 
-      {/* Type chip — tap to cycle */}
-      <Pressable
-        style={[styles.typeChip, { backgroundColor: bg, borderColor: fg }]}
-        onPress={() => onChange({ type: nextType(edit.type), dirty: true })}
-        hitSlop={4}
-      >
-        <Text style={[styles.typeChipText, { color: fg }]}>
-          {typeLabel(edit.type)}
-        </Text>
-      </Pressable>
+      {/* Type dropdown */}
+      <TypeDropdown
+        value={edit.type}
+        onChange={v => onChange({ type: v, dirty: true })}
+      />
 
       {/* Name input — only shown when configured */}
       {isConfigured ? (
@@ -273,7 +316,7 @@ export default function ConfigurePage() {
         {/* ── Column headers ── */}
         <View style={styles.colHeaders}>
           <Text style={[styles.colHeader, { width: 44 }]}>PIN</Text>
-          <Text style={[styles.colHeader, { width: 54 }]}>TYPE</Text>
+          <Text style={[styles.colHeader, { width: 52 }]}>TYPE</Text>
           <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
         </View>
 
@@ -388,39 +431,80 @@ const styles = StyleSheet.create({
   pinLabel: { fontSize: 13, fontWeight: "700", color: "#111827" },
   pinNote:  { fontSize: 9, color: "#9ca3af", marginTop: 1 },
 
-  // ── Type chip ──────────────────────────────────────────────────────────────
+  // ── Type chip + dropdown ───────────────────────────────────────────────────
   typeChip: {
-    width: 40,
-    height: 26,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    width: 52,
+    height: 28,
     borderRadius: 6,
+    borderWidth: 1.5,
+    justifyContent: "center",
+  },
+  typeChipText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.4 },
+
+  typeModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  typeMenuCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    width: 200,
+    paddingVertical: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  typeMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginHorizontal: 4,
+  },
+  typeMenuChip: {
+    width: 36,
+    height: 22,
+    borderRadius: 5,
     borderWidth: 1.5,
     justifyContent: "center",
     alignItems: "center",
   },
-  typeChipText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.4 },
+  typeMenuChipText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.4 },
+  typeMenuLabel: { flex: 1, fontSize: 14, color: "#374151" },
+  typeMenuDot: { width: 7, height: 7, borderRadius: 4 },
 
   // ── Name input ─────────────────────────────────────────────────────────────
   nameInput: {
     flex: 1,
-    height: 32,
+    minWidth: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: "#e5e7eb",
     borderRadius: 7,
-    paddingHorizontal: 8,
     fontSize: 13,
     color: "#111827",
     backgroundColor: "#f9fafb",
   },
-  nameInputPlaceholder: { flex: 1 },
+  nameInputPlaceholder: { flex: 1, minWidth: 0 },
 
   // ── Pixel count ────────────────────────────────────────────────────────────
   pixelInput: {
     width: 42,
-    height: 32,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: "#fde68a",
     borderRadius: 7,
-    paddingHorizontal: 6,
     fontSize: 13,
     color: "#92400e",
     backgroundColor: "#fffbeb",

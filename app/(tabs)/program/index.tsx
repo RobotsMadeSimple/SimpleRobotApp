@@ -3,7 +3,7 @@ import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotM
 import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Cpu, Plus } from "lucide-react-native";
+import { Box, Cpu, Plus, Repeat2 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -243,10 +243,12 @@ export default function ProgramScreen() {
   //   1. All built programs (live data if executing, synthetic if idle)
   //   2. External programs not in the built set
   const builtCards: { summary: ProgramSummary; isBuilt: true }[] =
-    builtPrograms.map((bp) => {
-      const live = programSummaries.find((p) => p.name === bp.name);
-      return { summary: live ?? syntheticSummary(bp), isBuilt: true };
-    });
+    builtPrograms
+      .filter((bp) => !bp.isRoutine)
+      .map((bp) => {
+        const live = programSummaries.find((p) => p.name === bp.name);
+        return { summary: live ?? syntheticSummary(bp), isBuilt: true };
+      });
 
   const externalCards: { summary: ProgramSummary; isBuilt: false }[] =
     programSummaries
@@ -292,6 +294,16 @@ export default function ProgramScreen() {
         >
           <Plus size={16} color="#2563eb" />
           <Text style={styles.addCardText}>New Program</Text>
+        </TouchableOpacity>
+
+        {/* ── Routines ── */}
+        <TouchableOpacity
+          style={styles.routinesCard}
+          onPress={() => router.push("/program/routines")}
+          activeOpacity={0.7}
+        >
+          <Repeat2 size={16} color="#7c3aed" />
+          <Text style={styles.routinesCardText}>Manage Routines</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -421,6 +433,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#2563eb",
+  },
+  routinesCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#7c3aed",
+    borderRadius: 14,
+    paddingVertical: 14,
+    backgroundColor: "transparent",
+  },
+  routinesCardText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#7c3aed",
   },
 
   // Empty state

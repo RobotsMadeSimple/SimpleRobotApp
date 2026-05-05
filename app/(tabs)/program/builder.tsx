@@ -20,6 +20,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Repeat2,
   Trash2,
   Wrench,
   X,
@@ -99,6 +100,7 @@ function stepLabel(step: ProgramStep): string {
     case "Wait":         return `Wait  ${step.waitMs ?? 0} ms`;
     case "Loop":         return `Loop  ×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
+    case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
     default:             return step.type;
   }
 }
@@ -111,6 +113,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "Wait":         return <Clock         size={size} color={color} />;
     case "Loop":         return <RefreshCw     size={size} color={color} />;
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
+    case "CallRoutine":  return <Repeat2       size={size} color={color} />;
     default:             return <Cpu           size={size} color={color} />;
   }
 }
@@ -122,6 +125,7 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "Wait",         label: "Wait",          desc: "Pause execution for a set duration" },
   { type: "Loop",         label: "Loop",          desc: "Repeat a block of steps N times" },
   { type: "StatusUpdate", label: "Status Update", desc: "Publish a message, warning, or error to the monitor" },
+  { type: "CallRoutine",  label: "Call Routine",  desc: "Run a saved routine inline then continue" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -200,7 +204,9 @@ function StepConfigModal({
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
 }) {
-  const points   = usePoints();
+  const points        = usePoints();
+  const allPrograms   = useBuiltPrograms();
+  const routines      = allPrograms.filter(p => p.isRoutine);
   const [draft, setDraft]       = useState<ProgramStep | null>(null);
   const [waitMsText, setWaitMs] = useState("");
   const [subPage, setSubPage]   = useState<SubPage>(null);
@@ -436,6 +442,35 @@ function StepConfigModal({
               placeholder="e.g. Picking part from tray…" placeholderTextColor="#c4c4c4"
               returnKeyType="done" autoFocus />
             <Text style={ms.hintText}>Appears as the current step description in the monitor.</Text>
+          </>
+        );
+
+      case "CallRoutine":
+        return (
+          <>
+            <Text style={ms.fieldLabel}>ROUTINE</Text>
+            {routines.length === 0 && (
+              <Text style={ms.emptyHint}>No routines saved yet. Create one from the Routines page.</Text>
+            )}
+            {routines.map((r, i) => {
+              const active = draft!.routineName === r.name;
+              return (
+                <TouchableOpacity
+                  key={r.name}
+                  style={[ms.row, i < routines.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ routineName: r.name })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{r.name}</Text>
+                    {!!r.description && <Text style={ms.rowDesc}>{r.description}</Text>}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </>
         );
 
@@ -813,8 +848,9 @@ function StepRow({
 // ── Builder screen ────────────────────────────────────────────────────────────
 
 export default function BuilderScreen() {
-  const { name: editName } = useLocalSearchParams<{ name?: string }>();
+  const { name: editName, isRoutine: isRoutineParam } = useLocalSearchParams<{ name?: string; isRoutine?: string }>();
   const builtPrograms = useBuiltPrograms();
+  const isRoutineMode = isRoutineParam === "1" || builtPrograms.find(p => p.name === editName)?.isRoutine === true;
 
   const existing = editName
     ? builtPrograms.find(p => p.name === editName) ?? null
@@ -1026,6 +1062,7 @@ export default function BuilderScreen() {
       waitMs: 500,
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined,
+      routineName: undefined,
     };
   }
 
@@ -1124,6 +1161,7 @@ export default function BuilderScreen() {
     }
     const prog: BuiltProgram = {
       name, description: description.trim(), steps, lastUpdatedUnixMs: 0,
+      isRoutine: isRoutineMode,
     };
     await robotClient.saveBuiltProgram(prog).catch(() => {});
     if (coverImage) {
@@ -1157,7 +1195,7 @@ export default function BuilderScreen() {
             style={styles.nameInput}
             value={programName}
             onChangeText={setProgramName}
-            placeholder="Program name…"
+            placeholder={isRoutineMode ? "Routine name…" : "Program name…"}
             placeholderTextColor="#9ca3af"
             returnKeyType="next"
           />
