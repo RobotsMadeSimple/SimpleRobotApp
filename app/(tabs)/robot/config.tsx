@@ -22,6 +22,9 @@ type RobotConfig = {
   j1HomeOffsetDeg: number;
   verticalHomePosition: number;
   horizontalHomePosition: number;
+  verticalHomingDirection: number;
+  horizontalHomingDirection: number;
+  j1HomingDirection: number;
 };
 
 function InfoRow({
@@ -48,6 +51,33 @@ function InfoRow({
   );
 }
 
+function DirectionToggle({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <View style={styles.dirToggleRow}>
+      <TouchableOpacity
+        style={[styles.dirBtn, value === 1 && styles.dirBtnActive]}
+        onPress={() => onChange(1)}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.dirBtnText, value === 1 && styles.dirBtnTextActive]}>+</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.dirBtn, value === -1 && styles.dirBtnActive]}
+        onPress={() => onChange(-1)}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.dirBtnText, value === -1 && styles.dirBtnTextActive]}>−</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ConfigureRobot() {
   const [config, setConfig] = useState<RobotConfig | null>(null);
   const [editVisible, setEditVisible] = useState(false);
@@ -55,6 +85,9 @@ export default function ConfigureRobot() {
   const [editJ1Offset, setEditJ1Offset] = useState("");
   const [editVertical, setEditVertical] = useState("");
   const [editHorizontal, setEditHorizontal] = useState("");
+  const [editVerticalDir, setEditVerticalDir] = useState(1);
+  const [editHorizontalDir, setEditHorizontalDir] = useState(1);
+  const [editJ1Dir, setEditJ1Dir] = useState(-1);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -67,17 +100,23 @@ export default function ConfigureRobot() {
     setEditJ1Offset(String(config.j1HomeOffsetDeg));
     setEditVertical(String(config.verticalHomePosition));
     setEditHorizontal(String(config.horizontalHomePosition));
+    setEditVerticalDir(config.verticalHomingDirection);
+    setEditHorizontalDir(config.horizontalHomingDirection);
+    setEditJ1Dir(config.j1HomingDirection);
     setEditVisible(true);
   }
 
   async function saveEdit() {
     setSaving(true);
     try {
-      const fields = {
-        homingSpeed:            parseFloat(editHomingSpeed),
-        j1HomeOffsetDeg:        parseFloat(editJ1Offset),
-        verticalHomePosition:   parseFloat(editVertical),
-        horizontalHomePosition: parseFloat(editHorizontal),
+      const fields: RobotConfig = {
+        homingSpeed:              parseFloat(editHomingSpeed),
+        j1HomeOffsetDeg:          parseFloat(editJ1Offset),
+        verticalHomePosition:     parseFloat(editVertical),
+        horizontalHomePosition:   parseFloat(editHorizontal),
+        verticalHomingDirection:  editVerticalDir,
+        horizontalHomingDirection: editHorizontalDir,
+        j1HomingDirection:        editJ1Dir,
       };
       await robotClient.setRobotConfig(fields);
       setConfig(fields);
@@ -86,6 +125,8 @@ export default function ConfigureRobot() {
       setSaving(false);
     }
   }
+
+  function dirLabel(v: number) { return v === 1 ? "+" : "−"; }
 
   return (
     <ScrollView
@@ -129,6 +170,24 @@ export default function ConfigureRobot() {
           tileBg="#fff7ed"
           label="Horizontal Home Position"
           value={config ? `${config.horizontalHomePosition} mm` : "—"}
+        />
+        <InfoRow
+          icon={<MoveVertical size={16} color="#16a34a" />}
+          tileBg="#f0fdf4"
+          label="Vertical Homing Direction"
+          value={config ? dirLabel(config.verticalHomingDirection) : "—"}
+        />
+        <InfoRow
+          icon={<MoveHorizontal size={16} color="#ea580c" />}
+          tileBg="#fff7ed"
+          label="Horizontal Homing Direction"
+          value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
+        />
+        <InfoRow
+          icon={<RotateCcw size={16} color="#0891b2" />}
+          tileBg="#ecfeff"
+          label="J1 Homing Direction"
+          value={config ? dirLabel(config.j1HomingDirection) : "—"}
           last
         />
       </View>
@@ -183,6 +242,15 @@ export default function ConfigureRobot() {
               placeholder="413"
               placeholderTextColor="#9ca3af"
             />
+
+            <Text style={styles.editLabel}>VERTICAL HOMING DIRECTION</Text>
+            <DirectionToggle value={editVerticalDir} onChange={setEditVerticalDir} />
+
+            <Text style={styles.editLabel}>HORIZONTAL HOMING DIRECTION</Text>
+            <DirectionToggle value={editHorizontalDir} onChange={setEditHorizontalDir} />
+
+            <Text style={styles.editLabel}>J1 HOMING DIRECTION</Text>
+            <DirectionToggle value={editJ1Dir} onChange={setEditJ1Dir} />
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -320,6 +388,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#f9fafb",
     marginBottom: 12,
   },
+
+  // Direction toggle
+  dirToggleRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  dirBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    backgroundColor: "#f9fafb",
+  },
+  dirBtnActive: {
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  dirBtnText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#9ca3af",
+  },
+  dirBtnTextActive: {
+    color: "#2563eb",
+  },
+
   modalButtons: {
     flexDirection: "row",
     gap: 10,

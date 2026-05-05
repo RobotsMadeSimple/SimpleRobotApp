@@ -678,6 +678,9 @@ export class RobotConnectService {
     j1HomeOffsetDeg: number;
     verticalHomePosition: number;
     horizontalHomePosition: number;
+    verticalHomingDirection: number;
+    horizontalHomingDirection: number;
+    j1HomingDirection: number;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -687,6 +690,9 @@ export class RobotConnectService {
     j1HomeOffsetDeg?: number;
     verticalHomePosition?: number;
     horizontalHomePosition?: number;
+    verticalHomingDirection?: number;
+    horizontalHomingDirection?: number;
+    j1HomingDirection?: number;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
   }
