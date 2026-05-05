@@ -61,18 +61,18 @@ function DirectionToggle({
   return (
     <View style={styles.dirToggleRow}>
       <TouchableOpacity
-        style={[styles.dirBtn, value === 1 && styles.dirBtnActive]}
-        onPress={() => onChange(1)}
-        activeOpacity={0.7}
-      >
-        <Text style={[styles.dirBtnText, value === 1 && styles.dirBtnTextActive]}>+</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
         style={[styles.dirBtn, value === -1 && styles.dirBtnActive]}
         onPress={() => onChange(-1)}
         activeOpacity={0.7}
       >
         <Text style={[styles.dirBtnText, value === -1 && styles.dirBtnTextActive]}>−</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.dirBtn, value === 1 && styles.dirBtnActive]}
+        onPress={() => onChange(1)}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.dirBtnText, value === 1 && styles.dirBtnTextActive]}>+</Text>
       </TouchableOpacity>
     </View>
   );
@@ -160,16 +160,16 @@ export default function ConfigureRobot() {
           value={config ? `${config.j1HomeOffsetDeg}°` : "—"}
         />
         <InfoRow
+          icon={<RotateCcw size={16} color="#0891b2" />}
+          tileBg="#ecfeff"
+          label="J1 Homing Direction"
+          value={config ? dirLabel(config.j1HomingDirection) : "—"}
+        />
+        <InfoRow
           icon={<MoveVertical size={16} color="#16a34a" />}
           tileBg="#f0fdf4"
           label="Vertical Home Position"
           value={config ? `${config.verticalHomePosition} mm` : "—"}
-        />
-        <InfoRow
-          icon={<MoveHorizontal size={16} color="#ea580c" />}
-          tileBg="#fff7ed"
-          label="Horizontal Home Position"
-          value={config ? `${config.horizontalHomePosition} mm` : "—"}
         />
         <InfoRow
           icon={<MoveVertical size={16} color="#16a34a" />}
@@ -180,14 +180,14 @@ export default function ConfigureRobot() {
         <InfoRow
           icon={<MoveHorizontal size={16} color="#ea580c" />}
           tileBg="#fff7ed"
-          label="Horizontal Homing Direction"
-          value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
+          label="Horizontal Home Position"
+          value={config ? `${config.horizontalHomePosition} mm` : "—"}
         />
         <InfoRow
-          icon={<RotateCcw size={16} color="#0891b2" />}
-          tileBg="#ecfeff"
-          label="J1 Homing Direction"
-          value={config ? dirLabel(config.j1HomingDirection) : "—"}
+          icon={<MoveHorizontal size={16} color="#ea580c" />}
+          tileBg="#fff7ed"
+          label="Horizontal Homing Direction"
+          value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
           last
         />
       </View>
@@ -223,6 +223,9 @@ export default function ConfigureRobot() {
               placeholderTextColor="#9ca3af"
             />
 
+            <Text style={styles.editLabel}>J1 HOMING DIRECTION</Text>
+            <DirectionToggle value={editJ1Dir} onChange={setEditJ1Dir} />
+
             <Text style={styles.editLabel}>VERTICAL HOME POSITION (mm)</Text>
             <TextInput
               style={styles.editInput}
@@ -232,6 +235,9 @@ export default function ConfigureRobot() {
               placeholder="445"
               placeholderTextColor="#9ca3af"
             />
+
+            <Text style={styles.editLabel}>VERTICAL HOMING DIRECTION</Text>
+            <DirectionToggle value={editVerticalDir} onChange={setEditVerticalDir} />
 
             <Text style={styles.editLabel}>HORIZONTAL HOME POSITION (mm)</Text>
             <TextInput
@@ -243,14 +249,8 @@ export default function ConfigureRobot() {
               placeholderTextColor="#9ca3af"
             />
 
-            <Text style={styles.editLabel}>VERTICAL HOMING DIRECTION</Text>
-            <DirectionToggle value={editVerticalDir} onChange={setEditVerticalDir} />
-
             <Text style={styles.editLabel}>HORIZONTAL HOMING DIRECTION</Text>
             <DirectionToggle value={editHorizontalDir} onChange={setEditHorizontalDir} />
-
-            <Text style={styles.editLabel}>J1 HOMING DIRECTION</Text>
-            <DirectionToggle value={editJ1Dir} onChange={setEditJ1Dir} />
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
