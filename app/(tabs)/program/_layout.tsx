@@ -29,6 +29,7 @@ export default function ProgramLayout() {
         }}
       />
       <Stack.Screen name="builder" options={{ headerShown: false }} />
+      <Stack.Screen name="routines" options={{ headerShown: false }} />
     </Stack>
   );
 }

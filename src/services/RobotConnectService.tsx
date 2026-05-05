@@ -613,6 +613,7 @@ export class RobotConnectService {
       name:        program.name,
       description: program.description,
       steps:       program.steps,
+      isRoutine:   program.isRoutine ?? false,
     });
   }
 
