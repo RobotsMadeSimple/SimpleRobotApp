@@ -1,5 +1,5 @@
-import { getSelectedRobot, setSelectedRobot } from "@/src/connections/robotState";
-import { useRobots } from "@/src/providers/RobotProvider";
+import { setSelectedRobot } from "@/src/connections/robotState";
+import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
@@ -84,7 +84,7 @@ const MENU_ITEMS = [
 ];
 
 export default function ConnectedRobot() {
-  const selectedRobot = getSelectedRobot();
+  const selectedRobot = useSelectedRobot();
   const { robots } = useRobots();
 
   const robot =
