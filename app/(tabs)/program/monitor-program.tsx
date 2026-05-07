@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Easing,
   Image,
   ScrollView,
   StyleSheet,
@@ -19,7 +18,7 @@ import {
   View,
 } from "react-native";
 
-// ── Status theming (mirrors index.tsx) ────────────────────────────────────────
+// ── Status theming ────────────────────────────────────────────────────────────
 
 type StatusTheme = { bg: string; text: string; bar: string };
 
@@ -38,7 +37,7 @@ const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
 
 type ActionBtn = { label: string; bg: string; onPress: () => void };
 
-function getButtons(p: ProgramSummary): ActionBtn[] {
+function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   const { name, status } = p;
   switch (status) {
     case "Ready":
@@ -54,17 +53,26 @@ function getButtons(p: ProgramSummary): ActionBtn[] {
     case "Stopped":
       return [
         { label: "Continue", bg: "#2563eb", onPress: () => robotClient.startProgram(name) },
-        { label: "Reset",    bg: "#6b7280", onPress: () => robotClient.resetProgram(name) },
         { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
       ];
     case "Complete":
       return [
-        { label: "Reset",    bg: "#6b7280", onPress: () => robotClient.resetProgram(name) },
+        {
+          label: "Run Again",
+          bg: "#16a34a",
+          onPress: () => {
+            robotClient.resetProgram(name);
+            if (isBuilt) {
+              robotClient.executeBuiltProgram(name).catch(() => {});
+            } else {
+              robotClient.startProgram(name);
+            }
+          },
+        },
         { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
       ];
     case "Error":
       return [
-        { label: "Reset",    bg: "#6b7280", onPress: () => robotClient.resetProgram(name) },
         { label: "Exit",     bg: "#dc2626", onPress: () => robotClient.abortProgram(name) },
       ];
     default:
@@ -72,7 +80,7 @@ function getButtons(p: ProgramSummary): ActionBtn[] {
   }
 }
 
-// ── Screen ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function syntheticSummary(bp: BuiltProgram): ProgramSummary {
   return {
@@ -91,6 +99,8 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
   };
 }
 
+// ── Screen ────────────────────────────────────────────────────────────────────
+
 export default function MonitorProgramScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
   const programName = name ? decodeURIComponent(name) : "";
@@ -98,16 +108,14 @@ export default function MonitorProgramScreen() {
   const builtPrograms       = useBuiltPrograms();
   const builtProgramsLoaded = useBuiltProgramsLoaded();
 
-  // Is this a controller-built program?
   const builtProgram = builtPrograms.find((p) => p.name === programName) ?? null;
   const isBuilt      = builtProgram !== null;
 
-  // Find this program in the live summaries; fall back to synthetic if built but idle
   const liveProgram = programSummaries.find((p) => p.name === programName) ?? null;
   const program: ProgramSummary | null =
     liveProgram ?? (builtProgram ? syntheticSummary(builtProgram) : null);
 
-  // Image fetched once on mount (or when program first appears)
+  // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
   useEffect(() => {
     if (!programName) return;
@@ -117,7 +125,7 @@ export default function MonitorProgramScreen() {
       .catch(() => {});
   }, [programName]);
 
-  // ── Log polling — only while this screen is focused ────────────────────────
+  // ── Log polling ────────────────────────────────────────────────────────────
   const [logs, setLogs] = useState<string[]>([]);
   const [totalLogCount, setTotalLogCount] = useState(0);
   const logsScrollRef = useRef<ScrollView>(null);
@@ -155,23 +163,23 @@ export default function MonitorProgramScreen() {
     }, [programName])
   );
 
-  // Auto-scroll when new logs arrive (only if user was already at the bottom)
   useEffect(() => {
     if (atBottomRef.current && logs.length > 0) {
       setTimeout(() => logsScrollRef.current?.scrollToEnd({ animated: true }), 80);
     }
   }, [logs]);
 
-  // Still waiting for the controller to send the programs list
+  // ── Loading / not-found states ─────────────────────────────────────────────
+
   if (!program && !builtProgramsLoaded) {
     return (
-      <View style={styles.loading}>
+      <View style={styles.root}>
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
         <SubPageHeader title={programName} />
-        <View style={styles.loadingCard}>
+        <View style={styles.centerState}>
           <ActivityIndicator size="large" color="#2563eb" />
-          <Text style={styles.loadingTitle}>{programName}</Text>
-          <Text style={styles.loadingSub}>Loading from controller…</Text>
+          <Text style={styles.centerTitle}>{programName}</Text>
+          <Text style={styles.centerSub}>Loading from controller…</Text>
         </View>
       </View>
     );
@@ -179,61 +187,53 @@ export default function MonitorProgramScreen() {
 
   if (!program) {
     return (
-      <View style={styles.notFound}>
+      <View style={styles.root}>
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
         <SubPageHeader title={programName} />
-        <Box size={40} color="#d1d5db" />
-        <Text style={styles.notFoundText}>Program not found</Text>
-        <Text style={styles.notFoundSub}>"{programName}" is not registered in the controller.</Text>
+        <View style={styles.centerState}>
+          <Box size={40} color="#d1d5db" />
+          <Text style={styles.centerTitle}>Program not found</Text>
+          <Text style={styles.centerSub}>"{programName}" is not registered in the controller.</Text>
+        </View>
       </View>
     );
   }
 
-  // Built programs should always use executeBuiltProgram, not startProgram.
-  // Show "Run" whenever a built program is in a runnable-ready state.
+  // ── Derived state ──────────────────────────────────────────────────────────
+
   const isRunnable = isBuilt && program.status === "Ready";
+  const isActivelyRunning =
+    program.status === "Running" ||
+    program.status === "Starting" ||
+    program.status === "Finishing";
 
   const theme = STATUS_THEME[program.status] ?? STATUS_THEME.Ready;
   const pct =
     program.maxStepCount > 0
       ? Math.round((program.currentStepNumber / program.maxStepCount) * 100)
       : 0;
-  // For built programs in Ready state, we override with the Run button below
-  const buttons = isRunnable ? [] : getButtons(program);
+  const buttons = isRunnable ? [] : getButtons(program, isBuilt);
+  const showActions = buttons.length > 0 || isRunnable;
 
-  // Animated progress bar — use measured pixel width to avoid % interpolation issues
-  const [trackWidth, setTrackWidth] = useState(0);
-  const progressAnim = useRef(new Animated.Value(0)).current;
+  // Progress bar — set directly so it always matches the text, no animation lag
+  const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => {
-    if (trackWidth === 0) return;
-    Animated.timing(progressAnim, {
-      toValue: (pct / 100) * trackWidth,
-      duration: 600,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [pct, trackWidth]);
+    progressAnim.setValue(pct);
+  }, [pct]);
 
-  const isActivelyRunning =
-    program.status === "Running" ||
-    program.status === "Starting" ||
-    program.status === "Finishing";
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <View style={styles.root}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
       <SubPageHeader title={programName} />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── Main card: identity + progress + live controls ── */}
-        <View style={[styles.mainCard, { borderColor: theme.bar + "40" }]}>
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
-          {/* Status badge + built chip */}
-          <View style={[styles.mainCardHeader, { backgroundColor: theme.bg }]}>
+        {/* ── Hero: full-width status banner ── */}
+        <View style={[styles.hero, { backgroundColor: theme.bg }]}>
+          {/* Status + built chip */}
+          <View style={styles.heroTopRow}>
             <View style={[styles.statusBadge, { borderColor: theme.bar + "55" }]}>
               <View style={[styles.statusDot, { backgroundColor: theme.bar }]} />
               <Text style={[styles.statusBadgeText, { color: theme.text }]}>
@@ -248,31 +248,33 @@ export default function MonitorProgramScreen() {
             )}
           </View>
 
-          <View style={styles.mainCardBody}>
-            {/* Image + name / description */}
-            <View style={styles.heroBody}>
-              <View style={[styles.imageWrap, { borderColor: theme.bar + "33" }]}>
-                {image ? (
-                  <Image
-                    source={{ uri: `data:image/png;base64,${image}` }}
-                    style={styles.image}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={[styles.imageFallback, { backgroundColor: theme.bar + "18" }]}>
-                    <Box size={32} color={theme.bar} />
-                  </View>
-                )}
-              </View>
-              <View style={styles.heroInfo}>
-                <Text style={styles.heroName}>{program.name}</Text>
-                <Text style={styles.heroDesc} numberOfLines={2}>
-                  {program.description || "No description"}
-                </Text>
-              </View>
+          {/* Image + name/description */}
+          <View style={styles.heroIdentity}>
+            <View style={[styles.imageWrap, { borderColor: theme.bar + "33" }]}>
+              {image ? (
+                <Image
+                  source={{ uri: `data:image/png;base64,${image}` }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.imageFallback, { backgroundColor: theme.bar + "22" }]}>
+                  <Box size={28} color={theme.bar} />
+                </View>
+              )}
             </View>
+            <View style={styles.heroInfo}>
+              <Text style={styles.heroName}>{program.name}</Text>
+              <Text style={styles.heroDesc} numberOfLines={2}>
+                {program.description || "No description"}
+              </Text>
+            </View>
+          </View>
+        </View>
 
-            {/* Alerts */}
+        {/* ── Alerts (inline, no card) ── */}
+        {(!!program.errorDescription || !!program.warningDescription) && (
+          <View style={styles.alertsSection}>
             {!!program.errorDescription && (
               <View style={styles.alertRow}>
                 <XCircle size={14} color="#dc2626" />
@@ -285,130 +287,136 @@ export default function MonitorProgramScreen() {
                 <Text style={styles.warnText} numberOfLines={2}>{program.warningDescription}</Text>
               </View>
             )}
-
-            {/* Divider */}
-            <View style={styles.divider} />
-
-            {/* Progress */}
-            <View style={styles.progressHeader}>
-              <Text style={styles.sectionLabel}>PROGRESS</Text>
-              <Text style={styles.progressMeta}>
-                <Text style={[styles.progressMetaBold, { color: theme.text }]}>
-                  {program.currentStepNumber}
-                </Text>
-                <Text style={styles.progressMetaMuted}> / {program.maxStepCount} steps</Text>
-              </Text>
-            </View>
-
-            <View
-              style={styles.progressTrack}
-              onLayout={e => setTrackWidth(e.nativeEvent.layout.width)}
-            >
-              <Animated.View
-                style={[
-                  styles.progressFill,
-                  { width: progressAnim, backgroundColor: theme.bar },
-                ]}
-              />
-            </View>
-            <Text style={[styles.progressPct, { color: theme.text }]}>{pct}%</Text>
-
-            {!!program.currentStepDescription && (
-              <View style={[styles.stepDescRow, { borderLeftColor: theme.bar }]}>
-                <Text style={styles.stepDescLabel}>CURRENT STEP</Text>
-                <Text style={styles.stepDescText}>{program.currentStepDescription}</Text>
-              </View>
-            )}
-
-            {/* Live control buttons */}
-            {(buttons.length > 0 || isRunnable) && (
-              <>
-                <View style={styles.divider} />
-                <View style={styles.liveButtons}>
-                  {isRunnable ? (
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
-                      onPress={() => robotClient.executeBuiltProgram(programName).catch(() => {})}
-                      activeOpacity={0.8}
-                    >
-                      <Play size={15} color="#fff" />
-                      <Text style={styles.actionBtnText}>Run</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    buttons.map((btn) => (
-                      <TouchableOpacity
-                        key={btn.label}
-                        style={[styles.actionBtn, { backgroundColor: btn.bg }]}
-                        onPress={btn.onPress}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.actionBtnText}>{btn.label}</Text>
-                      </TouchableOpacity>
-                    ))
-                  )}
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-
-        {/* ── Controller program actions (built only) ──── */}
-        {isBuilt && (
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>CONTROLLER PROGRAM</Text>
-            <View style={styles.controllerActions}>
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() =>
-                  router.push(`/program/builder?name=${encodeURIComponent(programName)}`)
-                }
-                activeOpacity={0.8}
-              >
-                <Edit2 size={15} color="#2563eb" />
-                <Text style={styles.editBtnText}>Edit Program</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.deleteBtn}
-                disabled={isActivelyRunning}
-                onPress={() =>
-                  Alert.alert(
-                    "Delete Program",
-                    `Delete "${programName}"? This cannot be undone.`,
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      {
-                        text: "Delete",
-                        style: "destructive",
-                        onPress: async () => {
-                          await robotClient.deleteBuiltProgram(programName).catch(() => {});
-                          robotClient.getBuiltPrograms().catch(() => {});
-                          router.back();
-                        },
-                      },
-                    ]
-                  )
-                }
-                activeOpacity={0.8}
-              >
-                <Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />
-                <Text style={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}>
-                  Delete Program
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
         )}
 
-        {/* ── Logs card ────────────────────────────────── */}
-        <View style={styles.card}>
-          <View style={styles.logHeader}>
-            <Text style={styles.sectionLabel}>PROGRAM LOG</Text>
-            <View style={styles.logCountBadge}>
-              <Text style={styles.logCountText}>{totalLogCount}</Text>
-            </View>
+        {/* ── Progress section ── */}
+        <View style={styles.section}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.sectionLabel}>PROGRESS</Text>
+            <Text style={styles.progressMeta}>
+              <Text style={[styles.progressMetaBold, { color: theme.text }]}>
+                {program.currentStepNumber}
+              </Text>
+              <Text style={styles.progressMetaMuted}> / {program.maxStepCount} steps</Text>
+            </Text>
           </View>
 
+          <View style={styles.progressTrack}>
+            <Animated.View
+              style={[
+                styles.progressFill,
+                {
+                  width: progressAnim.interpolate({
+                    inputRange:  [0, 100],
+                    outputRange: ["0%", "100%"],
+                    extrapolate: "clamp",
+                  }),
+                  backgroundColor: theme.bar,
+                },
+              ]}
+            />
+          </View>
+          <Text style={[styles.progressPct, { color: theme.text }]}>{pct}%</Text>
+
+          {!!program.currentStepDescription && (
+            <View style={[styles.stepDescRow, { borderLeftColor: theme.bar }]}>
+              <Text style={styles.stepDescLabel}>CURRENT STEP</Text>
+              <Text style={styles.stepDescText}>{program.currentStepDescription}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── Action buttons ── */}
+        {showActions && (
+          <>
+            <View style={styles.sectionDivider} />
+            <View style={styles.actionsSection}>
+              {isRunnable ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
+                  onPress={() => robotClient.executeBuiltProgram(programName).catch(() => {})}
+                  activeOpacity={0.8}
+                >
+                  <Play size={15} color="#fff" />
+                  <Text style={styles.actionBtnText}>Run Program</Text>
+                </TouchableOpacity>
+              ) : (
+                buttons.map((btn) => (
+                  <TouchableOpacity
+                    key={btn.label}
+                    style={[styles.actionBtn, { backgroundColor: btn.bg }]}
+                    onPress={btn.onPress}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.actionBtnText}>{btn.label}</Text>
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          </>
+        )}
+
+        {/* ── Program management (built only) ── */}
+        {isBuilt && (
+          <>
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>PROGRAM</Text>
+              <View style={styles.managementRow}>
+                <TouchableOpacity
+                  style={styles.editBtn}
+                  onPress={() =>
+                    router.push(`/program/builder?name=${encodeURIComponent(programName)}`)
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Edit2 size={15} color="#2563eb" />
+                  <Text style={styles.editBtnText}>Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.deleteBtn, isActivelyRunning && styles.deleteBtnDisabled]}
+                  disabled={isActivelyRunning}
+                  onPress={() =>
+                    Alert.alert(
+                      "Delete Program",
+                      `Delete "${programName}"? This cannot be undone.`,
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Delete",
+                          style: "destructive",
+                          onPress: async () => {
+                            await robotClient.deleteBuiltProgram(programName).catch(() => {});
+                            robotClient.getBuiltPrograms().catch(() => {});
+                            router.back();
+                          },
+                        },
+                      ]
+                    )
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />
+                  <Text style={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}>
+                    Delete
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
+
+        {/* ── Logs ── */}
+        <View style={styles.gapBand} />
+        <View style={styles.logsSection}>
+          <View style={styles.logHeader}>
+            <Text style={styles.logSectionLabel}>PROGRAM LOG</Text>
+            <View style={styles.logCountBadge}>
+              <Text style={styles.logCountText}>{totalLogCount} entries</Text>
+            </View>
+          </View>
           <ScrollView
             ref={logsScrollRef}
             style={styles.logsScroll}
@@ -432,6 +440,8 @@ export default function MonitorProgramScreen() {
             )}
           </ScrollView>
         </View>
+
+        <View style={{ height: 48 }} />
       </ScrollView>
     </View>
   );
@@ -439,45 +449,25 @@ export default function MonitorProgramScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const SHADOW = {
-  shadowColor: "#000",
-  shadowOpacity: 0.07,
-  shadowRadius: 8,
-  shadowOffset: { width: 0, height: 2 },
-  elevation: 3,
-} as const;
-
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: "#f3f4f6" },
-  scroll:  { flex: 1 },
-  content: { padding: 16, paddingBottom: 48, gap: 12 },
+  root:   { flex: 1, backgroundColor: "#f3f4f6" },
+  scroll: { flex: 1 },
 
-  // ── Loading ────────────────────────────────────────────────────────────────
-  loading: {
-    flex: 1, backgroundColor: "#f3f4f6",
-    alignItems: "center", justifyContent: "center",
-    padding: 32,
+  // ── Center states (loading / not-found) ───────────────────────────────────
+  centerState: {
+    flex: 1, alignItems: "center", justifyContent: "center",
+    gap: 12, padding: 32,
   },
-  loadingCard: {
-    backgroundColor: "#fff", borderRadius: 20,
-    paddingVertical: 36, paddingHorizontal: 32,
-    alignItems: "center", gap: 14,
-    shadowColor: "#000", shadowOpacity: 0.08,
-    shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 6,
-    minWidth: 240,
-  },
-  loadingTitle: { fontSize: 17, fontWeight: "700", color: "#111827", textAlign: "center" },
-  loadingSub:   { fontSize: 13, color: "#9ca3af" },
+  centerTitle: { fontSize: 17, fontWeight: "700", color: "#111827", textAlign: "center" },
+  centerSub:   { fontSize: 13, color: "#9ca3af", textAlign: "center", lineHeight: 20 },
 
-  // ── Not-found ──────────────────────────────────────────────────────────────
-  notFound: {
-    flex: 1, backgroundColor: "#f3f4f6",
-    alignItems: "center", justifyContent: "center",
-    gap: 10, padding: 32,
+  // ── Hero ───────────────────────────────────────────────────────────────────
+  hero: {
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24, gap: 16,
   },
-  notFoundText: { fontSize: 18, fontWeight: "700", color: "#374151" },
-  notFoundSub:  { fontSize: 13, color: "#9ca3af", textAlign: "center", lineHeight: 20 },
-
+  heroTopRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+  },
   statusBadge: {
     flexDirection: "row", alignItems: "center",
     gap: 7, borderWidth: 1, borderRadius: 20,
@@ -492,47 +482,51 @@ const styles = StyleSheet.create({
   },
   builtChipText: { fontSize: 11, fontWeight: "700", color: "#2563eb", letterSpacing: 0.5 },
 
-  heroBody: { flexDirection: "row", gap: 14, alignItems: "center" },
+  heroIdentity: { flexDirection: "row", gap: 16, alignItems: "center" },
   imageWrap: {
-    width: 80, height: 80, borderRadius: 14,
+    width: 72, height: 72, borderRadius: 14,
     overflow: "hidden", borderWidth: 1.5,
   },
-  image: { width: 80, height: 80 },
+  image:        { width: 72, height: 72 },
   imageFallback: {
-    width: 80, height: 80, borderRadius: 14,
+    width: 72, height: 72,
     justifyContent: "center", alignItems: "center",
   },
-  heroInfo:  { flex: 1, gap: 5 },
+  heroInfo:  { flex: 1, gap: 4 },
   heroName:  { fontSize: 20, fontWeight: "700", color: "#111827", lineHeight: 26 },
   heroDesc:  { fontSize: 13, color: "#6b7280", lineHeight: 18 },
 
+  // ── Alerts section ─────────────────────────────────────────────────────────
+  alertsSection: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 20, paddingVertical: 14,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "#e5e7eb",
+  },
   alertRow:  { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   errorText: { flex: 1, fontSize: 13, color: "#dc2626", lineHeight: 18 },
   warnText:  { flex: 1, fontSize: 13, color: "#ea580c", lineHeight: 18 },
 
-  // ── White card (shared) ────────────────────────────────────────────────────
-  card: {
-    backgroundColor: "#fff", borderRadius: 16, padding: 16, gap: 10,
-    ...SHADOW,
+  // ── Generic section (white bg) ─────────────────────────────────────────────
+  section: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 20, paddingVertical: 18,
+    gap: 12,
   },
   sectionLabel: {
     fontSize: 10, fontWeight: "700", color: "#9ca3af",
     letterSpacing: 1, textTransform: "uppercase",
   },
-
-  // ── Main card ──────────────────────────────────────────────────────────────
-  mainCard: {
-    backgroundColor: "#fff", borderRadius: 18,
-    borderWidth: 1.5, overflow: "hidden",
-    ...SHADOW,
+  sectionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#e5e7eb",
+    marginHorizontal: 20,
   },
-  mainCardHeader: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    paddingHorizontal: 16, paddingVertical: 12,
-  },
-  mainCardBody: { padding: 16, gap: 12 },
 
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: "#e5e7eb" },
+  // ── Gap band (gray strip between major sections) ───────────────────────────
+  gapBand: { height: 10, backgroundColor: "#f3f4f6" },
 
   // ── Progress ───────────────────────────────────────────────────────────────
   progressHeader: {
@@ -558,16 +552,20 @@ const styles = StyleSheet.create({
   },
   stepDescText: { fontSize: 14, color: "#1f2937", lineHeight: 20 },
 
-  // ── Live control buttons (inside main card) ────────────────────────────────
-  liveButtons: { flexDirection: "row", gap: 10 },
+  // ── Actions section ────────────────────────────────────────────────────────
+  actionsSection: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: "row", gap: 10,
+  },
   actionBtn: {
-    flex: 1, flexDirection: "row", paddingVertical: 12,
-    borderRadius: 10, alignItems: "center", justifyContent: "center", gap: 6,
+    flex: 1, flexDirection: "row", paddingVertical: 13,
+    borderRadius: 11, alignItems: "center", justifyContent: "center", gap: 6,
   },
   actionBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
 
-  // ── Controller program card ────────────────────────────────────────────────
-  controllerActions: { flexDirection: "row", gap: 10 },
+  // ── Management (edit / delete) ─────────────────────────────────────────────
+  managementRow: { flexDirection: "row", gap: 10 },
   editBtn: {
     flex: 1, flexDirection: "row", paddingVertical: 12,
     borderRadius: 10, alignItems: "center", justifyContent: "center", gap: 6,
@@ -579,20 +577,30 @@ const styles = StyleSheet.create({
     borderRadius: 10, alignItems: "center", justifyContent: "center", gap: 6,
     borderWidth: 1.5, borderColor: "#fca5a5", backgroundColor: "#fef2f2",
   },
+  deleteBtnDisabled: { opacity: 0.5 },
   deleteBtnText:         { color: "#dc2626", fontSize: 14, fontWeight: "700" },
   deleteBtnTextDisabled: { color: "#fca5a5" },
 
-  // ── Logs card ──────────────────────────────────────────────────────────────
+  // ── Logs ───────────────────────────────────────────────────────────────────
+  logsSection: {
+    backgroundColor: "#0f172a",
+    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 16,
+    gap: 10,
+  },
   logHeader: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
   },
+  logSectionLabel: {
+    fontSize: 10, fontWeight: "700", color: "#475569",
+    letterSpacing: 1, textTransform: "uppercase",
+  },
   logCountBadge: {
-    backgroundColor: "#f3f4f6", borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 10,
     paddingHorizontal: 8, paddingVertical: 2,
   },
-  logCountText:  { fontSize: 11, fontWeight: "600", color: "#6b7280" },
+  logCountText: { fontSize: 11, fontWeight: "600", color: "#64748b" },
   logsScroll: {
-    height: 260, backgroundColor: "#0f172a", borderRadius: 10, padding: 10,
+    height: 260, borderRadius: 8,
   },
   logsEmpty:    { color: "#64748b", fontSize: 13, fontStyle: "italic" },
   logEntry:     { flexDirection: "row", gap: 10, paddingVertical: 3, paddingHorizontal: 2 },
