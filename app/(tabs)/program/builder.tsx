@@ -10,9 +10,11 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  ClipboardPaste,
   Clock,
+  Copy,
   Cpu,
-  Edit2,
+  Gauge,
   GripVertical,
   ImagePlus,
   MessageSquare,
@@ -32,10 +34,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Image,
-  KeyboardAvoidingView,
   Modal,
   PanResponder,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -47,6 +47,109 @@ import {
 } from "react-native";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Numeric input with local text state.
+ * - Never auto-fills while typing (empty field stays empty).
+ * - On blur, reverts to the last valid value if the field is empty or invalid.
+ * - No selectTextOnFocus to avoid the highlight-overwrite issue.
+ */
+function NumericInput({
+  value,
+  onChange,
+  style,
+  autoFocus,
+  placeholder,
+}: {
+  value: number | undefined;
+  onChange: (n: number) => void;
+  style?: any;
+  autoFocus?: boolean;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(value !== undefined ? String(value) : "");
+  const lastValid = useRef<number | undefined>(value);
+
+  // Sync when the draft value changes externally (e.g. modal re-opens)
+  useEffect(() => {
+    if (value !== undefined && value !== lastValid.current) {
+      setText(String(value));
+      lastValid.current = value;
+    }
+  }, [value]);
+
+  return (
+    <TextInput
+      style={style}
+      value={text}
+      onChangeText={raw => {
+        setText(raw);
+        const n = parseFloat(raw);
+        if (!isNaN(n)) {
+          onChange(n);
+          lastValid.current = n;
+        }
+      }}
+      onBlur={() => {
+        const n = parseFloat(text);
+        if (isNaN(n) || text.trim() === "") {
+          const fallback = lastValid.current ?? 0;
+          setText(String(fallback));
+          onChange(fallback);
+        }
+      }}
+      keyboardType="numeric"
+      autoFocus={autoFocus}
+      placeholder={placeholder}
+      placeholderTextColor="#9ca3af"
+    />
+  );
+}
+
+/**
+ * Like NumericInput but allows clearing the field back to undefined ("use default").
+ * Empty field on blur stays empty and calls onChange(undefined).
+ */
+function OptionalNumericInput({
+  value,
+  onChange,
+  style,
+  placeholder = "default",
+}: {
+  value: number | undefined;
+  onChange: (n: number | undefined) => void;
+  style?: any;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(value !== undefined ? String(value) : "");
+
+  useEffect(() => {
+    setText(value !== undefined ? String(value) : "");
+  }, [value]);
+
+  return (
+    <TextInput
+      style={style}
+      value={text}
+      onChangeText={raw => {
+        setText(raw);
+        const n = parseFloat(raw);
+        if (!isNaN(n)) onChange(n);
+        else if (raw.trim() === "") onChange(undefined);
+      }}
+      onBlur={() => {
+        const n = parseFloat(text);
+        if (isNaN(n) || text.trim() === "") {
+          setText("");
+          onChange(undefined);
+        }
+      }}
+      keyboardType="numeric"
+      placeholder={placeholder}
+      placeholderTextColor="#9ca3af"
+    />
+  );
+}
 
 /** Controlled numeric input that accepts negative numbers and decimals only. */
 function SignedNumberInput({
@@ -114,7 +217,55 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "Loop":         return <RefreshCw     size={size} color={color} />;
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
     case "CallRoutine":  return <Repeat2       size={size} color={color} />;
+    case "SetSpeedL":
+    case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
     default:             return <Cpu           size={size} color={color} />;
+  }
+}
+
+// ── Step theme + card detail ──────────────────────────────────────────────────
+
+const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: string; label: string }> = {
+  MoveL:        { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Linear"  },
+  MoveJ:        { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Joint"   },
+  SetOutput:    { accent: "#ea580c", iconBg: "#fed7aa", iconColor: "#ea580c", label: "Set Output"   },
+  Wait:         { accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait"         },
+  Loop:         { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Loop"         },
+  StatusUpdate: { accent: "#475569", iconBg: "#e2e8f0", iconColor: "#475569", label: "Status Update"},
+  CallRoutine:  { accent: "#16a34a", iconBg: "#bbf7d0", iconColor: "#16a34a", label: "Call Routine" },
+  SetSpeedL:    { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed (Linear)" },
+  SetSpeedJ:    { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Set Speed (Joint)" },
+};
+
+function stepDetail(step: ProgramStep): string | null {
+  switch (step.type) {
+    case "MoveL":
+    case "MoveJ": {
+      const parts: string[] = [];
+      if (step.pointName) parts.push(`→ ${step.pointName}`);
+      if (step.speed != null) parts.push(`${step.speed} mm/s`);
+      return parts.length ? parts.join("  ·  ") : null;
+    }
+    case "SetOutput":
+      return `Output ${step.outputNumber ?? 1}  →  ${step.outputValue ? "ON" : "OFF"}`;
+    case "Wait":
+      return `${step.waitMs ?? 0} ms`;
+    case "Loop":
+      return `×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
+    case "StatusUpdate":
+      return step.statusMessage || null;
+    case "CallRoutine":
+      return step.routineName ? `→ ${step.routineName}` : null;
+    case "SetSpeedL":
+    case "SetSpeedJ": {
+      const parts: string[] = [];
+      if (step.speed != null)  parts.push(`${step.speed} mm/s`);
+      if (step.accel != null)  parts.push(`accel ${step.accel}`);
+      if (step.decel != null)  parts.push(`decel ${step.decel}`);
+      return parts.length ? parts.join("  ·  ") : null;
+    }
+    default:
+      return null;
   }
 }
 
@@ -126,6 +277,8 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "Loop",         label: "Loop",          desc: "Repeat a block of steps N times" },
   { type: "StatusUpdate", label: "Status Update", desc: "Publish a message, warning, or error to the monitor" },
   { type: "CallRoutine",  label: "Call Routine",  desc: "Run a saved routine inline then continue" },
+  { type: "SetSpeedL",    label: "Set Speed (Linear)", desc: "Update the linear move speed, accel and decel" },
+  { type: "SetSpeedJ",    label: "Set Speed (Joint)",  desc: "Update the joint move speed, accel and decel" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -264,22 +417,20 @@ function StepConfigModal({
       case "speed":
         return (
           <>
-            <Text style={ms.fieldLabel}>SPEED  (mm/s)</Text>
-            <TextInput style={ms.input} value={String(draft!.speed ?? 100)}
-              onChangeText={v => set({ speed: parseFloat(v) || 100 })}
-              keyboardType="numeric" selectTextOnFocus autoFocus />
+            <Text style={ms.hintText}>Leave blank to use the robot's current speed setting.</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 10 }]}>SPEED  (mm/s)</Text>
+            <OptionalNumericInput style={ms.input} value={draft!.speed}
+              onChange={v => set({ speed: v })} placeholder="default" />
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
-                <TextInput style={ms.input} value={String(draft!.accel ?? 100)}
-                  onChangeText={v => set({ accel: parseFloat(v) || 100 })}
-                  keyboardType="numeric" selectTextOnFocus />
+                <OptionalNumericInput style={ms.input} value={draft!.accel}
+                  onChange={v => set({ accel: v })} placeholder="default" />
               </View>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
-                <TextInput style={ms.input} value={String(draft!.decel ?? 100)}
-                  onChangeText={v => set({ decel: parseFloat(v) || 100 })}
-                  keyboardType="numeric" selectTextOnFocus />
+                <OptionalNumericInput style={ms.input} value={draft!.decel}
+                  onChange={v => set({ decel: v })} placeholder="default" />
               </View>
             </View>
           </>
@@ -365,8 +516,8 @@ function StepConfigModal({
             </TouchableOpacity>
             <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("speed")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Speed &amp; Accel</Text>
-                <Text style={ms.subRowValue}>{draft!.speed ?? 100} mm/s</Text>
+                <Text style={ms.subRowLabel}>Override Speed</Text>
+                <Text style={ms.subRowValue}>{draft!.speed != null ? `${draft!.speed} mm/s` : "Default"}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
@@ -474,21 +625,50 @@ function StepConfigModal({
           </>
         );
 
+      case "SetSpeedL":
+      case "SetSpeedJ": {
+        const isLinear = draft!.type === "SetSpeedL";
+        return (
+          <>
+            <Text style={ms.hintText}>
+              {isLinear
+                ? "Sets the linear (MoveL) speed for all subsequent moves until changed again."
+                : "Sets the joint (MoveJ) speed for all subsequent moves until changed again."}
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (mm/s)</Text>
+            <NumericInput style={ms.input} value={draft!.speed ?? 100}
+              onChange={v => set({ speed: v })} autoFocus />
+            <View style={ms.twoCol}>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
+                <NumericInput style={ms.input} value={draft!.accel ?? 100}
+                  onChange={v => set({ accel: v })} />
+              </View>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
+                <NumericInput style={ms.input} value={draft!.decel ?? 100}
+                  onChange={v => set({ decel: v })} />
+              </View>
+            </View>
+          </>
+        );
+      }
+
       default:
         return null;
     }
   }
 
   const subPageTitle: Record<NonNullable<SubPage>, string> = {
-    point: "Select Point", speed: "Speed & Accel",
+    point: "Select Point", speed: "Override Speed",
     posOffset: "Position Offset", toolOffset: "Tool Offset",
   };
 
-  const isMove = draft.type === "MoveL" || draft.type === "MoveJ";
+  const isMove    = draft.type === "MoveL" || draft.type === "MoveJ";
+  const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ";
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <Pressable style={ms.overlay} onPress={() => subPage ? setSubPage(null) : onClose()}>
           <Pressable style={ms.card} onPress={() => {}}>
             {/* Header */}
@@ -509,12 +689,16 @@ function StepConfigModal({
                 renderSubPage()
               ) : (
                 <>
-                  {/* Step name — all step types */}
-                  <Text style={ms.fieldLabel}>STEP NAME  (optional)</Text>
-                  <TextInput style={[ms.input, { marginBottom: 14 }]}
-                    value={draft!.name ?? ""} onChangeText={v => set({ name: v || undefined })}
-                    placeholder="e.g. Pick part, Place on conveyor…" placeholderTextColor="#c4c4c4"
-                    returnKeyType="next" />
+                  {/* Step name — all step types except SetSpeed */}
+                  {!isSetSpeed && (
+                    <>
+                      <Text style={ms.fieldLabel}>STEP NAME  (optional)</Text>
+                      <TextInput style={[ms.input, { marginBottom: 14 }]}
+                        value={draft!.name ?? ""} onChangeText={v => set({ name: v || undefined })}
+                        placeholder="e.g. Pick part, Place on conveyor…" placeholderTextColor="#c4c4c4"
+                        returnKeyType="next" />
+                    </>
+                  )}
 
                   {/* Status description — move steps only */}
                   {isMove && (
@@ -530,6 +714,8 @@ function StepConfigModal({
                   {/* Sub-row buttons for moves, inline body for everything else */}
                   {isMove ? (
                     <View style={ms.subRowCard}>{renderMainBody()}</View>
+                  ) : isSetSpeed ? (
+                    renderMainBody()
                   ) : (
                     renderMainBody()
                   )}
@@ -564,27 +750,40 @@ function StepConfigModal({
             )}
           </Pressable>
         </Pressable>
-      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 // ── Insert divider ────────────────────────────────────────────────────────────
 
-function InsertDivider({ onPress, inner }: { onPress: () => void; inner?: boolean }) {
+function InsertDivider({
+  onPress,
+  onPaste,
+  inner,
+  disabled,
+}: {
+  onPress: () => void;
+  onPaste?: () => void;
+  inner?: boolean;
+  disabled?: boolean;
+}) {
   return (
-    <TouchableOpacity
-      style={[styles.insertDivider, inner && styles.insertDividerInner]}
-      onPress={onPress}
-      activeOpacity={0.6}
-      hitSlop={4}
-    >
+    <View style={[styles.insertDivider, inner && styles.insertDividerInner]}>
       <View style={styles.insertLine} />
-      <View style={styles.insertBtn}>
-        <Plus size={10} color="#2563eb" />
-      </View>
+      <TouchableOpacity onPress={disabled ? undefined : onPress} activeOpacity={disabled ? 1 : 0.6} hitSlop={4} disabled={disabled}>
+        <View style={styles.insertBtn}>
+          <Plus size={10} color={disabled ? "#d1d5db" : "#2563eb"} />
+        </View>
+      </TouchableOpacity>
+      {onPaste && (
+        <TouchableOpacity onPress={disabled ? undefined : onPaste} activeOpacity={disabled ? 1 : 0.6} hitSlop={4} disabled={disabled}>
+          <View style={styles.insertPasteBtn}>
+            <ClipboardPaste size={10} color={disabled ? "#d1d5db" : "#7c3aed"} />
+          </View>
+        </TouchableOpacity>
+      )}
       <View style={styles.insertLine} />
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -633,15 +832,17 @@ function DragHandle({
   );
 }
 
-// ── Loop inner row ─────────────────────────────────────────────────────────────
+// ── Loop inner card ────────────────────────────────────────────────────────────
 
 function LoopInnerRow({
   step,
   index,
   loopId,
   isBeingDragged,
-  isDropTarget,
+  isDropAbove,
+  isDropBelow,
   onEdit,
+  onCopy,
   onDelete,
   onDragStart,
   onDragMove,
@@ -652,24 +853,30 @@ function LoopInnerRow({
   index: number;
   loopId: string;
   isBeingDragged: boolean;
-  isDropTarget: boolean;
+  isDropAbove: boolean;
+  isDropBelow: boolean;
   onEdit: () => void;
+  onCopy: () => void;
   onDelete: () => void;
   onDragStart: (id: string, loopId?: string) => void;
   onDragMove: (id: string, dy: number, loopId?: string) => void;
   onDragEnd: (id: string, loopId?: string) => void;
   onItemLayout: (id: string, height: number) => void;
 }) {
+  const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  const detail = stepDetail(step);
+
   return (
     <View
       onLayout={e => onItemLayout(step.id, e.nativeEvent.layout.height)}
       style={[
         isBeingDragged && styles.draggingItem,
-        isDropTarget   && styles.dropTargetItem,
+        isDropAbove    && styles.dropTargetItemTop,
+        isDropBelow    && styles.dropTargetItemBottom,
       ]}
     >
       <TouchableOpacity
-        style={[styles.stepRow, styles.stepRowIndentDeep]}
+        style={[styles.innerCard, { borderLeftColor: theme.accent }]}
         onPress={onEdit}
         activeOpacity={0.75}
       >
@@ -680,25 +887,24 @@ function LoopInnerRow({
           onMove={onDragMove}
           onEnd={onDragEnd}
         />
-        <View style={[styles.stepIndexBadge, styles.stepIndexBadgeInner]}>
-          <Text style={styles.stepIndexText}>{index + 1}</Text>
+        <View style={[styles.stepCardIcon, styles.stepCardIconSmall, { backgroundColor: theme.iconBg }]}>
+          <StepIcon type={step.type} size={15} color={theme.iconColor} />
         </View>
-        <View style={[styles.stepIconTile, styles.stepIconTileInner]}>
-          <StepIcon type={step.type} size={14} color="#7c3aed" />
-        </View>
-        <View style={styles.stepLabelCol}>
-          <Text style={styles.stepLabel} numberOfLines={1}>
-            {step.name || stepLabel(step)}
+        <View style={styles.stepCardText}>
+          <Text style={[styles.stepCardType, { color: theme.accent }]}>
+            {index + 1} · {theme.label.toUpperCase()}
           </Text>
-          {step.name && (
-            <Text style={styles.stepSubLabel} numberOfLines={1}>{stepLabel(step)}</Text>
-          )}
-          {step.statusMessage && (
-            <Text style={styles.stepStatusHint} numberOfLines={1}>{step.statusMessage}</Text>
+          <Text style={styles.stepCardName} numberOfLines={1}>
+            {step.name || (detail ?? step.type)}
+          </Text>
+          {step.name && detail && (
+            <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
           )}
         </View>
-
-        <TouchableOpacity onPress={onDelete} hitSlop={6} style={styles.stepAction} activeOpacity={0.7}>
+        <TouchableOpacity onPress={onCopy}   hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
+          <Copy   size={14} color="#9ca3af" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onDelete} hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
           <Trash2 size={14} color="#ef4444" />
         </TouchableOpacity>
       </TouchableOpacity>
@@ -706,109 +912,121 @@ function LoopInnerRow({
   );
 }
 
-// ── Top-level step row ─────────────────────────────────────────────────────────
+// ── Top-level step card ────────────────────────────────────────────────────────
 
 function StepRow({
   step,
   index,
   isLast,
   isBeingDragged,
-  isDropTarget,
+  isDropAbove,
+  isDropBelow,
   isDragging,
   collapsed,
   innerDrag,
   onToggleCollapse,
   onEdit,
+  onCopy,
   onDelete,
   onDragStart,
   onDragMove,
   onDragEnd,
   onInsertAfter,
+  onPasteAfter,
   onInsertInner,
+  onPasteInner,
   onEditInner,
+  onCopyInner,
   onDeleteInner,
   onInsertAfterInner,
+  onPasteAfterInner,
   onItemLayout,
 }: {
   step: ProgramStep;
   index: number;
   isLast: boolean;
   isBeingDragged: boolean;
-  isDropTarget: boolean;
+  isDropAbove: boolean;
+  isDropBelow: boolean;
   isDragging: boolean;
   collapsed: boolean;
   innerDrag: DragInfo | null;
   onToggleCollapse: () => void;
   onEdit: () => void;
+  onCopy: () => void;
   onDelete: () => void;
   onDragStart: (id: string, loopId?: string) => void;
   onDragMove: (id: string, dy: number, loopId?: string) => void;
   onDragEnd: (id: string, loopId?: string) => void;
   onInsertAfter: () => void;
+  onPasteAfter?: () => void;
   onInsertInner: () => void;
+  onPasteInner?: () => void;
   onEditInner: (inner: ProgramStep) => void;
+  onCopyInner: (inner: ProgramStep) => void;
   onDeleteInner: (id: string) => void;
   onInsertAfterInner: (afterIndex: number) => void;
+  onPasteAfterInner?: (afterIndex: number) => void;
   onItemLayout: (id: string, height: number) => void;
 }) {
   const isLoop     = step.type === "Loop";
   const innerSteps = step.loopSteps ?? [];
   const isExpanded = isLoop && !collapsed;
+  const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  const detail = stepDetail(step);
 
   return (
     <View
       onLayout={e => onItemLayout(step.id, e.nativeEvent.layout.height)}
       style={[
         isBeingDragged && styles.draggingItem,
-        isDropTarget   && styles.dropTargetItem,
+        isDropAbove    && styles.dropTargetItemTop,
+        isDropBelow    && styles.dropTargetItemBottom,
       ]}
     >
-      {/* Main row */}
-      <TouchableOpacity style={styles.stepRow} onPress={onEdit} activeOpacity={0.75}>
-        <DragHandle stepId={step.id} onStart={onDragStart} onMove={onDragMove} onEnd={onDragEnd} />
+      <View style={[styles.stepCard, { borderLeftColor: theme.accent }]}>
 
-        <View style={styles.stepIndexBadge}>
-          <Text style={styles.stepIndexText}>{index + 1}</Text>
-        </View>
-        <View style={styles.stepIconTile}>
-          <StepIcon type={step.type} size={16} color="#2563eb" />
-        </View>
-        <View style={styles.stepLabelCol}>
-          <Text style={styles.stepLabel} numberOfLines={1}>
-            {step.name || stepLabel(step)}
-          </Text>
-          {step.name && (
-            <Text style={styles.stepSubLabel} numberOfLines={1}>{stepLabel(step)}</Text>
-          )}
-          {step.statusMessage && (
-            <Text style={styles.stepStatusHint} numberOfLines={1}>{step.statusMessage}</Text>
-          )}
-        </View>
+        {/* Card header row */}
+        <TouchableOpacity style={styles.stepCardHeader} onPress={onEdit} activeOpacity={0.75}>
+          <DragHandle stepId={step.id} onStart={onDragStart} onMove={onDragMove} onEnd={onDragEnd} />
 
-        {/* Loop collapse toggle */}
-        {isLoop && (
-          <TouchableOpacity onPress={onToggleCollapse} hitSlop={8} style={styles.stepAction} activeOpacity={0.7}>
-            {collapsed
-              ? <ChevronDown size={15} color="#9ca3af" />
-              : <ChevronUp   size={15} color="#9ca3af" />}
+          <View style={[styles.stepCardIcon, { backgroundColor: theme.iconBg }]}>
+            <StepIcon type={step.type} size={18} color={theme.iconColor} />
+          </View>
+
+          <View style={styles.stepCardText}>
+            <Text style={[styles.stepCardType, { color: theme.accent }]}>
+              {index + 1} · {theme.label.toUpperCase()}
+            </Text>
+            <Text style={styles.stepCardName} numberOfLines={1}>
+              {step.name || (detail ?? step.type)}
+            </Text>
+            {step.name && detail && (
+              <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
+            )}
+            {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
+              <Text style={styles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
+            )}
+          </View>
+
+          {isLoop && (
+            <TouchableOpacity onPress={onToggleCollapse} hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
+              {collapsed ? <ChevronDown size={16} color="#9ca3af" /> : <ChevronUp size={16} color="#9ca3af" />}
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={onCopy}   hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
+            <Copy   size={15} color="#9ca3af" />
           </TouchableOpacity>
-        )}
-
-        <TouchableOpacity onPress={onEdit}   hitSlop={6} style={styles.stepAction} activeOpacity={0.7}>
-          <Edit2  size={15} color="#9ca3af" />
+          <TouchableOpacity onPress={onDelete} hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
+            <Trash2 size={15} color="#ef4444" />
+          </TouchableOpacity>
         </TouchableOpacity>
-        <TouchableOpacity onPress={onDelete} hitSlop={6} style={styles.stepAction} activeOpacity={0.7}>
-          <Trash2 size={15} color="#ef4444" />
-        </TouchableOpacity>
-      </TouchableOpacity>
 
-      {/* Loop body */}
-      {isExpanded && (
-        <View style={styles.loopBody}>
-          <View style={styles.loopSidebar} />
-          <View style={styles.loopContent}>
+        {/* Loop body — inner step cards */}
+        {isExpanded && (
+          <View style={[styles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
             {innerSteps.length === 0 && (
-              <Text style={styles.loopEmptyText}>No inner steps</Text>
+              <Text style={styles.loopEmptyText}>No steps inside this loop</Text>
             )}
             {innerSteps.map((inner, j) => (
               <React.Fragment key={inner.id}>
@@ -817,30 +1035,55 @@ function StepRow({
                   index={j}
                   loopId={step.id}
                   isBeingDragged={innerDrag?.id === inner.id}
-                  isDropTarget={!!(innerDrag && innerDrag.toIndex === j && innerDrag.id !== inner.id)}
+                  isDropAbove={!!(innerDrag && innerDrag.id !== inner.id && innerDrag.toIndex < innerDrag.fromIndex && innerDrag.toIndex === j)}
+                  isDropBelow={!!(innerDrag && innerDrag.id !== inner.id && innerDrag.toIndex > innerDrag.fromIndex && innerDrag.toIndex === j)}
                   onEdit={() => onEditInner(inner)}
+                  onCopy={() => onCopyInner(inner)}
                   onDelete={() => onDeleteInner(inner.id)}
                   onDragStart={onDragStart}
                   onDragMove={onDragMove}
                   onDragEnd={onDragEnd}
                   onItemLayout={onItemLayout}
                 />
-                {j < innerSteps.length - 1 && !isDragging && (
-                  <InsertDivider inner onPress={() => onInsertAfterInner(j)} />
+                {j < innerSteps.length - 1 && (
+                  <InsertDivider
+                    inner
+                    onPress={() => onInsertAfterInner(j)}
+                    onPaste={onPasteAfterInner ? () => onPasteAfterInner(j) : undefined}
+                    disabled={isDragging || !!innerDrag}
+                  />
                 )}
               </React.Fragment>
             ))}
 
-            <TouchableOpacity style={styles.addInnerBtn} onPress={onInsertInner} activeOpacity={0.7}>
-              <Plus size={13} color="#2563eb" />
-              <Text style={styles.addInnerText}>Add step inside loop</Text>
-            </TouchableOpacity>
+            <View style={styles.loopAddRow}>
+              <TouchableOpacity
+                style={[styles.loopAddBtn, { borderColor: theme.accent + "60" }]}
+                onPress={onInsertInner}
+                activeOpacity={0.7}
+              >
+                <Plus size={13} color={theme.iconColor} />
+                <Text style={[styles.loopAddText, { color: theme.iconColor }]}>Add Step</Text>
+              </TouchableOpacity>
+              {onPasteInner && (
+                <TouchableOpacity
+                  style={[styles.loopAddBtn, { borderColor: "#ddd6fe" }]}
+                  onPress={onPasteInner}
+                  activeOpacity={0.7}
+                >
+                  <ClipboardPaste size={13} color="#7c3aed" />
+                  <Text style={[styles.loopAddText, { color: "#7c3aed" }]}>Paste</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Insert divider between top-level steps */}
-      {!isLast && !isDragging && <InsertDivider onPress={onInsertAfter} />}
+      {!isLast && (
+        <InsertDivider onPress={onInsertAfter} onPaste={onPasteAfter} disabled={isDragging} />
+      )}
     </View>
   );
 }
@@ -945,6 +1188,50 @@ export default function BuilderScreen() {
     setCoverImage(b64);
   }
 
+  // ── Clipboard ─────────────────────────────────────────────────────────────
+
+  const [clipboard, setClipboard] = useState<ProgramStep | null>(null);
+
+  function cloneStepWithNewIds(step: ProgramStep): ProgramStep {
+    return {
+      ...step,
+      id: newId(),
+      loopSteps: step.loopSteps?.map(cloneStepWithNewIds),
+    };
+  }
+
+  function pasteStep(target: InsertTarget) {
+    if (!clipboard) return;
+    const step = cloneStepWithNewIds(clipboard);
+    setSteps(prev => {
+      const arr = [...prev];
+      switch (target.mode) {
+        case "append":
+          return [...arr, step];
+        case "insert":
+          arr.splice(target.afterIndex + 1, 0, step);
+          return arr;
+        case "appendLoop":
+          return arr.map(s =>
+            s.id === target.loopId
+              ? { ...s, loopSteps: [...(s.loopSteps ?? []), step] }
+              : s
+          );
+        case "insertLoop":
+          return arr.map(s => {
+            if (s.id !== target.loopId) return s;
+            const inner = [...(s.loopSteps ?? [])];
+            inner.splice(target.afterIndex + 1, 0, step);
+            return { ...s, loopSteps: inner };
+          });
+      }
+    });
+    if (target.mode === "appendLoop" || target.mode === "insertLoop") {
+      // Ensure the loop is expanded when a step is pasted inside it
+      setCollapsedLoops(prev => { const next = new Set(prev); next.delete(target.loopId); return next; });
+    }
+  }
+
   // Sync steps to a ref so drag callbacks always see the latest array
   const stepsRef = useRef(steps);
   useEffect(() => { stepsRef.current = steps; }, [steps]);
@@ -958,10 +1245,10 @@ export default function BuilderScreen() {
   // Ref mirrors state so addStep always reads the latest value regardless of closure age
   const insertTargetRef = useRef<InsertTarget>({ mode: "append" });
 
-  // Loop collapse — keys in set are EXPANDED; by default everything is collapsed
-  const [expandedLoops, setExpandedLoops] = useState<Set<string>>(new Set());
+  // Loop collapse — keys in set are COLLAPSED; by default everything is expanded
+  const [collapsedLoops, setCollapsedLoops] = useState<Set<string>>(new Set());
   function toggleLoop(id: string) {
-    setExpandedLoops(prev => {
+    setCollapsedLoops(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -1053,7 +1340,7 @@ export default function BuilderScreen() {
       id: newId(), type,
       name: undefined,
       pointName: undefined,
-      speed: 100, accel: 100, decel: 100,
+      speed: undefined, accel: undefined, decel: undefined,
       offsetX: undefined, offsetY: undefined, offsetZ: undefined,
       offsetRX: undefined, offsetRY: undefined, offsetRZ: undefined,
       toolOffsetX: undefined, toolOffsetY: undefined, toolOffsetZ: undefined,
@@ -1102,7 +1389,7 @@ export default function BuilderScreen() {
 
     // If adding to a loop, make sure it's expanded
     if (target.mode === "appendLoop" || target.mode === "insertLoop") {
-      setExpandedLoops(prev => new Set([...prev, target.loopId]));
+      setCollapsedLoops(prev => { const next = new Set(prev); next.delete(target.loopId); return next; });
     }
 
     setEditingStep(step);
@@ -1249,7 +1536,7 @@ export default function BuilderScreen() {
             <Text style={styles.emptyStepsText}>No steps yet</Text>
           </View>
         ) : (
-          <View style={styles.stepsCard}>
+          <View style={styles.stepsList}>
             {steps.map((step, i) => (
               <StepRow
                 key={step.id}
@@ -1257,12 +1544,14 @@ export default function BuilderScreen() {
                 index={i}
                 isLast={i === steps.length - 1}
                 isBeingDragged={drag?.id === step.id && !drag.loopId}
-                isDropTarget={!!(drag && !drag.loopId && drag.toIndex === i && drag.id !== step.id)}
+                isDropAbove={!!(drag && !drag.loopId && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
+                isDropBelow={!!(drag && !drag.loopId && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
                 isDragging={!!(drag && !drag.loopId)}
-                collapsed={!expandedLoops.has(step.id)}
+                collapsed={collapsedLoops.has(step.id)}
                 innerDrag={drag?.loopId === step.id ? drag : null}
                 onToggleCollapse={() => toggleLoop(step.id)}
                 onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
+                onCopy={() => setClipboard(step)}
                 onDelete={() => Alert.alert("Delete Step", "Remove this step?", [
                   { text: "Cancel", style: "cancel" },
                   { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
@@ -1271,28 +1560,44 @@ export default function BuilderScreen() {
                 onDragMove={handleDragMove}
                 onDragEnd={handleDragEnd}
                 onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
+                onPasteAfter={clipboard ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
                 onInsertInner={() => openTypePicker({ mode: "appendLoop", loopId: step.id })}
+                onPasteInner={clipboard ? () => pasteStep({ mode: "appendLoop", loopId: step.id }) : undefined}
                 onEditInner={inner => { setEditingStep(inner); setConfigOpen(true); }}
+                onCopyInner={inner => setClipboard(inner)}
                 onDeleteInner={id => Alert.alert("Delete Step", "Remove this inner step?", [
                   { text: "Cancel", style: "cancel" },
                   { text: "Delete", style: "destructive", onPress: () => deleteStep(id) },
                 ])}
                 onInsertAfterInner={j => openTypePicker({ mode: "insertLoop", loopId: step.id, afterIndex: j })}
+                onPasteAfterInner={clipboard ? j => pasteStep({ mode: "insertLoop", loopId: step.id, afterIndex: j }) : undefined}
                 onItemLayout={handleItemLayout}
               />
             ))}
           </View>
         )}
 
-        {/* Add step */}
-        <TouchableOpacity
-          style={styles.addCard}
-          onPress={() => openTypePicker({ mode: "append" })}
-          activeOpacity={0.7}
-        >
-          <Plus size={16} color="#2563eb" />
-          <Text style={styles.addCardText}>Add Step</Text>
-        </TouchableOpacity>
+        {/* Add / Paste step */}
+        <View style={styles.addRow}>
+          <TouchableOpacity
+            style={styles.addCard}
+            onPress={() => openTypePicker({ mode: "append" })}
+            activeOpacity={0.7}
+          >
+            <Plus size={16} color="#2563eb" />
+            <Text style={styles.addCardText}>Add Step</Text>
+          </TouchableOpacity>
+          {clipboard && (
+            <TouchableOpacity
+              style={styles.pasteCard}
+              onPress={() => pasteStep({ mode: "append" })}
+              activeOpacity={0.7}
+            >
+              <ClipboardPaste size={16} color="#7c3aed" />
+              <Text style={styles.pasteCardText}>Paste</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
 
       {/* Bottom bar */}
@@ -1377,71 +1682,93 @@ const styles = StyleSheet.create({
   },
   emptyStepsText: { fontSize: 14, color: "#9ca3af" },
 
-  stepsCard: {
-    backgroundColor: "#fff", borderRadius: 14, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 }, elevation: 3,
+  // ── Step cards ──────────────────────────────────────────────────────────────
+
+  stepsList: {
+    // each StepRow is its own card; InsertDivider provides spacing
   },
 
-  // Step row
-  stepRow: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 10, paddingVertical: 11, gap: 8,
+  stepCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderLeftWidth: 4,
+    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    overflow: "hidden",
   },
-  stepRowIndentDeep: { paddingLeft: 8 },
+
+  stepCardHeader: {
+    flexDirection: "row", alignItems: "center",
+    paddingLeft: 10, paddingRight: 10, paddingVertical: 14,
+    gap: 10,
+  },
+
+  stepCardIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    justifyContent: "center", alignItems: "center",
+    flexShrink: 0,
+  },
+  stepCardIconSmall: { width: 30, height: 30, borderRadius: 8 },
+
+  stepCardText:   { flex: 1, minWidth: 0, gap: 1 },
+  stepCardType:   { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
+  stepCardName:   { fontSize: 14, fontWeight: "600", color: "#111827" },
+  stepCardDetail: { fontSize: 12, color: "#6b7280" },
+  stepCardStatus: { fontSize: 12, color: "#93c5fd", fontStyle: "italic" },
+  cardAction:     { padding: 4 },
 
   dragHandle: {
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     justifyContent: "center", alignItems: "center",
   },
 
-  stepIndexBadge: {
-    width: 22, height: 22, borderRadius: 6,
-    backgroundColor: "#f3f4f6", justifyContent: "center", alignItems: "center",
-  },
-  stepIndexBadgeInner: { backgroundColor: "#f5f3ff" },
-  stepIndexText: { fontSize: 11, fontWeight: "700", color: "#6b7280" },
-
-  stepIconTile: {
-    width: 30, height: 30, borderRadius: 8,
-    backgroundColor: "#eff6ff", justifyContent: "center", alignItems: "center",
-  },
-  stepIconTileInner: { backgroundColor: "#f5f3ff" },
-
-  stepLabelCol:   { flex: 1, gap: 1, minWidth: 0 },
-  stepLabel:      { fontSize: 14, fontWeight: "500", color: "#111827" },
-  stepSubLabel:   { fontSize: 11, color: "#9ca3af" },
-  stepStatusHint: { fontSize: 11, color: "#93c5fd", fontStyle: "italic" },
-  stepAction: { padding: 3 },
-
   // Drag visual feedback
   draggingItem: { opacity: 0.35 },
-  dropTargetItem: {
-    borderTopWidth: 2,
+  dropTargetItemTop: {
+    borderTopWidth: 2.5,
     borderTopColor: "#2563eb",
   },
+  dropTargetItemBottom: {
+    borderBottomWidth: 2.5,
+    borderBottomColor: "#2563eb",
+  },
 
-  // Loop body
-  loopBody: {
-    flexDirection: "row",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
+  // ── Inner card (inside loop) ─────────────────────────────────────────────────
+
+  innerCard: {
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "#f8f9fb",
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    paddingLeft: 10, paddingRight: 8, paddingVertical: 11,
+    gap: 8,
   },
-  loopSidebar: {
-    width: 3, backgroundColor: "#ddd6fe", marginLeft: 24, marginVertical: 6, borderRadius: 2,
+
+  // ── Loop expanded body ───────────────────────────────────────────────────────
+
+  loopCardBody: {
+    borderTopWidth: 1,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 6,
+    gap: 4,
   },
-  loopContent: { flex: 1, paddingLeft: 8, paddingBottom: 6 },
   loopEmptyText: {
     fontSize: 12, color: "#c4b5fd", fontStyle: "italic",
-    paddingVertical: 8, paddingLeft: 8,
+    paddingVertical: 6,
   },
-
-  addInnerBtn: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingVertical: 9, paddingLeft: 8,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#ede9fe",
+  loopAddRow: {
+    flexDirection: "row", gap: 8,
+    paddingTop: 8, marginTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
   },
-  addInnerText: { fontSize: 13, color: "#2563eb", fontWeight: "600" },
+  loopAddBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingVertical: 7, paddingHorizontal: 10,
+    borderWidth: 1, borderRadius: 8,
+    backgroundColor: "transparent",
+  },
+  loopAddText: { fontSize: 12, fontWeight: "600" },
 
   // Insert divider
   insertDivider: {
@@ -1455,13 +1782,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#eff6ff", borderWidth: 1, borderColor: "#bfdbfe",
     justifyContent: "center", alignItems: "center",
   },
+  insertPasteBtn: {
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: "#f5f3ff", borderWidth: 1, borderColor: "#ddd6fe",
+    justifyContent: "center", alignItems: "center",
+  },
 
+  addRow: {
+    flexDirection: "row", gap: 10,
+  },
   addCard: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 8, borderWidth: 1.5, borderColor: "#2563eb", borderRadius: 14,
     paddingVertical: 14, backgroundColor: "transparent",
   },
   addCardText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+  pasteCard: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, borderWidth: 1.5, borderColor: "#7c3aed", borderRadius: 14,
+    paddingVertical: 14, paddingHorizontal: 18, backgroundColor: "transparent",
+  },
+  pasteCardText: { fontSize: 14, fontWeight: "600", color: "#7c3aed" },
 
   bottomBar: {
     flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16,
@@ -1491,7 +1832,8 @@ const styles = StyleSheet.create({
 const ms = StyleSheet.create({
   overlay: {
     flex: 1, backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "center", alignItems: "center", padding: 24,
+    justifyContent: "flex-start", alignItems: "center",
+    paddingTop: 52, paddingHorizontal: 24,
   },
   card: {
     width: "100%", maxWidth: 360, maxHeight: "88%",

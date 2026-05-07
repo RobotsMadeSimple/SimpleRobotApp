@@ -23,7 +23,7 @@ export type NeoPixelColor = { r: number; g: number; b: number };
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine';
+export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ';
 
 export type ProgramStep = {
   id: string;
