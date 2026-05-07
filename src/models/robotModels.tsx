@@ -155,6 +155,12 @@ export type RobotStatus = {
   targetRy: number,
   targetRz: number,
 
+  // Joint-space values (ASTRO: J1=base rotation °, J2=radial arm reach mm, J3=vertical mm, J4=EOAT rotation °)
+  joint1Angle: number,
+  joint2X:     number,   // radial reach (CoreXY stage cartesian.x)
+  joint2Z:     number,   // vertical height (CoreXY stage cartesian.z)
+  joint4Angle: number,
+
   poseX: number,
   poseY: number,
   poseZ: number,
@@ -209,6 +215,10 @@ export function createDefaultStatus(): RobotStatus {
     targetRx: 0,
     targetRy: 0,
     targetRz: 0,
+    joint1Angle: 0,
+    joint2X:     0,
+    joint2Z:     0,
+    joint4Angle: 0,
     poseX: 0,
     poseY: 0,
     poseZ: 0,

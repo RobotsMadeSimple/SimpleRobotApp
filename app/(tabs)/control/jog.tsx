@@ -282,12 +282,19 @@ export default function JogScreen() {
     setToolLocal(activeTool || "None");
   }, [activeTool]);
 
-  const coords = [
-    { label: "X",  value: s?.x  },
-    { label: "Y",  value: s?.y  },
-    { label: "Z",  value: s?.z  },
-    { label: "RZ", value: s?.rz },
-  ];
+  const coords = mode === "Joint"
+    ? [
+        { label: "J1", value: s?.joint1Angle, unit: "°" },
+        { label: "J2", value: s?.joint2X,     unit: "mm" },
+        { label: "J3", value: s?.joint2Z,     unit: "mm" },
+        { label: "J4", value: s?.joint4Angle, unit: "°" },
+      ]
+    : [
+        { label: "X",  value: s?.x,  unit: "mm" },
+        { label: "Y",  value: s?.y,  unit: "mm" },
+        { label: "Z",  value: s?.z,  unit: "mm" },
+        { label: "RZ", value: s?.rz, unit: "°"  },
+      ];
 
   return (
     <View style={styles.container}>
@@ -304,10 +311,11 @@ export default function JogScreen() {
         {/* Position card */}
         <View style={styles.card}>
           <View style={styles.coordRow}>
-            {coords.map(({ label, value }) => (
+            {coords.map(({ label, value, unit }) => (
               <View key={label} style={styles.coordCell}>
                 <Text style={styles.coordLabel}>{label}</Text>
                 <Text style={styles.coordValue}>{fmt(value)}</Text>
+                <Text style={styles.coordUnit}>{unit}</Text>
               </View>
             ))}
           </View>
@@ -490,6 +498,14 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111",
     fontFamily: "monospace",
+  },
+
+  coordUnit: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#9ca3af",
+    letterSpacing: 0.3,
+    marginTop: 1,
   },
 
   // ── Selector ──────────────────────────────────────────────────────────────
