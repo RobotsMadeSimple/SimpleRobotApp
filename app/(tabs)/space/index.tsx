@@ -11,7 +11,7 @@ const MENU_ITEMS = [
     icon: MapPin,
     tileColor: "#f0fdf4",
     iconColor: "#16a34a",
-    onPress: () => router.push("/space/points"),
+    onPress: () => router.navigate("/space/points"),
   },
   {
     label: "Tools",
@@ -19,7 +19,7 @@ const MENU_ITEMS = [
     icon: Wrench,
     tileColor: "#eff6ff",
     iconColor: "#2563eb",
-    onPress: () => router.push("/space/tools"),
+    onPress: () => router.navigate("/space/tools"),
   },
   {
     label: "Locals",
@@ -27,7 +27,7 @@ const MENU_ITEMS = [
     icon: Grid3x3,
     tileColor: "#f5f3ff",
     iconColor: "#7c3aed",
-    onPress: () => router.push("/space/locals"),
+    onPress: () => router.navigate("/space/locals"),
   },
 ];
 

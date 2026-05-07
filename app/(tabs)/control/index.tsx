@@ -9,7 +9,6 @@ import {
   HomeIcon,
   OctagonX,
   RotateCcw,
-  Settings2,
   Zap,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -81,11 +80,6 @@ export default function Control() {
     },
   ];
 
-  const settings = [
-    { label: "Speed & Acceleration", sub: "Set move speeds and ramp rates",  icon: <Zap      size={20} color="#9ca3af" />, iconBg: "#f3f4f6" },
-    { label: "Advanced",             sub: "Driver and controller options",    icon: <Settings2 size={20} color="#9ca3af" />, iconBg: "#f3f4f6" },
-  ];
-
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
@@ -149,28 +143,6 @@ export default function Control() {
                 </View>
               )}
             </Pressable>
-          ))}
-        </View>
-
-        {/* ── Settings (coming soon) ───────────────────────────────── */}
-        <Text style={styles.sectionLabel}>SETTINGS</Text>
-        <View style={styles.menuCard}>
-          {settings.map((item, i) => (
-            <View
-              key={i}
-              style={[styles.menuRow, i < settings.length - 1 && styles.menuRowBorder, styles.menuRowDisabled]}
-            >
-              <View style={[styles.menuIconTile, { backgroundColor: item.iconBg }]}>
-                {item.icon}
-              </View>
-              <View style={styles.menuTextBlock}>
-                <Text style={[styles.menuRowText, styles.menuRowTextDisabled]}>{item.label}</Text>
-                <Text style={styles.menuRowSub}>{item.sub}</Text>
-              </View>
-              <View style={styles.soonBadge}>
-                <Text style={styles.soonText}>Soon</Text>
-              </View>
-            </View>
           ))}
         </View>
 

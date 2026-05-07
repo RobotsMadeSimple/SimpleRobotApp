@@ -22,7 +22,7 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
   function setRobot() {
     setSelectedRobot(robot);
     robotClient.connectTo(robot);
-    router.push(`/robot/connected-robot`);
+    router.replace(`/robot/connected-robot`);
   }
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;

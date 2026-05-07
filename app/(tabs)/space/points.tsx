@@ -1,4 +1,5 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
 import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -360,6 +361,7 @@ export default function PointsPage() {
     <View style={styles.page}>
       <Tabs.Screen options={{ headerShown: false }} />
       <NotConnectedOverlay />
+      <SubPageHeader title="Points" />
       <PointsMap points={points} onPointPress={setSelectedPoint} />
 
       <FlatList

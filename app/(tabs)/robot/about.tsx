@@ -18,6 +18,7 @@ import {
 } from "lucide-react-native";
 
 import { Tabs } from "expo-router";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useEffect, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
 import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
@@ -130,12 +131,14 @@ export default function AboutRobot() {
   const isHoming = status.homingState !== "WaitingForStart";
 
   return (
+    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+      <Tabs.Screen options={{ headerShown: false }} />
+      <SubPageHeader title="About Robot" />
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <Tabs.Screen options={{ headerShown: false }} />
       {/* Hero card */}
       <View style={styles.heroCard}>
         <View style={styles.heroImageWrapper}>
@@ -301,6 +304,7 @@ export default function AboutRobot() {
       </Modal>
 
     </ScrollView>
+    </View>
   );
 }
 

@@ -1,4 +1,5 @@
 import JogPad from "@/src/components/ui/JogPad";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, Tabs } from "expo-router";
@@ -291,6 +292,7 @@ export default function JogScreen() {
   return (
     <View style={styles.container}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
+      <SubPageHeader title="Jog & Teach" />
 
       {/* ── Scrollable area: position + controls + jogpad ── */}
       <ScrollView

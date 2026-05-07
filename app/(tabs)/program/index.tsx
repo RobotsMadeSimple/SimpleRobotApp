@@ -106,7 +106,7 @@ function ProgramCard({
     <TouchableOpacity
       activeOpacity={0.85}
       onPress={() =>
-        router.push(
+        router.navigate(
           `/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`
         )
       }
@@ -289,7 +289,7 @@ export default function ProgramScreen() {
         {/* ── New Program button — always at bottom ── */}
         <TouchableOpacity
           style={styles.addCard}
-          onPress={() => router.push("/program/builder")}
+          onPress={() => router.navigate("/program/builder")}
           activeOpacity={0.7}
         >
           <Plus size={16} color="#2563eb" />
@@ -299,7 +299,7 @@ export default function ProgramScreen() {
         {/* ── Routines ── */}
         <TouchableOpacity
           style={styles.routinesCard}
-          onPress={() => router.push("/program/routines")}
+          onPress={() => router.navigate("/program/routines")}
           activeOpacity={0.7}
         >
           <Repeat2 size={16} color="#7c3aed" />

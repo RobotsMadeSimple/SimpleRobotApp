@@ -1,6 +1,7 @@
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms, usePoints, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ProgramStep, StepType } from "@/src/models/robotModels";
+import { BuiltProgram, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -16,6 +17,7 @@ import {
   Cpu,
   Gauge,
   GripVertical,
+  Hash,
   ImagePlus,
   MessageSquare,
   OctagonX,
@@ -180,6 +182,162 @@ function SignedNumberInput({
   );
 }
 
+/**
+ * Numeric field that also accepts math expressions referencing program variables.
+ *
+ * - Type a plain number as usual.
+ * - Type or tap a variable chip to build an expression like "$speed * 0.8".
+ * - Text turns purple when an expression is detected.
+ * - Tap × to clear back to empty.
+ * - Variable chips (when defined) are always shown below the field as one-tap shortcuts.
+ */
+function ExpressionInput({
+  fieldKey,
+  value,
+  expressions,
+  onChangeValue,
+  onChangeExpr,
+  style,
+  placeholder,
+  allowUndefined,
+  autoFocus,
+  variables,
+}: {
+  fieldKey: string;
+  value: number | undefined;
+  expressions: Record<string, string> | undefined;
+  onChangeValue: (n: number | undefined) => void;
+  onChangeExpr: (key: string, expr: string | undefined) => void;
+  style?: any;
+  placeholder?: string;
+  allowUndefined?: boolean;
+  autoFocus?: boolean;
+  variables?: ProgramVariable[];
+}) {
+  const currentExpr = expressions?.[fieldKey];
+  const [text, setText] = useState(currentExpr ?? (value != null ? String(value) : ""));
+  const inputRef = useRef<any>(null);
+
+  // Sync when draft changes externally (modal re-opens)
+  useEffect(() => {
+    setText(currentExpr ?? (value != null ? String(value) : ""));
+  }, [currentExpr, value]);
+
+  // Text contains variable references or operators → treat as expression
+  const isExpr = (t: string) =>
+    /[$+*\/\(\)]/.test(t) || (t.includes("-") && !/^-?\d*\.?\d*$/.test(t.trim()));
+
+  function commit(raw: string) {
+    const t = raw.trim();
+    if (!t) {
+      onChangeValue(undefined);
+      onChangeExpr(fieldKey, undefined);
+      return;
+    }
+    const n = parseFloat(t);
+    if (!isNaN(n) && !isExpr(t)) {
+      onChangeValue(n);
+      onChangeExpr(fieldKey, undefined);
+    } else {
+      onChangeExpr(fieldKey, t);
+    }
+  }
+
+  function handleChange(raw: string) {
+    setText(raw);
+    const t = raw.trim();
+    if (!t) {
+      onChangeValue(undefined);
+      onChangeExpr(fieldKey, undefined);
+    } else if (!isExpr(raw)) {
+      const n = parseFloat(t);
+      if (!isNaN(n)) { onChangeValue(n); onChangeExpr(fieldKey, undefined); }
+    } else {
+      onChangeExpr(fieldKey, t);
+    }
+  }
+
+  function insertVar(varName: string) {
+    const ref = text.trim();
+    const next = ref ? `${ref} + $${varName}` : `$${varName}`;
+    setText(next);
+    onChangeExpr(fieldKey, next);
+    inputRef.current?.focus();
+  }
+
+  function clear() {
+    setText("");
+    onChangeValue(undefined);
+    onChangeExpr(fieldKey, undefined);
+  }
+
+  const exprActive = isExpr(text);
+  const hasVars    = variables && variables.length > 0;
+
+  return (
+    <View>
+      <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
+        <TextInput
+          ref={inputRef}
+          style={{ flex: 1, fontSize: 14, color: exprActive ? "#7c3aed" : "#111827" }}
+          value={text}
+          onChangeText={handleChange}
+          onBlur={() => commit(text)}
+          keyboardType="default"
+          placeholder={placeholder ?? (allowUndefined ? "default" : "0")}
+          placeholderTextColor="#9ca3af"
+          autoFocus={autoFocus}
+          returnKeyType="done"
+        />
+        {text.trim().length > 0 && (
+          <TouchableOpacity onPress={clear} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
+            <X size={13} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+      </View>
+      {hasVars && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginTop: 6 }}
+          contentContainerStyle={{ gap: 5 }}
+          keyboardShouldPersistTaps="always"
+        >
+          {variables!.map(v => (
+            <TouchableOpacity
+              key={v.id}
+              onPress={() => insertVar(v.name)}
+              activeOpacity={0.7}
+              style={exprStyles.chip}
+            >
+              <Text style={exprStyles.chipText}>${v.name}</Text>
+              {v.description ? (
+                <Text style={exprStyles.chipHint}>{v.description}</Text>
+              ) : (
+                <Text style={exprStyles.chipHint}>{v.value}</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+const exprStyles = StyleSheet.create({
+  chip: {
+    backgroundColor: "#ede9fe",
+    borderWidth: 1,
+    borderColor: "#c4b5fd",
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    alignItems: "center",
+  },
+  chipText: { fontSize: 13, fontWeight: "700", color: "#7c3aed" },
+  chipHint: { fontSize: 10, color: "#a78bfa", marginTop: 1 },
+});
+
 function newId() {
   return typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -204,6 +362,9 @@ function stepLabel(step: ProgramStep): string {
     case "Loop":         return `Loop  ×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
     case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
+    case "SetSpeedL":    return `Set Linear Speed  →  ${step.speed ?? "?"} mm/s`;
+    case "SetSpeedJ":    return `Set Joint Speed  →  ${step.speed ?? "?"} mm/s`;
+    case "SetVariable":  return step.variableName ? `$${step.variableName} = ${step.variableExpr ?? "?"}` : "Set Variable";
     default:             return step.type;
   }
 }
@@ -219,6 +380,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "CallRoutine":  return <Repeat2       size={size} color={color} />;
     case "SetSpeedL":
     case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
+    case "SetVariable":  return <Hash          size={size} color={color} />;
     default:             return <Cpu           size={size} color={color} />;
   }
 }
@@ -234,7 +396,8 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   StatusUpdate: { accent: "#475569", iconBg: "#e2e8f0", iconColor: "#475569", label: "Status Update"},
   CallRoutine:  { accent: "#16a34a", iconBg: "#bbf7d0", iconColor: "#16a34a", label: "Call Routine" },
   SetSpeedL:    { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed (Linear)" },
-  SetSpeedJ:    { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Set Speed (Joint)" },
+  SetSpeedJ:    { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Set Speed (Joint)"  },
+  SetVariable:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Variable"       },
 };
 
 function stepDetail(step: ProgramStep): string | null {
@@ -264,6 +427,10 @@ function stepDetail(step: ProgramStep): string | null {
       if (step.decel != null)  parts.push(`decel ${step.decel}`);
       return parts.length ? parts.join("  ·  ") : null;
     }
+    case "SetVariable":
+      return step.variableName
+        ? `$${step.variableName} = ${step.variableExpr ?? "?"}`
+        : null;
     default:
       return null;
   }
@@ -279,6 +446,7 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "CallRoutine",  label: "Call Routine",  desc: "Run a saved routine inline then continue" },
   { type: "SetSpeedL",    label: "Set Speed (Linear)", desc: "Update the linear move speed, accel and decel" },
   { type: "SetSpeedJ",    label: "Set Speed (Joint)",  desc: "Update the joint move speed, accel and decel" },
+  { type: "SetVariable",  label: "Set Variable",       desc: "Assign a new value or expression to a program variable" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -319,23 +487,26 @@ function StepTypePicker({
               <X size={18} color="#9ca3af" />
             </TouchableOpacity>
           </View>
-          {STEP_TYPES.map((s, i) => (
-            <TouchableOpacity
-              key={s.type}
-              style={[ms.row, i < STEP_TYPES.length - 1 && ms.rowBorder]}
-              onPress={() => { onPick(s.type); onClose(); }}
-              activeOpacity={0.7}
-            >
-              <View style={ms.iconTile}>
-                <StepIcon type={s.type} size={18} color="#2563eb" />
-              </View>
-              <View style={ms.rowText}>
-                <Text style={ms.rowLabel}>{s.label}</Text>
-                <Text style={ms.rowDesc}>{s.desc}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-          ))}
+          {STEP_TYPES.map((s, i) => {
+            const theme = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
+            return (
+              <TouchableOpacity
+                key={s.type}
+                style={[ms.row, i < STEP_TYPES.length - 1 && ms.rowBorder]}
+                onPress={() => { onPick(s.type); onClose(); }}
+                activeOpacity={0.7}
+              >
+                <View style={[ms.iconTile, { backgroundColor: theme.iconBg }]}>
+                  <StepIcon type={s.type} size={18} color={theme.iconColor} />
+                </View>
+                <View style={ms.rowText}>
+                  <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
+                  <Text style={ms.rowDesc}>{s.desc}</Text>
+                </View>
+                <ChevronRight size={16} color="#d1d5db" />
+              </TouchableOpacity>
+            );
+          })}
         </Pressable>
       </Pressable>
     </Modal>
@@ -349,11 +520,13 @@ type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset";
 function StepConfigModal({
   visible,
   step,
+  variables,
   onSave,
   onClose,
 }: {
   visible: boolean;
   step: ProgramStep | null;
+  variables?: ProgramVariable[];
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
 }) {
@@ -378,6 +551,16 @@ function StepConfigModal({
   if (!draft) return null;
 
   const set = (fields: Partial<ProgramStep>) => setDraft(d => d ? { ...d, ...fields } : d);
+
+  /** Update (or clear) a single entry in the step's `expressions` dict. */
+  const setExpr = (key: string, expr: string | undefined) =>
+    setDraft(d => {
+      if (!d) return d;
+      const exprs = { ...(d.expressions ?? {}) };
+      if (expr === undefined || expr.trim() === "") delete exprs[key];
+      else exprs[key] = expr;
+      return { ...d, expressions: Object.keys(exprs).length > 0 ? exprs : undefined };
+    });
 
   const hasOffset  = draft.offsetX || draft.offsetY || draft.offsetZ ||
                      draft.offsetRX || draft.offsetRY || draft.offsetRZ;
@@ -419,18 +602,24 @@ function StepConfigModal({
           <>
             <Text style={ms.hintText}>Leave blank to use the robot's current speed setting.</Text>
             <Text style={[ms.fieldLabel, { marginTop: 10 }]}>SPEED  (mm/s)</Text>
-            <OptionalNumericInput style={ms.input} value={draft!.speed}
-              onChange={v => set({ speed: v })} placeholder="default" />
+            <ExpressionInput style={ms.input} fieldKey="speed"
+              value={draft!.speed} expressions={draft!.expressions}
+              onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables}
+              allowUndefined placeholder="default" />
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
-                <OptionalNumericInput style={ms.input} value={draft!.accel}
-                  onChange={v => set({ accel: v })} placeholder="default" />
+                <ExpressionInput style={ms.input} fieldKey="accel"
+                  value={draft!.accel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ accel: v })} onChangeExpr={setExpr} variables={variables}
+                  allowUndefined placeholder="default" />
               </View>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
-                <OptionalNumericInput style={ms.input} value={draft!.decel}
-                  onChange={v => set({ decel: v })} placeholder="default" />
+                <ExpressionInput style={ms.input} fieldKey="decel"
+                  value={draft!.decel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ decel: v })} onChangeExpr={setExpr} variables={variables}
+                  allowUndefined placeholder="default" />
               </View>
             </View>
           </>
@@ -443,8 +632,9 @@ function StepConfigModal({
               {(["offsetX","offsetY","offsetZ"] as const).map(k => (
                 <View key={k} style={ms.twoColItem}>
                   <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (mm)</Text>
-                  <SignedNumberInput key={draft!.id + k} style={ms.input}
-                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                    value={draft![k]} expressions={draft!.expressions}
+                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
                 </View>
               ))}
             </View>
@@ -452,8 +642,9 @@ function StepConfigModal({
               {(["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
                 <View key={k} style={ms.twoColItem}>
                   <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
-                  <SignedNumberInput key={draft!.id + k} style={ms.input}
-                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                    value={draft![k]} expressions={draft!.expressions}
+                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
                 </View>
               ))}
             </View>
@@ -472,8 +663,9 @@ function StepConfigModal({
               {(["toolOffsetX","toolOffsetY","toolOffsetZ"] as const).map(k => (
                 <View key={k} style={ms.twoColItem}>
                   <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (mm)</Text>
-                  <SignedNumberInput key={draft!.id + k} style={ms.input}
-                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                    value={draft![k]} expressions={draft!.expressions}
+                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
                 </View>
               ))}
             </View>
@@ -481,8 +673,9 @@ function StepConfigModal({
               {(["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
                 <View key={k} style={ms.twoColItem}>
                   <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
-                  <SignedNumberInput key={draft!.id + k} style={ms.input}
-                    value={draft![k]} onChange={n => set({ [k]: n })} />
+                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                    value={draft![k]} expressions={draft!.expressions}
+                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
                 </View>
               ))}
             </View>
@@ -566,10 +759,27 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>DURATION  (ms)</Text>
-            <TextInput style={ms.input} value={waitMsText}
-              onChangeText={v => { if (v === "" || /^\d+$/.test(v)) setWaitMs(v); }}
-              keyboardType="numeric" selectTextOnFocus autoFocus />
-            {waitMsText === "" && <Text style={ms.fieldError}>Enter a duration to save this step.</Text>}
+            {draft!.expressions?.waitMs ? (
+              <ExpressionInput style={ms.input} fieldKey="waitMs"
+                value={draft!.waitMs} expressions={draft!.expressions}
+                onChangeValue={v => { set({ waitMs: v !== undefined ? Math.round(v) : undefined }); setWaitMs(v !== undefined ? String(Math.round(v)) : ""); }}
+                onChangeExpr={setExpr} variables={variables} autoFocus />
+            ) : (
+              <>
+                <View style={[ms.input, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
+                  <TextInput
+                    style={{ flex: 1, fontSize: 14, color: "#111827" }}
+                    value={waitMsText}
+                    onChangeText={v => { if (v === "" || /^\d+$/.test(v)) setWaitMs(v); }}
+                    keyboardType="numeric" selectTextOnFocus autoFocus
+                  />
+                  <TouchableOpacity onPress={() => setExpr("waitMs", "$")} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: "#a78bfa" }}>$</Text>
+                  </TouchableOpacity>
+                </View>
+                {waitMsText === "" && <Text style={ms.fieldError}>Enter a duration to save this step.</Text>}
+              </>
+            )}
           </>
         );
 
@@ -577,9 +787,10 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>REPEAT COUNT  (0 = infinite)</Text>
-            <TextInput style={ms.input} value={String(draft!.loopCount ?? 1)}
-              onChangeText={v => set({ loopCount: parseInt(v) || 0 })}
-              keyboardType="numeric" selectTextOnFocus autoFocus />
+            <ExpressionInput style={ms.input} fieldKey="loopCount"
+              value={draft!.loopCount ?? 1} expressions={draft!.expressions}
+              onChangeValue={v => set({ loopCount: v !== undefined ? Math.round(v) : 1 })}
+              onChangeExpr={setExpr} variables={variables} autoFocus />
             <Text style={ms.hintText}>Add steps inside this loop from the builder after saving.</Text>
           </>
         );
@@ -636,20 +847,62 @@ function StepConfigModal({
                 : "Sets the joint (MoveJ) speed for all subsequent moves until changed again."}
             </Text>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (mm/s)</Text>
-            <NumericInput style={ms.input} value={draft!.speed ?? 100}
-              onChange={v => set({ speed: v })} autoFocus />
+            <ExpressionInput style={ms.input} fieldKey="speed"
+              value={draft!.speed ?? 100} expressions={draft!.expressions}
+              onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables} autoFocus />
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
-                <NumericInput style={ms.input} value={draft!.accel ?? 100}
-                  onChange={v => set({ accel: v })} />
+                <ExpressionInput style={ms.input} fieldKey="accel"
+                  value={draft!.accel ?? 100} expressions={draft!.expressions}
+                  onChangeValue={v => set({ accel: v })} onChangeExpr={setExpr} variables={variables} />
               </View>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
-                <NumericInput style={ms.input} value={draft!.decel ?? 100}
-                  onChange={v => set({ decel: v })} />
+                <ExpressionInput style={ms.input} fieldKey="decel"
+                  value={draft!.decel ?? 100} expressions={draft!.expressions}
+                  onChangeValue={v => set({ decel: v })} onChangeExpr={setExpr} variables={variables} />
               </View>
             </View>
+          </>
+        );
+      }
+
+      case "SetVariable": {
+        const varNames = (variables ?? []).map(v => v.name);
+        return (
+          <>
+            <Text style={ms.fieldLabel}>VARIABLE</Text>
+            {varNames.length === 0 ? (
+              <Text style={ms.emptyHint}>
+                No variables defined. Add variables in the Variables section of the builder.
+              </Text>
+            ) : (
+              <View style={ms.segRow}>
+                {varNames.map(n => {
+                  const active = draft!.variableName === n;
+                  return (
+                    <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                      onPress={() => set({ variableName: n })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]}>${n}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>NEW VALUE  (expression)</Text>
+            <Text style={ms.hintText}>
+              Use a number or an expression: <Text style={{ color: "#7c3aed", fontWeight: "600" }}>$counter + 1</Text>
+            </Text>
+            <TextInput
+              style={[ms.input, { color: draft!.variableExpr ? "#7c3aed" : "#111827" }]}
+              value={draft!.variableExpr ?? ""}
+              onChangeText={v => set({ variableExpr: v || undefined })}
+              placeholder="e.g. $counter + 1"
+              placeholderTextColor="#c4b5fd"
+              returnKeyType="done"
+              autoFocus={varNames.length === 0 ? false : !draft!.variableName}
+            />
           </>
         );
       }
@@ -664,8 +917,8 @@ function StepConfigModal({
     posOffset: "Position Offset", toolOffset: "Tool Offset",
   };
 
-  const isMove    = draft.type === "MoveL" || draft.type === "MoveJ";
-  const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ";
+  const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ";
+  const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable";
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
@@ -1088,6 +1341,112 @@ function StepRow({
   );
 }
 
+// ── Variable edit modal ───────────────────────────────────────────────────────
+
+function VariableEditModal({
+  visible,
+  variable,
+  onSave,
+  onClose,
+}: {
+  visible: boolean;
+  variable: ProgramVariable | null;
+  onSave: (v: ProgramVariable) => void;
+  onClose: () => void;
+}) {
+  const [name,  setName]  = useState("");
+  const [value, setValue] = useState("0");
+  const [desc,  setDesc]  = useState("");
+
+  useEffect(() => {
+    if (variable) {
+      setName(variable.name);
+      setValue(String(variable.value));
+      setDesc(variable.description ?? "");
+    } else {
+      setName(""); setValue("0"); setDesc("");
+    }
+  }, [variable]);
+
+  const isNew = variable === null;
+  const canSave = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ms.overlay} onPress={onClose}>
+        <Pressable style={ms.card} onPress={() => {}}>
+          <View style={ms.header}>
+            <View style={{ width: 18 }} />
+            <Text style={ms.title}>{isNew ? "New Variable" : "Edit Variable"}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color="#9ca3af" />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={ms.fieldLabel}>NAME</Text>
+          <TextInput
+            style={ms.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="e.g. speed, pickHeight, counter"
+            placeholderTextColor="#9ca3af"
+            autoFocus={isNew}
+            autoCapitalize="none"
+            returnKeyType="next"
+          />
+          {name.trim().length > 0 && !canSave && (
+            <Text style={ms.fieldError}>Use letters, digits, and _ only. Must start with a letter.</Text>
+          )}
+          <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>
+
+          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
+          <TextInput
+            style={ms.input}
+            value={value}
+            onChangeText={v => { if (v === "" || /^-?\d*\.?\d*$/.test(v)) setValue(v); }}
+            keyboardType="numbers-and-punctuation"
+            selectTextOnFocus
+          />
+
+          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DESCRIPTION  (optional)</Text>
+          <TextInput
+            style={ms.input}
+            value={desc}
+            onChangeText={setDesc}
+            placeholder="What this variable controls…"
+            placeholderTextColor="#9ca3af"
+            returnKeyType="done"
+          />
+
+          <View style={[ms.actions, { marginTop: 16 }]}>
+            <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+              <Text style={ms.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.saveBtn, !canSave && { opacity: 0.4 }]}
+              onPress={() => {
+                if (!canSave) return;
+                onSave({
+                  id: variable?.id ?? newId(),
+                  name: name.trim(),
+                  value: parseFloat(value) || 0,
+                  description: desc.trim() || undefined,
+                });
+                onClose();
+              }}
+              activeOpacity={0.7}
+              disabled={!canSave}
+            >
+              <Check size={15} color="white" />
+              <Text style={ms.saveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ── Builder screen ────────────────────────────────────────────────────────────
 
 export default function BuilderScreen() {
@@ -1102,6 +1461,7 @@ export default function BuilderScreen() {
   const [programName, setProgramName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [steps, setSteps]             = useState<ProgramStep[]>(existing?.steps ?? []);
+  const [variables, setVariables]     = useState<ProgramVariable[]>(existing?.variables ?? []);
   const [coverImage, setCoverImage]   = useState<string | null>(null);
 
   // Load existing cover image when editing
@@ -1126,6 +1486,7 @@ export default function BuilderScreen() {
       setProgramName(existing.name);
       setDescription(existing.description);
       setSteps(rehydrateIds(existing.steps));
+      setVariables(existing.variables ?? []);
     }
   }, [existing?.name]);
 
@@ -1235,6 +1596,26 @@ export default function BuilderScreen() {
   // Sync steps to a ref so drag callbacks always see the latest array
   const stepsRef = useRef(steps);
   useEffect(() => { stepsRef.current = steps; }, [steps]);
+
+  // ── Variable editor state ─────────────────────────────────────────────────
+
+  const [varModalOpen,   setVarModalOpen]   = useState(false);
+  const [editingVar,     setEditingVar]     = useState<ProgramVariable | null>(null);
+
+  function openNewVar()  { setEditingVar(null); setVarModalOpen(true); }
+  function openEditVar(v: ProgramVariable) { setEditingVar(v); setVarModalOpen(true); }
+
+  function saveVar(v: ProgramVariable) {
+    setVariables(prev => {
+      const idx = prev.findIndex(x => x.id === v.id);
+      if (idx >= 0) { const next = [...prev]; next[idx] = v; return next; }
+      return [...prev, v];
+    });
+  }
+
+  function deleteVar(id: string) {
+    setVariables(prev => prev.filter(v => v.id !== id));
+  }
 
   // ── UI state ──────────────────────────────────────────────────────────────
 
@@ -1350,6 +1731,8 @@ export default function BuilderScreen() {
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined,
       routineName: undefined,
+      variableName: undefined, variableExpr: undefined,
+      expressions: undefined,
     };
   }
 
@@ -1447,7 +1830,9 @@ export default function BuilderScreen() {
       return false;
     }
     const prog: BuiltProgram = {
-      name, description: description.trim(), steps, lastUpdatedUnixMs: 0,
+      name, description: description.trim(), steps,
+      variables: variables.length > 0 ? variables : undefined,
+      lastUpdatedUnixMs: 0,
       isRoutine: isRoutineMode,
     };
     await robotClient.saveBuiltProgram(prog).catch(() => {});
@@ -1470,6 +1855,7 @@ export default function BuilderScreen() {
 
   return (
     <View style={styles.container}>
+      <SubPageHeader title={isRoutineMode ? "Routine Builder" : "Program Builder"} />
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -1525,6 +1911,52 @@ export default function BuilderScreen() {
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+
+        {/* Variables */}
+        <Text style={styles.sectionLabel}>VARIABLES</Text>
+        <View style={styles.variablesCard}>
+          {variables.length === 0 ? (
+            <Text style={styles.varEmptyText}>
+              No variables yet. Tap + to define reusable values you can reference in any numeric field.
+            </Text>
+          ) : (
+            variables.map((v, i) => (
+              <React.Fragment key={v.id}>
+                {i > 0 && <View style={styles.varSep} />}
+                <View style={styles.varRow}>
+                  <View style={styles.varInfo}>
+                    <Text style={styles.varName}>${v.name}</Text>
+                    {v.description ? (
+                      <Text style={styles.varDesc}>{v.description}</Text>
+                    ) : (
+                      <Text style={styles.varDesc}>Initial: {v.value}</Text>
+                    )}
+                  </View>
+                  <Text style={styles.varValue}>{v.value}</Text>
+                  <TouchableOpacity onPress={() => openEditVar(v)} hitSlop={8} style={{ paddingHorizontal: 4 }} activeOpacity={0.7}>
+                    <Text style={styles.varEditBtn}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => Alert.alert("Delete Variable", `Remove $${v.name}?`, [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "Delete", style: "destructive", onPress: () => deleteVar(v.id) },
+                    ])}
+                    hitSlop={8} activeOpacity={0.7}
+                  >
+                    <Trash2 size={14} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              </React.Fragment>
+            ))
+          )}
+          <TouchableOpacity
+            style={[styles.varAddBtn, variables.length > 0 && styles.varAddBtnBorder]}
+            onPress={openNewVar} activeOpacity={0.7}
+          >
+            <Plus size={13} color="#7c3aed" />
+            <Text style={styles.varAddText}>Add Variable</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Steps */}
@@ -1617,8 +2049,15 @@ export default function BuilderScreen() {
       <StepConfigModal
         visible={configOpen}
         step={editingStep}
+        variables={variables}
         onSave={updateStep}
         onClose={() => setConfigOpen(false)}
+      />
+      <VariableEditModal
+        visible={varModalOpen}
+        variable={editingVar}
+        onSave={saveVar}
+        onClose={() => setVarModalOpen(false)}
       />
     </View>
   );
@@ -1681,6 +2120,37 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8, elevation: 3,
   },
   emptyStepsText: { fontSize: 14, color: "#9ca3af" },
+
+  // ── Variables card ──────────────────────────────────────────────────────────
+
+  variablesCard: {
+    backgroundColor: "#fff", borderRadius: 14, overflow: "hidden",
+    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    paddingVertical: 4,
+  },
+  varRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  varSep: { height: StyleSheet.hairlineWidth, backgroundColor: "#e5e7eb", marginHorizontal: 14 },
+  varInfo: { flex: 1, minWidth: 0 },
+  varName: { fontSize: 14, fontWeight: "700", color: "#7c3aed" },
+  varDesc: { fontSize: 12, color: "#9ca3af" },
+  varValue: { fontSize: 14, fontWeight: "600", color: "#374151", marginRight: 4 },
+  varEditBtn: { fontSize: 13, fontWeight: "600", color: "#2563eb" },
+  varEmptyText: {
+    fontSize: 13, color: "#9ca3af", paddingHorizontal: 14, paddingVertical: 12,
+    lineHeight: 18,
+  },
+  varAddBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  varAddBtnBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+  },
+  varAddText: { fontSize: 13, fontWeight: "600", color: "#7c3aed" },
 
   // ── Step cards ──────────────────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -28,8 +29,9 @@ export default function RoutinesScreen() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <NotConnectedOverlay />
+      <SubPageHeader title="Routines" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}

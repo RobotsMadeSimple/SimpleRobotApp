@@ -286,8 +286,41 @@ export class RobotConnectService {
     if (update.lastToolUpdate         !== undefined && update.lastToolUpdate         !== prev.lastToolUpdate)         this.getTools().catch(() => {});
     if (update.lastBuiltProgramUpdate !== undefined && update.lastBuiltProgramUpdate !== prev.lastBuiltProgramUpdate) this.getBuiltPrograms().catch(() => {});
 
-    this.status = { ...prev, ...update };
+    const next = { ...prev, ...update };
+
+    // Skip listener calls when nothing meaningful changed — prevents unnecessary React re-renders
+    // while the robot is idle between poll ticks.
+    if (this.statusEq(prev, next)) return;
+
+    this.status = next;
     this.statusListeners.forEach(cb => cb(this.status));
+  }
+
+  private statusEq(a: RobotStatus, b: RobotStatus): boolean {
+    return (
+      a.connected       === b.connected       &&
+      a.moving          === b.moving          &&
+      a.wasHomed        === b.wasHomed        &&
+      a.driverConnected === b.driverConnected &&
+      a.homingState     === b.homingState     &&
+      a.activeTool      === b.activeTool      &&
+      a.lastPointUpdate        === b.lastPointUpdate        &&
+      a.lastToolUpdate         === b.lastToolUpdate         &&
+      a.lastBuiltProgramUpdate === b.lastBuiltProgramUpdate &&
+      a.x  === b.x  && a.y  === b.y  && a.z  === b.z  &&
+      a.rx === b.rx && a.ry === b.ry && a.rz === b.rz &&
+      a.targetX  === b.targetX  && a.targetY  === b.targetY  && a.targetZ  === b.targetZ  &&
+      a.targetRx === b.targetRx && a.targetRy === b.targetRy && a.targetRz === b.targetRz &&
+      a.poseX  === b.poseX  && a.poseY  === b.poseY  && a.poseZ  === b.poseZ  &&
+      a.poseRx === b.poseRx && a.poseRy === b.poseRy && a.poseRz === b.poseRz &&
+      a.speedS === b.speedS && a.accelS === b.accelS && a.decelS === b.decelS &&
+      a.speedJ === b.speedJ && a.accelJ === b.accelJ && a.decelJ === b.decelJ &&
+      a.input1 === b.input1 && a.input2 === b.input2 &&
+      a.input3 === b.input3 && a.input4 === b.input4 &&
+      a.output1 === b.output1 && a.output2 === b.output2 &&
+      a.output3 === b.output3 && a.output4 === b.output4 &&
+      JSON.stringify(a.programs) === JSON.stringify(b.programs)
+    );
   }
 
   onPoints(cb: PointsListener) {
@@ -432,7 +465,7 @@ export class RobotConnectService {
       if (this.isConnected) {
         this.getStatus().catch(() => {});
       }
-    }, 40);
+    }, 100);
   }
 
   private stopStatusPolling() {
