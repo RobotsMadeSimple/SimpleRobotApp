@@ -39,7 +39,7 @@ const MENU_ITEMS = [
     icon: CodeXml,
     tileColor: "#eff6ff",
     iconColor: "#2563eb",
-    onPress: () => router.push("/program"),
+    onPress: () => router.navigate("/program"),
   },
   {
     label: "Jog and Teach",
@@ -47,7 +47,7 @@ const MENU_ITEMS = [
     icon: Gamepad2,
     tileColor: "#f0fdf4",
     iconColor: "#16a34a",
-    onPress: () => router.push("/control"),
+    onPress: () => router.navigate("/control"),
   },
   {
     label: "Points, Tools & Locals",
@@ -55,7 +55,7 @@ const MENU_ITEMS = [
     icon: Move3d,
     tileColor: "#f5f3ff",
     iconColor: "#7c3aed",
-    onPress: () => router.push("/space"),
+    onPress: () => router.navigate("/space"),
   },
   {
     label: "Inputs and Outputs",
@@ -63,7 +63,7 @@ const MENU_ITEMS = [
     icon: ArrowLeftRight,
     tileColor: "#fff7ed",
     iconColor: "#ea580c",
-    onPress: () => router.push("/io"),
+    onPress: () => router.navigate("/io"),
   },
   {
     label: "Configure",
@@ -71,7 +71,7 @@ const MENU_ITEMS = [
     icon: Settings2,
     tileColor: "#fdf4ff",
     iconColor: "#9333ea",
-    onPress: () => router.push("/robot/config"),
+    onPress: () => router.navigate("/robot/config"),
   },
   {
     label: "About Robot",
@@ -79,13 +79,13 @@ const MENU_ITEMS = [
     icon: Info,
     tileColor: "#f9fafb",
     iconColor: "#6b7280",
-    onPress: () => router.push("/robot/about"),
+    onPress: () => router.navigate("/robot/about"),
   },
 ];
 
 export default function ConnectedRobot() {
   const selectedRobot = useSelectedRobot();
-  const { robots } = useRobots();
+  const robots = useRobots();
 
   const robot =
     robots.find((r) => r.serialNumber === selectedRobot?.serialNumber) ??

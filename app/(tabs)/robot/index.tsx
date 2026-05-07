@@ -16,7 +16,7 @@ import {
 } from "react-native";
 
 export default function Robot() {
-  const { robots } = useRobots();
+  const robots = useRobots();
   const selectedRobot = useSelectedRobot();
   const [manualIp, setManualIp] = useState("");
 
@@ -36,7 +36,7 @@ export default function Robot() {
     };
     setSelectedRobot(robot);
     robotClient.connectTo(robot);
-    router.push(`/robot/connected-robot`);
+    router.replace(`/robot/connected-robot`);
   }
 
   return (

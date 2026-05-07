@@ -4,51 +4,70 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-type RobotWithStatus = RobotInfo & {
-  status: RobotStatus;
-};
+type RobotWithStatus = RobotInfo & { status: RobotStatus };
 
-type RobotContextType = {
-  robots: RobotWithStatus[];
-  connected: boolean;
-  selectedRobot: RobotWithStatus | null;
-  points: Point[];
-  tools: Tool[];
-  builtPrograms: BuiltProgram[];
+// ── Status context — updates every poll tick (100 ms) ─────────────────────────
+// Components that only need built programs, points, tools, or IO should use
+// DataContext hooks so they are NOT re-rendered by position/status changes.
+
+type StatusContextType = {
+  connected:        boolean;
+  status:           RobotStatus;
   programSummaries: ProgramSummary[];
-  status: RobotStatus;
-  nanoIO: NanoState[];
+  robots:           RobotWithStatus[];
+  selectedRobot:    RobotWithStatus | null;
 };
 
-const RobotContext = createContext<RobotContextType>({
-  robots: [],
-  connected: false,
-  selectedRobot: null,
-  points: [],
-  tools: [],
-  builtPrograms: [],
+const StatusContext = createContext<StatusContextType>({
+  connected:        false,
+  status:           createDefaultStatus(),
   programSummaries: [],
-  status: createDefaultStatus(),
-  nanoIO: [],
+  robots:           [],
+  selectedRobot:    null,
 });
 
+// ── Data context — updates only when repository data changes ─────────────────
+// Builder, space, and IO pages subscribe here and are immune to status noise.
+
+type DataContextType = {
+  points:              Point[];
+  tools:               Tool[];
+  builtPrograms:       BuiltProgram[];
+  builtProgramsLoaded: boolean;
+  nanoIO:              NanoState[];
+};
+
+const DataContext = createContext<DataContextType>({
+  points:              [],
+  tools:               [],
+  builtPrograms:       [],
+  builtProgramsLoaded: false,
+  nanoIO:              [],
+});
+
+// ── Provider ──────────────────────────────────────────────────────────────────
+
 export function RobotProvider({ children }: { children: React.ReactNode }) {
-  const [robots,         setRobots]        = useState<RobotInfo[]>([]);
-  const [status,         setStatus]        = useState<RobotStatus>(createDefaultStatus());
-  const [points,         setPoints]        = useState<Point[]>([]);
-  const [tools,          setTools]         = useState<Tool[]>([]);
-  const [builtPrograms,  setBuiltPrograms] = useState<BuiltProgram[]>([]);
-  const [nanoIO,         setNanoIO]        = useState<NanoState[]>([]);
-  const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
+  const [robots,              setRobots]              = useState<RobotInfo[]>([]);
+  const [status,              setStatus]              = useState<RobotStatus>(createDefaultStatus());
+  const [points,              setPoints]              = useState<Point[]>([]);
+  const [tools,               setTools]               = useState<Tool[]>([]);
+  const [builtPrograms,       setBuiltPrograms]       = useState<BuiltProgram[]>([]);
+  const [builtProgramsLoaded, setBuiltProgramsLoaded] = useState(false);
+  const [nanoIO,              setNanoIO]              = useState<NanoState[]>([]);
+  const [selectedSerial,      setSelectedSerial]      = useState<string | null>(null);
 
   useEffect(() => {
     const unsubDiscovery     = robotDiscovery.subscribe(setRobots);
     const unsubStatus        = robotClient.onStatus(setStatus);
     const unsubPoints        = robotClient.onPoints(setPoints);
     const unsubTools         = robotClient.onTools(setTools);
-    const unsubBuiltPrograms = robotClient.onBuiltPrograms(setBuiltPrograms);
-    const unsubNanoIO        = robotClient.onNanoIO(setNanoIO);
-    const unsubSelected      = subscribeRobot(robot =>
+    const unsubBuiltPrograms = robotClient.onBuiltPrograms(programs => {
+      setBuiltPrograms(programs);
+      setBuiltProgramsLoaded(true);
+    });
+    const unsubNanoIO  = robotClient.onNanoIO(setNanoIO);
+    const unsubSelected = subscribeRobot(robot =>
       setSelectedSerial(robot?.serialNumber ?? null)
     );
 
@@ -68,7 +87,9 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const robotsWithStatus: RobotWithStatus[] = useMemo(
+  // ── Status context value — recalculated on every status tick ──────────────
+
+  const robotsWithStatus = useMemo<RobotWithStatus[]>(
     () => robots.map(r => ({ ...r, status })),
     [robots, status]
   );
@@ -78,55 +99,45 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     [robotsWithStatus, selectedSerial]
   );
 
+  const statusContextValue = useMemo<StatusContextType>(() => ({
+    connected:        status.connected,
+    status,
+    programSummaries: status.programs,
+    robots:           robotsWithStatus,
+    selectedRobot,
+  }), [status, robotsWithStatus, selectedRobot]);
+
+  // ── Data context value — only recalculated when repository data changes ───
+
+  const dataContextValue = useMemo<DataContextType>(() => ({
+    points,
+    tools,
+    builtPrograms,
+    builtProgramsLoaded,
+    nanoIO,
+  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO]);
+
   return (
-    <RobotContext.Provider value={{
-      robots: robotsWithStatus,
-      connected: status.connected,
-      selectedRobot,
-      points,
-      tools,
-      builtPrograms,
-      programSummaries: status.programs,
-      status,
-      nanoIO,
-    }}>
-      {children}
-    </RobotContext.Provider>
+    <StatusContext.Provider value={statusContextValue}>
+      <DataContext.Provider value={dataContextValue}>
+        {children}
+      </DataContext.Provider>
+    </StatusContext.Provider>
   );
 }
 
-export function useRobots() {
-  return useContext(RobotContext);
-}
+// ── Hooks — status (re-renders on every poll tick) ────────────────────────────
 
-export function usePoints() {
-  return useContext(RobotContext).points;
-}
+export function useRobots()          { return useContext(StatusContext).robots; }
+export function useSelectedRobot()   { return useContext(StatusContext).selectedRobot; }
+export function useConnected()       { return useContext(StatusContext).connected; }
+export function useRobotStatus()     { return useContext(StatusContext).status; }
+export function useProgramSummaries(){ return useContext(StatusContext).programSummaries; }
 
-export function useTools() {
-  return useContext(RobotContext).tools;
-}
+// ── Hooks — data (re-renders only when repository data changes) ───────────────
 
-export function useBuiltPrograms() {
-  return useContext(RobotContext).builtPrograms;
-}
-
-export function useProgramSummaries() {
-  return useContext(RobotContext).programSummaries;
-}
-
-export function useSelectedRobot() {
-  return useContext(RobotContext).selectedRobot;
-}
-
-export function useConnected() {
-  return useContext(RobotContext).connected;
-}
-
-export function useRobotStatus() {
-  return useContext(RobotContext).status;
-}
-
-export function useNanoIO() {
-  return useContext(RobotContext).nanoIO;
-}
+export function usePoints()              { return useContext(DataContext).points; }
+export function useTools()               { return useContext(DataContext).tools; }
+export function useBuiltPrograms()       { return useContext(DataContext).builtPrograms; }
+export function useBuiltProgramsLoaded() { return useContext(DataContext).builtProgramsLoaded; }
+export function useNanoIO()              { return useContext(DataContext).nanoIO; }

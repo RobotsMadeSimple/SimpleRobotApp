@@ -1,3 +1,4 @@
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Home,
@@ -16,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 
 type RobotConfig = {
   homingSpeed: number;
@@ -129,6 +131,8 @@ export default function ConfigureRobot() {
   function dirLabel(v: number) { return v === 1 ? "+" : "−"; }
 
   return (
+    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+      <SubPageHeader title="Configure Robot" />
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -273,6 +277,7 @@ export default function ConfigureRobot() {
         </View>
       </Modal>
     </ScrollView>
+    </View>
   );
 }
 

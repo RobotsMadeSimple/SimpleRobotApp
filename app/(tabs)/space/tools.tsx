@@ -1,3 +1,4 @@
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Tabs } from "expo-router";
@@ -235,6 +236,7 @@ export default function ToolsPage() {
   return (
     <View style={styles.container}>
       <Tabs.Screen options={{ headerShown: false }} />
+      <SubPageHeader title="Tools" />
 
       <ScrollView
         contentContainerStyle={styles.content}

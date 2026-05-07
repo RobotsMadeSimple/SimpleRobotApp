@@ -23,7 +23,14 @@ export type NeoPixelColor = { r: number; g: number; b: number };
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine';
+export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable';
+
+export type ProgramVariable = {
+  id: string;
+  name: string;
+  value: number;
+  description?: string;
+};
 
 export type ProgramStep = {
   id: string;
@@ -56,12 +63,18 @@ export type ProgramStep = {
   statusWarning?: string;
   statusError?: string;
   routineName?: string;
+  // SetVariable
+  variableName?: string;
+  variableExpr?: string;
+  // Variable expressions — keyed by camelCase field name, override literal numeric values at execution time
+  expressions?: Record<string, string>;
 };
 
 export type BuiltProgram = {
   name: string;
   description: string;
   steps: ProgramStep[];
+  variables?: ProgramVariable[];
   lastUpdatedUnixMs: number;
   isRoutine?: boolean;
 };

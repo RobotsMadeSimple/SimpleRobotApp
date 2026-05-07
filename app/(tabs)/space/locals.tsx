@@ -1,3 +1,4 @@
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Tabs } from "expo-router";
 import { Grid3x3 } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
@@ -6,6 +7,7 @@ export default function LocalsPage() {
   return (
     <View style={styles.container}>
       <Tabs.Screen options={{ headerShown: false }} />
+      <SubPageHeader title="Locals" />
       <View style={styles.center}>
         <View style={styles.iconTile}>
           <Grid3x3 size={32} color="#7c3aed" />

@@ -1,18 +1,4 @@
-import { router, Stack } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
-import { Pressable } from "react-native";
-
-function BackButton() {
-  return (
-    <Pressable
-      onPress={() => router.back()}
-      hitSlop={12}
-      style={{ marginLeft: 4, padding: 4 }}
-    >
-      <ArrowLeft size={20} color="#111" />
-    </Pressable>
-  );
-}
+import { Stack } from "expo-router";
 
 export default function ControlLayout() {
   return (
@@ -21,17 +7,7 @@ export default function ControlLayout() {
         name="index"
         options={{ headerShown: false }}
       />
-      <Stack.Screen
-        name="jog"
-        options={{
-          title: "Jog",
-          headerShown: true,
-          headerTitleAlign: "left",
-          headerTitleStyle: { fontWeight: "bold", fontSize: 22 },
-
-          headerLeft: () => <BackButton />,
-        }}
-      />
+      <Stack.Screen name="jog" options={{ headerShown: false }} />
     </Stack>
   );
 }

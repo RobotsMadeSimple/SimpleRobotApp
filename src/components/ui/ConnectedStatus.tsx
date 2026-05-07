@@ -1,9 +1,9 @@
 
-import { useRobots } from "@/src/providers/RobotProvider";
+import { useConnected } from "@/src/providers/RobotProvider";
 import { Text, View } from "react-native";
 
 export function ConnectionStatus() {
-  const { connected } = useRobots();
+  const connected = useConnected();
 
   return (
     <View

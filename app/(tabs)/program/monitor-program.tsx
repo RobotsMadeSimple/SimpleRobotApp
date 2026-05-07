@@ -1,11 +1,13 @@
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
-import { router, Tabs, Stack, useLocalSearchParams } from "expo-router";
+import { router, Tabs, useLocalSearchParams } from "expo-router";
 import { AlertTriangle, Box, Cpu, Edit2, Play, Trash2, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Easing,
@@ -92,8 +94,9 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
 export default function MonitorProgramScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
   const programName = name ? decodeURIComponent(name) : "";
-  const programSummaries = useProgramSummaries();
-  const builtPrograms    = useBuiltPrograms();
+  const programSummaries    = useProgramSummaries();
+  const builtPrograms       = useBuiltPrograms();
+  const builtProgramsLoaded = useBuiltProgramsLoaded();
 
   // Is this a controller-built program?
   const builtProgram = builtPrograms.find((p) => p.name === programName) ?? null;
@@ -159,10 +162,26 @@ export default function MonitorProgramScreen() {
     }
   }, [logs]);
 
+  // Still waiting for the controller to send the programs list
+  if (!program && !builtProgramsLoaded) {
+    return (
+      <View style={styles.loading}>
+        <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
+        <SubPageHeader title={programName} />
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color="#2563eb" />
+          <Text style={styles.loadingTitle}>{programName}</Text>
+          <Text style={styles.loadingSub}>Loading from controller…</Text>
+        </View>
+      </View>
+    );
+  }
+
   if (!program) {
     return (
       <View style={styles.notFound}>
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
+        <SubPageHeader title={programName} />
         <Box size={40} color="#d1d5db" />
         <Text style={styles.notFoundText}>Program not found</Text>
         <Text style={styles.notFoundSub}>"{programName}" is not registered in the controller.</Text>
@@ -203,7 +222,7 @@ export default function MonitorProgramScreen() {
   return (
     <View style={styles.root}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-      <Stack.Screen options={{ title: programName }} />
+      <SubPageHeader title={programName} />
 
       <ScrollView
         style={styles.scroll}
@@ -432,6 +451,23 @@ const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: "#f3f4f6" },
   scroll:  { flex: 1 },
   content: { padding: 16, paddingBottom: 48, gap: 12 },
+
+  // ── Loading ────────────────────────────────────────────────────────────────
+  loading: {
+    flex: 1, backgroundColor: "#f3f4f6",
+    alignItems: "center", justifyContent: "center",
+    padding: 32,
+  },
+  loadingCard: {
+    backgroundColor: "#fff", borderRadius: 20,
+    paddingVertical: 36, paddingHorizontal: 32,
+    alignItems: "center", gap: 14,
+    shadowColor: "#000", shadowOpacity: 0.08,
+    shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 6,
+    minWidth: 240,
+  },
+  loadingTitle: { fontSize: 17, fontWeight: "700", color: "#111827", textAlign: "center" },
+  loadingSub:   { fontSize: 13, color: "#9ca3af" },
 
   // ── Not-found ──────────────────────────────────────────────────────────────
   notFound: {
