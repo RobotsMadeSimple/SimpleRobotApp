@@ -399,8 +399,15 @@ function stepLabel(step: ProgramStep): string {
     }
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
     case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
-    case "SetSpeedL":    return `Set Linear Speed  →  ${step.speed ?? "?"} mm/s`;
-    case "SetSpeedJ":    return `Set Joint Speed  →  ${step.speed ?? "?"} mm/s`;
+    case "SetSpeedL":
+    case "SetSpeedJ": {
+      const label  = step.type === "SetSpeedL" ? "Set Linear Speed" : "Set Joint Speed";
+      const parts: string[] = [];
+      if (step.speed != null) parts.push(`${step.speed} mm/s`);
+      if (step.accel != null) parts.push(`accel ${step.accel}`);
+      if (step.decel != null) parts.push(`decel ${step.decel}`);
+      return parts.length ? `${label}  →  ${parts.join("  ·  ")}` : label;
+    }
     case "SetVariable":  return step.variableName ? `$${step.variableName} = ${step.variableExpr ?? "?"}` : "Set Variable";
     default:             return step.type;
   }
@@ -462,11 +469,11 @@ function stepDetail(step: ProgramStep): string | null {
       return step.routineName ? `→ ${step.routineName}` : null;
     case "SetSpeedL":
     case "SetSpeedJ": {
-      const parts: string[] = [];
-      if (step.speed != null)  parts.push(`${step.speed} mm/s`);
-      if (step.accel != null)  parts.push(`accel ${step.accel}`);
-      if (step.decel != null)  parts.push(`decel ${step.decel}`);
-      return parts.length ? parts.join("  ·  ") : null;
+      const lines: string[] = [];
+      if (step.speed != null)  lines.push(`${step.speed} mm/s`);
+      if (step.accel != null)  lines.push(`accel ${step.accel}`);
+      if (step.decel != null)  lines.push(`decel ${step.decel}`);
+      return lines.length ? lines.join("\n") : null;
     }
     case "SetVariable":
       return step.variableName
@@ -1423,11 +1430,11 @@ function StepRow({
             <Text style={[styles.stepCardType, { color: theme.accent }]}>
               {index + 1} · {theme.label.toUpperCase()}
             </Text>
-            <Text style={styles.stepCardName} numberOfLines={1}>
+            <Text style={styles.stepCardName} numberOfLines={step.type === "SetSpeedL" || step.type === "SetSpeedJ" ? undefined : 1}>
               {step.name || (detail ?? step.type)}
             </Text>
             {step.name && detail && (
-              <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
+              <Text style={styles.stepCardDetail} numberOfLines={step.type === "SetSpeedL" || step.type === "SetSpeedJ" ? undefined : 1}>{detail}</Text>
             )}
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
               <Text style={styles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
