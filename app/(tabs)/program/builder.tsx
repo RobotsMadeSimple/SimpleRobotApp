@@ -338,11 +338,6 @@ function ExpressionInput({
               style={exprStyles.chip}
             >
               <Text style={exprStyles.chipText}>${v.name}</Text>
-              {v.description ? (
-                <Text style={exprStyles.chipHint}>{v.description}</Text>
-              ) : (
-                <Text style={exprStyles.chipHint}>{v.value}</Text>
-              )}
             </TouchableOpacity>
           ))}
         </ScrollView>
