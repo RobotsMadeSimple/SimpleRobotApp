@@ -1,5 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useBuiltPrograms, usePoints, useTools } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useNanoIO, usePoints, useRelayIO, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CircuitBoard,
   ClipboardPaste,
   Clock,
   Copy,
@@ -23,6 +24,7 @@ import {
   OctagonX,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   Repeat2,
   Trash2,
@@ -357,7 +359,14 @@ function stepLabel(step: ProgramStep): string {
       const base = `${step.type}  →  ${step.pointName ?? "—"}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
-    case "SetOutput":    return `Output ${step.outputNumber ?? 1}  →  ${step.outputValue ? "ON" : "OFF"}`;
+    case "SetOutput": {
+      const card = step.outputCard ?? "stb";
+      const num  = step.outputNumber ?? 1;
+      const val  = step.outputValue ? "ON" : "OFF";
+      if (card === "relay") return `Relay ${num}  →  ${val}`;
+      if (card === "nano")  return `Nano · Pin ${num}  →  ${val}`;
+      return `STB · Output ${num}  →  ${val}`;
+    }
     case "Wait":         return `Wait  ${step.waitMs ?? 0} ms`;
     case "Loop":         return `Loop  ×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
@@ -533,6 +542,8 @@ function StepConfigModal({
   const points        = usePoints();
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
+  const nanos         = useNanoIO();
+  const relay         = useRelayIO();
   const [draft, setDraft]       = useState<ProgramStep | null>(null);
   const [waitMsText, setWaitMs] = useState("");
   const [subPage, setSubPage]   = useState<SubPage>(null);
@@ -731,21 +742,104 @@ function StepConfigModal({
           </>
         );
 
-      case "SetOutput":
+      case "SetOutput": {
+        const selectedCard = draft!.outputCard ?? "stb";
+        const outputPins = selectedCard === "nano"
+          ? (nanos ?? []).flatMap(n => (n.pins ?? []).filter(p => p.type === "Output"))
+          : [];
         return (
           <>
-            <Text style={ms.fieldLabel}>OUTPUT NUMBER</Text>
+            <Text style={ms.fieldLabel}>CARD</Text>
             <View style={ms.segRow}>
-              {[1, 2, 3, 4].map(n => {
-                const active = (draft!.outputNumber ?? 1) === n;
+              {([
+                { key: "stb",   label: "STB4100", Icon: CircuitBoard, color: "#16a34a" },
+                { key: "relay", label: "Relay",   Icon: Radio,        color: "#0891b2" },
+                { key: "nano",  label: "Nano",    Icon: Cpu,          color: "#4f46e5" },
+              ] as const).map(({ key, label, Icon, color }) => {
+                const active = selectedCard === key;
                 return (
-                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
-                    onPress={() => set({ outputNumber: n })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
+                  <TouchableOpacity key={key} style={[ms.seg, active && ms.segActive, { flex: 1, flexDirection: "column", alignItems: "center", gap: 2, paddingVertical: 6 }]}
+                    onPress={() => set({ outputCard: key, outputNumber: 1, outputNanoId: key === "nano" ? (nanos?.[0]?.id ?? undefined) : undefined })}
+                    activeOpacity={0.8}>
+                    <Icon size={14} color={active ? color : "#6b7280"} />
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
+
+            {selectedCard === "stb" && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OUTPUT NUMBER</Text>
+                <View style={ms.segRow}>
+                  {[1, 2, 3, 4].map(n => {
+                    const active = (draft!.outputNumber ?? 1) === n;
+                    return (
+                      <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                        onPress={() => set({ outputNumber: n })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {selectedCard === "relay" && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>RELAY</Text>
+                <View style={ms.segRow}>
+                  {[1, 2, 3, 4].map(n => {
+                    const active = (draft!.outputNumber ?? 1) === n;
+                    const label  = relay?.names?.[n - 1] ?? `Relay ${n}`;
+                    return (
+                      <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                        onPress={() => set({ outputNumber: n })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {selectedCard === "nano" && (
+              <>
+                {(nanos ?? []).length > 1 && (
+                  <>
+                    <Text style={[ms.fieldLabel, { marginTop: 12 }]}>NANO DEVICE</Text>
+                    <View style={ms.segRow}>
+                      {(nanos ?? []).map(n => {
+                        const active = (draft!.outputNanoId ?? nanos?.[0]?.id) === n.id;
+                        return (
+                          <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                            onPress={() => set({ outputNanoId: n.id, outputNumber: 1 })} activeOpacity={0.8}>
+                            <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OUTPUT PIN</Text>
+                {outputPins.length === 0 ? (
+                  <Text style={{ fontSize: 13, color: "#9ca3af", marginTop: 4 }}>No output pins configured on this Nano</Text>
+                ) : (
+                  <View style={ms.segRow}>
+                    {outputPins.map(p => {
+                      const active = (draft!.outputNumber ?? outputPins[0]?.pin) === p.pin;
+                      return (
+                        <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                          onPress={() => set({ outputNumber: p.pin })} activeOpacity={0.8}>
+                          <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </>
+            )}
+
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE</Text>
             <View style={ms.switchRow}>
               <Text style={ms.switchLabel}>{draft!.outputValue ? "ON" : "OFF"}</Text>
@@ -754,6 +848,7 @@ function StepConfigModal({
             </View>
           </>
         );
+      }
 
       case "Wait":
         return (

@@ -65,6 +65,8 @@ export type ProgramStep = {
   toolOffsetRZ?: number;
   outputNumber?: number;
   outputValue?: boolean;
+  outputCard?: string;     // "stb" | "relay" | "nano"
+  outputNanoId?: string;   // only for nano
   waitMs?: number;
   loopCount?: number;
   loopSteps?: ProgramStep[];
