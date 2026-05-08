@@ -369,7 +369,11 @@ function stepLabel(step: ProgramStep): string {
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
     case "Wait":         return `Wait  ${step.waitMs ?? 0} ms`;
-    case "Loop":         return `Loop  ×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
+    case "Loop": {
+      const loopExpr = step.expressions?.loopCount;
+      const loopVal  = loopExpr ? loopExpr : (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1));
+      return `Loop  ×${loopVal}`;
+    }
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
     case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
     case "SetSpeedL":    return `Set Linear Speed  →  ${step.speed ?? "?"} mm/s`;
@@ -423,8 +427,10 @@ function stepDetail(step: ProgramStep): string | null {
       return `Output ${step.outputNumber ?? 1}  →  ${step.outputValue ? "ON" : "OFF"}`;
     case "Wait":
       return `${step.waitMs ?? 0} ms`;
-    case "Loop":
-      return `×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
+    case "Loop": {
+      const loopExpr = step.expressions?.loopCount;
+      return `×${loopExpr ?? (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1))}`;
+    }
     case "StatusUpdate":
       return step.statusMessage || null;
     case "CallRoutine":
