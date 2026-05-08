@@ -27,6 +27,7 @@ type RobotConfig = {
   verticalHomingDirection: number;
   horizontalHomingDirection: number;
   j1HomingDirection: number;
+  j4HomeOffsetDeg: number;
 };
 
 function InfoRow({
@@ -90,6 +91,7 @@ export default function ConfigureRobot() {
   const [editVerticalDir, setEditVerticalDir] = useState(1);
   const [editHorizontalDir, setEditHorizontalDir] = useState(1);
   const [editJ1Dir, setEditJ1Dir] = useState(-1);
+  const [editJ4Offset, setEditJ4Offset] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -105,6 +107,7 @@ export default function ConfigureRobot() {
     setEditVerticalDir(config.verticalHomingDirection);
     setEditHorizontalDir(config.horizontalHomingDirection);
     setEditJ1Dir(config.j1HomingDirection);
+    setEditJ4Offset(String(config.j4HomeOffsetDeg));
     setEditVisible(true);
   }
 
@@ -119,6 +122,7 @@ export default function ConfigureRobot() {
         verticalHomingDirection:  editVerticalDir,
         horizontalHomingDirection: editHorizontalDir,
         j1HomingDirection:        editJ1Dir,
+        j4HomeOffsetDeg:          parseFloat(editJ4Offset),
       };
       await robotClient.setRobotConfig(fields);
       setConfig(fields);
@@ -192,6 +196,12 @@ export default function ConfigureRobot() {
           tileBg="#fff7ed"
           label="Horizontal Homing Direction"
           value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
+        />
+        <InfoRow
+          icon={<RotateCcw size={16} color="#7c3aed" />}
+          tileBg="#f5f3ff"
+          label="J4 Home Offset"
+          value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
           last
         />
       </View>
@@ -255,6 +265,16 @@ export default function ConfigureRobot() {
 
             <Text style={styles.editLabel}>HORIZONTAL HOMING DIRECTION</Text>
             <DirectionToggle value={editHorizontalDir} onChange={setEditHorizontalDir} />
+
+            <Text style={styles.editLabel}>J4 HOME OFFSET (°)</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editJ4Offset}
+              onChangeText={setEditJ4Offset}
+              keyboardType="numeric"
+              placeholder="0"
+              placeholderTextColor="#9ca3af"
+            />
 
             <View style={styles.modalButtons}>
               <TouchableOpacity

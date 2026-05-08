@@ -1,144 +1,119 @@
-import { JogButton } from "@/src/components/ui/JogButton";
 import { robotClient } from "@/src/services/RobotConnectService";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  RedoDot,
-  UndoDot
-} from "lucide-react-native";
-import { useRef, useState } from "react";
-import { useWindowDimensions, View } from "react-native";
+import { useRef } from "react";
+import { CartesianJogPanel, CartesianAxis } from "@/src/components/ui/jog/CartesianJogPanel";
+import { JointJogPanel, JointAxis } from "@/src/components/ui/jog/JointJogPanel";
 
-type JogIntent = {
-  axis: "x" | "y" | "z" | "rz";
-  direction: 1 | -1;
-};
-
-type JogPadProps = {
-  jogMode: string;
-  selectedSpeed: string;
-};
+// ── Speed map ─────────────────────────────────────────────────────────────────
+// "mm" entries are step-move magnitudes; others are continuous speeds (mm/s or °/s)
 
 const speedMap: Record<string, number> = {
   "0.1mm": 0.1,
-  "1mm": 1,
-  "10mm": 10,
-  Slow: 10,
-  Normal: 100,
-  Fast: 300,
+  "1mm":   1,
+  "10mm":  10,
+  Slow:    10,
+  Normal:  100,
+  Fast:    300,
 };
 
-export default function JogPad({
-  jogMode,
-  selectedSpeed
-}: JogPadProps) {
-  const { width } = useWindowDimensions();
-  const jogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [activeJog, setActiveJog] = useState<JogIntent | null>(null);
-  const activeSpeed = speedMap[selectedSpeed];
+// Joint degree-step equivalents for the discrete "mm" speed options
+const jointStepMap: Record<string, number> = {
+  "0.1mm": 0.5,
+  "1mm":   2,
+  "10mm":  10,
+};
 
-  // Scale the grid to fill the available width (container has 12px padding each side)
-  // Grid is 4.5 columns wide. Cap at 90px per cell so tablets don't get huge buttons.
-  const cellSize = Math.min((width - 24) / 4.5, 90);
-  const buttonSize = Math.round(cellSize * 0.875);
-  const iconSize = Math.round(buttonSize * 0.43);
+type JogPadProps = {
+  jogMode:       string;  // "XYZ" | "Tool" | "Joint"
+  selectedSpeed: string;
+};
 
-  const startJog = (intent: JogIntent) => {
-    if (jogIntervalRef.current) return;
+/**
+ * Smart jog-pad container.
+ * Handles all interval timing and robot commands; delegates visual layout
+ * to CartesianJogPanel (XYZ / Tool) or JointJogPanel (Joint).
+ *
+ * Adding a new robot type's jog layout is as simple as creating a new
+ * *JogPanel component and wiring it in here.
+ */
+export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
+  const intervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeSpeed  = speedMap[selectedSpeed];
+  const isStep       = selectedSpeed.includes("mm");
 
-    setActiveJog(intent);
-
-    if (jogMode === "Tool"){
-      jogIntervalRef.current = setInterval(() => {
-        robotClient.jogTool({
-          x: intent.axis === "x" ? intent.direction : 0,
-          y: intent.axis === "y" ? intent.direction : 0,
-          z: intent.axis === "z" ? intent.direction : 0,
-          rz: intent.axis === "rz" ? intent.direction : 0,
-          speed: activeSpeed,
-          accel: 200,
-          decel: 1000
-        })
-      }, 20);
-      return;
-    }
-
-    if (!selectedSpeed.includes("mm")){
-      jogIntervalRef.current = setInterval(() => {
-        robotClient.jogL({
-          x: intent.axis === "x" ? intent.direction : 0,
-          y: intent.axis === "y" ? intent.direction : 0,
-          z: intent.axis === "z" ? intent.direction : 0,
-          rz: intent.axis === "rz" ? intent.direction : 0,
-          speed: activeSpeed,
-          accel: 200,
-          decel: 1000
-        })
-      }, 20);
-      return;
-    }
-    else{
-      robotClient.offsetL({
-        x: intent.axis === "x" ? activeSpeed * intent.direction : 0,
-        y: intent.axis === "y" ? activeSpeed * intent.direction : 0,
-        z: intent.axis === "z" ? activeSpeed * intent.direction : 0,
-        rz: intent.axis === "rz" ? activeSpeed * intent.direction : 0,
-        speed: 100,
-        accel: 200,
-        decel: 1000,
-      });
-      return;
-    }
-  };
-
+  // ── Stop ────────────────────────────────────────────────────────────────────
   const stopJog = () => {
-    if (jogIntervalRef.current) {
-      clearInterval(jogIntervalRef.current);
-      jogIntervalRef.current = null;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-    setActiveJog(null);
     robotClient.stopJog();
   };
 
-  const cell  = { width: cellSize,   height: cellSize,   alignItems: "center" as const, justifyContent: "center" as const };
-  const narrow = { width: cellSize/2, height: cellSize,   alignItems: "center" as const, justifyContent: "center" as const };
-  const grid  = { width: cellSize * 4.5, flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, alignContent: "space-between" as const };
+  // ── Cartesian start (XYZ / Tool) ────────────────────────────────────────────
+  const startCartesian = (axis: CartesianAxis, direction: 1 | -1) => {
+    if (intervalRef.current) return;
 
-  const btn = (label: string, icon: React.ReactNode, pos: "above"|"below"|"left"|"right", intent: JogIntent) => (
-    <JogButton
-      label={label}
-      icon={icon}
-      iconPosition={pos}
-      onStart={() => startJog(intent)}
-      onStop={stopJog}
-      size={buttonSize}
-    />
-  );
+    const vec = {
+      x:  axis === "x"  ? direction : 0,
+      y:  axis === "y"  ? direction : 0,
+      z:  axis === "z"  ? direction : 0,
+      rz: axis === "rz" ? direction : 0,
+    };
 
-  return (
-    <View style={grid}>
-      {/* Row 1 */}
-      <View style={cell}>{btn("+RZ", <UndoDot   size={iconSize} color="#666" />, "above", { axis: "rz", direction:  1 })}</View>
-      <View style={cell}>{btn("-X",  <ChevronUp size={iconSize} color="#666" />, "above", { axis: "x",  direction: -1 })}</View>
-      <View style={cell}>{btn("-RZ", <RedoDot   size={iconSize} color="#666" />, "above", { axis: "rz", direction: -1 })}</View>
-      <View style={narrow} />
-      <View style={cell}>{btn("+Z",  <ChevronUp size={iconSize} color="#666" />, "above", { axis: "z",  direction:  1 })}</View>
+    if (jogMode === "Tool") {
+      intervalRef.current = setInterval(() => {
+        robotClient.jogTool({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
+      }, 20);
+      return;
+    }
 
-      {/* Row 2 */}
-      <View style={cell}>{btn("-Y",  <ChevronLeft  size={iconSize} color="#666" />, "left",  { axis: "y", direction: -1 })}</View>
-      <View style={cell} />
-      <View style={cell}>{btn("+Y",  <ChevronRight size={iconSize} color="#666" />, "right", { axis: "y", direction:  1 })}</View>
-      <View style={narrow} />
-      <View style={cell} />
+    if (isStep) {
+      robotClient.offsetL({
+        x:  vec.x  * activeSpeed,
+        y:  vec.y  * activeSpeed,
+        z:  vec.z  * activeSpeed,
+        rz: vec.rz * activeSpeed,
+        speed: 100, accel: 200, decel: 1000,
+      });
+    } else {
+      intervalRef.current = setInterval(() => {
+        robotClient.jogL({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
+      }, 20);
+    }
+  };
 
-      {/* Row 3 */}
-      <View style={cell} />
-      <View style={cell}>{btn("+X",  <ChevronDown size={iconSize} color="#666" />, "below", { axis: "x", direction:  1 })}</View>
-      <View style={cell} />
-      <View style={narrow} />
-      <View style={cell}>{btn("-Z",  <ChevronDown size={iconSize} color="#666" />, "below", { axis: "z", direction: -1 })}</View>
-    </View>
-  );
+  // ── Joint start ─────────────────────────────────────────────────────────────
+  const startJoint = (joint: JointAxis, direction: 1 | -1) => {
+    if (intervalRef.current) return;
+
+    // Map joint key → jogJ axis param
+    const vec = {
+      x:  joint === "j1" ? direction : 0,
+      y:  joint === "j2" ? direction : 0,
+      z:  joint === "j3" ? direction : 0,
+      rz: joint === "j4" ? direction : 0,
+    };
+
+    if (isStep) {
+      const stepDeg = jointStepMap[selectedSpeed] ?? 2;
+      robotClient.jogJ({
+        x:  vec.x  * stepDeg,
+        y:  vec.y  * stepDeg,
+        z:  vec.z  * stepDeg,
+        rz: vec.rz * stepDeg,
+        speed: 20, accel: 100, decel: 200,
+      });
+    } else {
+      intervalRef.current = setInterval(() => {
+        robotClient.jogJ({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
+      }, 20);
+    }
+  };
+
+  // ── Render the appropriate panel ────────────────────────────────────────────
+  if (jogMode === "Joint") {
+    return <JointJogPanel onStart={startJoint} onStop={stopJog} />;
+  }
+
+  return <CartesianJogPanel onStart={startCartesian} onStop={stopJog} />;
 }

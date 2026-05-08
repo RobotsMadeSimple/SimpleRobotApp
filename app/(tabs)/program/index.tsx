@@ -7,7 +7,6 @@ import { Box, Cpu, Plus, Repeat2 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Easing,
   Image,
   ScrollView,
   StyleSheet,
@@ -35,7 +34,7 @@ const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
 
 type ActionBtn = { label: string; bg: string; onPress: () => void };
 
-function getButtons(p: ProgramSummary): ActionBtn[] {
+function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   const { name, status } = p;
   switch (status) {
     case "Ready":
@@ -51,17 +50,26 @@ function getButtons(p: ProgramSummary): ActionBtn[] {
     case "Stopped":
       return [
         { label: "Continue", bg: "#2563eb", onPress: () => robotClient.startProgram(name) },
-        { label: "Reset",    bg: "#6b7280", onPress: () => robotClient.resetProgram(name) },
         { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
       ];
     case "Complete":
       return [
-        { label: "Reset",    bg: "#6b7280", onPress: () => robotClient.resetProgram(name) },
+        {
+          label: "Run Again",
+          bg: "#16a34a",
+          onPress: () => {
+            robotClient.resetProgram(name);
+            if (isBuilt) {
+              robotClient.executeBuiltProgram(name).catch(() => {});
+            } else {
+              robotClient.startProgram(name);
+            }
+          },
+        },
         { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
       ];
     case "Error":
       return [
-        { label: "Reset",    bg: "#6b7280", onPress: () => robotClient.resetProgram(name) },
         { label: "Exit",     bg: "#dc2626", onPress: () => robotClient.abortProgram(name) },
       ];
     case "Stopping":
@@ -86,17 +94,12 @@ function ProgramCard({
     p.maxStepCount > 0
       ? Math.round((p.currentStepNumber / p.maxStepCount) * 100)
       : 0;
-  const buttons = getButtons(p);
+  const buttons = getButtons(p, isBuilt ?? false);
 
-  // Animated progress bar
+  // Progress bar — set directly so it always matches the percentage text
   const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: pct,
-      duration: 600,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
+    progressAnim.setValue(pct);
   }, [pct]);
 
   const alert = p.errorDescription || p.warningDescription;

@@ -79,8 +79,11 @@ jobs:
       - name: Build release APK
         run: cd android && ./gradlew assembleRelease
 
+      - name: Rename APK to fixed filename
+        run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/SimpleRobotApp.apk
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          files: android/app/build/outputs/apk/release/*.apk
+          files: android/app/build/outputs/apk/release/SimpleRobotApp.apk

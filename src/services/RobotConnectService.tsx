@@ -307,6 +307,8 @@ export class RobotConnectService {
       a.lastPointUpdate        === b.lastPointUpdate        &&
       a.lastToolUpdate         === b.lastToolUpdate         &&
       a.lastBuiltProgramUpdate === b.lastBuiltProgramUpdate &&
+      a.joint1Angle === b.joint1Angle && a.joint2X === b.joint2X &&
+      a.joint2Z     === b.joint2Z     && a.joint4Angle === b.joint4Angle &&
       a.x  === b.x  && a.y  === b.y  && a.z  === b.z  &&
       a.rx === b.rx && a.ry === b.ry && a.rz === b.rz &&
       a.targetX  === b.targetX  && a.targetY  === b.targetY  && a.targetZ  === b.targetZ  &&
@@ -646,6 +648,7 @@ export class RobotConnectService {
       name:        program.name,
       description: program.description,
       steps:       program.steps,
+      variables:   program.variables,
       isRoutine:   program.isRoutine ?? false,
     });
   }
@@ -714,6 +717,7 @@ export class RobotConnectService {
     verticalHomingDirection: number;
     horizontalHomingDirection: number;
     j1HomingDirection: number;
+    j4HomeOffsetDeg: number;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -726,6 +730,7 @@ export class RobotConnectService {
     verticalHomingDirection?: number;
     horizontalHomingDirection?: number;
     j1HomingDirection?: number;
+    j4HomeOffsetDeg?: number;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
   }
