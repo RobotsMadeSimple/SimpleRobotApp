@@ -67,6 +67,7 @@ export type ProgramStep = {
   outputValue?: boolean;
   outputCard?: string;     // "stb" | "relay" | "nano"
   outputNanoId?: string;   // only for nano
+  pulseMs?: number;        // >0 = non-blocking pulse; set to outputValue for pulseMs then flip
   waitMs?: number;
   loopCount?: number;
   loopSteps?: ProgramStep[];

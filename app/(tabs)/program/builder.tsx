@@ -360,12 +360,13 @@ function stepLabel(step: ProgramStep): string {
       return suffix ? `${base}  (${suffix})` : base;
     }
     case "SetOutput": {
-      const card = step.outputCard ?? "stb";
-      const num  = step.outputNumber ?? 1;
-      const val  = step.outputValue ? "ON" : "OFF";
-      if (card === "relay") return `Relay ${num}  →  ${val}`;
-      if (card === "nano")  return `Nano · Pin ${num}  →  ${val}`;
-      return `STB · Output ${num}  →  ${val}`;
+      const card  = step.outputCard ?? "stb";
+      const num   = step.outputNumber ?? 1;
+      const val   = step.outputValue ? "ON" : "OFF";
+      const pulse = step.pulseMs && step.pulseMs > 0 ? `  pulse ${step.pulseMs} ms` : "";
+      if (card === "relay") return `Relay ${num}  →  ${val}${pulse}`;
+      if (card === "nano")  return `Nano · Pin ${num}  →  ${val}${pulse}`;
+      return `STB · Output ${num}  →  ${val}${pulse}`;
     }
     case "Wait":         return `Wait  ${step.waitMs ?? 0} ms`;
     case "Loop":         return `Loop  ×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
@@ -544,17 +545,20 @@ function StepConfigModal({
   const routines      = allPrograms.filter(p => p.isRoutine);
   const nanos         = useNanoIO();
   const relay         = useRelayIO();
-  const [draft, setDraft]       = useState<ProgramStep | null>(null);
-  const [waitMsText, setWaitMs] = useState("");
-  const [subPage, setSubPage]   = useState<SubPage>(null);
+  const [draft, setDraft]           = useState<ProgramStep | null>(null);
+  const [waitMsText, setWaitMs]     = useState("");
+  const [pulseMsText, setPulseMs]   = useState("");
+  const [subPage, setSubPage]       = useState<SubPage>(null);
 
   useEffect(() => {
     if (step) {
       setDraft({ ...step });
       setWaitMs(step.waitMs !== undefined ? String(step.waitMs) : "");
+      setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
     } else {
       setDraft(null);
       setWaitMs("");
+      setPulseMs("");
     }
     setSubPage(null);
   }, [step]);
@@ -846,6 +850,48 @@ function StepConfigModal({
               <Switch value={draft!.outputValue ?? false} onValueChange={v => set({ outputValue: v })}
                 trackColor={{ false: "#e5e7eb", true: "#2563eb" }} />
             </View>
+
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PULSE</Text>
+            <View style={ms.switchRow}>
+              <Text style={ms.switchLabel}>
+                {(draft!.pulseMs ?? 0) > 0 ? `${draft!.pulseMs} ms then ${draft!.outputValue ? "OFF" : "ON"}` : "Off  (hold state)"}
+              </Text>
+              <Switch
+                value={(draft!.pulseMs ?? 0) > 0}
+                onValueChange={v => {
+                  const ms = v ? 500 : 0;
+                  set({ pulseMs: ms > 0 ? ms : undefined });
+                  setPulseMs(v ? "500" : "");
+                }}
+                trackColor={{ false: "#e5e7eb", true: "#f59e0b" }}
+              />
+            </View>
+            {(draft!.pulseMs ?? 0) > 0 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>PULSE DURATION  (ms)</Text>
+                <View style={[ms.input, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
+                  <TextInput
+                    style={{ flex: 1, fontSize: 14, color: "#111827" }}
+                    value={pulseMsText}
+                    onChangeText={v => {
+                      if (v === "" || /^\d+$/.test(v)) {
+                        setPulseMs(v);
+                        const n = parseInt(v, 10);
+                        set({ pulseMs: isNaN(n) || n <= 0 ? undefined : n });
+                      }
+                    }}
+                    keyboardType="numeric"
+                    selectTextOnFocus
+                    placeholder="500"
+                    placeholderTextColor="#c4c4c4"
+                  />
+                  <Text style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 6 }}>ms</Text>
+                </View>
+                <Text style={ms.hintText}>
+                  Output goes {draft!.outputValue ? "ON" : "OFF"} immediately, then flips {draft!.outputValue ? "OFF" : "ON"} after the pulse. Program continues without waiting.
+                </Text>
+              </>
+            )}
           </>
         );
       }
