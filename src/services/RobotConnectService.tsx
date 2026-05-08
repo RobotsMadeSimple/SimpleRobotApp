@@ -781,6 +781,17 @@ export class RobotConnectService {
     }
     return this.sendCommand("SetRelay", { relay, value });
   }
+
+  public renameRelay(relay: number, name: string) {
+    // Optimistic update
+    if (this.relayIO) {
+      const names = [...(this.relayIO.names ?? ["Relay 1", "Relay 2", "Relay 3", "Relay 4"])];
+      names[relay - 1] = name;
+      this.relayIO = { ...this.relayIO, names };
+      this.emitRelayIO();
+    }
+    return this.sendCommand("RenameRelay", { relay, name });
+  }
 }
 
 

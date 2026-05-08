@@ -5,6 +5,7 @@ export default function IOLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="configure" />
+      <Stack.Screen name="configure-relay" />
     </Stack>
   );
 }

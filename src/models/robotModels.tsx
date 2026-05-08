@@ -27,6 +27,7 @@ export type UsbRelayState = {
   connected: boolean;
   serial: string | null;
   relays: boolean[] | null;  // index 0 = relay 1, length 4
+  names: string[];           // display names, index 0 = relay 1
 };
 
 // ── Program builder ───────────────────────────────────────────────────────────

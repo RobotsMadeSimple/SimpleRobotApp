@@ -301,9 +301,10 @@ function NanoCard({ nano }: { nano: NanoState }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function UsbRelayCard() {
-  const relay = useRelayIO();
+  const relay     = useRelayIO();
   const connected = relay?.connected ?? false;
   const relays    = relay?.relays ?? [false, false, false, false];
+  const names     = relay?.names  ?? ["Relay 1", "Relay 2", "Relay 3", "Relay 4"];
   const serial    = relay?.serial ?? "";
 
   return (
@@ -314,13 +315,14 @@ function UsbRelayCard() {
         name="USB Relay Board"
         subtitle={`DCTTECH 4CH · HID${serial ? ` · ${serial}` : ""}`}
         connected={connected}
+        onConfigure={() => router.push("/(tabs)/io/configure-relay")}
       />
 
       <PinGroup label="RELAYS" fg="#0891b2" bg="#ecfeff">
         {[0, 1, 2, 3].map((i) => (
           <IORow
             key={i}
-            label={`Relay ${i + 1}`}
+            label={names[i] ?? `Relay ${i + 1}`}
             sublabel={`Channel ${i + 1}`}
             type="Output"
             value={relays[i] ?? false}
