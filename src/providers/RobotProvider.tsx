@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { BuiltProgram, NanoState, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, NanoState, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -35,6 +35,7 @@ type DataContextType = {
   builtPrograms:       BuiltProgram[];
   builtProgramsLoaded: boolean;
   nanoIO:              NanoState[];
+  relayIO:             UsbRelayState | null;
 };
 
 const DataContext = createContext<DataContextType>({
@@ -43,6 +44,7 @@ const DataContext = createContext<DataContextType>({
   builtPrograms:       [],
   builtProgramsLoaded: false,
   nanoIO:              [],
+  relayIO:             null,
 });
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -55,6 +57,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [builtPrograms,       setBuiltPrograms]       = useState<BuiltProgram[]>([]);
   const [builtProgramsLoaded, setBuiltProgramsLoaded] = useState(false);
   const [nanoIO,              setNanoIO]              = useState<NanoState[]>([]);
+  const [relayIO,             setRelayIO]             = useState<UsbRelayState | null>(null);
   const [selectedSerial,      setSelectedSerial]      = useState<string | null>(null);
 
   useEffect(() => {
@@ -66,7 +69,8 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       setBuiltPrograms(programs);
       setBuiltProgramsLoaded(true);
     });
-    const unsubNanoIO  = robotClient.onNanoIO(setNanoIO);
+    const unsubNanoIO   = robotClient.onNanoIO(setNanoIO);
+    const unsubRelayIO  = robotClient.onRelayIO(setRelayIO);
     const unsubSelected = subscribeRobot(robot =>
       setSelectedSerial(robot?.serialNumber ?? null)
     );
@@ -82,6 +86,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubTools();
       unsubBuiltPrograms();
       unsubNanoIO();
+      unsubRelayIO();
       robotDiscovery.stop();
       robotClient.disconnect();
     };
@@ -115,7 +120,8 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     builtPrograms,
     builtProgramsLoaded,
     nanoIO,
-  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO]);
+    relayIO,
+  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO, relayIO]);
 
   return (
     <StatusContext.Provider value={statusContextValue}>
@@ -141,3 +147,4 @@ export function useTools()               { return useContext(DataContext).tools;
 export function useBuiltPrograms()       { return useContext(DataContext).builtPrograms; }
 export function useBuiltProgramsLoaded() { return useContext(DataContext).builtProgramsLoaded; }
 export function useNanoIO()              { return useContext(DataContext).nanoIO; }
+export function useRelayIO()             { return useContext(DataContext).relayIO; }
