@@ -1,10 +1,13 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
+  CircuitBoard,
+  Cpu,
   Home,
   MoveHorizontal,
   MoveVertical,
   Pencil,
+  Radio,
   RotateCcw,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -12,6 +15,7 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -28,6 +32,9 @@ type RobotConfig = {
   horizontalHomingDirection: number;
   j1HomingDirection: number;
   j4HomeOffsetDeg: number;
+  enableStbCard: boolean;
+  enableNanoCards: boolean;
+  enableRelayCard: boolean;
 };
 
 function InfoRow({
@@ -93,6 +100,7 @@ export default function ConfigureRobot() {
   const [editJ1Dir, setEditJ1Dir] = useState(-1);
   const [editJ4Offset, setEditJ4Offset] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingCards, setSavingCards] = useState(false);
 
   useEffect(() => {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
@@ -123,12 +131,27 @@ export default function ConfigureRobot() {
         horizontalHomingDirection: editHorizontalDir,
         j1HomingDirection:        editJ1Dir,
         j4HomeOffsetDeg:          parseFloat(editJ4Offset),
+        enableStbCard:   config?.enableStbCard   ?? true,
+        enableNanoCards: config?.enableNanoCards  ?? true,
+        enableRelayCard: config?.enableRelayCard  ?? false,
       };
       await robotClient.setRobotConfig(fields);
       setConfig(fields);
       setEditVisible(false);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleCard(field: 'enableStbCard' | 'enableNanoCards' | 'enableRelayCard', value: boolean) {
+    if (!config || savingCards) return;
+    setSavingCards(true);
+    try {
+      const updated = { ...config, [field]: value };
+      await robotClient.setRobotConfig({ [field]: value });
+      setConfig(updated);
+    } finally {
+      setSavingCards(false);
     }
   }
 
@@ -204,6 +227,45 @@ export default function ConfigureRobot() {
           value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
           last
         />
+      </View>
+
+      {/* IO Cards */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionLabel}>IO CARDS</Text>
+      </View>
+      <View style={styles.card}>
+        {[
+          {
+            field: "enableStbCard"   as const,
+            icon:  <CircuitBoard size={16} color="#16a34a" />,
+            tileBg: "#f0fdf4",
+            label: "STB4100 Robot IO Board",
+          },
+          {
+            field: "enableNanoCards" as const,
+            icon:  <Cpu size={16} color="#4f46e5" />,
+            tileBg: "#eef2ff",
+            label: "Arduino Nano Devices",
+          },
+          {
+            field: "enableRelayCard" as const,
+            icon:  <Radio size={16} color="#0891b2" />,
+            tileBg: "#ecfeff",
+            label: "USB Relay Board",
+          },
+        ].map(({ field, icon, tileBg, label }, idx, arr) => (
+          <View key={field} style={[styles.infoRow, idx < arr.length - 1 && styles.infoRowBorder]}>
+            <View style={[styles.rowTile, { backgroundColor: tileBg }]}>{icon}</View>
+            <Text style={[styles.infoLabel, { flex: 1 }]}>{label}</Text>
+            <Switch
+              value={config ? config[field] : false}
+              onValueChange={v => toggleCard(field, v)}
+              disabled={!config || savingCards}
+              trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+              thumbColor="#fff"
+            />
+          </View>
+        ))}
       </View>
 
       {/* Edit modal */}

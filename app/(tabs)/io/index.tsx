@@ -1,10 +1,11 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { useNanoIO, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoState, PinType } from "@/src/models/robotModels";
 import {
   CircuitBoard,
   Cpu,
+  Radio,
   Settings,
   ToggleLeft,
   ToggleRight,
@@ -13,7 +14,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import { router } from "expo-router";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -21,6 +22,16 @@ import {
   Text,
   View,
 } from "react-native";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Config flags — fetched once on mount
+// ─────────────────────────────────────────────────────────────────────────────
+
+type IOConfig = {
+  enableStbCard:   boolean;
+  enableNanoCards: boolean;
+  enableRelayCard: boolean;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -41,7 +52,7 @@ function typeLabel(type: PinType) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared IO row — used by both STB card and Nano card
+// Shared IO row
 // ─────────────────────────────────────────────────────────────────────────────
 
 function IORow({
@@ -60,7 +71,7 @@ function IORow({
   onToggle?: () => void;
 }) {
   const { fg, bg } = typeColor(type);
-  const isOutput = type === "Output";
+  const isOutput   = type === "Output";
   const isNeopixel = type === "Neopixel";
 
   return (
@@ -96,7 +107,7 @@ function IORow({
 
       {isNeopixel && (
         <View style={styles.neoDots}>
-          {Array.from({ length: Math.min(8, 8) }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <View key={i} style={styles.neoDot} />
           ))}
         </View>
@@ -286,24 +297,81 @@ function NanoCard({ nano }: { nano: NanoState }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// USB Relay card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function UsbRelayCard() {
+  const relay = useRelayIO();
+  const connected = relay?.connected ?? false;
+  const relays    = relay?.relays ?? [false, false, false, false];
+  const serial    = relay?.serial ?? "";
+
+  return (
+    <View style={styles.card}>
+      <CardHeader
+        icon={<Radio size={16} color="#0891b2" />}
+        iconBg="#ecfeff"
+        name="USB Relay Board"
+        subtitle={`DCTTECH 4CH · HID${serial ? ` · ${serial}` : ""}`}
+        connected={connected}
+      />
+
+      <PinGroup label="RELAYS" fg="#0891b2" bg="#ecfeff">
+        {[0, 1, 2, 3].map((i) => (
+          <IORow
+            key={i}
+            label={`Relay ${i + 1}`}
+            sublabel={`Channel ${i + 1}`}
+            type="Output"
+            value={relays[i] ?? false}
+            last={i === 3}
+            onToggle={() => robotClient.setRelay(i + 1, !(relays[i] ?? false))}
+          />
+        ))}
+      </PinGroup>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function IoPage() {
   const nanos = useNanoIO();
+  const [ioConfig, setIoConfig] = useState<IOConfig | null>(null);
+
+  useEffect(() => {
+    robotClient.getRobotConfig()
+      .then(cfg => setIoConfig({
+        enableStbCard:   cfg.enableStbCard   ?? true,
+        enableNanoCards: cfg.enableNanoCards ?? true,
+        enableRelayCard: cfg.enableRelayCard ?? false,
+      }))
+      .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false }));
+  }, []);
+
+  const showStb   = ioConfig?.enableStbCard   ?? true;
+  const showNanos = ioConfig?.enableNanoCards  ?? true;
+  const showRelay = ioConfig?.enableRelayCard  ?? false;
+
+  const hasAnything = showStb || (showNanos && nanos.length > 0) || showRelay;
 
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <RobotIOBoardCard />
-        {nanos.map(nano => <NanoCard key={nano.id} nano={nano} />)}
-        {nanos.length === 0 && (
+
+        {showStb   && <RobotIOBoardCard />}
+        {showNanos && nanos.map(nano => <NanoCard key={nano.id} nano={nano} />)}
+        {showRelay && <UsbRelayCard />}
+
+        {!hasAnything && (
           <View style={styles.emptyState}>
             <Zap size={22} color="#d1d5db" />
-            <Text style={styles.emptyTitle}>No Nano Devices</Text>
+            <Text style={styles.emptyTitle}>No IO Cards Enabled</Text>
             <Text style={styles.emptyBody}>
-              Add entries to nano_config.json to see Nano IO here.
+              Enable IO cards in Robot → Configure to see them here.
             </Text>
           </View>
         )}

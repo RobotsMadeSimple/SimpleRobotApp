@@ -21,6 +21,14 @@ export type NanoState = {
 
 export type NeoPixelColor = { r: number; g: number; b: number };
 
+// ── USB Relay ─────────────────────────────────────────────────────────────────
+
+export type UsbRelayState = {
+  connected: boolean;
+  serial: string | null;
+  relays: boolean[] | null;  // index 0 = relay 1, length 4
+};
+
 // ── Program builder ───────────────────────────────────────────────────────────
 
 export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable';

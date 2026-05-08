@@ -1,11 +1,12 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { BuiltProgram, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, createDefaultStatus } from "../models/robotModels";
+import { BuiltProgram, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
 type ToolsListener            = (tools: Tool[])                          => void;
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
 type NanoIOListener           = (nanos: NanoState[])                     => void;
+type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type ProgramImagesListener    = (images: Record<string, string | null>)  => void;
 type PendingAck = {
   resolve: (value: any) => void;
@@ -28,13 +29,15 @@ export class RobotConnectService {
   private toolsListeners:         ToolsListener[]         = [];
   private builtProgramsListeners:  BuiltProgramsListener[]  = [];
   private nanoIOListeners:         NanoIOListener[]         = [];
+  private relayIOListeners:        RelayIOListener[]        = [];
   private programImagesListeners:  ProgramImagesListener[]  = [];
-  private status:       RobotStatus    = createDefaultStatus();
-  private connecting:   boolean        = false;
-  private points:       Point[]        = [];
-  private tools:        Tool[]         = [];
+  private status:       RobotStatus        = createDefaultStatus();
+  private connecting:   boolean            = false;
+  private points:       Point[]            = [];
+  private tools:        Tool[]             = [];
   private builtPrograms:  BuiltProgram[]                = [];
   private nanoIO:         NanoState[]                   = [];
+  private relayIO:        UsbRelayState | null          = null;
   private programImages:  Record<string, string | null> = {};
 
   private ws: WebSocket | null = null;
@@ -189,7 +192,7 @@ export class RobotConnectService {
         break;
 
       case "GetIO":
-        this.decodeNanoIO(data);
+        this.decodeIO(data);
         break;
     }
 
@@ -197,17 +200,32 @@ export class RobotConnectService {
     pending.resolve(data);
   }
 
-  private decodeNanoIO(data: any) {
-    if (!data.nanos) { this.nanoIO = []; this.emitNanoIO(); return; }
-
-    let parsed: any[];
-    try { parsed = JSON.parse(data.nanos); }
-    catch { this.nanoIO = []; this.emitNanoIO(); return; }
-
-    if (!Array.isArray(parsed)) { this.nanoIO = []; this.emitNanoIO(); return; }
-
-    this.nanoIO = parsed as NanoState[];
+  private decodeIO(data: any) {
+    // Nano devices
+    if (!data.nanos) {
+      this.nanoIO = [];
+    } else {
+      try {
+        const parsed = JSON.parse(data.nanos);
+        this.nanoIO = Array.isArray(parsed) ? (parsed as NanoState[]) : [];
+      } catch {
+        this.nanoIO = [];
+      }
+    }
     this.emitNanoIO();
+
+    // USB relay board
+    if (!data.relay) {
+      this.relayIO = null;
+    } else {
+      try {
+        const parsed = JSON.parse(data.relay);
+        this.relayIO = parsed as UsbRelayState;
+      } catch {
+        this.relayIO = null;
+      }
+    }
+    this.emitRelayIO();
   }
 
   private decodePoints(data: any) {
@@ -383,6 +401,18 @@ export class RobotConnectService {
 
   private emitNanoIO() {
     this.nanoIOListeners.forEach(cb => cb(this.nanoIO));
+  }
+
+  onRelayIO(cb: RelayIOListener) {
+    this.relayIOListeners.push(cb);
+    cb(this.relayIO);
+    return () => {
+      this.relayIOListeners = this.relayIOListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitRelayIO() {
+    this.relayIOListeners.forEach(cb => cb(this.relayIO));
   }
 
   private decodeTools(data: any) {
@@ -718,6 +748,9 @@ export class RobotConnectService {
     horizontalHomingDirection: number;
     j1HomingDirection: number;
     j4HomeOffsetDeg: number;
+    enableStbCard: boolean;
+    enableNanoCards: boolean;
+    enableRelayCard: boolean;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -731,8 +764,15 @@ export class RobotConnectService {
     horizontalHomingDirection?: number;
     j1HomingDirection?: number;
     j4HomeOffsetDeg?: number;
+    enableStbCard?: boolean;
+    enableNanoCards?: boolean;
+    enableRelayCard?: boolean;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
+  }
+
+  public setRelay(relay: number, value: boolean) {
+    return this.sendCommand("SetRelay", { relay, value });
   }
 }
 
