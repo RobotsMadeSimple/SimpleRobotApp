@@ -276,6 +276,31 @@ function ExpressionInput({
   const exprActive = isExpr(text);
   const hasVars    = variables && variables.length > 0;
 
+  // Extract the partial variable name being typed after the last '$' so we can
+  // rank the chips — e.g. "$cou" → query "cou" → "count" sorts above "speed"
+  const varQuery = (() => {
+    const dollarIdx = text.lastIndexOf("$");
+    if (dollarIdx === -1) return "";
+    const after = text.slice(dollarIdx + 1);
+    // Only treat as a live query while the cursor is still in the token
+    // (no whitespace / operators follow the partial name yet)
+    return /^[\w]*$/.test(after) ? after.toLowerCase() : "";
+  })();
+
+  const sortedVars = hasVars
+    ? [...variables!].sort((a, b) => {
+        const score = (name: string) => {
+          const n = name.toLowerCase();
+          if (!varQuery)              return 0;
+          if (n === varQuery)         return 3;   // exact
+          if (n.startsWith(varQuery)) return 2;   // prefix
+          if (n.includes(varQuery))   return 1;   // substring
+          return 0;
+        };
+        return score(b.name) - score(a.name);   // descending — best match first
+      })
+    : [];
+
   return (
     <View>
       <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
@@ -305,7 +330,7 @@ function ExpressionInput({
           contentContainerStyle={{ gap: 5 }}
           keyboardShouldPersistTaps="always"
         >
-          {variables!.map(v => (
+          {sortedVars.map(v => (
             <TouchableOpacity
               key={v.id}
               onPress={() => insertVar(v.name)}
