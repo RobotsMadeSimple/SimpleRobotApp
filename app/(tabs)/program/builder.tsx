@@ -388,7 +388,10 @@ function stepLabel(step: ProgramStep): string {
       if (card === "nano")  return `Nano · Pin ${num}  →  ${val}${pulse}`;
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
-    case "Wait":         return `Wait  ${step.waitMs ?? 0} ms`;
+    case "Wait": {
+      const waitExpr = step.expressions?.waitMs;
+      return `Wait  ${waitExpr ?? `${step.waitMs ?? 0} ms`}`;
+    }
     case "Loop": {
       const loopExpr = step.expressions?.loopCount;
       const loopVal  = loopExpr ? loopExpr : (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1));
@@ -445,8 +448,10 @@ function stepDetail(step: ProgramStep): string | null {
     }
     case "SetOutput":
       return `Output ${step.outputNumber ?? 1}  →  ${step.outputValue ? "ON" : "OFF"}`;
-    case "Wait":
-      return `${step.waitMs ?? 0} ms`;
+    case "Wait": {
+      const waitExpr = step.expressions?.waitMs;
+      return waitExpr ?? `${step.waitMs ?? 0} ms`;
+    }
     case "Loop": {
       const loopExpr = step.expressions?.loopCount;
       return `×${loopExpr ?? (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1))}`;
