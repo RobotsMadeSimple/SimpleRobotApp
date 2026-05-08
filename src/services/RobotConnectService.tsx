@@ -772,6 +772,13 @@ export class RobotConnectService {
   }
 
   public setRelay(relay: number, value: boolean) {
+    // Optimistic update — reflect the change immediately before the server confirms
+    if (this.relayIO) {
+      const relays = [...(this.relayIO.relays ?? [false, false, false, false])];
+      relays[relay - 1] = value;
+      this.relayIO = { ...this.relayIO, relays };
+      this.emitRelayIO();
+    }
     return this.sendCommand("SetRelay", { relay, value });
   }
 }
