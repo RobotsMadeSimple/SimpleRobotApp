@@ -1,6 +1,6 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, Tabs, useLocalSearchParams } from "expo-router";
@@ -108,6 +108,10 @@ export default function MonitorProgramScreen() {
   const builtPrograms       = useBuiltPrograms();
   const builtProgramsLoaded = useBuiltProgramsLoaded();
 
+  const robot  = useSelectedRobot();
+  const s      = robot?.status;
+  const fmt    = (v?: number) => (v ?? 0).toFixed(1);
+
   const builtProgram = builtPrograms.find((p) => p.name === programName) ?? null;
   const isBuilt      = builtProgram !== null;
 
@@ -206,6 +210,14 @@ export default function MonitorProgramScreen() {
     program.status === "Running" ||
     program.status === "Starting" ||
     program.status === "Finishing";
+
+  const builtProgramNames = new Set(builtPrograms.map((p) => p.name));
+  const anotherBuiltRunning = programSummaries.some(
+    (p) =>
+      p.name !== programName &&
+      builtProgramNames.has(p.name) &&
+      (p.status === "Running" || p.status === "Starting" || p.status === "Finishing")
+  );
 
   const theme = STATUS_THEME[program.status] ?? STATUS_THEME.Ready;
   const pct =
@@ -319,12 +331,88 @@ export default function MonitorProgramScreen() {
           </View>
           <Text style={[styles.progressPct, { color: theme.text }]}>{pct}%</Text>
 
-          {!!program.currentStepDescription && (
-            <View style={[styles.stepDescRow, { borderLeftColor: theme.bar }]}>
-              <Text style={styles.stepDescLabel}>CURRENT STEP</Text>
-              <Text style={styles.stepDescText}>{program.currentStepDescription}</Text>
-            </View>
-          )}
+          <View style={[styles.stepDescRow, { borderLeftColor: theme.bar }]}>
+            <Text style={styles.stepDescLabel}>CURRENT STEP</Text>
+            <Text style={[styles.stepDescText, !program.currentStepDescription && styles.stepDescPlaceholder]}>
+              {program.currentStepDescription || "—"}
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Position ── */}
+        <View style={styles.gapBand} />
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>POSITION</Text>
+
+          {/* Current coords */}
+          <View style={styles.coordRow}>
+            {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
+              <View key={axis} style={styles.coordCell}>
+                <Text style={styles.coordLabel}>{axis}</Text>
+                <Text style={styles.coordValue}>
+                  {fmt(s?.[axis.toLowerCase() as "x" | "y" | "z" | "rz"])}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Target coords */}
+          <View style={[styles.coordRow, styles.coordRowTarget]}>
+            {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
+              <View key={axis} style={styles.coordCell}>
+                <Text style={styles.coordLabelTarget}>{axis}</Text>
+                <Text style={styles.coordValueTarget}>
+                  {fmt(s?.[`target${axis[0]}${axis.slice(1).toLowerCase()}` as "targetX" | "targetY" | "targetZ" | "targetRz"])}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Point name */}
+          <View style={styles.posSubRow}>
+            <Text style={styles.posSubLabel}>POINT</Text>
+            <Text style={[styles.posSubValue, !program.currentPointName && styles.posSubPlaceholder]}>
+              {program.currentPointName || "—"}
+            </Text>
+          </View>
+
+          {/* Speeds */}
+          <View style={styles.posSubRow}>
+            <Text style={styles.posSubLabel}>SPEED</Text>
+            <Text style={styles.posSubValue}>{fmt(s?.speedS)} mm/s</Text>
+            <Text style={styles.posSubDot}>·</Text>
+            <Text style={styles.posSubLabel}>ACCEL</Text>
+            <Text style={styles.posSubValue}>{fmt(s?.accelS)} mm/s²</Text>
+            <Text style={styles.posSubDot}>·</Text>
+            <Text style={styles.posSubLabel}>DECEL</Text>
+            <Text style={styles.posSubValue}>{fmt(s?.decelS)} mm/s²</Text>
+          </View>
+
+          {/* Position offset */}
+          <View style={styles.posSubRow}>
+            <Text style={styles.posSubLabel}>OFFSET</Text>
+            {(["X", "Y", "Z", "RX", "RY", "RZ"] as const).map((lbl) => {
+              const v = program[`currentOffset${lbl}` as keyof typeof program] as number | undefined;
+              return (
+                <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
+                  {lbl} {v != null ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—"}{"  "}
+                </Text>
+              );
+            })}
+          </View>
+
+          {/* Tool offset */}
+          <View style={styles.posSubRow}>
+            <Text style={styles.posSubLabel}>TOOL</Text>
+            {(["X", "Y", "Z", "RX", "RY", "RZ"] as const).map((lbl) => {
+              const v = program[`currentToolOffset${lbl}` as keyof typeof program] as number | undefined;
+              return (
+                <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
+                  {lbl} {v != null ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—"}{"  "}
+                </Text>
+              );
+            })}
+          </View>
         </View>
 
         {/* ── Action buttons ── */}
@@ -334,24 +422,34 @@ export default function MonitorProgramScreen() {
             <View style={styles.actionsSection}>
               {isRunnable ? (
                 <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
-                  onPress={() => robotClient.executeBuiltProgram(programName).catch(() => {})}
+                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? "#9ca3af" : "#16a34a" }]}
+                  onPress={() => { if (!anotherBuiltRunning) robotClient.executeBuiltProgram(programName).catch(() => {}); }}
+                  disabled={anotherBuiltRunning}
                   activeOpacity={0.8}
                 >
                   <Play size={15} color="#fff" />
-                  <Text style={styles.actionBtnText}>Run Program</Text>
+                  <Text style={styles.actionBtnText}>
+                    {anotherBuiltRunning ? "Another Program Running" : "Run Program"}
+                  </Text>
                 </TouchableOpacity>
               ) : (
-                buttons.map((btn) => (
-                  <TouchableOpacity
-                    key={btn.label}
-                    style={[styles.actionBtn, { backgroundColor: btn.bg }]}
-                    onPress={btn.onPress}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.actionBtnText}>{btn.label}</Text>
-                  </TouchableOpacity>
-                ))
+                buttons.map((btn) => {
+                  const isStartAction = isBuilt && (btn.label === "Continue" || btn.label === "Run Again");
+                  const blocked = isStartAction && anotherBuiltRunning;
+                  return (
+                    <TouchableOpacity
+                      key={btn.label}
+                      style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
+                      onPress={blocked ? undefined : btn.onPress}
+                      disabled={blocked}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.actionBtnText}>
+                        {blocked ? "Another Program Running" : btn.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
               )}
             </View>
           </>
@@ -550,7 +648,8 @@ const styles = StyleSheet.create({
     fontSize: 9, fontWeight: "700", color: "#9ca3af",
     letterSpacing: 0.8, textTransform: "uppercase",
   },
-  stepDescText: { fontSize: 14, color: "#1f2937", lineHeight: 20 },
+  stepDescText:        { fontSize: 14, color: "#1f2937", lineHeight: 20 },
+  stepDescPlaceholder: { color: "#d1d5db" },
 
   // ── Actions section ────────────────────────────────────────────────────────
   actionsSection: {
@@ -580,6 +679,43 @@ const styles = StyleSheet.create({
   deleteBtnDisabled: { opacity: 0.5 },
   deleteBtnText:         { color: "#dc2626", fontSize: 14, fontWeight: "700" },
   deleteBtnTextDisabled: { color: "#fca5a5" },
+
+  // ── Position ───────────────────────────────────────────────────────────────
+  coordRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  coordCell: {
+    alignItems: "center",
+    flex: 1,
+  },
+  coordLabel: {
+    fontSize: 11, fontWeight: "600", color: "#9ca3af",
+    letterSpacing: 0.5, marginBottom: 4,
+  },
+  coordValue: {
+    fontSize: 20, fontWeight: "700", color: "#111827",
+    fontFamily: "monospace",
+  },
+
+  // ── Position ───────────────────────────────────────────────────────────────
+  coordRowTarget:   { marginTop: 6 },
+  coordLabelTarget: { fontSize: 11, fontWeight: "600", color: "#c4b5fd", letterSpacing: 0.5, marginBottom: 4 },
+  coordValueTarget: { fontSize: 16, fontWeight: "600", color: "#7c3aed", fontFamily: "monospace" },
+
+  posSubRow: {
+    flexDirection: "row", alignItems: "center", flexWrap: "wrap",
+    gap: 4, paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+  },
+  posSubLabel: {
+    fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5,
+  },
+  posSubValue: {
+    fontSize: 12, fontWeight: "600", color: "#374151",
+  },
+  posSubPlaceholder: { color: "#d1d5db" },
+  posSubDot: { fontSize: 10, color: "#d1d5db" },
 
   // ── Logs ───────────────────────────────────────────────────────────────────
   logsSection: {

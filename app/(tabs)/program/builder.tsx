@@ -276,6 +276,31 @@ function ExpressionInput({
   const exprActive = isExpr(text);
   const hasVars    = variables && variables.length > 0;
 
+  // Extract the partial variable name being typed after the last '$' so we can
+  // rank the chips — e.g. "$cou" → query "cou" → "count" sorts above "speed"
+  const varQuery = (() => {
+    const dollarIdx = text.lastIndexOf("$");
+    if (dollarIdx === -1) return "";
+    const after = text.slice(dollarIdx + 1);
+    // Only treat as a live query while the cursor is still in the token
+    // (no whitespace / operators follow the partial name yet)
+    return /^[\w]*$/.test(after) ? after.toLowerCase() : "";
+  })();
+
+  const sortedVars = hasVars
+    ? [...variables!].sort((a, b) => {
+        const score = (name: string) => {
+          const n = name.toLowerCase();
+          if (!varQuery)              return 0;
+          if (n === varQuery)         return 3;   // exact
+          if (n.startsWith(varQuery)) return 2;   // prefix
+          if (n.includes(varQuery))   return 1;   // substring
+          return 0;
+        };
+        return score(b.name) - score(a.name);   // descending — best match first
+      })
+    : [];
+
   return (
     <View>
       <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
@@ -305,7 +330,7 @@ function ExpressionInput({
           contentContainerStyle={{ gap: 5 }}
           keyboardShouldPersistTaps="always"
         >
-          {variables!.map(v => (
+          {sortedVars.map(v => (
             <TouchableOpacity
               key={v.id}
               onPress={() => insertVar(v.name)}
@@ -313,11 +338,6 @@ function ExpressionInput({
               style={exprStyles.chip}
             >
               <Text style={exprStyles.chipText}>${v.name}</Text>
-              {v.description ? (
-                <Text style={exprStyles.chipHint}>{v.description}</Text>
-              ) : (
-                <Text style={exprStyles.chipHint}>{v.value}</Text>
-              )}
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -368,12 +388,26 @@ function stepLabel(step: ProgramStep): string {
       if (card === "nano")  return `Nano · Pin ${num}  →  ${val}${pulse}`;
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
-    case "Wait":         return `Wait  ${step.waitMs ?? 0} ms`;
-    case "Loop":         return `Loop  ×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
+    case "Wait": {
+      const waitExpr = step.expressions?.waitMs;
+      return `Wait  ${waitExpr ?? `${step.waitMs ?? 0} ms`}`;
+    }
+    case "Loop": {
+      const loopExpr = step.expressions?.loopCount;
+      const loopVal  = loopExpr ? loopExpr : (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1));
+      return `Loop  ×${loopVal}`;
+    }
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
     case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
-    case "SetSpeedL":    return `Set Linear Speed  →  ${step.speed ?? "?"} mm/s`;
-    case "SetSpeedJ":    return `Set Joint Speed  →  ${step.speed ?? "?"} mm/s`;
+    case "SetSpeedL":
+    case "SetSpeedJ": {
+      const label  = step.type === "SetSpeedL" ? "Set Linear Speed" : "Set Joint Speed";
+      const parts: string[] = [];
+      if (step.speed != null) parts.push(`${step.speed} mm/s`);
+      if (step.accel != null) parts.push(`accel ${step.accel}`);
+      if (step.decel != null) parts.push(`decel ${step.decel}`);
+      return parts.length ? `${label}  →  ${parts.join("  ·  ")}` : label;
+    }
     case "SetVariable":  return step.variableName ? `$${step.variableName} = ${step.variableExpr ?? "?"}` : "Set Variable";
     default:             return step.type;
   }
@@ -421,21 +455,28 @@ function stepDetail(step: ProgramStep): string | null {
     }
     case "SetOutput":
       return `Output ${step.outputNumber ?? 1}  →  ${step.outputValue ? "ON" : "OFF"}`;
-    case "Wait":
-      return `${step.waitMs ?? 0} ms`;
-    case "Loop":
-      return `×${step.loopCount === 0 ? "∞" : (step.loopCount ?? 1)}`;
+    case "Wait": {
+      const waitExpr = step.expressions?.waitMs;
+      return waitExpr ?? `${step.waitMs ?? 0} ms`;
+    }
+    case "Loop": {
+      const loopExpr = step.expressions?.loopCount;
+      return `×${loopExpr ?? (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1))}`;
+    }
     case "StatusUpdate":
       return step.statusMessage || null;
     case "CallRoutine":
       return step.routineName ? `→ ${step.routineName}` : null;
     case "SetSpeedL":
     case "SetSpeedJ": {
-      const parts: string[] = [];
-      if (step.speed != null)  parts.push(`${step.speed} mm/s`);
-      if (step.accel != null)  parts.push(`accel ${step.accel}`);
-      if (step.decel != null)  parts.push(`decel ${step.decel}`);
-      return parts.length ? parts.join("  ·  ") : null;
+      const lines: string[] = [];
+      const speedStr = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
+      const accelStr = step.expressions?.accel ?? (step.accel != null ? `${step.accel} mm/s²` : null);
+      const decelStr = step.expressions?.decel ?? (step.decel != null ? `${step.decel} mm/s²` : null);
+      if (speedStr) lines.push(`Speed  ${speedStr}`);
+      if (accelStr) lines.push(`Accel  ${accelStr}`);
+      if (decelStr) lines.push(`Decel  ${decelStr}`);
+      return lines.length ? lines.join("\n") : null;
     }
     case "SetVariable":
       return step.variableName
@@ -546,18 +587,15 @@ function StepConfigModal({
   const nanos         = useNanoIO();
   const relay         = useRelayIO();
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
-  const [waitMsText, setWaitMs]     = useState("");
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
 
   useEffect(() => {
     if (step) {
       setDraft({ ...step });
-      setWaitMs(step.waitMs !== undefined ? String(step.waitMs) : "");
       setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
     } else {
       setDraft(null);
-      setWaitMs("");
       setPulseMs("");
     }
     setSubPage(null);
@@ -900,27 +938,10 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>DURATION  (ms)</Text>
-            {draft!.expressions?.waitMs ? (
-              <ExpressionInput style={ms.input} fieldKey="waitMs"
-                value={draft!.waitMs} expressions={draft!.expressions}
-                onChangeValue={v => { set({ waitMs: v !== undefined ? Math.round(v) : undefined }); setWaitMs(v !== undefined ? String(Math.round(v)) : ""); }}
-                onChangeExpr={setExpr} variables={variables} autoFocus />
-            ) : (
-              <>
-                <View style={[ms.input, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
-                  <TextInput
-                    style={{ flex: 1, fontSize: 14, color: "#111827" }}
-                    value={waitMsText}
-                    onChangeText={v => { if (v === "" || /^\d+$/.test(v)) setWaitMs(v); }}
-                    keyboardType="numeric" selectTextOnFocus autoFocus
-                  />
-                  <TouchableOpacity onPress={() => setExpr("waitMs", "$")} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "700", color: "#a78bfa" }}>$</Text>
-                  </TouchableOpacity>
-                </View>
-                {waitMsText === "" && <Text style={ms.fieldError}>Enter a duration to save this step.</Text>}
-              </>
-            )}
+            <ExpressionInput style={ms.input} fieldKey="waitMs"
+              value={draft!.waitMs} expressions={draft!.expressions}
+              onChangeValue={v => set({ waitMs: v !== undefined ? Math.round(v) : undefined })}
+              onChangeExpr={setExpr} variables={variables} autoFocus />
           </>
         );
 
@@ -989,19 +1010,19 @@ function StepConfigModal({
             </Text>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (mm/s)</Text>
             <ExpressionInput style={ms.input} fieldKey="speed"
-              value={draft!.speed ?? 100} expressions={draft!.expressions}
+              value={draft!.speed} expressions={draft!.expressions}
               onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables} autoFocus />
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="accel"
-                  value={draft!.accel ?? 100} expressions={draft!.expressions}
+                  value={draft!.accel} expressions={draft!.expressions}
                   onChangeValue={v => set({ accel: v })} onChangeExpr={setExpr} variables={variables} />
               </View>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="decel"
-                  value={draft!.decel ?? 100} expressions={draft!.expressions}
+                  value={draft!.decel} expressions={draft!.expressions}
                   onChangeValue={v => set({ decel: v })} onChangeExpr={setExpr} variables={variables} />
               </View>
             </View>
@@ -1126,13 +1147,7 @@ function StepConfigModal({
                 <TouchableOpacity
                   style={ms.saveBtn}
                   onPress={() => {
-                    if (draft!.type === "Wait") {
-                      const ms = parseInt(waitMsText);
-                      if (!waitMsText || isNaN(ms) || ms <= 0) return;
-                      onSave({ ...draft!, waitMs: ms });
-                    } else {
-                      onSave(draft!);
-                    }
+                    onSave(draft!);
                     onClose();
                   }}
                   activeOpacity={0.7}
@@ -1257,8 +1272,9 @@ function LoopInnerRow({
   onDragEnd: (id: string, loopId?: string) => void;
   onItemLayout: (id: string, height: number) => void;
 }) {
-  const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
-  const detail = stepDetail(step);
+  const theme      = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  const detail     = stepDetail(step);
+  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ";
 
   return (
     <View
@@ -1288,10 +1304,15 @@ function LoopInnerRow({
           <Text style={[styles.stepCardType, { color: theme.accent }]}>
             {index + 1} · {theme.label.toUpperCase()}
           </Text>
-          <Text style={styles.stepCardName} numberOfLines={1}>
-            {step.name || (detail ?? step.type)}
-          </Text>
-          {step.name && detail && (
+          {(!isSetSpeed || !!step.name) && (
+            <Text style={styles.stepCardName} numberOfLines={1}>
+              {step.name || (detail ?? step.type)}
+            </Text>
+          )}
+          {isSetSpeed && detail && detail.split("\n").map((line, i) => (
+            <Text key={i} style={styles.stepCardDetail}>{line}</Text>
+          ))}
+          {!isSetSpeed && !!step.name && detail && (
             <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
           )}
         </View>
@@ -1364,6 +1385,7 @@ function StepRow({
   onItemLayout: (id: string, height: number) => void;
 }) {
   const isLoop     = step.type === "Loop";
+  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ";
   const innerSteps = step.loopSteps ?? [];
   const isExpanded = isLoop && !collapsed;
   const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
@@ -1392,10 +1414,15 @@ function StepRow({
             <Text style={[styles.stepCardType, { color: theme.accent }]}>
               {index + 1} · {theme.label.toUpperCase()}
             </Text>
-            <Text style={styles.stepCardName} numberOfLines={1}>
-              {step.name || (detail ?? step.type)}
-            </Text>
-            {step.name && detail && (
+            {(!isSetSpeed || !!step.name) && (
+              <Text style={styles.stepCardName} numberOfLines={1}>
+                {step.name || (detail ?? step.type)}
+              </Text>
+            )}
+            {isSetSpeed && detail && detail.split("\n").map((line, i) => (
+              <Text key={i} style={styles.stepCardDetail}>{line}</Text>
+            ))}
+            {!isSetSpeed && !!step.name && detail && (
               <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
             )}
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
@@ -2065,7 +2092,7 @@ export default function BuilderScreen() {
             variables.map((v, i) => (
               <React.Fragment key={v.id}>
                 {i > 0 && <View style={styles.varSep} />}
-                <View style={styles.varRow}>
+                <TouchableOpacity style={styles.varRow} onPress={() => openEditVar(v)} activeOpacity={0.7}>
                   <View style={styles.varInfo}>
                     <Text style={styles.varName}>${v.name}</Text>
                     {v.description ? (
@@ -2074,10 +2101,6 @@ export default function BuilderScreen() {
                       <Text style={styles.varDesc}>Initial: {v.value}</Text>
                     )}
                   </View>
-                  <Text style={styles.varValue}>{v.value}</Text>
-                  <TouchableOpacity onPress={() => openEditVar(v)} hitSlop={8} style={{ paddingHorizontal: 4 }} activeOpacity={0.7}>
-                    <Text style={styles.varEditBtn}>Edit</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => Alert.alert("Delete Variable", `Remove $${v.name}?`, [
                       { text: "Cancel", style: "cancel" },
@@ -2087,7 +2110,7 @@ export default function BuilderScreen() {
                   >
                     <Trash2 size={14} color="#ef4444" />
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               </React.Fragment>
             ))
           )}
@@ -2278,8 +2301,6 @@ const styles = StyleSheet.create({
   varInfo: { flex: 1, minWidth: 0 },
   varName: { fontSize: 14, fontWeight: "700", color: "#7c3aed" },
   varDesc: { fontSize: 12, color: "#9ca3af" },
-  varValue: { fontSize: 14, fontWeight: "600", color: "#374151", marginRight: 4 },
-  varEditBtn: { fontSize: 13, fontWeight: "600", color: "#2563eb" },
   varEmptyText: {
     fontSize: 13, color: "#9ca3af", paddingHorizontal: 14, paddingVertical: 12,
     lineHeight: 18,

@@ -6,7 +6,6 @@ import {
   Home,
   MoveHorizontal,
   MoveVertical,
-  Pencil,
   Radio,
   RotateCcw,
 } from "lucide-react-native";
@@ -22,7 +21,6 @@ import {
   View,
 } from "react-native";
 
-
 type RobotConfig = {
   homingSpeed: number;
   j1HomeOffsetDeg: number;
@@ -37,29 +35,50 @@ type RobotConfig = {
   enableRelayCard: boolean;
 };
 
-function InfoRow({
+type EditingField = {
+  key: keyof RobotConfig;
+  label: string;
+  type: "number" | "direction";
+  unit?: string;
+  placeholder?: string;
+  numText: string;
+  dirValue: number;
+};
+
+// ── Config row ────────────────────────────────────────────────────────────────
+
+function ConfigRow({
   icon,
   tileBg,
   label,
   value,
   last = false,
+  onPress,
 }: {
   icon: React.ReactNode;
   tileBg?: string;
   label: string;
   value: string;
   last?: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <View style={[styles.infoRow, !last && styles.infoRowBorder]}>
+    <TouchableOpacity
+      style={[styles.infoRow, !last && styles.infoRowBorder]}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.55 : 1}
+      disabled={!onPress}
+    >
       <View style={[styles.rowTile, { backgroundColor: tileBg ?? "#f3f4f6" }]}>
         {icon}
       </View>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
+
+// ── Direction toggle ───────────────────────────────────────────────────────────
 
 function DirectionToggle({
   value,
@@ -88,17 +107,11 @@ function DirectionToggle({
   );
 }
 
+// ── Screen ────────────────────────────────────────────────────────────────────
+
 export default function ConfigureRobot() {
   const [config, setConfig] = useState<RobotConfig | null>(null);
-  const [editVisible, setEditVisible] = useState(false);
-  const [editHomingSpeed, setEditHomingSpeed] = useState("");
-  const [editJ1Offset, setEditJ1Offset] = useState("");
-  const [editVertical, setEditVertical] = useState("");
-  const [editHorizontal, setEditHorizontal] = useState("");
-  const [editVerticalDir, setEditVerticalDir] = useState(1);
-  const [editHorizontalDir, setEditHorizontalDir] = useState(1);
-  const [editJ1Dir, setEditJ1Dir] = useState(-1);
-  const [editJ4Offset, setEditJ4Offset] = useState("");
+  const [editing, setEditing] = useState<EditingField | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingCards, setSavingCards] = useState(false);
 
@@ -106,44 +119,31 @@ export default function ConfigureRobot() {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
   }, []);
 
-  function openEdit() {
-    if (!config) return;
-    setEditHomingSpeed(String(config.homingSpeed));
-    setEditJ1Offset(String(config.j1HomeOffsetDeg));
-    setEditVertical(String(config.verticalHomePosition));
-    setEditHorizontal(String(config.horizontalHomePosition));
-    setEditVerticalDir(config.verticalHomingDirection);
-    setEditHorizontalDir(config.horizontalHomingDirection);
-    setEditJ1Dir(config.j1HomingDirection);
-    setEditJ4Offset(String(config.j4HomeOffsetDeg));
-    setEditVisible(true);
+  function openFor(field: EditingField) {
+    setEditing(field);
   }
 
-  async function saveEdit() {
+  async function saveField() {
+    if (!editing || !config) return;
     setSaving(true);
     try {
-      const fields: RobotConfig = {
-        homingSpeed:              parseFloat(editHomingSpeed),
-        j1HomeOffsetDeg:          parseFloat(editJ1Offset),
-        verticalHomePosition:     parseFloat(editVertical),
-        horizontalHomePosition:   parseFloat(editHorizontal),
-        verticalHomingDirection:  editVerticalDir,
-        horizontalHomingDirection: editHorizontalDir,
-        j1HomingDirection:        editJ1Dir,
-        j4HomeOffsetDeg:          parseFloat(editJ4Offset),
-        enableStbCard:   config?.enableStbCard   ?? true,
-        enableNanoCards: config?.enableNanoCards  ?? true,
-        enableRelayCard: config?.enableRelayCard  ?? false,
-      };
-      await robotClient.setRobotConfig(fields);
-      setConfig(fields);
-      setEditVisible(false);
+      const value: number =
+        editing.type === "direction"
+          ? editing.dirValue
+          : parseFloat(editing.numText);
+      const updated = { ...config, [editing.key]: value };
+      await robotClient.setRobotConfig({ [editing.key]: value });
+      setConfig(updated);
+      setEditing(null);
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleCard(field: 'enableStbCard' | 'enableNanoCards' | 'enableRelayCard', value: boolean) {
+  async function toggleCard(
+    field: "enableStbCard" | "enableNanoCards" | "enableRelayCard",
+    value: boolean
+  ) {
     if (!config || savingCards) return;
     setSavingCards(true);
     try {
@@ -155,222 +155,174 @@ export default function ConfigureRobot() {
     }
   }
 
-  function dirLabel(v: number) { return v === 1 ? "+" : "−"; }
+  function dirLabel(v: number) {
+    return v === 1 ? "+" : "−";
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <SubPageHeader title="Configure Robot" />
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Homing */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionLabel}>HOMING</Text>
-        <TouchableOpacity
-          onPress={openEdit}
-          style={styles.editButton}
-          disabled={!config}
-        >
-          <Pencil size={14} color="#2563eb" />
-          <Text style={styles.editButtonText}>Edit</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.card}>
-        <InfoRow
-          icon={<Home size={16} color="#7c3aed" />}
-          tileBg="#f5f3ff"
-          label="Homing Speed"
-          value={config ? `${config.homingSpeed} u/s` : "—"}
-        />
-        <InfoRow
-          icon={<RotateCcw size={16} color="#0891b2" />}
-          tileBg="#ecfeff"
-          label="J1 Home Offset"
-          value={config ? `${config.j1HomeOffsetDeg}°` : "—"}
-        />
-        <InfoRow
-          icon={<RotateCcw size={16} color="#0891b2" />}
-          tileBg="#ecfeff"
-          label="J1 Homing Direction"
-          value={config ? dirLabel(config.j1HomingDirection) : "—"}
-        />
-        <InfoRow
-          icon={<MoveVertical size={16} color="#16a34a" />}
-          tileBg="#f0fdf4"
-          label="Vertical Home Position"
-          value={config ? `${config.verticalHomePosition} mm` : "—"}
-        />
-        <InfoRow
-          icon={<MoveVertical size={16} color="#16a34a" />}
-          tileBg="#f0fdf4"
-          label="Vertical Homing Direction"
-          value={config ? dirLabel(config.verticalHomingDirection) : "—"}
-        />
-        <InfoRow
-          icon={<MoveHorizontal size={16} color="#ea580c" />}
-          tileBg="#fff7ed"
-          label="Horizontal Home Position"
-          value={config ? `${config.horizontalHomePosition} mm` : "—"}
-        />
-        <InfoRow
-          icon={<MoveHorizontal size={16} color="#ea580c" />}
-          tileBg="#fff7ed"
-          label="Horizontal Homing Direction"
-          value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
-        />
-        <InfoRow
-          icon={<RotateCcw size={16} color="#7c3aed" />}
-          tileBg="#f5f3ff"
-          label="J4 Home Offset"
-          value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
-          last
-        />
-      </View>
-
-      {/* IO Cards */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionLabel}>IO CARDS</Text>
-      </View>
-      <View style={styles.card}>
-        {[
-          {
-            field: "enableStbCard"   as const,
-            icon:  <CircuitBoard size={16} color="#16a34a" />,
-            tileBg: "#f0fdf4",
-            label: "STB4100 Robot IO Board",
-          },
-          {
-            field: "enableNanoCards" as const,
-            icon:  <Cpu size={16} color="#4f46e5" />,
-            tileBg: "#eef2ff",
-            label: "Arduino Nano Devices",
-          },
-          {
-            field: "enableRelayCard" as const,
-            icon:  <Radio size={16} color="#0891b2" />,
-            tileBg: "#ecfeff",
-            label: "USB Relay Board",
-          },
-        ].map(({ field, icon, tileBg, label }, idx, arr) => (
-          <View key={field} style={[styles.infoRow, idx < arr.length - 1 && styles.infoRowBorder]}>
-            <View style={[styles.rowTile, { backgroundColor: tileBg }]}>{icon}</View>
-            <Text style={[styles.infoLabel, { flex: 1 }]}>{label}</Text>
-            <Switch
-              value={config ? config[field] : false}
-              onValueChange={v => toggleCard(field, v)}
-              disabled={!config || savingCards}
-              trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
-              thumbColor="#fff"
-            />
-          </View>
-        ))}
-      </View>
-
-      {/* Edit modal */}
-      <Modal
-        visible={editVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditVisible(false)}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Edit Homing Config</Text>
+        {/* ── Homing ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>HOMING</Text>
+        </View>
+        <View style={styles.card}>
+          <ConfigRow
+            icon={<Home size={16} color="#7c3aed" />}
+            tileBg="#f5f3ff"
+            label="Homing Speed"
+            value={config ? `${config.homingSpeed} u/s` : "—"}
+            onPress={config ? () => openFor({ key: "homingSpeed", label: "Homing Speed", type: "number", unit: "u/s", placeholder: "20", numText: String(config.homingSpeed), dirValue: 1 }) : undefined}
+          />
+          <ConfigRow
+            icon={<RotateCcw size={16} color="#0891b2" />}
+            tileBg="#ecfeff"
+            label="J1 Home Offset"
+            value={config ? `${config.j1HomeOffsetDeg}°` : "—"}
+            onPress={config ? () => openFor({ key: "j1HomeOffsetDeg", label: "J1 Home Offset", type: "number", unit: "°", placeholder: "-17", numText: String(config.j1HomeOffsetDeg), dirValue: 1 }) : undefined}
+          />
+          <ConfigRow
+            icon={<RotateCcw size={16} color="#0891b2" />}
+            tileBg="#ecfeff"
+            label="J1 Homing Direction"
+            value={config ? dirLabel(config.j1HomingDirection) : "—"}
+            onPress={config ? () => openFor({ key: "j1HomingDirection", label: "J1 Homing Direction", type: "direction", numText: "", dirValue: config.j1HomingDirection }) : undefined}
+          />
+          <ConfigRow
+            icon={<MoveVertical size={16} color="#16a34a" />}
+            tileBg="#f0fdf4"
+            label="Vertical Home Position"
+            value={config ? `${config.verticalHomePosition} mm` : "—"}
+            onPress={config ? () => openFor({ key: "verticalHomePosition", label: "Vertical Home Position", type: "number", unit: "mm", placeholder: "445", numText: String(config.verticalHomePosition), dirValue: 1 }) : undefined}
+          />
+          <ConfigRow
+            icon={<MoveVertical size={16} color="#16a34a" />}
+            tileBg="#f0fdf4"
+            label="Vertical Homing Direction"
+            value={config ? dirLabel(config.verticalHomingDirection) : "—"}
+            onPress={config ? () => openFor({ key: "verticalHomingDirection", label: "Vertical Homing Direction", type: "direction", numText: "", dirValue: config.verticalHomingDirection }) : undefined}
+          />
+          <ConfigRow
+            icon={<MoveHorizontal size={16} color="#ea580c" />}
+            tileBg="#fff7ed"
+            label="Horizontal Home Position"
+            value={config ? `${config.horizontalHomePosition} mm` : "—"}
+            onPress={config ? () => openFor({ key: "horizontalHomePosition", label: "Horizontal Home Position", type: "number", unit: "mm", placeholder: "413", numText: String(config.horizontalHomePosition), dirValue: 1 }) : undefined}
+          />
+          <ConfigRow
+            icon={<MoveHorizontal size={16} color="#ea580c" />}
+            tileBg="#fff7ed"
+            label="Horizontal Homing Direction"
+            value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
+            onPress={config ? () => openFor({ key: "horizontalHomingDirection", label: "Horizontal Homing Direction", type: "direction", numText: "", dirValue: config.horizontalHomingDirection }) : undefined}
+          />
+          <ConfigRow
+            icon={<RotateCcw size={16} color="#7c3aed" />}
+            tileBg="#f5f3ff"
+            label="J4 Home Offset"
+            value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
+            last
+            onPress={config ? () => openFor({ key: "j4HomeOffsetDeg", label: "J4 Home Offset", type: "number", unit: "°", placeholder: "0", numText: String(config.j4HomeOffsetDeg), dirValue: 1 }) : undefined}
+          />
+        </View>
 
-            <Text style={styles.editLabel}>HOMING SPEED (u/s)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editHomingSpeed}
-              onChangeText={setEditHomingSpeed}
-              keyboardType="numeric"
-              placeholder="20"
-              placeholderTextColor="#9ca3af"
-            />
+        {/* ── IO Cards ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>IO CARDS</Text>
+        </View>
+        <View style={styles.card}>
+          {[
+            { field: "enableStbCard"   as const, icon: <CircuitBoard size={16} color="#16a34a" />, tileBg: "#f0fdf4", label: "STB4100 Robot IO Board" },
+            { field: "enableNanoCards" as const, icon: <Cpu size={16} color="#4f46e5" />,          tileBg: "#eef2ff", label: "Arduino Nano Devices" },
+            { field: "enableRelayCard" as const, icon: <Radio size={16} color="#0891b2" />,        tileBg: "#ecfeff", label: "USB Relay Board" },
+          ].map(({ field, icon, tileBg, label }, idx, arr) => (
+            <View key={field} style={[styles.infoRow, idx < arr.length - 1 && styles.infoRowBorder]}>
+              <View style={[styles.rowTile, { backgroundColor: tileBg }]}>{icon}</View>
+              <Text style={[styles.infoLabel, { flex: 1 }]}>{label}</Text>
+              <Switch
+                value={config ? config[field] : false}
+                onValueChange={v => toggleCard(field, v)}
+                disabled={!config || savingCards}
+                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                thumbColor="#fff"
+              />
+            </View>
+          ))}
+        </View>
 
-            <Text style={styles.editLabel}>J1 HOME OFFSET (°)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editJ1Offset}
-              onChangeText={setEditJ1Offset}
-              keyboardType="numeric"
-              placeholder="-17"
-              placeholderTextColor="#9ca3af"
-            />
+        {/* ── Per-field edit modal ── */}
+        <Modal
+          visible={editing !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setEditing(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{editing?.label}</Text>
 
-            <Text style={styles.editLabel}>J1 HOMING DIRECTION</Text>
-            <DirectionToggle value={editJ1Dir} onChange={setEditJ1Dir} />
+              {editing?.type === "number" && (
+                <>
+                  <Text style={styles.editLabel}>
+                    {editing.label.toUpperCase()}{editing.unit ? ` (${editing.unit})` : ""}
+                  </Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editing.numText}
+                    onChangeText={v => setEditing(e => e ? { ...e, numText: v } : e)}
+                    keyboardType="numeric"
+                    placeholder={editing.placeholder ?? "0"}
+                    placeholderTextColor="#9ca3af"
+                    autoFocus
+                  />
+                </>
+              )}
 
-            <Text style={styles.editLabel}>VERTICAL HOME POSITION (mm)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editVertical}
-              onChangeText={setEditVertical}
-              keyboardType="numeric"
-              placeholder="445"
-              placeholderTextColor="#9ca3af"
-            />
+              {editing?.type === "direction" && (
+                <>
+                  <Text style={styles.editLabel}>DIRECTION</Text>
+                  <DirectionToggle
+                    value={editing.dirValue}
+                    onChange={v => setEditing(e => e ? { ...e, dirValue: v } : e)}
+                  />
+                </>
+              )}
 
-            <Text style={styles.editLabel}>VERTICAL HOMING DIRECTION</Text>
-            <DirectionToggle value={editVerticalDir} onChange={setEditVerticalDir} />
-
-            <Text style={styles.editLabel}>HORIZONTAL HOME POSITION (mm)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editHorizontal}
-              onChangeText={setEditHorizontal}
-              keyboardType="numeric"
-              placeholder="413"
-              placeholderTextColor="#9ca3af"
-            />
-
-            <Text style={styles.editLabel}>HORIZONTAL HOMING DIRECTION</Text>
-            <DirectionToggle value={editHorizontalDir} onChange={setEditHorizontalDir} />
-
-            <Text style={styles.editLabel}>J4 HOME OFFSET (°)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editJ4Offset}
-              onChangeText={setEditJ4Offset}
-              keyboardType="numeric"
-              placeholder="0"
-              placeholderTextColor="#9ca3af"
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setEditVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, saving && { opacity: 0.6 }]}
-                onPress={saveEdit}
-                disabled={saving}
-              >
-                <Text style={styles.saveButtonText}>
-                  {saving ? "Saving…" : "Save"}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setEditing(null)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && { opacity: 0.6 }]}
+                  onPress={saveField}
+                  disabled={saving}
+                >
+                  <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save"}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
-    </ScrollView>
+        </Modal>
+      </ScrollView>
     </View>
   );
 }
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f3f4f6" },
   content:   { padding: 16, paddingBottom: 36 },
 
   sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginBottom: 8,
   },
   sectionLabel: {
@@ -378,16 +330,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#6b7280",
     letterSpacing: 0.8,
-  },
-  editButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  editButtonText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#2563eb",
   },
 
   card: {
@@ -432,7 +374,7 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-  // Modal
+  // ── Modal ──────────────────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -476,7 +418,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  // Direction toggle
+  // ── Direction toggle ───────────────────────────────────────────────────────
   dirToggleRow: {
     flexDirection: "row",
     gap: 8,
@@ -504,6 +446,7 @@ const styles = StyleSheet.create({
     color: "#2563eb",
   },
 
+  // ── Modal buttons ──────────────────────────────────────────────────────────
   modalButtons: {
     flexDirection: "row",
     gap: 10,
