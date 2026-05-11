@@ -106,6 +106,11 @@ export type ProgramSummary = {
   maxStepCount: number;
   errorDescription: string;
   warningDescription: string;
+  currentPointName: string;
+  currentOffsetX?: number;  currentOffsetY?: number;  currentOffsetZ?: number;
+  currentOffsetRX?: number; currentOffsetRY?: number; currentOffsetRZ?: number;
+  currentToolOffsetX?: number;  currentToolOffsetY?: number;  currentToolOffsetZ?: number;
+  currentToolOffsetRX?: number; currentToolOffsetRY?: number; currentToolOffsetRZ?: number;
   /** Flag set by mobile app — external program reads and consumes this */
   start: boolean;
   stop: boolean;

@@ -84,10 +84,12 @@ function ProgramCard({
   p,
   image,
   isBuilt,
+  anotherBuiltRunning,
 }: {
   p: ProgramSummary;
   image: string | null;
   isBuilt?: boolean;
+  anotherBuiltRunning?: boolean;
 }) {
   const theme = STATUS_THEME[p.status] ?? STATUS_THEME.Ready;
   const pct =
@@ -193,19 +195,24 @@ function ProgramCard({
         {/* ── Action buttons ─────────────────────────── */}
         {buttons.length > 0 && (
           <View style={styles.buttonsRow}>
-            {buttons.map((btn) => (
-              <TouchableOpacity
-                key={btn.label}
-                style={[styles.actionBtn, { backgroundColor: btn.bg }]}
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  btn.onPress();
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.actionBtnText}>{btn.label}</Text>
-              </TouchableOpacity>
-            ))}
+            {buttons.map((btn) => {
+              const isStartAction = btn.label === "Start" || btn.label === "Continue" || btn.label === "Run Again";
+              const blocked = !!(isBuilt && anotherBuiltRunning && isStartAction);
+              return (
+                <TouchableOpacity
+                  key={btn.label}
+                  style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    if (!blocked) btn.onPress();
+                  }}
+                  disabled={blocked}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.actionBtnText}>{blocked ? "Another Program Running" : btn.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
       </View>
@@ -261,6 +268,15 @@ export default function ProgramScreen() {
   const allCards = [...builtCards, ...externalCards];
   useEffect(() => robotClient.onProgramImages(setImages), []);
 
+  const isActiveStatus = (s: ProgramStatus) =>
+    s === "Running" || s === "Starting" || s === "Finishing";
+
+  function anotherBuiltRunning(forName: string) {
+    return programSummaries.some(
+      (p) => p.name !== forName && builtNames.has(p.name) && isActiveStatus(p.status)
+    );
+  }
+
   return (
     <View style={{ flex: 1 }}>
       <NotConnectedOverlay />
@@ -285,6 +301,7 @@ export default function ProgramScreen() {
               p={c.summary}
               image={images[c.summary.name] ?? null}
               isBuilt={c.isBuilt}
+              anotherBuiltRunning={c.isBuilt ? anotherBuiltRunning(c.summary.name) : false}
             />
           ))
         )}

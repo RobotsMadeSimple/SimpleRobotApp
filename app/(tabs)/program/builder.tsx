@@ -470,9 +470,12 @@ function stepDetail(step: ProgramStep): string | null {
     case "SetSpeedL":
     case "SetSpeedJ": {
       const lines: string[] = [];
-      if (step.speed != null)  lines.push(`${step.speed} mm/s`);
-      if (step.accel != null)  lines.push(`accel ${step.accel}`);
-      if (step.decel != null)  lines.push(`decel ${step.decel}`);
+      const speedStr = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
+      const accelStr = step.expressions?.accel ?? (step.accel != null ? `${step.accel} mm/s²` : null);
+      const decelStr = step.expressions?.decel ?? (step.decel != null ? `${step.decel} mm/s²` : null);
+      if (speedStr) lines.push(`Speed  ${speedStr}`);
+      if (accelStr) lines.push(`Accel  ${accelStr}`);
+      if (decelStr) lines.push(`Decel  ${decelStr}`);
       return lines.length ? lines.join("\n") : null;
     }
     case "SetVariable":
@@ -584,18 +587,15 @@ function StepConfigModal({
   const nanos         = useNanoIO();
   const relay         = useRelayIO();
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
-  const [waitMsText, setWaitMs]     = useState("");
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
 
   useEffect(() => {
     if (step) {
       setDraft({ ...step });
-      setWaitMs(step.waitMs !== undefined ? String(step.waitMs) : "");
       setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
     } else {
       setDraft(null);
-      setWaitMs("");
       setPulseMs("");
     }
     setSubPage(null);
@@ -938,27 +938,10 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>DURATION  (ms)</Text>
-            {draft!.expressions?.waitMs ? (
-              <ExpressionInput style={ms.input} fieldKey="waitMs"
-                value={draft!.waitMs} expressions={draft!.expressions}
-                onChangeValue={v => { set({ waitMs: v !== undefined ? Math.round(v) : undefined }); setWaitMs(v !== undefined ? String(Math.round(v)) : ""); }}
-                onChangeExpr={setExpr} variables={variables} autoFocus />
-            ) : (
-              <>
-                <View style={[ms.input, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
-                  <TextInput
-                    style={{ flex: 1, fontSize: 14, color: "#111827" }}
-                    value={waitMsText}
-                    onChangeText={v => { if (v === "" || /^\d+$/.test(v)) setWaitMs(v); }}
-                    keyboardType="numeric" selectTextOnFocus autoFocus
-                  />
-                  <TouchableOpacity onPress={() => setExpr("waitMs", "$")} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "700", color: "#a78bfa" }}>$</Text>
-                  </TouchableOpacity>
-                </View>
-                {waitMsText === "" && <Text style={ms.fieldError}>Enter a duration to save this step.</Text>}
-              </>
-            )}
+            <ExpressionInput style={ms.input} fieldKey="waitMs"
+              value={draft!.waitMs} expressions={draft!.expressions}
+              onChangeValue={v => set({ waitMs: v !== undefined ? Math.round(v) : undefined })}
+              onChangeExpr={setExpr} variables={variables} autoFocus />
           </>
         );
 
@@ -1027,19 +1010,19 @@ function StepConfigModal({
             </Text>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (mm/s)</Text>
             <ExpressionInput style={ms.input} fieldKey="speed"
-              value={draft!.speed ?? 100} expressions={draft!.expressions}
+              value={draft!.speed} expressions={draft!.expressions}
               onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables} autoFocus />
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="accel"
-                  value={draft!.accel ?? 100} expressions={draft!.expressions}
+                  value={draft!.accel} expressions={draft!.expressions}
                   onChangeValue={v => set({ accel: v })} onChangeExpr={setExpr} variables={variables} />
               </View>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="decel"
-                  value={draft!.decel ?? 100} expressions={draft!.expressions}
+                  value={draft!.decel} expressions={draft!.expressions}
                   onChangeValue={v => set({ decel: v })} onChangeExpr={setExpr} variables={variables} />
               </View>
             </View>
@@ -1164,13 +1147,7 @@ function StepConfigModal({
                 <TouchableOpacity
                   style={ms.saveBtn}
                   onPress={() => {
-                    if (draft!.type === "Wait") {
-                      const ms = parseInt(waitMsText);
-                      if (!waitMsText || isNaN(ms) || ms <= 0) return;
-                      onSave({ ...draft!, waitMs: ms });
-                    } else {
-                      onSave(draft!);
-                    }
+                    onSave(draft!);
                     onClose();
                   }}
                   activeOpacity={0.7}
@@ -1295,8 +1272,9 @@ function LoopInnerRow({
   onDragEnd: (id: string, loopId?: string) => void;
   onItemLayout: (id: string, height: number) => void;
 }) {
-  const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
-  const detail = stepDetail(step);
+  const theme      = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  const detail     = stepDetail(step);
+  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ";
 
   return (
     <View
@@ -1326,10 +1304,15 @@ function LoopInnerRow({
           <Text style={[styles.stepCardType, { color: theme.accent }]}>
             {index + 1} · {theme.label.toUpperCase()}
           </Text>
-          <Text style={styles.stepCardName} numberOfLines={1}>
-            {step.name || (detail ?? step.type)}
-          </Text>
-          {step.name && detail && (
+          {(!isSetSpeed || !!step.name) && (
+            <Text style={styles.stepCardName} numberOfLines={1}>
+              {step.name || (detail ?? step.type)}
+            </Text>
+          )}
+          {isSetSpeed && detail && detail.split("\n").map((line, i) => (
+            <Text key={i} style={styles.stepCardDetail}>{line}</Text>
+          ))}
+          {!isSetSpeed && !!step.name && detail && (
             <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
           )}
         </View>
@@ -1402,6 +1385,7 @@ function StepRow({
   onItemLayout: (id: string, height: number) => void;
 }) {
   const isLoop     = step.type === "Loop";
+  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ";
   const innerSteps = step.loopSteps ?? [];
   const isExpanded = isLoop && !collapsed;
   const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
@@ -1430,11 +1414,16 @@ function StepRow({
             <Text style={[styles.stepCardType, { color: theme.accent }]}>
               {index + 1} · {theme.label.toUpperCase()}
             </Text>
-            <Text style={styles.stepCardName} numberOfLines={step.type === "SetSpeedL" || step.type === "SetSpeedJ" ? undefined : 1}>
-              {step.name || (detail ?? step.type)}
-            </Text>
-            {step.name && detail && (
-              <Text style={styles.stepCardDetail} numberOfLines={step.type === "SetSpeedL" || step.type === "SetSpeedJ" ? undefined : 1}>{detail}</Text>
+            {(!isSetSpeed || !!step.name) && (
+              <Text style={styles.stepCardName} numberOfLines={1}>
+                {step.name || (detail ?? step.type)}
+              </Text>
+            )}
+            {isSetSpeed && detail && detail.split("\n").map((line, i) => (
+              <Text key={i} style={styles.stepCardDetail}>{line}</Text>
+            ))}
+            {!isSetSpeed && !!step.name && detail && (
+              <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
             )}
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
               <Text style={styles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
@@ -2103,7 +2092,7 @@ export default function BuilderScreen() {
             variables.map((v, i) => (
               <React.Fragment key={v.id}>
                 {i > 0 && <View style={styles.varSep} />}
-                <View style={styles.varRow}>
+                <TouchableOpacity style={styles.varRow} onPress={() => openEditVar(v)} activeOpacity={0.7}>
                   <View style={styles.varInfo}>
                     <Text style={styles.varName}>${v.name}</Text>
                     {v.description ? (
@@ -2112,10 +2101,6 @@ export default function BuilderScreen() {
                       <Text style={styles.varDesc}>Initial: {v.value}</Text>
                     )}
                   </View>
-                  <Text style={styles.varValue}>{v.value}</Text>
-                  <TouchableOpacity onPress={() => openEditVar(v)} hitSlop={8} style={{ paddingHorizontal: 4 }} activeOpacity={0.7}>
-                    <Text style={styles.varEditBtn}>Edit</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => Alert.alert("Delete Variable", `Remove $${v.name}?`, [
                       { text: "Cancel", style: "cancel" },
@@ -2125,7 +2110,7 @@ export default function BuilderScreen() {
                   >
                     <Trash2 size={14} color="#ef4444" />
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               </React.Fragment>
             ))
           )}
@@ -2316,8 +2301,6 @@ const styles = StyleSheet.create({
   varInfo: { flex: 1, minWidth: 0 },
   varName: { fontSize: 14, fontWeight: "700", color: "#7c3aed" },
   varDesc: { fontSize: 12, color: "#9ca3af" },
-  varValue: { fontSize: 14, fontWeight: "600", color: "#374151", marginRight: 4 },
-  varEditBtn: { fontSize: 13, fontWeight: "600", color: "#2563eb" },
   varEmptyText: {
     fontSize: 13, color: "#9ca3af", paddingHorizontal: 14, paddingVertical: 12,
     lineHeight: 18,
