@@ -13,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -33,6 +33,15 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from "react-native-reanimated";
+
+// ── Blueprint palette ──────────────────────────────────────────────────────────
+const BP_BG         = "#0b1d35";
+const BP_AXIS       = "rgba(96, 165, 250, 0.70)";
+const BP_GRID_MAJOR = "rgba(59, 130, 246, 0.28)";
+const BP_GRID_MINOR = "rgba(59, 130, 246, 0.09)";
+const GRID_MINOR_STEP = 100;
+const GRID_MAJOR_STEP = 500;
+const GRID_RANGE      = 2500;
 
 const LABEL_WIDTH = 60;
 const MAX_LABEL_SCREEN_PX = 11;
@@ -65,6 +74,23 @@ function PointLabel({
   );
 }
 
+// ── Blueprint grid ─────────────────────────────────────────────────────────────
+
+function BlueprintGrid({ cx, cy }: { cx: number; cy: number }) {
+  const els: React.ReactElement[] = [];
+  for (let v = -GRID_RANGE; v <= GRID_RANGE; v += GRID_MINOR_STEP) {
+    if (v === 0) continue; // axes drawn separately
+    const major = v % GRID_MAJOR_STEP === 0;
+    const color = major ? BP_GRID_MAJOR : BP_GRID_MINOR;
+    const thick = major ? 1 : StyleSheet.hairlineWidth;
+    els.push(
+      <View key={`h${v}`} style={{ position: "absolute", top: cy - v, left: -GRID_RANGE, width: GRID_RANGE * 2, height: thick, backgroundColor: color }} />,
+      <View key={`v${v}`} style={{ position: "absolute", left: cx + v, top: -GRID_RANGE, width: thick, height: GRID_RANGE * 2, backgroundColor: color }} />
+    );
+  }
+  return <>{els}</>;
+}
+
 const MAP_HEIGHT = 300;
 const DOT_RADIUS = 6;
 const HIT_THRESHOLD_PX = 28;
@@ -81,15 +107,21 @@ function PointsMap({
 
   const offsetX = useSharedValue(0);
   const offsetY = useSharedValue(0);
-  const scale = useSharedValue(1);
+  const scale   = useSharedValue(1);
+
+  const savedScale   = useSharedValue(1);
   const savedOffsetX = useSharedValue(0);
   const savedOffsetY = useSharedValue(0);
-  const savedScale = useSharedValue(1);
-  const savedFocalX = useSharedValue(0);
-  const savedFocalY = useSharedValue(0);
-  const centerX = useSharedValue(0);
-  const centerY = useSharedValue(0);
-  const isPinching = useSharedValue(false);
+  const savedFocalX  = useSharedValue(0);
+  const savedFocalY  = useSharedValue(0);
+  const centerX      = useSharedValue(0);
+  const centerY      = useSharedValue(0);
+  const isPinching   = useSharedValue(false);
+
+  // Delta-based pan: tracks the previous finger position each frame so that
+  // when the pinch ends and pan resumes, there is no accumulated-offset snap.
+  const lastPanX = useSharedValue(0);
+  const lastPanY = useSharedValue(0);
 
   const [tapPos, setTapPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -129,39 +161,43 @@ function PointsMap({
     .minPointers(1)
     .maxPointers(1)
     .minDistance(6)
-    .onStart(() => {
-      savedOffsetX.value = offsetX.value;
-      savedOffsetY.value = offsetY.value;
+    .onStart((e) => {
+      lastPanX.value = e.x;
+      lastPanY.value = e.y;
     })
     .onUpdate((e) => {
       if (isPinching.value) {
-        savedOffsetX.value = offsetX.value - e.translationX;
-        savedOffsetY.value = offsetY.value - e.translationY;
+        // Keep position synced while pinching so the first post-pinch delta is tiny
+        lastPanX.value = e.x;
+        lastPanY.value = e.y;
         return;
       }
-      offsetX.value = savedOffsetX.value + e.translationX;
-      offsetY.value = savedOffsetY.value + e.translationY;
+      offsetX.value += e.x - lastPanX.value;
+      offsetY.value += e.y - lastPanY.value;
+      lastPanX.value = e.x;
+      lastPanY.value = e.y;
     });
 
   const pinch = Gesture.Pinch()
     .onStart((e) => {
-      isPinching.value = true;
-      savedScale.value = scale.value;
+      isPinching.value   = true;
+      savedScale.value   = scale.value;
       savedOffsetX.value = offsetX.value;
       savedOffsetY.value = offsetY.value;
-      savedFocalX.value = e.focalX;
-      savedFocalY.value = e.focalY;
-    })
-    .onEnd(() => {
-      isPinching.value = false;
+      savedFocalX.value  = e.focalX;
+      savedFocalY.value  = e.focalY;
     })
     .onUpdate((e) => {
       const newScale = Math.max(0.05, Math.min(20, savedScale.value * e.scale));
+      // Pin the world point that was under the initial focal
       const childX = (savedFocalX.value - centerX.value - savedOffsetX.value) / savedScale.value;
       const childY = (savedFocalY.value - centerY.value - savedOffsetY.value) / savedScale.value;
-      offsetX.value = e.focalX - centerX.value - childX * newScale;
-      offsetY.value = e.focalY - centerY.value - childY * newScale;
+      offsetX.value = savedFocalX.value - centerX.value - childX * newScale;
+      offsetY.value = savedFocalY.value - centerY.value - childY * newScale;
       scale.value = newScale;
+    })
+    .onEnd(() => {
+      isPinching.value = false;
     });
 
   const tap = Gesture.Tap()
@@ -193,6 +229,7 @@ function PointsMap({
       <GestureDetector gesture={composed}>
         <View style={StyleSheet.absoluteFill}>
           <Animated.View style={[StyleSheet.absoluteFill, animStyle]}>
+            {layout && <BlueprintGrid cx={layout.width / 2} cy={layout.height / 2} />}
             <View style={styles.axisH} />
             <View style={styles.axisV} />
 
@@ -551,7 +588,7 @@ const styles = StyleSheet.create({
 
   mapContainer: {
     height: MAP_HEIGHT,
-    backgroundColor: "#dde1e8",
+    backgroundColor: BP_BG,
     overflow: "hidden",
   },
   axisH: {
@@ -560,7 +597,7 @@ const styles = StyleSheet.create({
     left: -9999,
     right: -9999,
     height: 1,
-    backgroundColor: "#b0b8c6",
+    backgroundColor: BP_AXIS,
   },
   axisV: {
     position: "absolute",
@@ -568,21 +605,21 @@ const styles = StyleSheet.create({
     top: -9999,
     bottom: -9999,
     width: 1,
-    backgroundColor: "#b0b8c6",
+    backgroundColor: BP_AXIS,
   },
   pointDot: {
     position: "absolute",
     width: DOT_RADIUS * 2,
     height: DOT_RADIUS * 2,
     borderRadius: DOT_RADIUS,
-    backgroundColor: "#4ade80",
+    backgroundColor: "#3b82f6",
     borderWidth: 1.5,
-    borderColor: "#166534",
+    borderColor: "#bfdbfe",
   },
   pointLabel: {
     position: "absolute",
     width: LABEL_WIDTH,
-    color: "#1f2937",
+    color: "#93c5fd",
     textAlign: "center",
   },
   robotDot: {
@@ -590,26 +627,28 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: "#3b82f6",
+    backgroundColor: "#fbbf24",
     borderWidth: 2,
-    borderColor: "#93c5fd",
+    borderColor: "#fde68a",
   },
   posOverlay: {
     position: "absolute",
     top: 8,
     left: 10,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: "rgba(11, 29, 53, 0.88)",
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.35)",
   },
   posText: {
     fontSize: 11,
-    color: "#cbd5e1",
+    color: "#7dd3fc",
     fontFamily: "monospace",
   },
   posVal: {
-    color: "#fff",
+    color: "#e0f2fe",
     fontWeight: "600",
   },
   hint: {
@@ -617,7 +656,7 @@ const styles = StyleSheet.create({
     bottom: 6,
     right: 8,
     fontSize: 10,
-    color: "#6b7280",
+    color: "rgba(148, 163, 184, 0.55)",
   },
 
   list: {
