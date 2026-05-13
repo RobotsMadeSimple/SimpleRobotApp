@@ -35,10 +35,10 @@ import Animated, {
 } from "react-native-reanimated";
 
 // ── Blueprint palette ──────────────────────────────────────────────────────────
-const BP_BG         = "#0b1d35";
-const BP_AXIS       = "rgba(96, 165, 250, 0.70)";
-const BP_GRID_MAJOR = "rgba(59, 130, 246, 0.28)";
-const BP_GRID_MINOR = "rgba(59, 130, 246, 0.09)";
+const BP_BG         = "#1a3a5c";
+const BP_AXIS       = "rgba(186, 230, 255, 0.85)";
+const BP_GRID_MAJOR = "rgba(147, 197, 253, 0.45)";
+const BP_GRID_MINOR = "rgba(147, 197, 253, 0.18)";
 const GRID_MINOR_STEP = 100;
 const GRID_MAJOR_STEP = 500;
 const GRID_RANGE      = 2500;
@@ -612,14 +612,14 @@ const styles = StyleSheet.create({
     width: DOT_RADIUS * 2,
     height: DOT_RADIUS * 2,
     borderRadius: DOT_RADIUS,
-    backgroundColor: "#3b82f6",
+    backgroundColor: "#60a5fa",
     borderWidth: 1.5,
-    borderColor: "#bfdbfe",
+    borderColor: "#e0f2fe",
   },
   pointLabel: {
     position: "absolute",
     width: LABEL_WIDTH,
-    color: "#93c5fd",
+    color: "#bae6fd",
     textAlign: "center",
   },
   robotDot: {
@@ -635,12 +635,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 8,
     left: 10,
-    backgroundColor: "rgba(11, 29, 53, 0.88)",
+    backgroundColor: "rgba(20, 55, 90, 0.88)",
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: "rgba(59, 130, 246, 0.35)",
+    borderColor: "rgba(147, 197, 253, 0.45)",
   },
   posText: {
     fontSize: 11,
