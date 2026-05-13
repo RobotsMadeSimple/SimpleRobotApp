@@ -599,6 +599,37 @@ function fmtSetVar(varName: string | undefined, expr: string | undefined): strin
 
 // ── SetVariableFields ─────────────────────────────────────────────────────────
 
+const OP_LABELS: Record<SetVarOp, string> = {
+  "=":  "Assign — set to value",
+  "+=": "Add — $var + value",
+  "-=": "Subtract — $var − value",
+  "×=": "Multiply — $var × value",
+  "/=": "Divide — $var ÷ value",
+};
+
+function SvDropdownModal({
+  visible,
+  onClose,
+  title,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={svs.modalOverlay} onPress={onClose}>
+        <Pressable style={svs.modalCard} onPress={() => {}}>
+          <Text style={svs.modalTitle}>{title}</Text>
+          {children}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function SetVariableFields({
   draft,
   variables,
@@ -610,9 +641,10 @@ function SetVariableFields({
 }) {
   const varList = (variables ?? []).map(v => v.name);
   const initial = useMemo(() => parseVarExpr(draft.variableName, draft.variableExpr), []);
-  const [op, setOp]         = useState<SetVarOp>(initial.op);
-  const [rawVal, setRawVal] = useState(initial.val);
-  const [dropOpen, setDropOpen] = useState(false);
+  const [op, setOp]           = useState<SetVarOp>(initial.op);
+  const [rawVal, setRawVal]   = useState(initial.val);
+  const [varDropOpen, setVarDropOpen] = useState(false);
+  const [opDropOpen,  setOpDropOpen]  = useState(false);
 
   function apply(varName: string | undefined, operator: SetVarOp, value: string) {
     if (!varName) return;
@@ -620,12 +652,12 @@ function SetVariableFields({
   }
 
   function selectVar(name: string) {
-    setDropOpen(false);
+    setVarDropOpen(false);
     set({ variableName: name, variableExpr: buildVarExpr(name, op, rawVal) });
   }
 
-  function cycleOp() {
-    const next = SET_VAR_OPS[(SET_VAR_OPS.indexOf(op) + 1) % SET_VAR_OPS.length];
+  function selectOp(next: SetVarOp) {
+    setOpDropOpen(false);
     setOp(next);
     apply(draft.variableName, next, rawVal);
   }
@@ -649,53 +681,70 @@ function SetVariableFields({
 
   return (
     <>
-      {/* Single-row: [$var ▼] [op] [value] */}
-      <View style={svs.row}>
-        {/* Variable dropdown trigger */}
-        <TouchableOpacity style={svs.varBtn} onPress={() => setDropOpen(d => !d)} activeOpacity={0.75}>
-          <Text style={svs.varBtnText} numberOfLines={1}>
-            {draft.variableName ? `$${draft.variableName}` : "var ▾"}
-          </Text>
-          <ChevronDown size={12} color="#7c3aed" />
-        </TouchableOpacity>
+      {/* Row 1 — Variable */}
+      <Text style={ms.fieldLabel}>VARIABLE</Text>
+      <TouchableOpacity style={svs.selectBtn} onPress={() => setVarDropOpen(true)} activeOpacity={0.75}>
+        <Text style={[svs.selectBtnText, !draft.variableName && svs.selectBtnPlaceholder]}>
+          {draft.variableName ? `$${draft.variableName}` : "Select variable…"}
+        </Text>
+        <ChevronDown size={14} color="#7c3aed" />
+      </TouchableOpacity>
 
-        {/* Operator — tap to cycle */}
-        <TouchableOpacity style={svs.opBtn} onPress={cycleOp} activeOpacity={0.7}>
-          <Text style={svs.opBtnText}>{op}</Text>
-        </TouchableOpacity>
+      {/* Row 2 — Operator */}
+      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OPERATION</Text>
+      <TouchableOpacity style={svs.selectBtn} onPress={() => setOpDropOpen(true)} activeOpacity={0.75}>
+        <Text style={svs.selectBtnText}>{op}</Text>
+        <Text style={svs.selectBtnSub} numberOfLines={1}>{OP_LABELS[op]}</Text>
+        <ChevronDown size={14} color="#7c3aed" />
+      </TouchableOpacity>
 
-        {/* Value */}
-        <TextInput
-          style={svs.valueInput}
-          value={rawVal}
-          onChangeText={changeVal}
-          placeholder="value or expr"
-          placeholderTextColor="#c4b5fd"
-          returnKeyType="done"
-          autoFocus={!!draft.variableName}
-        />
-      </View>
+      {/* Row 3 — Value */}
+      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (number or expression)</Text>
+      <TextInput
+        style={[ms.input, { color: "#7c3aed" }]}
+        value={rawVal}
+        onChangeText={changeVal}
+        placeholder="e.g.  1  or  $speed * 2"
+        placeholderTextColor="#c4b5fd"
+        returnKeyType="done"
+        autoFocus={!!draft.variableName}
+      />
 
-      {/* Inline variable dropdown */}
-      {dropOpen && (
-        <View style={svs.dropList}>
-          {varList.map(name => (
-            <TouchableOpacity
-              key={name}
-              style={[svs.dropItem, name === draft.variableName && svs.dropItemActive]}
-              onPress={() => selectVar(name)}
-              activeOpacity={0.7}
-            >
-              <Text style={[svs.dropItemText, name === draft.variableName && svs.dropItemTextActive]}>
-                ${name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* Live expression preview */}
+      {/* Live preview */}
       {preview && <Text style={svs.preview}>{preview}</Text>}
+
+      {/* Variable picker modal */}
+      <SvDropdownModal visible={varDropOpen} onClose={() => setVarDropOpen(false)} title="Select Variable">
+        {varList.map((name, i) => (
+          <TouchableOpacity
+            key={name}
+            style={[svs.optionRow, i < varList.length - 1 && svs.optionRowBorder, name === draft.variableName && svs.optionRowActive]}
+            onPress={() => selectVar(name)}
+            activeOpacity={0.7}
+          >
+            <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
+            {name === draft.variableName && <Check size={15} color="#7c3aed" />}
+          </TouchableOpacity>
+        ))}
+      </SvDropdownModal>
+
+      {/* Operator picker modal */}
+      <SvDropdownModal visible={opDropOpen} onClose={() => setOpDropOpen(false)} title="Select Operation">
+        {SET_VAR_OPS.map((o, i) => (
+          <TouchableOpacity
+            key={o}
+            style={[svs.optionRow, i < SET_VAR_OPS.length - 1 && svs.optionRowBorder, o === op && svs.optionRowActive]}
+            onPress={() => selectOp(o)}
+            activeOpacity={0.7}
+          >
+            <View style={svs.opOptionLeft}>
+              <Text style={[svs.opOptionSymbol, o === op && svs.optionTextActive]}>{o}</Text>
+              <Text style={svs.opOptionDesc}>{OP_LABELS[o]}</Text>
+            </View>
+            {o === op && <Check size={15} color="#7c3aed" />}
+          </TouchableOpacity>
+        ))}
+      </SvDropdownModal>
     </>
   );
 }
@@ -2662,80 +2711,100 @@ const ms = StyleSheet.create({
 
 // ── SetVariableFields styles ───────────────────────────────────────────────────
 const svs = StyleSheet.create({
-  row: {
+  // Dropdown trigger button (shared by var + op rows)
+  selectBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
-    marginTop: 4,
-  },
-  varBtn: {
-    flex: 1.1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
+    gap: 8,
     backgroundColor: "#f5f3ff",
     borderWidth: 1.5,
     borderColor: "#c4b5fd",
     borderRadius: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 9,
-    minWidth: 80,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginTop: 4,
   },
-  varBtnText: {
+  selectBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#7c3aed",
     flex: 1,
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#7c3aed",
   },
-  opBtn: {
-    backgroundColor: "#ede9fe",
-    borderWidth: 1.5,
-    borderColor: "#c4b5fd",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 46,
+  selectBtnSub: {
+    fontSize: 12,
+    color: "#a78bfa",
+    flex: 2,
   },
-  opBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#7c3aed",
+  selectBtnPlaceholder: {
+    color: "#c4b5fd",
+    fontWeight: "400",
   },
-  valueInput: {
-    flex: 1.6,
-    borderWidth: 1.5,
-    borderColor: "#c4b5fd",
-    borderRadius: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 9,
-    fontSize: 13,
-    color: "#7c3aed",
-    backgroundColor: "#f5f3ff",
-  },
-  dropList: {
-    marginTop: 4,
-    borderWidth: 1.5,
-    borderColor: "#c4b5fd",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    overflow: "hidden",
-    maxHeight: 160,
-  },
-  dropItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ede9fe",
-  },
-  dropItemActive: { backgroundColor: "#f5f3ff" },
-  dropItemText: { fontSize: 14, color: "#374151" },
-  dropItemTextActive: { fontWeight: "700", color: "#7c3aed" },
+
+  // Live expression preview
   preview: {
-    marginTop: 8,
+    marginTop: 10,
     fontSize: 12,
     color: "#a78bfa",
     fontStyle: "italic",
   },
+
+  // Dropdown modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingTop: 18,
+    paddingBottom: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 12,
+    overflow: "hidden",
+  },
+  modalTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#9ca3af",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+
+  // Option rows inside the modal
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  optionRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e7eb",
+  },
+  optionRowActive: { backgroundColor: "#f5f3ff" },
+  optionText: {
+    flex: 1,
+    fontSize: 15,
+    color: "#374151",
+    fontWeight: "500",
+  },
+  optionTextActive: { color: "#7c3aed", fontWeight: "700" },
+
+  // Operator-specific option layout
+  opOptionLeft: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  opOptionSymbol: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#374151",
+    width: 30,
+  },
+  opOptionDesc: { fontSize: 13, color: "#6b7280" },
 });
