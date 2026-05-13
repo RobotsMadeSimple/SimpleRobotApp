@@ -1,5 +1,7 @@
 import { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 
 type IconPosition = "above" | "below" | "left" | "right";
 
@@ -20,29 +22,32 @@ export function JogButton({
   onStop,
   size = 70,
 }: Props) {
-  const isRow = iconPosition === "left" || iconPosition === "right";
-  const isReverse =
-    iconPosition === "below" || iconPosition === "right";
+  const isRow     = iconPosition === "left" || iconPosition === "right";
+  const isReverse = iconPosition === "below" || iconPosition === "right";
+  const fontSize  = Math.round(size * 0.24);
 
-  const fontSize = Math.round(size * 0.24);
+  // Pan.onBegin fires immediately on touch-down (before activation thresholds).
+  // onFinalize fires on BOTH finger-lift AND gesture cancellation, so the jog
+  // always stops even when the touch is stolen by a scroll view or system gesture.
+  const gesture = Gesture.Pan()
+    .onBegin(() => runOnJS(onStart)())
+    .onFinalize(() => runOnJS(onStop)());
 
   return (
-    <Pressable
-      onPressIn={onStart}
-      onPressOut={onStop}
-      style={[styles.button, { width: size, height: size }]}
-    >
-      <View
-        style={[
-          styles.content,
-          { flexDirection: isRow ? "row" : "column" },
-          isReverse && { flexDirection: isRow ? "row-reverse" : "column-reverse" },
-        ]}
-      >
-        {icon}
-        <Text style={[styles.text, { fontSize }]}>{label}</Text>
+    <GestureDetector gesture={gesture}>
+      <View style={[styles.button, { width: size, height: size }]}>
+        <View
+          style={[
+            styles.content,
+            { flexDirection: isRow ? "row" : "column" },
+            isReverse && { flexDirection: isRow ? "row-reverse" : "column-reverse" },
+          ]}
+        >
+          {icon}
+          <Text style={[styles.text, { fontSize }]}>{label}</Text>
+        </View>
       </View>
-    </Pressable>
+    </GestureDetector>
   );
 }
 

@@ -1,5 +1,7 @@
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useRef } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import { CartesianJogPanel, CartesianAxis } from "@/src/components/ui/jog/CartesianJogPanel";
 import { JointJogPanel, JointAxis } from "@/src/components/ui/jog/JointJogPanel";
 
@@ -22,6 +24,10 @@ const jointStepMap: Record<string, number> = {
   "10mm":  10,
 };
 
+// Maximum time a continuous jog can run before being force-stopped.
+// Guards against any edge case where stop gestures are not received.
+const MAX_JOG_MS = 10_000;
+
 type JogPadProps = {
   jogMode:       string;  // "XYZ" | "Tool" | "Joint"
   selectedSpeed: string;
@@ -31,23 +37,36 @@ type JogPadProps = {
  * Smart jog-pad container.
  * Handles all interval timing and robot commands; delegates visual layout
  * to CartesianJogPanel (XYZ / Tool) or JointJogPanel (Joint).
- *
- * Adding a new robot type's jog layout is as simple as creating a new
- * *JogPanel component and wiring it in here.
  */
 export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
-  const intervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeSpeed  = speedMap[selectedSpeed];
-  const isStep       = selectedSpeed.includes("mm");
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const safetyRef   = useRef<ReturnType<typeof setTimeout>  | null>(null);
+  const activeSpeed = speedMap[selectedSpeed];
+  const isStep      = selectedSpeed.includes("mm");
 
   // ── Stop ────────────────────────────────────────────────────────────────────
-  const stopJog = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+  const stopJog = useCallback(() => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (safetyRef.current)   { clearTimeout(safetyRef.current);    safetyRef.current   = null; }
     robotClient.stopJog();
-  };
+  }, []);
+
+  // Arm the safety timeout whenever a continuous jog starts
+  function armSafety() {
+    if (safetyRef.current) clearTimeout(safetyRef.current);
+    safetyRef.current = setTimeout(stopJog, MAX_JOG_MS);
+  }
+
+  // Stop when the user navigates away from this screen
+  useFocusEffect(useCallback(() => () => stopJog(), [stopJog]));
+
+  // Stop when the app goes to background or becomes inactive
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state !== "active") stopJog();
+    });
+    return () => { sub.remove(); stopJog(); };
+  }, [stopJog]);
 
   // ── Cartesian start (XYZ / Tool) ────────────────────────────────────────────
   const startCartesian = (axis: CartesianAxis, direction: 1 | -1) => {
@@ -64,6 +83,7 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
       intervalRef.current = setInterval(() => {
         robotClient.jogTool({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
       }, 20);
+      armSafety();
       return;
     }
 
@@ -79,6 +99,7 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
       intervalRef.current = setInterval(() => {
         robotClient.jogL({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
       }, 20);
+      armSafety();
     }
   };
 
@@ -86,7 +107,6 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
   const startJoint = (joint: JointAxis, direction: 1 | -1) => {
     if (intervalRef.current) return;
 
-    // Map joint key → jogJ axis param
     const vec = {
       x:  joint === "j1" ? direction : 0,
       y:  joint === "j2" ? direction : 0,
@@ -107,6 +127,7 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
       intervalRef.current = setInterval(() => {
         robotClient.jogJ({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
       }, 20);
+      armSafety();
     }
   };
 
