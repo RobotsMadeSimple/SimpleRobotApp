@@ -24,10 +24,6 @@ const jointStepMap: Record<string, number> = {
   "10mm":  10,
 };
 
-// Maximum time a continuous jog can run before being force-stopped.
-// Guards against any edge case where stop gestures are not received.
-const MAX_JOG_MS = 10_000;
-
 type JogPadProps = {
   jogMode:       string;  // "XYZ" | "Tool" | "Joint"
   selectedSpeed: string;
@@ -40,22 +36,14 @@ type JogPadProps = {
  */
 export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const safetyRef   = useRef<ReturnType<typeof setTimeout>  | null>(null);
   const activeSpeed = speedMap[selectedSpeed];
   const isStep      = selectedSpeed.includes("mm");
 
   // ── Stop ────────────────────────────────────────────────────────────────────
   const stopJog = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    if (safetyRef.current)   { clearTimeout(safetyRef.current);    safetyRef.current   = null; }
     robotClient.stopJog();
   }, []);
-
-  // Arm the safety timeout whenever a continuous jog starts
-  function armSafety() {
-    if (safetyRef.current) clearTimeout(safetyRef.current);
-    safetyRef.current = setTimeout(stopJog, MAX_JOG_MS);
-  }
 
   // Stop when the user navigates away from this screen
   useFocusEffect(useCallback(() => () => stopJog(), [stopJog]));
@@ -83,7 +71,6 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
       intervalRef.current = setInterval(() => {
         robotClient.jogTool({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
       }, 20);
-      armSafety();
       return;
     }
 
@@ -99,7 +86,6 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
       intervalRef.current = setInterval(() => {
         robotClient.jogL({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
       }, 20);
-      armSafety();
     }
   };
 
@@ -127,7 +113,6 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
       intervalRef.current = setInterval(() => {
         robotClient.jogJ({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
       }, 20);
-      armSafety();
     }
   };
 
