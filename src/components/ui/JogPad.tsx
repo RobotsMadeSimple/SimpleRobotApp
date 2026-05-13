@@ -95,8 +95,8 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
 
     const vec = {
       x:  joint === "j1" ? direction : 0,
-      y:  joint === "j2" ? direction : 0,
-      z:  joint === "j3" ? direction : 0,
+      y:  joint === "j3" ? direction : 0,
+      z:  joint === "j2" ? direction : 0,
       rz: joint === "j4" ? direction : 0,
     };
 
