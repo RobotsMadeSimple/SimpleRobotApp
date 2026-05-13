@@ -34,7 +34,7 @@ import {
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -408,7 +408,7 @@ function stepLabel(step: ProgramStep): string {
       if (step.decel != null) parts.push(`decel ${step.decel}`);
       return parts.length ? `${label}  →  ${parts.join("  ·  ")}` : label;
     }
-    case "SetVariable":  return step.variableName ? `$${step.variableName} = ${step.variableExpr ?? "?"}` : "Set Variable";
+    case "SetVariable":  return fmtSetVar(step.variableName, step.variableExpr);
     default:             return step.type;
   }
 }
@@ -479,9 +479,7 @@ function stepDetail(step: ProgramStep): string | null {
       return lines.length ? lines.join("\n") : null;
     }
     case "SetVariable":
-      return step.variableName
-        ? `$${step.variableName} = ${step.variableExpr ?? "?"}`
-        : null;
+      return step.variableName ? fmtSetVar(step.variableName, step.variableExpr) : null;
     default:
       return null;
   }
@@ -567,6 +565,140 @@ function StepTypePicker({
 // ── Step config modal ─────────────────────────────────────────────────────────
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset";
+
+// ── SetVariable helpers ───────────────────────────────────────────────────────
+
+const SET_VAR_OPS = ["=", "+=", "-=", "×=", "/="] as const;
+type SetVarOp = typeof SET_VAR_OPS[number];
+
+function escapeRegex(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function buildVarExpr(varName: string, op: SetVarOp, val: string): string | undefined {
+  const v = val.trim();
+  if (!v) return undefined;
+  if (op === "=")  return v;
+  if (op === "+=") return `$${varName} + ${v}`;
+  if (op === "-=") return `$${varName} - ${v}`;
+  if (op === "×=") return `$${varName} * ${v}`;
+  if (op === "/=") return `$${varName} / ${v}`;
+}
+
+function parseVarExpr(varName: string | undefined, expr: string | undefined): { op: SetVarOp; val: string } {
+  if (!expr || !varName) return { op: "=", val: "" };
+  const m = expr.match(new RegExp(`^\\$${escapeRegex(varName)}\\s*([+\\-*/])\\s*(.+)$`));
+  if (!m) return { op: "=", val: expr };
+  const opMap: Record<string, SetVarOp> = { "+": "+=", "-": "-=", "*": "×=", "/": "/=" };
+  return { op: opMap[m[1]] ?? "=", val: m[2].trim() };
+}
+
+function fmtSetVar(varName: string | undefined, expr: string | undefined): string {
+  if (!varName) return "Set Variable";
+  const { op, val } = parseVarExpr(varName, expr);
+  return op === "=" ? `$${varName} = ${val || "?"}` : `$${varName} ${op} ${val || "?"}`;
+}
+
+// ── SetVariableFields ─────────────────────────────────────────────────────────
+
+function SetVariableFields({
+  draft,
+  variables,
+  set,
+}: {
+  draft: ProgramStep;
+  variables: ProgramVariable[] | undefined;
+  set: (p: Partial<ProgramStep>) => void;
+}) {
+  const varList = (variables ?? []).map(v => v.name);
+  const initial = useMemo(() => parseVarExpr(draft.variableName, draft.variableExpr), []);
+  const [op, setOp]         = useState<SetVarOp>(initial.op);
+  const [rawVal, setRawVal] = useState(initial.val);
+  const [dropOpen, setDropOpen] = useState(false);
+
+  function apply(varName: string | undefined, operator: SetVarOp, value: string) {
+    if (!varName) return;
+    set({ variableName: varName, variableExpr: buildVarExpr(varName, operator, value) });
+  }
+
+  function selectVar(name: string) {
+    setDropOpen(false);
+    set({ variableName: name, variableExpr: buildVarExpr(name, op, rawVal) });
+  }
+
+  function cycleOp() {
+    const next = SET_VAR_OPS[(SET_VAR_OPS.indexOf(op) + 1) % SET_VAR_OPS.length];
+    setOp(next);
+    apply(draft.variableName, next, rawVal);
+  }
+
+  function changeVal(val: string) {
+    setRawVal(val);
+    apply(draft.variableName, op, val);
+  }
+
+  if (varList.length === 0) {
+    return (
+      <Text style={ms.emptyHint}>
+        No variables defined. Add variables in the Variables section of the builder.
+      </Text>
+    );
+  }
+
+  const preview = draft.variableName && rawVal
+    ? `$${draft.variableName} = ${buildVarExpr(draft.variableName, op, rawVal) ?? "?"}`
+    : null;
+
+  return (
+    <>
+      {/* Single-row: [$var ▼] [op] [value] */}
+      <View style={svs.row}>
+        {/* Variable dropdown trigger */}
+        <TouchableOpacity style={svs.varBtn} onPress={() => setDropOpen(d => !d)} activeOpacity={0.75}>
+          <Text style={svs.varBtnText} numberOfLines={1}>
+            {draft.variableName ? `$${draft.variableName}` : "var ▾"}
+          </Text>
+          <ChevronDown size={12} color="#7c3aed" />
+        </TouchableOpacity>
+
+        {/* Operator — tap to cycle */}
+        <TouchableOpacity style={svs.opBtn} onPress={cycleOp} activeOpacity={0.7}>
+          <Text style={svs.opBtnText}>{op}</Text>
+        </TouchableOpacity>
+
+        {/* Value */}
+        <TextInput
+          style={svs.valueInput}
+          value={rawVal}
+          onChangeText={changeVal}
+          placeholder="value or expr"
+          placeholderTextColor="#c4b5fd"
+          returnKeyType="done"
+          autoFocus={!!draft.variableName}
+        />
+      </View>
+
+      {/* Inline variable dropdown */}
+      {dropOpen && (
+        <View style={svs.dropList}>
+          {varList.map(name => (
+            <TouchableOpacity
+              key={name}
+              style={[svs.dropItem, name === draft.variableName && svs.dropItemActive]}
+              onPress={() => selectVar(name)}
+              activeOpacity={0.7}
+            >
+              <Text style={[svs.dropItemText, name === draft.variableName && svs.dropItemTextActive]}>
+                ${name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Live expression preview */}
+      {preview && <Text style={svs.preview}>{preview}</Text>}
+    </>
+  );
+}
 
 function StepConfigModal({
   visible,
@@ -1030,44 +1162,8 @@ function StepConfigModal({
         );
       }
 
-      case "SetVariable": {
-        const varNames = (variables ?? []).map(v => v.name);
-        return (
-          <>
-            <Text style={ms.fieldLabel}>VARIABLE</Text>
-            {varNames.length === 0 ? (
-              <Text style={ms.emptyHint}>
-                No variables defined. Add variables in the Variables section of the builder.
-              </Text>
-            ) : (
-              <View style={ms.segRow}>
-                {varNames.map(n => {
-                  const active = draft!.variableName === n;
-                  return (
-                    <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
-                      onPress={() => set({ variableName: n })} activeOpacity={0.8}>
-                      <Text style={[ms.segText, active && ms.segTextActive]}>${n}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>NEW VALUE  (expression)</Text>
-            <Text style={ms.hintText}>
-              Use a number or an expression: <Text style={{ color: "#7c3aed", fontWeight: "600" }}>$counter + 1</Text>
-            </Text>
-            <TextInput
-              style={[ms.input, { color: draft!.variableExpr ? "#7c3aed" : "#111827" }]}
-              value={draft!.variableExpr ?? ""}
-              onChangeText={v => set({ variableExpr: v || undefined })}
-              placeholder="e.g. $counter + 1"
-              placeholderTextColor="#c4b5fd"
-              returnKeyType="done"
-              autoFocus={varNames.length === 0 ? false : !draft!.variableName}
-            />
-          </>
-        );
-      }
+      case "SetVariable":
+        return <SetVariableFields draft={draft!} variables={variables} set={set} />;
 
       default:
         return null;
@@ -2562,4 +2658,84 @@ const ms = StyleSheet.create({
   subRowLeft: { flex: 1 },
   subRowLabel: { fontSize: 14, fontWeight: "600", color: "#111827" },
   subRowValue: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+});
+
+// ── SetVariableFields styles ───────────────────────────────────────────────────
+const svs = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 4,
+  },
+  varBtn: {
+    flex: 1.1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f5f3ff",
+    borderWidth: 1.5,
+    borderColor: "#c4b5fd",
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 9,
+    minWidth: 80,
+  },
+  varBtnText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#7c3aed",
+  },
+  opBtn: {
+    backgroundColor: "#ede9fe",
+    borderWidth: 1.5,
+    borderColor: "#c4b5fd",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 46,
+  },
+  opBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#7c3aed",
+  },
+  valueInput: {
+    flex: 1.6,
+    borderWidth: 1.5,
+    borderColor: "#c4b5fd",
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 9,
+    fontSize: 13,
+    color: "#7c3aed",
+    backgroundColor: "#f5f3ff",
+  },
+  dropList: {
+    marginTop: 4,
+    borderWidth: 1.5,
+    borderColor: "#c4b5fd",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    overflow: "hidden",
+    maxHeight: 160,
+  },
+  dropItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#ede9fe",
+  },
+  dropItemActive: { backgroundColor: "#f5f3ff" },
+  dropItemText: { fontSize: 14, color: "#374151" },
+  dropItemTextActive: { fontWeight: "700", color: "#7c3aed" },
+  preview: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#a78bfa",
+    fontStyle: "italic",
+  },
 });
