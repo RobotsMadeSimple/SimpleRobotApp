@@ -1,13 +1,13 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
-  CircuitBoard,
   Cpu,
   Home,
   MoveHorizontal,
   MoveVertical,
   Radio,
   RotateCcw,
+  Zap,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
@@ -30,18 +30,22 @@ type RobotConfig = {
   horizontalHomingDirection: number;
   j1HomingDirection: number;
   j4HomeOffsetDeg: number;
-  enableStbCard: boolean;
+  m1Direction: number;
+  m2Direction: number;
+  m3Direction: number;
+  m4Direction: number;
   enableNanoCards: boolean;
   enableRelayCard: boolean;
 };
 
 type EditingField = {
-  key: keyof RobotConfig;
   label: string;
-  type: "number" | "direction";
+  type: "number" | "direction" | "homing";
+  numKey?: keyof RobotConfig;
+  numText: string;
   unit?: string;
   placeholder?: string;
-  numText: string;
+  dirKey?: keyof RobotConfig;
   dirValue: number;
 };
 
@@ -119,21 +123,17 @@ export default function ConfigureRobot() {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
   }, []);
 
-  function openFor(field: EditingField) {
-    setEditing(field);
-  }
-
   async function saveField() {
     if (!editing || !config) return;
     setSaving(true);
     try {
-      const value: number =
-        editing.type === "direction"
-          ? editing.dirValue
-          : parseFloat(editing.numText);
-      const updated = { ...config, [editing.key]: value };
-      await robotClient.setRobotConfig({ [editing.key]: value });
-      setConfig(updated);
+      const patch: any = {};
+      if ((editing.type === "number" || editing.type === "homing") && editing.numKey)
+        patch[editing.numKey] = parseFloat(editing.numText);
+      if ((editing.type === "direction" || editing.type === "homing") && editing.dirKey)
+        patch[editing.dirKey] = editing.dirValue;
+      await robotClient.setRobotConfig(patch);
+      setConfig({ ...config, ...patch });
       setEditing(null);
     } finally {
       setSaving(false);
@@ -159,6 +159,13 @@ export default function ConfigureRobot() {
     return v === 1 ? "+" : "−";
   }
 
+  const motorRows: { key: keyof RobotConfig; label: string }[] = [
+    { key: "m1Direction", label: "M1 — J1 Rotation" },
+    { key: "m2Direction", label: "M2 — CoreXY A" },
+    { key: "m3Direction", label: "M3 — CoreXY B" },
+    { key: "m4Direction", label: "M4 — J4 Rotation" },
+  ];
+
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <SubPageHeader title="Configure Robot" />
@@ -167,6 +174,31 @@ export default function ConfigureRobot() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+
+        {/* ── Motor Directions ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>MOTOR DIRECTIONS</Text>
+        </View>
+        <View style={styles.card}>
+          {motorRows.map(({ key, label }, idx) => (
+            <ConfigRow
+              key={key}
+              icon={<Zap size={16} color="#d97706" />}
+              tileBg="#fffbeb"
+              label={label}
+              value={config ? dirLabel(config[key] as number) : "—"}
+              last={idx === motorRows.length - 1}
+              onPress={config ? () => setEditing({
+                label,
+                type: "direction",
+                dirKey: key,
+                dirValue: config[key] as number,
+                numText: "",
+              }) : undefined}
+            />
+          ))}
+        </View>
+
         {/* ── Homing ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionLabel}>HOMING</Text>
@@ -177,49 +209,47 @@ export default function ConfigureRobot() {
             tileBg="#f5f3ff"
             label="Homing Speed"
             value={config ? `${config.homingSpeed} u/s` : "—"}
-            onPress={config ? () => openFor({ key: "homingSpeed", label: "Homing Speed", type: "number", unit: "u/s", placeholder: "20", numText: String(config.homingSpeed), dirValue: 1 }) : undefined}
+            onPress={config ? () => setEditing({
+              label: "Homing Speed", type: "number",
+              numKey: "homingSpeed", numText: String(config.homingSpeed),
+              unit: "u/s", placeholder: "20", dirValue: 1,
+            }) : undefined}
           />
           <ConfigRow
             icon={<RotateCcw size={16} color="#0891b2" />}
             tileBg="#ecfeff"
-            label="J1 Home Offset"
-            value={config ? `${config.j1HomeOffsetDeg}°` : "—"}
-            onPress={config ? () => openFor({ key: "j1HomeOffsetDeg", label: "J1 Home Offset", type: "number", unit: "°", placeholder: "-17", numText: String(config.j1HomeOffsetDeg), dirValue: 1 }) : undefined}
-          />
-          <ConfigRow
-            icon={<RotateCcw size={16} color="#0891b2" />}
-            tileBg="#ecfeff"
-            label="J1 Homing Direction"
-            value={config ? dirLabel(config.j1HomingDirection) : "—"}
-            onPress={config ? () => openFor({ key: "j1HomingDirection", label: "J1 Homing Direction", type: "direction", numText: "", dirValue: config.j1HomingDirection }) : undefined}
-          />
-          <ConfigRow
-            icon={<MoveVertical size={16} color="#16a34a" />}
-            tileBg="#f0fdf4"
-            label="Vertical Home Position"
-            value={config ? `${config.verticalHomePosition} mm` : "—"}
-            onPress={config ? () => openFor({ key: "verticalHomePosition", label: "Vertical Home Position", type: "number", unit: "mm", placeholder: "445", numText: String(config.verticalHomePosition), dirValue: 1 }) : undefined}
+            label="J1 Homing"
+            value={config ? `${config.j1HomeOffsetDeg}° · ${dirLabel(config.j1HomingDirection)}` : "—"}
+            onPress={config ? () => setEditing({
+              label: "J1 Homing", type: "homing",
+              numKey: "j1HomeOffsetDeg", numText: String(config.j1HomeOffsetDeg),
+              unit: "°", placeholder: "-17",
+              dirKey: "j1HomingDirection", dirValue: config.j1HomingDirection,
+            }) : undefined}
           />
           <ConfigRow
             icon={<MoveVertical size={16} color="#16a34a" />}
             tileBg="#f0fdf4"
-            label="Vertical Homing Direction"
-            value={config ? dirLabel(config.verticalHomingDirection) : "—"}
-            onPress={config ? () => openFor({ key: "verticalHomingDirection", label: "Vertical Homing Direction", type: "direction", numText: "", dirValue: config.verticalHomingDirection }) : undefined}
+            label="Vertical Homing"
+            value={config ? `${config.verticalHomePosition} mm · ${dirLabel(config.verticalHomingDirection)}` : "—"}
+            onPress={config ? () => setEditing({
+              label: "Vertical Homing", type: "homing",
+              numKey: "verticalHomePosition", numText: String(config.verticalHomePosition),
+              unit: "mm", placeholder: "445",
+              dirKey: "verticalHomingDirection", dirValue: config.verticalHomingDirection,
+            }) : undefined}
           />
           <ConfigRow
             icon={<MoveHorizontal size={16} color="#ea580c" />}
             tileBg="#fff7ed"
-            label="Horizontal Home Position"
-            value={config ? `${config.horizontalHomePosition} mm` : "—"}
-            onPress={config ? () => openFor({ key: "horizontalHomePosition", label: "Horizontal Home Position", type: "number", unit: "mm", placeholder: "413", numText: String(config.horizontalHomePosition), dirValue: 1 }) : undefined}
-          />
-          <ConfigRow
-            icon={<MoveHorizontal size={16} color="#ea580c" />}
-            tileBg="#fff7ed"
-            label="Horizontal Homing Direction"
-            value={config ? dirLabel(config.horizontalHomingDirection) : "—"}
-            onPress={config ? () => openFor({ key: "horizontalHomingDirection", label: "Horizontal Homing Direction", type: "direction", numText: "", dirValue: config.horizontalHomingDirection }) : undefined}
+            label="Horizontal Homing"
+            value={config ? `${config.horizontalHomePosition} mm · ${dirLabel(config.horizontalHomingDirection)}` : "—"}
+            onPress={config ? () => setEditing({
+              label: "Horizontal Homing", type: "homing",
+              numKey: "horizontalHomePosition", numText: String(config.horizontalHomePosition),
+              unit: "mm", placeholder: "413",
+              dirKey: "horizontalHomingDirection", dirValue: config.horizontalHomingDirection,
+            }) : undefined}
           />
           <ConfigRow
             icon={<RotateCcw size={16} color="#7c3aed" />}
@@ -227,7 +257,11 @@ export default function ConfigureRobot() {
             label="J4 Home Offset"
             value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
             last
-            onPress={config ? () => openFor({ key: "j4HomeOffsetDeg", label: "J4 Home Offset", type: "number", unit: "°", placeholder: "0", numText: String(config.j4HomeOffsetDeg), dirValue: 1 }) : undefined}
+            onPress={config ? () => setEditing({
+              label: "J4 Home Offset", type: "number",
+              numKey: "j4HomeOffsetDeg", numText: String(config.j4HomeOffsetDeg),
+              unit: "°", placeholder: "0", dirValue: 1,
+            }) : undefined}
           />
         </View>
 
@@ -237,7 +271,6 @@ export default function ConfigureRobot() {
         </View>
         <View style={styles.card}>
           {[
-            { field: "enableStbCard"   as const, icon: <CircuitBoard size={16} color="#16a34a" />, tileBg: "#f0fdf4", label: "STB4100 Robot IO Board" },
             { field: "enableNanoCards" as const, icon: <Cpu size={16} color="#4f46e5" />,          tileBg: "#eef2ff", label: "Arduino Nano Devices" },
             { field: "enableRelayCard" as const, icon: <Radio size={16} color="#0891b2" />,        tileBg: "#ecfeff", label: "USB Relay Board" },
           ].map(({ field, icon, tileBg, label }, idx, arr) => (
@@ -255,7 +288,7 @@ export default function ConfigureRobot() {
           ))}
         </View>
 
-        {/* ── Per-field edit modal ── */}
+        {/* ── Edit modal ── */}
         <Modal
           visible={editing !== null}
           transparent
@@ -266,10 +299,10 @@ export default function ConfigureRobot() {
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>{editing?.label}</Text>
 
-              {editing?.type === "number" && (
+              {(editing?.type === "number" || editing?.type === "homing") && (
                 <>
                   <Text style={styles.editLabel}>
-                    {editing.label.toUpperCase()}{editing.unit ? ` (${editing.unit})` : ""}
+                    {editing.unit ? `OFFSET (${editing.unit})` : "VALUE"}
                   </Text>
                   <TextInput
                     style={styles.editInput}
@@ -278,12 +311,12 @@ export default function ConfigureRobot() {
                     keyboardType="numeric"
                     placeholder={editing.placeholder ?? "0"}
                     placeholderTextColor="#9ca3af"
-                    autoFocus
+                    autoFocus={editing.type === "number"}
                   />
                 </>
               )}
 
-              {editing?.type === "direction" && (
+              {(editing?.type === "direction" || editing?.type === "homing") && (
                 <>
                   <Text style={styles.editLabel}>DIRECTION</Text>
                   <DirectionToggle

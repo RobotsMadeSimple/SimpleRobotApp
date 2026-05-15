@@ -1,5 +1,7 @@
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useRef } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import { CartesianJogPanel, CartesianAxis } from "@/src/components/ui/jog/CartesianJogPanel";
 import { JointJogPanel, JointAxis } from "@/src/components/ui/jog/JointJogPanel";
 
@@ -31,23 +33,28 @@ type JogPadProps = {
  * Smart jog-pad container.
  * Handles all interval timing and robot commands; delegates visual layout
  * to CartesianJogPanel (XYZ / Tool) or JointJogPanel (Joint).
- *
- * Adding a new robot type's jog layout is as simple as creating a new
- * *JogPanel component and wiring it in here.
  */
 export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
-  const intervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeSpeed  = speedMap[selectedSpeed];
-  const isStep       = selectedSpeed.includes("mm");
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeSpeed = speedMap[selectedSpeed];
+  const isStep      = selectedSpeed.includes("mm");
 
   // ── Stop ────────────────────────────────────────────────────────────────────
-  const stopJog = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+  const stopJog = useCallback(() => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     robotClient.stopJog();
-  };
+  }, []);
+
+  // Stop when the user navigates away from this screen
+  useFocusEffect(useCallback(() => () => stopJog(), [stopJog]));
+
+  // Stop when the app goes to background or becomes inactive
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state !== "active") stopJog();
+    });
+    return () => { sub.remove(); stopJog(); };
+  }, [stopJog]);
 
   // ── Cartesian start (XYZ / Tool) ────────────────────────────────────────────
   const startCartesian = (axis: CartesianAxis, direction: 1 | -1) => {
@@ -86,11 +93,10 @@ export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
   const startJoint = (joint: JointAxis, direction: 1 | -1) => {
     if (intervalRef.current) return;
 
-    // Map joint key → jogJ axis param
     const vec = {
       x:  joint === "j1" ? direction : 0,
-      y:  joint === "j2" ? direction : 0,
-      z:  joint === "j3" ? direction : 0,
+      y:  joint === "j3" ? direction : 0,
+      z:  joint === "j2" ? direction : 0,
       rz: joint === "j4" ? direction : 0,
     };
 

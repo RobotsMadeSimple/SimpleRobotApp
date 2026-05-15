@@ -34,7 +34,7 @@ import {
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -408,7 +408,7 @@ function stepLabel(step: ProgramStep): string {
       if (step.decel != null) parts.push(`decel ${step.decel}`);
       return parts.length ? `${label}  →  ${parts.join("  ·  ")}` : label;
     }
-    case "SetVariable":  return step.variableName ? `$${step.variableName} = ${step.variableExpr ?? "?"}` : "Set Variable";
+    case "SetVariable":  return fmtSetVar(step.variableName, step.variableExpr);
     default:             return step.type;
   }
 }
@@ -479,9 +479,7 @@ function stepDetail(step: ProgramStep): string | null {
       return lines.length ? lines.join("\n") : null;
     }
     case "SetVariable":
-      return step.variableName
-        ? `$${step.variableName} = ${step.variableExpr ?? "?"}`
-        : null;
+      return step.variableName ? fmtSetVar(step.variableName, step.variableExpr) : null;
     default:
       return null;
   }
@@ -567,6 +565,189 @@ function StepTypePicker({
 // ── Step config modal ─────────────────────────────────────────────────────────
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset";
+
+// ── SetVariable helpers ───────────────────────────────────────────────────────
+
+const SET_VAR_OPS = ["=", "+=", "-=", "×=", "/="] as const;
+type SetVarOp = typeof SET_VAR_OPS[number];
+
+function escapeRegex(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function buildVarExpr(varName: string, op: SetVarOp, val: string): string | undefined {
+  const v = val.trim();
+  if (!v) return undefined;
+  if (op === "=")  return v;
+  if (op === "+=") return `$${varName} + ${v}`;
+  if (op === "-=") return `$${varName} - ${v}`;
+  if (op === "×=") return `$${varName} * ${v}`;
+  if (op === "/=") return `$${varName} / ${v}`;
+}
+
+function parseVarExpr(varName: string | undefined, expr: string | undefined): { op: SetVarOp; val: string } {
+  if (!expr || !varName) return { op: "=", val: "" };
+  const m = expr.match(new RegExp(`^\\$${escapeRegex(varName)}\\s*([+\\-*/])\\s*(.+)$`));
+  if (!m) return { op: "=", val: expr };
+  const opMap: Record<string, SetVarOp> = { "+": "+=", "-": "-=", "*": "×=", "/": "/=" };
+  return { op: opMap[m[1]] ?? "=", val: m[2].trim() };
+}
+
+function fmtSetVar(varName: string | undefined, expr: string | undefined): string {
+  if (!varName) return "Set Variable";
+  const { op, val } = parseVarExpr(varName, expr);
+  return op === "=" ? `$${varName} = ${val || "?"}` : `$${varName} ${op} ${val || "?"}`;
+}
+
+// ── SetVariableFields ─────────────────────────────────────────────────────────
+
+const OP_LABELS: Record<SetVarOp, string> = {
+  "=":  "Assign — set to value",
+  "+=": "Add — $var + value",
+  "-=": "Subtract — $var − value",
+  "×=": "Multiply — $var × value",
+  "/=": "Divide — $var ÷ value",
+};
+
+function SvDropdownModal({
+  visible,
+  onClose,
+  title,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={svs.modalOverlay} onPress={onClose}>
+        <Pressable style={svs.modalCard} onPress={() => {}}>
+          <Text style={svs.modalTitle}>{title}</Text>
+          {children}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function SetVariableFields({
+  draft,
+  variables,
+  set,
+}: {
+  draft: ProgramStep;
+  variables: ProgramVariable[] | undefined;
+  set: (p: Partial<ProgramStep>) => void;
+}) {
+  const varList = (variables ?? []).map(v => v.name);
+  const initial = useMemo(() => parseVarExpr(draft.variableName, draft.variableExpr), []);
+  const [op, setOp]           = useState<SetVarOp>(initial.op);
+  const [rawVal, setRawVal]   = useState(initial.val);
+  const [varDropOpen, setVarDropOpen] = useState(false);
+  const [opDropOpen,  setOpDropOpen]  = useState(false);
+
+  function apply(varName: string | undefined, operator: SetVarOp, value: string) {
+    if (!varName) return;
+    set({ variableName: varName, variableExpr: buildVarExpr(varName, operator, value) });
+  }
+
+  function selectVar(name: string) {
+    setVarDropOpen(false);
+    set({ variableName: name, variableExpr: buildVarExpr(name, op, rawVal) });
+  }
+
+  function selectOp(next: SetVarOp) {
+    setOpDropOpen(false);
+    setOp(next);
+    apply(draft.variableName, next, rawVal);
+  }
+
+  function changeVal(val: string) {
+    setRawVal(val);
+    apply(draft.variableName, op, val);
+  }
+
+  if (varList.length === 0) {
+    return (
+      <Text style={ms.emptyHint}>
+        No variables defined. Add variables in the Variables section of the builder.
+      </Text>
+    );
+  }
+
+  const preview = draft.variableName && rawVal
+    ? `$${draft.variableName} = ${buildVarExpr(draft.variableName, op, rawVal) ?? "?"}`
+    : null;
+
+  return (
+    <>
+      {/* Row 1 — Variable */}
+      <Text style={ms.fieldLabel}>VARIABLE</Text>
+      <TouchableOpacity style={svs.selectBtn} onPress={() => setVarDropOpen(true)} activeOpacity={0.75}>
+        <Text style={[svs.selectBtnText, !draft.variableName && svs.selectBtnPlaceholder]}>
+          {draft.variableName ? `$${draft.variableName}` : "Select variable…"}
+        </Text>
+        <ChevronDown size={14} color="#7c3aed" />
+      </TouchableOpacity>
+
+      {/* Row 2 — Operator */}
+      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OPERATION</Text>
+      <TouchableOpacity style={svs.selectBtn} onPress={() => setOpDropOpen(true)} activeOpacity={0.75}>
+        <Text style={svs.selectBtnText}>{op}</Text>
+        <Text style={svs.selectBtnSub} numberOfLines={1}>{OP_LABELS[op]}</Text>
+        <ChevronDown size={14} color="#7c3aed" />
+      </TouchableOpacity>
+
+      {/* Row 3 — Value */}
+      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (number or expression)</Text>
+      <TextInput
+        style={[ms.input, { color: "#7c3aed" }]}
+        value={rawVal}
+        onChangeText={changeVal}
+        placeholder="e.g.  1  or  $speed * 2"
+        placeholderTextColor="#c4b5fd"
+        returnKeyType="done"
+        autoFocus={!!draft.variableName}
+      />
+
+      {/* Live preview */}
+      {preview && <Text style={svs.preview}>{preview}</Text>}
+
+      {/* Variable picker modal */}
+      <SvDropdownModal visible={varDropOpen} onClose={() => setVarDropOpen(false)} title="Select Variable">
+        {varList.map((name, i) => (
+          <TouchableOpacity
+            key={name}
+            style={[svs.optionRow, i < varList.length - 1 && svs.optionRowBorder, name === draft.variableName && svs.optionRowActive]}
+            onPress={() => selectVar(name)}
+            activeOpacity={0.7}
+          >
+            <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
+            {name === draft.variableName && <Check size={15} color="#7c3aed" />}
+          </TouchableOpacity>
+        ))}
+      </SvDropdownModal>
+
+      {/* Operator picker modal */}
+      <SvDropdownModal visible={opDropOpen} onClose={() => setOpDropOpen(false)} title="Select Operation">
+        {SET_VAR_OPS.map((o, i) => (
+          <TouchableOpacity
+            key={o}
+            style={[svs.optionRow, i < SET_VAR_OPS.length - 1 && svs.optionRowBorder, o === op && svs.optionRowActive]}
+            onPress={() => selectOp(o)}
+            activeOpacity={0.7}
+          >
+            <View style={svs.opOptionLeft}>
+              <Text style={[svs.opOptionSymbol, o === op && svs.optionTextActive]}>{o}</Text>
+              <Text style={svs.opOptionDesc}>{OP_LABELS[o]}</Text>
+            </View>
+            {o === op && <Check size={15} color="#7c3aed" />}
+          </TouchableOpacity>
+        ))}
+      </SvDropdownModal>
+    </>
+  );
+}
 
 function StepConfigModal({
   visible,
@@ -1030,44 +1211,8 @@ function StepConfigModal({
         );
       }
 
-      case "SetVariable": {
-        const varNames = (variables ?? []).map(v => v.name);
-        return (
-          <>
-            <Text style={ms.fieldLabel}>VARIABLE</Text>
-            {varNames.length === 0 ? (
-              <Text style={ms.emptyHint}>
-                No variables defined. Add variables in the Variables section of the builder.
-              </Text>
-            ) : (
-              <View style={ms.segRow}>
-                {varNames.map(n => {
-                  const active = draft!.variableName === n;
-                  return (
-                    <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
-                      onPress={() => set({ variableName: n })} activeOpacity={0.8}>
-                      <Text style={[ms.segText, active && ms.segTextActive]}>${n}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>NEW VALUE  (expression)</Text>
-            <Text style={ms.hintText}>
-              Use a number or an expression: <Text style={{ color: "#7c3aed", fontWeight: "600" }}>$counter + 1</Text>
-            </Text>
-            <TextInput
-              style={[ms.input, { color: draft!.variableExpr ? "#7c3aed" : "#111827" }]}
-              value={draft!.variableExpr ?? ""}
-              onChangeText={v => set({ variableExpr: v || undefined })}
-              placeholder="e.g. $counter + 1"
-              placeholderTextColor="#c4b5fd"
-              returnKeyType="done"
-              autoFocus={varNames.length === 0 ? false : !draft!.variableName}
-            />
-          </>
-        );
-      }
+      case "SetVariable":
+        return <SetVariableFields draft={draft!} variables={variables} set={set} />;
 
       default:
         return null;
@@ -2562,4 +2707,104 @@ const ms = StyleSheet.create({
   subRowLeft: { flex: 1 },
   subRowLabel: { fontSize: 14, fontWeight: "600", color: "#111827" },
   subRowValue: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+});
+
+// ── SetVariableFields styles ───────────────────────────────────────────────────
+const svs = StyleSheet.create({
+  // Dropdown trigger button (shared by var + op rows)
+  selectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#f5f3ff",
+    borderWidth: 1.5,
+    borderColor: "#c4b5fd",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginTop: 4,
+  },
+  selectBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#7c3aed",
+    flex: 1,
+  },
+  selectBtnSub: {
+    fontSize: 12,
+    color: "#a78bfa",
+    flex: 2,
+  },
+  selectBtnPlaceholder: {
+    color: "#c4b5fd",
+    fontWeight: "400",
+  },
+
+  // Live expression preview
+  preview: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#a78bfa",
+    fontStyle: "italic",
+  },
+
+  // Dropdown modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingTop: 18,
+    paddingBottom: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 12,
+    overflow: "hidden",
+  },
+  modalTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#9ca3af",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+
+  // Option rows inside the modal
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  optionRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e7eb",
+  },
+  optionRowActive: { backgroundColor: "#f5f3ff" },
+  optionText: {
+    flex: 1,
+    fontSize: 15,
+    color: "#374151",
+    fontWeight: "500",
+  },
+  optionTextActive: { color: "#7c3aed", fontWeight: "700" },
+
+  // Operator-specific option layout
+  opOptionLeft: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  opOptionSymbol: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#374151",
+    width: 30,
+  },
+  opOptionDesc: { fontSize: 13, color: "#6b7280" },
 });
