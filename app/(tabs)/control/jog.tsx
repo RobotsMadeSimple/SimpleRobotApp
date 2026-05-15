@@ -308,8 +308,10 @@ export default function JogScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Position card */}
+        {/* Combined position + controls card */}
         <View style={styles.card}>
+
+          {/* Position strip */}
           <View style={styles.coordRow}>
             {coords.map(({ label, value, unit }) => (
               <View key={label} style={styles.coordCell}>
@@ -319,10 +321,8 @@ export default function JogScreen() {
               </View>
             ))}
           </View>
-        </View>
 
-        {/* Controls card (selectors + mode + speed) */}
-        <View style={styles.card}>
+          <View style={styles.cardSeparator} />
 
           {/* Local / Tool row */}
           <View style={styles.selectorsRow}>
@@ -432,16 +432,16 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
-    padding: 12,
-    gap: 10,
-    paddingBottom: 16,
+    padding: 10,
+    gap: 8,
+    paddingBottom: 12,
   },
 
   // ── Card ──────────────────────────────────────────────────────────────────
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
-    padding: 14,
+    padding: 11,
     shadowColor: "#000",
     shadowOpacity: 0.06,
     shadowRadius: 8,
@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
   cardSeparator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: "#e5e7eb",
-    marginVertical: 12,
+    marginVertical: 8,
   },
 
   sectionLabel: {
@@ -490,11 +490,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#9ca3af",
     letterSpacing: 0.5,
-    marginBottom: 4,
+    marginBottom: 2,
   },
 
   coordValue: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "700",
     color: "#111",
     fontFamily: "monospace",
@@ -519,7 +519,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingVertical: 10,
+    paddingVertical: 6,
     paddingHorizontal: 10,
   },
 
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 9,
+    paddingVertical: 7,
     borderRadius: 10,
     backgroundColor: "#f3f4f6",
   },
@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
   chip: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: "#f3f4f6",
   },
@@ -725,7 +725,7 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: "#dc2626",
     borderRadius: 12,
-    paddingVertical: 15,
+    paddingVertical: 12,
   },
 
   stopText: {
@@ -744,7 +744,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#2563eb",
     borderRadius: 12,
-    paddingVertical: 15,
+    paddingVertical: 12,
     backgroundColor: "#eff6ff",
   },
 
