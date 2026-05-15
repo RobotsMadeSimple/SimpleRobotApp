@@ -34,7 +34,6 @@ type RobotConfig = {
   m2Direction: number;
   m3Direction: number;
   m4Direction: number;
-  enableStbCard: boolean;
   enableNanoCards: boolean;
   enableRelayCard: boolean;
 };
