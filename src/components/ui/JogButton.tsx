@@ -1,7 +1,13 @@
 import { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
+import Animated, {
+  interpolateColor,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 type IconPosition = "above" | "below" | "left" | "right";
 
@@ -26,16 +32,27 @@ export function JogButton({
   const isReverse = iconPosition === "below" || iconPosition === "right";
   const fontSize  = Math.round(size * 0.24);
 
-  // Pan.onBegin fires immediately on touch-down (before activation thresholds).
-  // onFinalize fires on BOTH finger-lift AND gesture cancellation, so the jog
-  // always stops even when the touch is stolen by a scroll view or system gesture.
+  const pressed = useSharedValue(0);
+
   const gesture = Gesture.Pan()
-    .onBegin(() => runOnJS(onStart)())
-    .onFinalize(() => runOnJS(onStop)());
+    .onBegin(() => {
+      pressed.value = withTiming(1, { duration: 60 });
+      runOnJS(onStart)();
+    })
+    .onFinalize(() => {
+      pressed.value = withTiming(0, { duration: 180 });
+      runOnJS(onStop)();
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(pressed.value, [0, 1], ["transparent", "#dbeafe"]),
+    borderColor:     interpolateColor(pressed.value, [0, 1], ["#666666",     "#2563eb"]),
+    transform: [{ scale: 1 - pressed.value * 0.06 }],
+  }));
 
   return (
     <GestureDetector gesture={gesture}>
-      <View style={[styles.button, { width: size, height: size }]}>
+      <Animated.View style={[styles.button, { width: size, height: size }, animatedStyle]}>
         <View
           style={[
             styles.content,
@@ -46,16 +63,14 @@ export function JogButton({
           {icon}
           <Text style={[styles.text, { fontSize }]}>{label}</Text>
         </View>
-      </View>
+      </Animated.View>
     </GestureDetector>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: "transparent",
     borderWidth: 1.5,
-    borderColor: "#666",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 8,

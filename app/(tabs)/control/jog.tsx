@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Modal,
   ScrollView,
@@ -118,7 +119,7 @@ function Selector({
 
   return (
     <View style={styles.selectorWrap}>
-      <TouchableOpacity style={styles.selectorBtn} onPress={() => setOpen(true)} activeOpacity={0.7}>
+      <AnimatedPressable style={styles.selectorBtn} onPress={() => setOpen(true)}>
         {icon && <View style={styles.selectorIcon}>{icon}</View>}
         <View style={styles.selectorTextStack}>
           <Text style={styles.selectorLabel}>{label}</Text>
@@ -127,7 +128,7 @@ function Selector({
             <ChevronDown size={13} color="#9ca3af" />
           </View>
         </View>
-      </TouchableOpacity>
+      </AnimatedPressable>
 
       <PickerModal
         visible={open}
@@ -354,15 +355,14 @@ export default function JogScreen() {
             {jogModes.map(({ key, icon }) => {
               const active = mode === key;
               return (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={key}
                   style={[styles.segment, active && styles.segmentActive]}
                   onPress={() => setMode(key)}
-                  activeOpacity={0.8}
                 >
                   {icon(active)}
                   <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               );
             })}
           </View>
@@ -374,14 +374,13 @@ export default function JogScreen() {
             {speedOptions.map((spd) => {
               const active = selectedSpeed === spd;
               return (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={spd}
                   style={[styles.chip, active && styles.chipActive]}
                   onPress={() => setSelectedSpeed(spd)}
-                  activeOpacity={0.8}
                 >
                   <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               );
             })}
           </View>
@@ -396,15 +395,15 @@ export default function JogScreen() {
 
       {/* ── Fixed bottom row: STOP + Teach ── */}
       <View style={styles.bottomRow}>
-        <TouchableOpacity style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")}>
           <OctagonX size={22} color="white" />
           <Text style={styles.stopText}>STOP</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
-        <TouchableOpacity style={styles.teachButton} onPress={() => setTeachOpen(true)} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.teachButton} onPress={() => setTeachOpen(true)}>
           <MousePointerClick size={18} color="#2563eb" />
           <Text style={styles.teachButtonText}>Teach</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       {/* ── Teach modal ── */}
