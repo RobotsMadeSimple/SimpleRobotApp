@@ -1,7 +1,6 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
-  CircuitBoard,
   Cpu,
   Home,
   MoveHorizontal,
@@ -273,7 +272,6 @@ export default function ConfigureRobot() {
         </View>
         <View style={styles.card}>
           {[
-            { field: "enableStbCard"   as const, icon: <CircuitBoard size={16} color="#16a34a" />, tileBg: "#f0fdf4", label: "STB4100 Robot IO Board" },
             { field: "enableNanoCards" as const, icon: <Cpu size={16} color="#4f46e5" />,          tileBg: "#eef2ff", label: "Arduino Nano Devices" },
             { field: "enableRelayCard" as const, icon: <Radio size={16} color="#0891b2" />,        tileBg: "#ecfeff", label: "USB Relay Board" },
           ].map(({ field, icon, tileBg, label }, idx, arr) => (
