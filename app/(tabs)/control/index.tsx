@@ -1,5 +1,5 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
@@ -29,8 +29,7 @@ const HOMING_LABELS: Record<string, string> = {
 };
 
 export default function Control() {
-  const robot = useSelectedRobot();
-  const s = robot?.status;
+  const s = useRobotStatus();
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
   const isHoming = !!s?.homingState && s.homingState !== "WaitingForStart";
