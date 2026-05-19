@@ -3,6 +3,9 @@
 # dependencies
 node_modules/
 
+# generated electron bundle
+electron-bundle.js
+
 # Expo
 .expo/
 dist/
