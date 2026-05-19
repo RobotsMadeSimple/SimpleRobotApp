@@ -22,9 +22,14 @@ import {
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import Constants from "expo-constants";
+import * as FileSystem from "expo-file-system";
+import * as IntentLauncher from "expo-intent-launcher";
 
-const GITHUB_OWNER_REPO = "RobotsMadeSimple/SimpleRobotController";
+const CONTROLLER_REPO = "RobotsMadeSimple/SimpleRobotController";
+const APP_REPO        = "RobotsMadeSimple/SimpleRobotApp";
+const APP_APK_ASSET   = "SimpleRobotApp.apk";
 
 const robotImages: Record<string, any> = {
   ASTRO: require("@/assets/images/ASTRO.png"),
@@ -110,11 +115,21 @@ export default function AboutRobot() {
     return () => clearTimeout(t);
   }, [updating]);
 
-  async function fetchLatestVersion(): Promise<string | null> {
+  // ── App update state ───────────────────────────────────────────────────────
+  const [appLatestVersion,  setAppLatestVersion]  = useState<string | null>(null);
+  const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
+  const [downloadingApp,    setDownloadingApp]    = useState(false);
+  const [downloadProgress,  setDownloadProgress]  = useState(0);
+
+  const appVersion = Constants.expoConfig?.version ?? "0.0.0";
+  const isAndroid  = Platform.OS === "android";
+
+  async function fetchLatestRelease(repo: string): Promise<{ version: string; assets: { name: string; browser_download_url: string }[] } | null> {
     try {
-      const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER_REPO}/releases/latest`);
+      const res  = await fetch(`https://api.github.com/repos/${repo}/releases/latest`);
       const data = await res.json();
-      return (data.tag_name as string ?? "").replace(/^v/, "") || null;
+      const version = (data.tag_name as string ?? "").replace(/^v/, "");
+      return { version, assets: data.assets ?? [] };
     } catch {
       return null;
     }
@@ -123,22 +138,66 @@ export default function AboutRobot() {
   async function checkForUpdates() {
     setCheckingUpdate(true);
     setLatestVersion(null);
-    const v = await fetchLatestVersion();
-    setLatestVersion(v);
+    const rel = await fetchLatestRelease(CONTROLLER_REPO);
+    setLatestVersion(rel?.version ?? null);
     setCheckingUpdate(false);
+  }
+
+  async function checkAppForUpdates() {
+    setCheckingAppUpdate(true);
+    setAppLatestVersion(null);
+    const rel = await fetchLatestRelease(APP_REPO);
+    setAppLatestVersion(rel?.version ?? null);
+    setCheckingAppUpdate(false);
   }
 
   async function handleUpdate() {
     setCheckingUpdate(true);
-    const latest = await fetchLatestVersion();
+    const rel = await fetchLatestRelease(CONTROLLER_REPO);
     setCheckingUpdate(false);
-    if (!latest) return;
-    setLatestVersion(latest);
+    if (!rel) return;
+    setLatestVersion(rel.version);
     const current = status.version && status.version !== "0.0.0" ? status.version : null;
-    if (current && latest === current) return; // already up to date — UI shows chip
+    if (current && rel.version === current) return;
     setUpdating(true);
     disconnectedDuringUpdate.current = false;
     try { await robotClient.updateController(); } catch { setUpdating(false); }
+  }
+
+  async function handleAppUpdate() {
+    setCheckingAppUpdate(true);
+    const rel = await fetchLatestRelease(APP_REPO);
+    setCheckingAppUpdate(false);
+    if (!rel) return;
+    setAppLatestVersion(rel.version);
+    if (rel.version === appVersion) return;
+
+    const asset = rel.assets.find(a => a.name === APP_APK_ASSET);
+    if (!asset) return;
+
+    const destPath = FileSystem.cacheDirectory + APP_APK_ASSET;
+    setDownloadingApp(true);
+    setDownloadProgress(0);
+    try {
+      const dl = FileSystem.createDownloadResumable(
+        asset.browser_download_url,
+        destPath,
+        {},
+        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+          setDownloadProgress(totalBytesExpectedToWrite > 0 ? totalBytesWritten / totalBytesExpectedToWrite : 0);
+        }
+      );
+      const result = await dl.downloadAsync();
+      if (!result) return;
+      const contentUri = await FileSystem.getContentUriAsync(result.uri);
+      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+        data: contentUri,
+        flags: 1,
+        type: "application/vnd.android.package-archive",
+      });
+    } finally {
+      setDownloadingApp(false);
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -183,8 +242,10 @@ export default function AboutRobot() {
   const controllerVersion = status.version && status.version !== "0.0.0" ? `v${status.version}` : "—";
   const isLinux = status.isLinux;
 
-  const isUpToDate  = latestVersion !== null && status.version !== "0.0.0" && latestVersion === status.version;
-  const hasUpdate   = latestVersion !== null && status.version !== "0.0.0" && latestVersion !== status.version;
+  const isUpToDate      = latestVersion !== null && status.version !== "0.0.0" && latestVersion === status.version;
+  const hasUpdate       = latestVersion !== null && status.version !== "0.0.0" && latestVersion !== status.version;
+  const appIsUpToDate   = appLatestVersion !== null && appLatestVersion === appVersion;
+  const appHasUpdate    = appLatestVersion !== null && appLatestVersion !== appVersion;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
@@ -318,6 +379,64 @@ export default function AboutRobot() {
         </TouchableOpacity>
         {!isLinux && (
           <Text style={styles.updateNote}>Remote update is only available on Linux controllers.</Text>
+        )}
+
+        {/* App update — Android only */}
+        {isAndroid && (
+          <>
+            <Text style={styles.sectionLabel}>APP</Text>
+            <View style={styles.card}>
+              <View style={[styles.infoRow, styles.infoRowBorder]}>
+                <View style={[styles.rowTile, { backgroundColor: "#eff6ff" }]}>
+                  <Download size={16} color="#2563eb" />
+                </View>
+                <Text style={styles.infoLabel}>App Version</Text>
+                <View style={styles.versionRight}>
+                  {appIsUpToDate && (
+                    <View style={styles.upToDateChip}>
+                      <CheckCircle2 size={11} color="#16a34a" />
+                      <Text style={styles.upToDateText}>Up to date</Text>
+                    </View>
+                  )}
+                  {appHasUpdate && (
+                    <View style={styles.updateChip}>
+                      <Text style={styles.updateChipText}>v{appLatestVersion} available</Text>
+                    </View>
+                  )}
+                  <Text style={[styles.infoValue, { maxWidth: undefined }]} numberOfLines={1}>v{appVersion}</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.infoRow}
+                onPress={checkAppForUpdates}
+                activeOpacity={0.7}
+                disabled={checkingAppUpdate || downloadingApp}
+              >
+                <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
+                  {checkingAppUpdate
+                    ? <ActivityIndicator size="small" color="#2563eb" />
+                    : <RefreshCw size={16} color="#2563eb" />}
+                </View>
+                <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.updateButton, !appHasUpdate && styles.updateButtonDisabled]}
+              onPress={handleAppUpdate}
+              activeOpacity={appHasUpdate ? 0.8 : 1}
+              disabled={!appHasUpdate || downloadingApp || checkingAppUpdate}
+            >
+              {downloadingApp
+                ? <ActivityIndicator size="small" color="#2563eb" />
+                : <Download size={15} color={appHasUpdate ? "#2563eb" : "#9ca3af"} />}
+              <Text style={[styles.updateButtonText, !appHasUpdate && styles.updateButtonTextDisabled]}>
+                {downloadingApp
+                  ? `Downloading… ${Math.round(downloadProgress * 100)}%`
+                  : "Update App"}
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
 
         {/* Restart */}
