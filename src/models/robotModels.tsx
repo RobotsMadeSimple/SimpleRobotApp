@@ -212,6 +212,8 @@ export type RobotStatus = {
   activeTool: string,
 
   lastBuiltProgramUpdate: number,
+  version: string,
+  isLinux: boolean,
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -267,5 +269,7 @@ export function createDefaultStatus(): RobotStatus {
     activeTool: "",
 
     lastBuiltProgramUpdate: 0,
+    version: "0.0.0",
+    isLinux: false,
   };
 }
