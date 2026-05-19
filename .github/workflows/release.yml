@@ -73,6 +73,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: Set version from tag
+        run: |
+          VERSION=$(echo "${{ inputs.tag || github.ref_name }}" | sed 's/^v//')
+          jq ".expo.version = \"$VERSION\"" app.json > app.json.tmp && mv app.json.tmp app.json
+
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
