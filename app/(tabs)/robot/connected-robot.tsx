@@ -50,20 +50,20 @@ const MENU_ITEMS = [
     onPress: () => router.navigate("/control"),
   },
   {
-    label: "Points, Tools & Locals",
-    description: "Manage saved positions and tool frames",
-    icon: Move3d,
-    tileColor: "#f5f3ff",
-    iconColor: "#7c3aed",
-    onPress: () => router.navigate("/space"),
-  },
-  {
     label: "Inputs and Outputs",
     description: "Monitor and control digital I/O",
     icon: ArrowLeftRight,
     tileColor: "#fff7ed",
     iconColor: "#ea580c",
     onPress: () => router.navigate("/io"),
+  },
+  {
+    label: "Points, Tools & Locals",
+    description: "Manage saved positions and tool frames",
+    icon: Move3d,
+    tileColor: "#f5f3ff",
+    iconColor: "#7c3aed",
+    onPress: () => router.navigate("/space"),
   },
   {
     label: "Configure",
