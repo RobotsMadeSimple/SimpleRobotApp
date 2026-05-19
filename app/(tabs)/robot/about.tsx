@@ -279,7 +279,7 @@ export default function AboutRobot() {
                   <Text style={styles.updateChipText}>v{latestVersion} available</Text>
                 </View>
               )}
-              <Text style={styles.infoValue}>{controllerVersion}</Text>
+              <Text style={[styles.infoValue, { maxWidth: undefined }]} numberOfLines={1}>{controllerVersion}</Text>
             </View>
           </View>
           <View style={[styles.infoRow, styles.infoRowBorder]}>
