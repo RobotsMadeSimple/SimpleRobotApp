@@ -739,6 +739,10 @@ export class RobotConnectService {
     return this.sendCommand("RestartController");
   }
 
+  public updateController() {
+    return this.sendCommand("Update");
+  }
+
   public getRobotConfig(): Promise<{
     homingSpeed: number;
     j1HomeOffsetDeg: number;

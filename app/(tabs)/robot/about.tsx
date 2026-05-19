@@ -4,7 +4,9 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import {
   Activity,
+  CheckCircle2,
   Cpu,
+  Download,
   Gauge,
   Hash,
   Network,
@@ -17,11 +19,12 @@ import {
   Zap,
 } from "lucide-react-native";
 
-import { Tabs } from "expo-router";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+
+const GITHUB_OWNER_REPO = "RobotsMadeSimple/SimpleRobotController";
 
 const robotImages: Record<string, any> = {
   ASTRO: require("@/assets/images/ASTRO.png"),
@@ -32,14 +35,12 @@ const defaultRobotImage = require("@/assets/images/no-robot.png");
 
 function InfoRow({
   icon,
-  iconColor,
   tileBg,
   label,
   value,
   last = false,
 }: {
   icon: React.ReactNode;
-  iconColor?: string;
   tileBg?: string;
   label: string;
   value: string | number | React.ReactNode;
@@ -77,23 +78,75 @@ export default function AboutRobot() {
 
   useEffect(() => subscribeRobot(setRobot), []);
 
-  const [editVisible, setEditVisible] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editType, setEditType] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [editVisible,   setEditVisible]   = useState(false);
+  const [editName,      setEditName]      = useState("");
+  const [editType,      setEditType]      = useState("");
+  const [saving,        setSaving]        = useState(false);
 
   const [restartVisible, setRestartVisible] = useState(false);
-  const [restarting, setRestarting] = useState(false);
+  const [restarting,     setRestarting]     = useState(false);
 
+  // ── Update state ───────────────────────────────────────────────────────────
+  const [checkingUpdate,  setCheckingUpdate]  = useState(false);
+  const [latestVersion,   setLatestVersion]   = useState<string | null>(null);
+  const [updating,        setUpdating]        = useState(false);
+  const [updateDone,      setUpdateDone]      = useState(false);
+  const disconnectedDuringUpdate = useRef(false);
+
+  // Detect reconnect after update
+  useEffect(() => {
+    if (!updating) { disconnectedDuringUpdate.current = false; return; }
+    if (!status.connected) disconnectedDuringUpdate.current = true;
+    if (disconnectedDuringUpdate.current && status.connected) {
+      setUpdating(false);
+      setUpdateDone(true);
+    }
+  }, [status.connected, updating]);
+
+  // Timeout safety — dismiss spinner after 2 minutes
+  useEffect(() => {
+    if (!updating) return;
+    const t = setTimeout(() => setUpdating(false), 120_000);
+    return () => clearTimeout(t);
+  }, [updating]);
+
+  async function fetchLatestVersion(): Promise<string | null> {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER_REPO}/releases/latest`);
+      const data = await res.json();
+      return (data.tag_name as string ?? "").replace(/^v/, "") || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function checkForUpdates() {
+    setCheckingUpdate(true);
+    setLatestVersion(null);
+    const v = await fetchLatestVersion();
+    setLatestVersion(v);
+    setCheckingUpdate(false);
+  }
+
+  async function handleUpdate() {
+    setCheckingUpdate(true);
+    const latest = await fetchLatestVersion();
+    setCheckingUpdate(false);
+    if (!latest) return;
+    setLatestVersion(latest);
+    const current = status.version && status.version !== "0.0.0" ? status.version : null;
+    if (current && latest === current) return; // already up to date — UI shows chip
+    setUpdating(true);
+    disconnectedDuringUpdate.current = false;
+    try { await robotClient.updateController(); } catch { setUpdating(false); }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   async function confirmRestart() {
     setRestarting(true);
-    try {
-      await robotClient.restartController();
-    } finally {
-      setRestarting(false);
-      setRestartVisible(false);
-    }
+    try { await robotClient.restartController(); }
+    finally { setRestarting(false); setRestartVisible(false); }
   }
 
   function openEdit() {
@@ -114,9 +167,7 @@ export default function AboutRobot() {
       setSelectedRobot(updated);
       robotDiscovery.updateRobot(robot.serialNumber, updated);
       setEditVisible(false);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   if (!robot) {
@@ -129,181 +180,240 @@ export default function AboutRobot() {
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
   const isHoming = status.homingState !== "WaitingForStart";
+  const controllerVersion = status.version && status.version !== "0.0.0" ? `v${status.version}` : "—";
+  const isLinux = status.isLinux;
+
+  const isUpToDate  = latestVersion !== null && status.version !== "0.0.0" && latestVersion === status.version;
+  const hasUpdate   = latestVersion !== null && status.version !== "0.0.0" && latestVersion !== status.version;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <Tabs.Screen options={{ headerShown: false }} />
       <SubPageHeader title="About Robot" />
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Hero card */}
-      <View style={styles.heroCard}>
-        <View style={styles.heroImageWrapper}>
-          <Image source={imageSource} style={styles.heroImage} resizeMode="contain" />
-        </View>
-        <Text style={styles.heroName}>{robot.robotName || "Unknown Robot"}</Text>
-        {!!robot.robotType && (
-          <View style={styles.typeBadge}>
-            <Text style={styles.typeText}>{robot.robotType}</Text>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Hero card */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroImageWrapper}>
+            <Image source={imageSource} style={styles.heroImage} resizeMode="contain" />
           </View>
-        )}
-      </View>
+          <Text style={styles.heroName}>{robot.robotName || "Unknown Robot"}</Text>
+          {!!robot.robotType && (
+            <View style={styles.typeBadge}>
+              <Text style={styles.typeText}>{robot.robotType}</Text>
+            </View>
+          )}
+        </View>
 
-      {/* Identity */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionLabel}>IDENTITY</Text>
-        <TouchableOpacity onPress={openEdit} style={styles.editButton}>
-          <Pencil size={14} color="#2563eb" />
-          <Text style={styles.editButtonText}>Edit</Text>
+        {/* Identity */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>IDENTITY</Text>
+          <TouchableOpacity onPress={openEdit} style={styles.editButton}>
+            <Pencil size={14} color="#2563eb" />
+            <Text style={styles.editButtonText}>Edit</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.card}>
+          <InfoRow icon={<Tag size={16} color="#2563eb" />}  tileBg="#eff6ff" label="Name"          value={robot.robotName   || "—"} />
+          <InfoRow icon={<Cpu size={16} color="#7c3aed" />}  tileBg="#f5f3ff" label="Type"          value={robot.robotType   || "—"} />
+          <InfoRow icon={<Hash size={16} color="#6b7280" />} tileBg="#f9fafb" label="Serial Number" value={robot.serialNumber || "—"} last />
+        </View>
+
+        {/* Network */}
+        <Text style={styles.sectionLabel}>NETWORK</Text>
+        <View style={styles.card}>
+          <InfoRow icon={<Network size={16} color="#0891b2" />} tileBg="#ecfeff" label="IP Address" value={robot.ipAddress       || "—"} />
+          <InfoRow icon={<Server  size={16} color="#0891b2" />} tileBg="#ecfeff" label="Port"       value={robot.port} />
+          <InfoRow icon={<Zap     size={16} color="#0891b2" />} tileBg="#ecfeff" label="Endpoint"   value={robot.controlEndpoint} last />
+        </View>
+
+        {/* Live status */}
+        <Text style={styles.sectionLabel}>LIVE STATUS</Text>
+        <View style={styles.card}>
+          <InfoRow
+            icon={status.connected ? <Wifi size={16} color="#16a34a" /> : <WifiOff size={16} color="#dc2626" />}
+            tileBg={status.connected ? "#f0fdf4" : "#fef2f2"}
+            label="Connection"
+            value={<StatusDot ok={status.connected} label={status.connected ? "Connected" : "Disconnected"} />}
+          />
+          <InfoRow
+            icon={<Cpu size={16} color={status.driverConnected ? "#16a34a" : "#dc2626"} />}
+            tileBg={status.driverConnected ? "#f0fdf4" : "#fef2f2"}
+            label="Motor Driver"
+            value={<StatusDot ok={status.driverConnected} label={status.driverConnected ? "Online" : "Offline"} />}
+          />
+          <InfoRow
+            icon={<Activity size={16} color={status.wasHomed ? "#16a34a" : "#f97316"} />}
+            tileBg={status.wasHomed ? "#f0fdf4" : "#fff7ed"}
+            label="Homed"
+            value={<StatusDot ok={status.wasHomed} label={status.wasHomed ? "Yes" : "No"} />}
+          />
+          <InfoRow
+            icon={<Gauge size={16} color="#6b7280" />}
+            tileBg="#f9fafb"
+            label="Homing State"
+            value={isHoming ? status.homingState : "Idle"}
+            last
+          />
+        </View>
+
+        {/* Software */}
+        <Text style={styles.sectionLabel}>SOFTWARE</Text>
+        <View style={styles.card}>
+          <View style={[styles.infoRow, styles.infoRowBorder]}>
+            <View style={[styles.rowTile, { backgroundColor: "#eff6ff" }]}>
+              <Download size={16} color="#2563eb" />
+            </View>
+            <Text style={styles.infoLabel}>Controller Version</Text>
+            <View style={styles.versionRight}>
+              {isUpToDate && (
+                <View style={styles.upToDateChip}>
+                  <CheckCircle2 size={11} color="#16a34a" />
+                  <Text style={styles.upToDateText}>Up to date</Text>
+                </View>
+              )}
+              {hasUpdate && (
+                <View style={styles.updateChip}>
+                  <Text style={styles.updateChipText}>v{latestVersion} available</Text>
+                </View>
+              )}
+              <Text style={styles.infoValue}>{controllerVersion}</Text>
+            </View>
+          </View>
+          <View style={[styles.infoRow, styles.infoRowBorder]}>
+            <View style={[styles.rowTile, { backgroundColor: isLinux ? "#f0fdf4" : "#f9fafb" }]}>
+              <Server size={16} color={isLinux ? "#16a34a" : "#6b7280"} />
+            </View>
+            <Text style={styles.infoLabel}>Platform</Text>
+            <Text style={styles.infoValue}>{isLinux ? "Linux" : "Windows"}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.infoRow}
+            onPress={checkForUpdates}
+            activeOpacity={0.7}
+            disabled={checkingUpdate}
+          >
+            <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
+              {checkingUpdate
+                ? <ActivityIndicator size="small" color="#2563eb" />
+                : <RefreshCw size={16} color="#2563eb" />}
+            </View>
+            <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Update Controller button */}
+        <TouchableOpacity
+          style={[styles.updateButton, !isLinux && styles.updateButtonDisabled]}
+          onPress={handleUpdate}
+          activeOpacity={isLinux ? 0.8 : 1}
+          disabled={!isLinux || checkingUpdate || updating}
+        >
+          <Download size={15} color={isLinux ? "#2563eb" : "#9ca3af"} />
+          <Text style={[styles.updateButtonText, !isLinux && styles.updateButtonTextDisabled]}>
+            Update Controller
+          </Text>
         </TouchableOpacity>
-      </View>
-      <View style={styles.card}>
-        <InfoRow
-          icon={<Tag size={16} color="#2563eb" />}
-          tileBg="#eff6ff"
-          label="Name"
-          value={robot.robotName || "—"}
-        />
-        <InfoRow
-          icon={<Cpu size={16} color="#7c3aed" />}
-          tileBg="#f5f3ff"
-          label="Type"
-          value={robot.robotType || "—"}
-        />
-        <InfoRow
-          icon={<Hash size={16} color="#6b7280" />}
-          tileBg="#f9fafb"
-          label="Serial Number"
-          value={robot.serialNumber || "—"}
-          last
-        />
-      </View>
+        {!isLinux && (
+          <Text style={styles.updateNote}>Remote update is only available on Linux controllers.</Text>
+        )}
 
-      {/* Network */}
-      <Text style={styles.sectionLabel}>NETWORK</Text>
-      <View style={styles.card}>
-        <InfoRow
-          icon={<Network size={16} color="#0891b2" />}
-          tileBg="#ecfeff"
-          label="IP Address"
-          value={robot.ipAddress || "—"}
-        />
-        <InfoRow
-          icon={<Server size={16} color="#0891b2" />}
-          tileBg="#ecfeff"
-          label="Port"
-          value={robot.port}
-        />
-        <InfoRow
-          icon={<Zap size={16} color="#0891b2" />}
-          tileBg="#ecfeff"
-          label="Endpoint"
-          value={robot.controlEndpoint}
-          last
-        />
-      </View>
+        {/* Restart */}
+        <TouchableOpacity style={styles.restartButton} onPress={() => setRestartVisible(true)}>
+          <RefreshCw size={15} color="#dc2626" />
+          <Text style={styles.restartButtonText}>Restart Controller</Text>
+        </TouchableOpacity>
 
-      {/* Live status */}
-      <Text style={styles.sectionLabel}>LIVE STATUS</Text>
-      <View style={styles.card}>
-        <InfoRow
-          icon={status.connected ? <Wifi size={16} color="#16a34a" /> : <WifiOff size={16} color="#dc2626" />}
-          tileBg={status.connected ? "#f0fdf4" : "#fef2f2"}
-          label="Connection"
-          value={<StatusDot ok={status.connected} label={status.connected ? "Connected" : "Disconnected"} />}
-        />
-        <InfoRow
-          icon={<Cpu size={16} color={status.driverConnected ? "#16a34a" : "#dc2626"} />}
-          tileBg={status.driverConnected ? "#f0fdf4" : "#fef2f2"}
-          label="Motor Driver"
-          value={<StatusDot ok={status.driverConnected} label={status.driverConnected ? "Online" : "Offline"} />}
-        />
-        <InfoRow
-          icon={<Activity size={16} color={status.wasHomed ? "#16a34a" : "#f97316"} />}
-          tileBg={status.wasHomed ? "#f0fdf4" : "#fff7ed"}
-          label="Homed"
-          value={<StatusDot ok={status.wasHomed} label={status.wasHomed ? "Yes" : "No"} />}
-        />
-        <InfoRow
-          icon={<Gauge size={16} color="#6b7280" />}
-          tileBg="#f9fafb"
-          label="Homing State"
-          value={isHoming ? status.homingState : "Idle"}
-          last
-        />
-      </View>
+        {/* ── Modals ── */}
 
-      {/* Restart */}
-      <TouchableOpacity style={styles.restartButton} onPress={() => setRestartVisible(true)}>
-        <RefreshCw size={15} color="#dc2626" />
-        <Text style={styles.restartButtonText}>Restart Controller</Text>
-      </TouchableOpacity>
-
-      <Modal visible={restartVisible} transparent animationType="fade" onRequestClose={() => setRestartVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Restart Controller?</Text>
-            <Text style={styles.restartWarning}>
-              The robot will disconnect briefly while the controller restarts. Motion will stop.
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setRestartVisible(false)}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.restartConfirmButton, restarting && { opacity: 0.6 }]}
-                onPress={confirmRestart}
-                disabled={restarting}
-              >
-                <Text style={styles.saveButtonText}>{restarting ? "Restarting…" : "Restart"}</Text>
-              </TouchableOpacity>
+        {/* Updating modal */}
+        <Modal visible={updating} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <ActivityIndicator size="large" color="#2563eb" style={{ marginBottom: 16 }} />
+              <Text style={styles.modalTitle}>Updating Controller</Text>
+              <Text style={styles.restartWarning}>
+                Downloading and applying the update. The controller will reconnect automatically once complete.
+              </Text>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      <Modal visible={editVisible} transparent animationType="fade" onRequestClose={() => setEditVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Edit Robot Identity</Text>
-
-            <Text style={styles.editLabel}>ROBOT NAME</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Robot name"
-              placeholderTextColor="#9ca3af"
-            />
-
-            <Text style={styles.editLabel}>ROBOT TYPE</Text>
-            <View style={styles.pickerWrapper}>
-              <Picker
-                selectedValue={editType}
-                onValueChange={setEditType}
-                style={styles.picker}
-                dropdownIconColor="#6b7280"
-              >
-                <Picker.Item label="ASTRO" value="ASTRO" />
-              </Picker>
-            </View>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setEditVisible(false)}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={saveEdit} disabled={saving}>
-                <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save"}</Text>
-              </TouchableOpacity>
+        {/* Update complete modal */}
+        <Modal visible={updateDone} transparent animationType="fade" onRequestClose={() => setUpdateDone(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <CheckCircle2 size={36} color="#16a34a" style={{ marginBottom: 12 }} />
+              <Text style={styles.modalTitle}>Update Complete</Text>
+              <Text style={styles.restartWarning}>
+                The controller is now running the latest version.
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.saveButton} onPress={() => setUpdateDone(false)}>
+                  <Text style={styles.saveButtonText}>Done</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-    </ScrollView>
+        {/* Restart modal */}
+        <Modal visible={restartVisible} transparent animationType="fade" onRequestClose={() => setRestartVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Restart Controller?</Text>
+              <Text style={styles.restartWarning}>
+                The robot will disconnect briefly while the controller restarts. Motion will stop.
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setRestartVisible(false)}>
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.restartConfirmButton, restarting && { opacity: 0.6 }]}
+                  onPress={confirmRestart}
+                  disabled={restarting}
+                >
+                  <Text style={styles.saveButtonText}>{restarting ? "Restarting…" : "Restart"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Edit identity modal */}
+        <Modal visible={editVisible} transparent animationType="fade" onRequestClose={() => setEditVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Edit Robot Identity</Text>
+              <Text style={styles.editLabel}>ROBOT NAME</Text>
+              <TextInput
+                style={styles.editInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Robot name"
+                placeholderTextColor="#9ca3af"
+              />
+              <Text style={styles.editLabel}>ROBOT TYPE</Text>
+              <View style={styles.pickerWrapper}>
+                <Picker selectedValue={editType} onValueChange={setEditType} style={styles.picker} dropdownIconColor="#6b7280">
+                  <Picker.Item label="ASTRO" value="ASTRO" />
+                </Picker>
+              </View>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setEditVisible(false)}>
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={saveEdit} disabled={saving}>
+                  <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
     </View>
   );
 }
@@ -311,26 +421,11 @@ export default function AboutRobot() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f3f4f6",
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 36,
-  },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#f3f4f6",
-  },
-  centerText: {
-    fontSize: 15,
-    color: "#6b7280",
-  },
+  container:   { flex: 1, backgroundColor: "#f3f4f6" },
+  content:     { padding: 16, paddingBottom: 36 },
+  center:      { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f3f4f6" },
+  centerText:  { fontSize: 15, color: "#6b7280" },
 
-  // Hero
   heroCard: {
     backgroundColor: "#ffffff",
     borderRadius: 16,
@@ -345,62 +440,57 @@ const styles = StyleSheet.create({
     elevation: 3,
     gap: 8,
   },
-  heroImageWrapper: {
-    width: 110,
-    height: 110,
-    borderRadius: 20,
+  heroImageWrapper: { width: 110, height: 110, borderRadius: 20, backgroundColor: "#ffffff", justifyContent: "center", alignItems: "center", marginBottom: 4 },
+  heroImage:        { width: 110, height: 110 },
+  heroName:         { fontSize: 22, fontWeight: "700", color: "#111827" },
+  typeBadge:        { backgroundColor: "#eff6ff", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4 },
+  typeText:         { fontSize: 13, fontWeight: "600", color: "#2563eb" },
+
+  sectionHeader:    { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  sectionLabel:     { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8, marginBottom: 8 },
+  editButton:       { flexDirection: "row", alignItems: "center", gap: 4 },
+  editButtonText:   { fontSize: 12, fontWeight: "600", color: "#2563eb" },
+
+  card: {
     backgroundColor: "#ffffff",
+    borderRadius: 14,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+    overflow: "hidden",
+  },
+  infoRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 13, gap: 12 },
+  infoRowBorder:  { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb" },
+  rowTile:        { width: 32, height: 32, borderRadius: 8, justifyContent: "center", alignItems: "center" },
+  infoLabel:      { flex: 1, fontSize: 14, fontWeight: "500", color: "#374151" },
+  infoValue:      { fontSize: 14, color: "#6b7280", maxWidth: "45%", textAlign: "right" },
+
+  versionRight:    { flexDirection: "row", alignItems: "center", gap: 6 },
+  upToDateChip:    { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  upToDateText:    { fontSize: 11, fontWeight: "600", color: "#16a34a" },
+  updateChip:      { backgroundColor: "#fef3c7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  updateChipText:  { fontSize: 11, fontWeight: "600", color: "#d97706" },
+
+  updateButton: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  heroImage: {
-    width: 110,
-    height: 110,
-  },
-  heroName: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  typeBadge: {
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
     backgroundColor: "#eff6ff",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  typeText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#2563eb",
-  },
-
-  // Section label
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginBottom: 8,
   },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
-  editButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  editButtonText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#2563eb",
-  },
+  updateButtonDisabled: { borderColor: "#e5e7eb", backgroundColor: "#f9fafb" },
+  updateButtonText:         { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+  updateButtonTextDisabled: { color: "#9ca3af" },
+  updateNote: { fontSize: 12, color: "#9ca3af", textAlign: "center", marginBottom: 16 },
 
-  // Restart button
   restartButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -413,169 +503,26 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff5f5",
     marginBottom: 20,
   },
-  restartButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#dc2626",
-  },
-  restartWarning: {
-    fontSize: 13,
-    color: "#6b7280",
-    marginBottom: 16,
-    lineHeight: 18,
-  },
-  restartConfirmButton: {
-    flex: 1,
-    backgroundColor: "#dc2626",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
+  restartButtonText:    { fontSize: 14, fontWeight: "600", color: "#dc2626" },
+  restartConfirmButton: { flex: 1, backgroundColor: "#dc2626", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  restartWarning:       { fontSize: 13, color: "#6b7280", marginBottom: 16, lineHeight: 18 },
 
-  // Edit modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    padding: 20,
-    width: 300,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 16,
-  },
-  editLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#6b7280",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  editInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: "#111827",
-    backgroundColor: "#f9fafb",
-    marginBottom: 12,
-  },
-  pickerWrapper: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    backgroundColor: "#f9fafb",
-    marginBottom: 12,
-    overflow: "hidden",
-  },
-  picker: {
-    color: "#111827",
-  },
-  modalButtons: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
-  },
-  cancelButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  saveButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#ffffff",
-  },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
+  modalCard:    { backgroundColor: "#ffffff", borderRadius: 16, padding: 20, width: 300, alignItems: "center", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  modalTitle:   { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8, textAlign: "center" },
 
-  // Card
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
+  editLabel:     { fontSize: 11, fontWeight: "600", color: "#6b7280", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4, alignSelf: "flex-start" },
+  editInput:     { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, color: "#111827", backgroundColor: "#f9fafb", marginBottom: 12, width: "100%" },
+  pickerWrapper: { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 8, backgroundColor: "#f9fafb", marginBottom: 12, overflow: "hidden", width: "100%" },
+  picker:        { color: "#111827" },
 
-  // Info row
-  infoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    gap: 12,
-  },
-  infoRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  rowTile: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  infoLabel: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#374151",
-  },
-  infoValue: {
-    fontSize: 14,
-    color: "#6b7280",
-    maxWidth: "45%",
-    textAlign: "right",
-  },
+  modalButtons:  { flexDirection: "row", gap: 10, marginTop: 4, width: "100%" },
+  cancelButton:  { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  cancelButtonText: { fontSize: 14, fontWeight: "600", color: "#6b7280" },
+  saveButton:    { flex: 1, backgroundColor: "#2563eb", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  saveButtonText: { fontSize: 14, fontWeight: "600", color: "#ffffff" },
 
-  // Status dot
-  statusDot: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
+  statusDot:  { flexDirection: "row", alignItems: "center", gap: 5 },
+  dot:        { width: 8, height: 8, borderRadius: 4 },
+  dotLabel:   { fontSize: 13, fontWeight: "600" },
 });

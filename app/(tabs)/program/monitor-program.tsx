@@ -119,6 +119,16 @@ export default function MonitorProgramScreen() {
   const program: ProgramSummary | null =
     liveProgram ?? (builtProgram ? syntheticSummary(builtProgram) : null);
 
+  // Guard against double-tap opening two builder screens
+  const navigatingToEdit = useRef(false);
+  useFocusEffect(useCallback(() => { navigatingToEdit.current = false; }, []));
+
+  function handleEditPress() {
+    if (navigatingToEdit.current) return;
+    navigatingToEdit.current = true;
+    router.push(`/program/builder?name=${encodeURIComponent(programName)}`);
+  }
+
   // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
   useEffect(() => {
@@ -457,9 +467,7 @@ export default function MonitorProgramScreen() {
               <View style={styles.managementRow}>
                 <TouchableOpacity
                   style={styles.editBtn}
-                  onPress={() =>
-                    router.push(`/program/builder?name=${encodeURIComponent(programName)}`)
-                  }
+                  onPress={handleEditPress}
                   activeOpacity={0.8}
                 >
                   <Edit2 size={15} color="#2563eb" />

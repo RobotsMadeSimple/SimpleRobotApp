@@ -10,10 +10,14 @@ class RobotDiscoveryService {
 
   private started = false;
   private listenersRegistered = false;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   async start() {
     if (Platform.OS === 'web') {
       await this.fetchFromHttp();
+      if (!this.pollTimer) {
+        this.pollTimer = setInterval(() => this.fetchFromHttp(), 5000);
+      }
       return;
     }
 
@@ -61,6 +65,10 @@ class RobotDiscoveryService {
 
   stop() {
     if (Platform.OS === 'web') {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
       this.robots.clear();
       this.emit();
       return;

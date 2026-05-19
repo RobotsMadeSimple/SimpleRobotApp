@@ -2,10 +2,11 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const { Bonjour } = require('bonjour-service');
 
 // Serve the dist folder over a local HTTP server so that
 // asset paths (/_expo/...) resolve correctly in Electron.
-function startServer(distPath, port) {
+function startAppServer(distPath, port) {
   const mime = {
     '.html': 'text/html',
     '.js':   'application/javascript',
@@ -46,11 +47,44 @@ function startServer(distPath, port) {
   }).listen(port);
 }
 
+// Browse for _robot._tcp.local. mDNS services and expose them at
+// http://localhost:3001/get-robots so the web app can discover robots.
+function startDiscoveryServer() {
+  const robots = new Map();
+  const bonjour = new Bonjour();
+  const browser = bonjour.find({ type: 'robot' });
+
+  browser.on('up', service => {
+    const ip = (service.addresses && service.addresses[0]) || service.host;
+    robots.set(service.name, {
+      robotName:       service.txt?.RobotName       || service.name,
+      ipAddress:       ip,
+      port:            service.port,
+      robotType:       service.txt?.RobotType        || '',
+      controlEndpoint: service.txt?.ControlEndpoint  || 'control',
+      serialNumber:    service.txt?.SerialNumber      || '',
+    });
+  });
+
+  browser.on('down', service => {
+    robots.delete(service.name);
+  });
+
+  http.createServer((req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(JSON.stringify([...robots.values()]));
+  }).listen(3001);
+}
+
 app.whenReady().then(() => {
   const distPath = path.join(__dirname, 'dist');
   const port = 45678;
 
-  startServer(distPath, port);
+  startAppServer(distPath, port);
+  startDiscoveryServer();
 
   const win = new BrowserWindow({
     width: 1280,
