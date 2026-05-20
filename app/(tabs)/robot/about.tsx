@@ -22,7 +22,7 @@ import {
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system";
 import * as IntentLauncher from "expo-intent-launcher";
@@ -75,6 +75,14 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+function ProgressBar({ progress }: { progress: number }) {
+  return (
+    <View style={styles.progressBarTrack}>
+      <View style={[styles.progressBarFill, { width: `${Math.round(progress * 100)}%` as any }]} />
+    </View>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AboutRobot() {
@@ -91,14 +99,29 @@ export default function AboutRobot() {
   const [restartVisible, setRestartVisible] = useState(false);
   const [restarting,     setRestarting]     = useState(false);
 
-  // ── Update state ───────────────────────────────────────────────────────────
+  // ── Toast ──────────────────────────────────────────────────────────────────
+  const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
+  const toastAnim  = useRef(new Animated.Value(0)).current;
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(message: string, error = false) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, error });
+    toastAnim.setValue(0);
+    Animated.timing(toastAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    toastTimer.current = setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 0, duration: 300, useNativeDriver: true })
+        .start(() => setToast(null));
+    }, 3500);
+  }
+
+  // ── Controller update state ────────────────────────────────────────────────
   const [checkingUpdate,  setCheckingUpdate]  = useState(false);
   const [latestVersion,   setLatestVersion]   = useState<string | null>(null);
   const [updating,        setUpdating]        = useState(false);
   const [updateDone,      setUpdateDone]      = useState(false);
   const disconnectedDuringUpdate = useRef(false);
 
-  // Detect reconnect after update
   useEffect(() => {
     if (!updating) { disconnectedDuringUpdate.current = false; return; }
     if (!status.connected) disconnectedDuringUpdate.current = true;
@@ -108,7 +131,6 @@ export default function AboutRobot() {
     }
   }, [status.connected, updating]);
 
-  // Timeout safety — dismiss spinner after 2 minutes
   useEffect(() => {
     if (!updating) return;
     const t = setTimeout(() => setUpdating(false), 120_000);
@@ -127,16 +149,18 @@ export default function AboutRobot() {
   // ── Electron update state ──────────────────────────────────────────────────
   const electronAPI = typeof window !== "undefined" ? (window as any).electronAPI : null;
   const isElectron  = !!electronAPI;
-  const [electronVersion,        setElectronVersion]        = useState<string | null>(null);
-  const [electronLatestVersion,  setElectronLatestVersion]  = useState<string | null>(null);
-  const [checkingElectronUpdate, setCheckingElectronUpdate] = useState(false);
-  const [downloadingElectron,    setDownloadingElectron]    = useState(false);
+  const [electronVersion,          setElectronVersion]          = useState<string | null>(null);
+  const [electronLatestVersion,    setElectronLatestVersion]    = useState<string | null>(null);
+  const [checkingElectronUpdate,   setCheckingElectronUpdate]   = useState(false);
+  const [downloadingElectron,      setDownloadingElectron]      = useState(false);
   const [electronDownloadProgress, setElectronDownloadProgress] = useState(0);
 
   useEffect(() => {
     if (!isElectron) return;
     electronAPI.getVersion().then(setElectronVersion);
   }, [isElectron]);
+
+  // ── Shared fetch ───────────────────────────────────────────────────────────
 
   async function fetchLatestRelease(repo: string): Promise<{ version: string; assets: { name: string; browser_download_url: string }[] } | null> {
     try {
@@ -149,70 +173,63 @@ export default function AboutRobot() {
     }
   }
 
+  // ── Controller update ──────────────────────────────────────────────────────
+
   async function checkForUpdates() {
     setCheckingUpdate(true);
     setLatestVersion(null);
     const rel = await fetchLatestRelease(CONTROLLER_REPO);
-    setLatestVersion(rel?.version ?? null);
     setCheckingUpdate(false);
-  }
-
-  async function checkAppForUpdates() {
-    setCheckingAppUpdate(true);
-    setAppLatestVersion(null);
-    const rel = await fetchLatestRelease(APP_REPO);
-    setAppLatestVersion(rel?.version ?? null);
-    setCheckingAppUpdate(false);
-  }
-
-  async function checkElectronForUpdates() {
-    setCheckingElectronUpdate(true);
-    setElectronLatestVersion(null);
-    const result = await electronAPI.checkForUpdates();
-    setElectronLatestVersion(result?.version ?? null);
-    setCheckingElectronUpdate(false);
-  }
-
-  async function handleElectronUpdate() {
-    setDownloadingElectron(true);
-    setElectronDownloadProgress(0);
-    electronAPI.onUpdateProgress((p: number) => setElectronDownloadProgress(p));
-    try {
-      await electronAPI.downloadAndInstall();
-    } finally {
-      electronAPI.offUpdateProgress();
-      setDownloadingElectron(false);
-    }
+    if (!rel) { showToast("Could not reach GitHub", true); return; }
+    setLatestVersion(rel.version);
   }
 
   async function handleUpdate() {
     setCheckingUpdate(true);
     const rel = await fetchLatestRelease(CONTROLLER_REPO);
     setCheckingUpdate(false);
-    if (!rel) return;
+    if (!rel) { showToast("Could not reach GitHub", true); return; }
     setLatestVersion(rel.version);
     const current = status.version && status.version !== "0.0.0" ? status.version : null;
-    if (current && rel.version === current) return;
+    if (current && rel.version === current) { showToast("Controller is already up to date"); return; }
     setUpdating(true);
     disconnectedDuringUpdate.current = false;
-    try { await robotClient.updateController(); } catch { setUpdating(false); }
+    try {
+      await robotClient.updateController();
+      showToast("Update started — controller will reconnect when done");
+    } catch {
+      setUpdating(false);
+      showToast("Failed to send update command", true);
+    }
+  }
+
+  // ── Android app update ─────────────────────────────────────────────────────
+
+  async function checkAppForUpdates() {
+    setCheckingAppUpdate(true);
+    setAppLatestVersion(null);
+    const rel = await fetchLatestRelease(APP_REPO);
+    setCheckingAppUpdate(false);
+    if (!rel) { showToast("Could not reach GitHub", true); return; }
+    setAppLatestVersion(rel.version);
   }
 
   async function handleAppUpdate() {
     setCheckingAppUpdate(true);
     const rel = await fetchLatestRelease(APP_REPO);
     setCheckingAppUpdate(false);
-    if (!rel) return;
+    if (!rel) { showToast("Could not reach GitHub", true); return; }
     setAppLatestVersion(rel.version);
-    if (rel.version === appVersion) return;
+    if (rel.version === appVersion) { showToast("App is already up to date"); return; }
 
     const asset = rel.assets.find(a => a.name === APP_APK_ASSET);
-    if (!asset) return;
+    if (!asset) { showToast("APK not found in latest release", true); return; }
 
-    const destPath = FileSystem.cacheDirectory + APP_APK_ASSET;
+    const destPath = (FileSystem.cacheDirectory ?? "") + APP_APK_ASSET;
     setDownloadingApp(true);
     setDownloadProgress(0);
     try {
+      showToast("Downloading update…");
       const dl = FileSystem.createDownloadResumable(
         asset.browser_download_url,
         destPath,
@@ -222,15 +239,43 @@ export default function AboutRobot() {
         }
       );
       const result = await dl.downloadAsync();
-      if (!result) return;
+      if (!result) { showToast("Download failed", true); return; }
+      showToast("Download complete — opening installer");
       const contentUri = await FileSystem.getContentUriAsync(result.uri);
       await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
         data: contentUri,
         flags: 1,
         type: "application/vnd.android.package-archive",
       });
+    } catch (err: any) {
+      showToast(err?.message ?? "Update failed", true);
     } finally {
       setDownloadingApp(false);
+    }
+  }
+
+  // ── Electron app update ────────────────────────────────────────────────────
+
+  async function checkElectronForUpdates() {
+    setCheckingElectronUpdate(true);
+    setElectronLatestVersion(null);
+    const result = await electronAPI.checkForUpdates();
+    setCheckingElectronUpdate(false);
+    if (!result) { showToast("Could not reach GitHub", true); return; }
+    setElectronLatestVersion(result.version);
+  }
+
+  async function handleElectronUpdate() {
+    setDownloadingElectron(true);
+    setElectronDownloadProgress(0);
+    electronAPI.onUpdateProgress((p: number) => setElectronDownloadProgress(p));
+    showToast("Downloading update…");
+    try {
+      await electronAPI.downloadAndInstall();
+    } catch (err: any) {
+      showToast(err?.message ?? "Update failed", true);
+      electronAPI.offUpdateProgress();
+      setDownloadingElectron(false);
     }
   }
 
@@ -276,12 +321,11 @@ export default function AboutRobot() {
   const controllerVersion = status.version && status.version !== "0.0.0" ? `v${status.version}` : "—";
   const isLinux = status.isLinux;
 
-  const isUpToDate      = latestVersion !== null && status.version !== "0.0.0" && latestVersion === status.version;
-  const hasUpdate       = latestVersion !== null && status.version !== "0.0.0" && latestVersion !== status.version;
-  const appIsUpToDate   = appLatestVersion !== null && appLatestVersion === appVersion;
-  const appHasUpdate    = appLatestVersion !== null && appLatestVersion !== appVersion;
-
-  const evCurrent    = electronVersion ?? "0.0.0";
+  const isUpToDate    = latestVersion !== null && status.version !== "0.0.0" && latestVersion === status.version;
+  const hasUpdate     = latestVersion !== null && status.version !== "0.0.0" && latestVersion !== status.version;
+  const appIsUpToDate = appLatestVersion !== null && appLatestVersion === appVersion;
+  const appHasUpdate  = appLatestVersion !== null && appLatestVersion !== appVersion;
+  const evCurrent          = electronVersion ?? "0.0.0";
   const electronIsUpToDate = electronLatestVersion !== null && electronLatestVersion === evCurrent;
   const electronHasUpdate  = electronLatestVersion !== null && electronLatestVersion !== evCurrent;
 
@@ -389,7 +433,7 @@ export default function AboutRobot() {
             <Text style={styles.infoValue}>{isLinux ? "Linux" : "Windows"}</Text>
           </View>
           <TouchableOpacity
-            style={styles.infoRow}
+            style={[styles.infoRow, styles.infoRowBorder]}
             onPress={checkForUpdates}
             activeOpacity={0.7}
             disabled={checkingUpdate}
@@ -401,25 +445,25 @@ export default function AboutRobot() {
             </View>
             <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.cardAction}
+            onPress={handleUpdate}
+            activeOpacity={isLinux ? 0.7 : 1}
+            disabled={!isLinux || checkingUpdate || updating}
+          >
+            {checkingUpdate || updating
+              ? <ActivityIndicator size="small" color={isLinux ? "#2563eb" : "#9ca3af"} />
+              : <Download size={15} color={isLinux ? "#2563eb" : "#9ca3af"} />}
+            <Text style={[styles.cardActionText, !isLinux && styles.cardActionTextDisabled]}>
+              {updating ? "Updating…" : "Update Controller"}
+            </Text>
+          </TouchableOpacity>
+          {!isLinux && (
+            <Text style={styles.cardNote}>Remote update is only available on Linux controllers.</Text>
+          )}
         </View>
 
-        {/* Update Controller button */}
-        <TouchableOpacity
-          style={[styles.updateButton, !isLinux && styles.updateButtonDisabled]}
-          onPress={handleUpdate}
-          activeOpacity={isLinux ? 0.8 : 1}
-          disabled={!isLinux || checkingUpdate || updating}
-        >
-          <Download size={15} color={isLinux ? "#2563eb" : "#9ca3af"} />
-          <Text style={[styles.updateButtonText, !isLinux && styles.updateButtonTextDisabled]}>
-            Update Controller
-          </Text>
-        </TouchableOpacity>
-        {!isLinux && (
-          <Text style={styles.updateNote}>Remote update is only available on Linux controllers.</Text>
-        )}
-
-        {/* App update — Android only */}
+        {/* App update — Android */}
         {isAndroid && (
           <>
             <Text style={styles.sectionLabel}>APP</Text>
@@ -445,7 +489,7 @@ export default function AboutRobot() {
                 </View>
               </View>
               <TouchableOpacity
-                style={styles.infoRow}
+                style={[styles.infoRow, styles.infoRowBorder]}
                 onPress={checkAppForUpdates}
                 activeOpacity={0.7}
                 disabled={checkingAppUpdate || downloadingApp}
@@ -457,27 +501,25 @@ export default function AboutRobot() {
                 </View>
                 <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
               </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.updateButton, !appHasUpdate && styles.updateButtonDisabled]}
-              onPress={handleAppUpdate}
-              activeOpacity={appHasUpdate ? 0.8 : 1}
-              disabled={!appHasUpdate || downloadingApp || checkingAppUpdate}
-            >
-              {downloadingApp
-                ? <ActivityIndicator size="small" color="#2563eb" />
-                : <Download size={15} color={appHasUpdate ? "#2563eb" : "#9ca3af"} />}
-              <Text style={[styles.updateButtonText, !appHasUpdate && styles.updateButtonTextDisabled]}>
+              {downloadingApp && <ProgressBar progress={downloadProgress} />}
+              <TouchableOpacity
+                style={styles.cardAction}
+                onPress={handleAppUpdate}
+                activeOpacity={appHasUpdate ? 0.7 : 1}
+                disabled={!appHasUpdate || downloadingApp || checkingAppUpdate}
+              >
                 {downloadingApp
-                  ? `Downloading… ${Math.round(downloadProgress * 100)}%`
-                  : "Update App"}
-              </Text>
-            </TouchableOpacity>
+                  ? <ActivityIndicator size="small" color="#2563eb" />
+                  : <Download size={15} color={appHasUpdate ? "#2563eb" : "#9ca3af"} />}
+                <Text style={[styles.cardActionText, !appHasUpdate && styles.cardActionTextDisabled]}>
+                  {downloadingApp ? `Downloading… ${Math.round(downloadProgress * 100)}%` : "Update App"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
 
-        {/* Electron / Windows app update */}
+        {/* App update — Electron */}
         {isElectron && (
           <>
             <Text style={styles.sectionLabel}>APP</Text>
@@ -505,7 +547,7 @@ export default function AboutRobot() {
                 </View>
               </View>
               <TouchableOpacity
-                style={styles.infoRow}
+                style={[styles.infoRow, styles.infoRowBorder]}
                 onPress={checkElectronForUpdates}
                 activeOpacity={0.7}
                 disabled={checkingElectronUpdate || downloadingElectron}
@@ -517,23 +559,21 @@ export default function AboutRobot() {
                 </View>
                 <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
               </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.updateButton, !electronHasUpdate && styles.updateButtonDisabled]}
-              onPress={handleElectronUpdate}
-              activeOpacity={electronHasUpdate ? 0.8 : 1}
-              disabled={!electronHasUpdate || downloadingElectron || checkingElectronUpdate}
-            >
-              {downloadingElectron
-                ? <ActivityIndicator size="small" color="#2563eb" />
-                : <Download size={15} color={electronHasUpdate ? "#2563eb" : "#9ca3af"} />}
-              <Text style={[styles.updateButtonText, !electronHasUpdate && styles.updateButtonTextDisabled]}>
+              {downloadingElectron && <ProgressBar progress={electronDownloadProgress} />}
+              <TouchableOpacity
+                style={styles.cardAction}
+                onPress={handleElectronUpdate}
+                activeOpacity={electronHasUpdate ? 0.7 : 1}
+                disabled={!electronHasUpdate || downloadingElectron || checkingElectronUpdate}
+              >
                 {downloadingElectron
-                  ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%`
-                  : "Update App"}
-              </Text>
-            </TouchableOpacity>
+                  ? <ActivityIndicator size="small" color="#2563eb" />
+                  : <Download size={15} color={electronHasUpdate ? "#2563eb" : "#9ca3af"} />}
+                <Text style={[styles.cardActionText, !electronHasUpdate && styles.cardActionTextDisabled]}>
+                  {downloadingElectron ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%` : "Update App"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
 
@@ -545,28 +585,24 @@ export default function AboutRobot() {
 
         {/* ── Modals ── */}
 
-        {/* Updating modal */}
         <Modal visible={updating} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <ActivityIndicator size="large" color="#2563eb" style={{ marginBottom: 16 }} />
               <Text style={styles.modalTitle}>Updating Controller</Text>
-              <Text style={styles.restartWarning}>
+              <Text style={styles.modalBody}>
                 Downloading and applying the update. The controller will reconnect automatically once complete.
               </Text>
             </View>
           </View>
         </Modal>
 
-        {/* Update complete modal */}
         <Modal visible={updateDone} transparent animationType="fade" onRequestClose={() => setUpdateDone(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <CheckCircle2 size={36} color="#16a34a" style={{ marginBottom: 12 }} />
               <Text style={styles.modalTitle}>Update Complete</Text>
-              <Text style={styles.restartWarning}>
-                The controller is now running the latest version.
-              </Text>
+              <Text style={styles.modalBody}>The controller is now running the latest version.</Text>
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.saveButton} onPress={() => setUpdateDone(false)}>
                   <Text style={styles.saveButtonText}>Done</Text>
@@ -576,12 +612,11 @@ export default function AboutRobot() {
           </View>
         </Modal>
 
-        {/* Restart modal */}
         <Modal visible={restartVisible} transparent animationType="fade" onRequestClose={() => setRestartVisible(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Restart Controller?</Text>
-              <Text style={styles.restartWarning}>
+              <Text style={styles.modalBody}>
                 The robot will disconnect briefly while the controller restarts. Motion will stop.
               </Text>
               <View style={styles.modalButtons}>
@@ -600,7 +635,6 @@ export default function AboutRobot() {
           </View>
         </Modal>
 
-        {/* Edit identity modal */}
         <Modal visible={editVisible} transparent animationType="fade" onRequestClose={() => setEditVisible(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
@@ -631,6 +665,13 @@ export default function AboutRobot() {
           </View>
         </Modal>
       </ScrollView>
+
+      {/* Toast */}
+      {toast && (
+        <Animated.View style={[styles.toast, toast.error && styles.toastError, { opacity: toastAnim }]}>
+          <Text style={styles.toastText}>{toast.message}</Text>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -663,10 +704,10 @@ const styles = StyleSheet.create({
   typeBadge:        { backgroundColor: "#eff6ff", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4 },
   typeText:         { fontSize: 13, fontWeight: "600", color: "#2563eb" },
 
-  sectionHeader:    { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  sectionLabel:     { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8, marginBottom: 8 },
-  editButton:       { flexDirection: "row", alignItems: "center", gap: 4 },
-  editButtonText:   { fontSize: 12, fontWeight: "600", color: "#2563eb" },
+  sectionHeader:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  sectionLabel:   { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8, marginBottom: 8 },
+  editButton:     { flexDirection: "row", alignItems: "center", gap: 4 },
+  editButtonText: { fontSize: 12, fontWeight: "600", color: "#2563eb" },
 
   card: {
     backgroundColor: "#ffffff",
@@ -679,34 +720,33 @@ const styles = StyleSheet.create({
     elevation: 3,
     overflow: "hidden",
   },
-  infoRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 13, gap: 12 },
-  infoRowBorder:  { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb" },
-  rowTile:        { width: 32, height: 32, borderRadius: 8, justifyContent: "center", alignItems: "center" },
-  infoLabel:      { flex: 1, fontSize: 14, fontWeight: "500", color: "#374151" },
-  infoValue:      { fontSize: 14, color: "#6b7280", maxWidth: "45%", textAlign: "right" },
+  infoRow:       { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 13, gap: 12 },
+  infoRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb" },
+  rowTile:       { width: 32, height: 32, borderRadius: 8, justifyContent: "center", alignItems: "center" },
+  infoLabel:     { flex: 1, fontSize: 14, fontWeight: "500", color: "#374151" },
+  infoValue:     { fontSize: 14, color: "#6b7280", maxWidth: "45%", textAlign: "right" },
 
-  versionRight:    { flexDirection: "row", alignItems: "center", gap: 6 },
-  upToDateChip:    { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  upToDateText:    { fontSize: 11, fontWeight: "600", color: "#16a34a" },
-  updateChip:      { backgroundColor: "#fef3c7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  updateChipText:  { fontSize: 11, fontWeight: "600", color: "#d97706" },
+  versionRight:  { flexDirection: "row", alignItems: "center", gap: 6 },
+  upToDateChip:  { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  upToDateText:  { fontSize: 11, fontWeight: "600", color: "#16a34a" },
+  updateChip:    { backgroundColor: "#fef3c7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  updateChipText:{ fontSize: 11, fontWeight: "600", color: "#d97706" },
 
-  updateButton: {
+  cardAction: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 13,
     gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    backgroundColor: "#eff6ff",
-    marginBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e7eb",
   },
-  updateButtonDisabled: { borderColor: "#e5e7eb", backgroundColor: "#f9fafb" },
-  updateButtonText:         { fontSize: 14, fontWeight: "600", color: "#2563eb" },
-  updateButtonTextDisabled: { color: "#9ca3af" },
-  updateNote: { fontSize: 12, color: "#9ca3af", textAlign: "center", marginBottom: 16 },
+  cardActionText:         { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+  cardActionTextDisabled: { color: "#9ca3af" },
+  cardNote: { fontSize: 12, color: "#9ca3af", textAlign: "center", paddingHorizontal: 16, paddingBottom: 12 },
+
+  progressBarTrack: { height: 3, backgroundColor: "#e5e7eb", marginHorizontal: 16, marginBottom: 2 },
+  progressBarFill:  { height: 3, backgroundColor: "#2563eb", borderRadius: 2 },
 
   restartButton: {
     flexDirection: "row",
@@ -722,24 +762,43 @@ const styles = StyleSheet.create({
   },
   restartButtonText:    { fontSize: 14, fontWeight: "600", color: "#dc2626" },
   restartConfirmButton: { flex: 1, backgroundColor: "#dc2626", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
-  restartWarning:       { fontSize: 13, color: "#6b7280", marginBottom: 16, lineHeight: 18 },
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
   modalCard:    { backgroundColor: "#ffffff", borderRadius: 16, padding: 20, width: 300, alignItems: "center", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
   modalTitle:   { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8, textAlign: "center" },
+  modalBody:    { fontSize: 13, color: "#6b7280", marginBottom: 16, lineHeight: 18, textAlign: "center" },
 
   editLabel:     { fontSize: 11, fontWeight: "600", color: "#6b7280", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4, alignSelf: "flex-start" },
   editInput:     { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, color: "#111827", backgroundColor: "#f9fafb", marginBottom: 12, width: "100%" },
   pickerWrapper: { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 8, backgroundColor: "#f9fafb", marginBottom: 12, overflow: "hidden", width: "100%" },
   picker:        { color: "#111827" },
 
-  modalButtons:  { flexDirection: "row", gap: 10, marginTop: 4, width: "100%" },
-  cancelButton:  { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  modalButtons:     { flexDirection: "row", gap: 10, marginTop: 4, width: "100%" },
+  cancelButton:     { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
   cancelButtonText: { fontSize: 14, fontWeight: "600", color: "#6b7280" },
-  saveButton:    { flex: 1, backgroundColor: "#2563eb", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
-  saveButtonText: { fontSize: 14, fontWeight: "600", color: "#ffffff" },
+  saveButton:       { flex: 1, backgroundColor: "#2563eb", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  saveButtonText:   { fontSize: 14, fontWeight: "600", color: "#ffffff" },
 
-  statusDot:  { flexDirection: "row", alignItems: "center", gap: 5 },
-  dot:        { width: 8, height: 8, borderRadius: 4 },
-  dotLabel:   { fontSize: 13, fontWeight: "600" },
+  statusDot: { flexDirection: "row", alignItems: "center", gap: 5 },
+  dot:       { width: 8, height: 8, borderRadius: 4 },
+  dotLabel:  { fontSize: 13, fontWeight: "600" },
+
+  toast: {
+    position: "absolute",
+    bottom: 24,
+    left: 16,
+    right: 16,
+    backgroundColor: "#111827",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 8,
+  },
+  toastError: { backgroundColor: "#dc2626" },
+  toastText:  { color: "#ffffff", fontSize: 14, fontWeight: "500", textAlign: "center" },
 });
