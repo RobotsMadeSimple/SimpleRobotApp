@@ -8,7 +8,6 @@ import {
   Gamepad2,
   HomeIcon,
   OctagonX,
-  RotateCcw,
   Zap,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -65,18 +64,6 @@ export default function Control() {
         run: () => robotClient.sendCommand("Home"),
       }),
     },
-    {
-      label: "Reset Driver",
-      sub: "Clear driver faults",
-      icon: <RotateCcw size={20} color="#d97706" />,
-      iconBg: "#fef3c7",
-      onPress: () => setConfirm({
-        label: "Reset Driver",
-        sub: "This will reset the motor driver and clear any active faults.",
-        icon: <RotateCcw size={28} color="#d97706" />,
-        run: () => robotClient.sendCommand("Reset"),
-      }),
-    },
   ];
 
   return (
@@ -114,9 +101,18 @@ export default function Control() {
             <View style={[styles.badge, s?.driverConnected ? styles.badgeGreen : styles.badgeGray]}>
               <Cpu size={11} color={s?.driverConnected ? "#166534" : "#6b7280"} />
               <Text style={[styles.badgeText, s?.driverConnected ? styles.badgeTextGreen : styles.badgeTextGray]}>
-                {s?.driverConnected ? "Driver OK" : "No Driver"}
+                {s?.driverConnected ? "Driver" : "No Driver"}
               </Text>
             </View>
+
+            {s?.driverConnected && (
+              <View style={[styles.badge, s?.driverOk ? styles.badgeGreen : styles.badgeRed]}>
+                <View style={[styles.badgeDot, s?.driverOk ? styles.dotGreen : styles.dotRed]} />
+                <Text style={[styles.badgeText, s?.driverOk ? styles.badgeTextGreen : styles.badgeTextRed]}>
+                  {s?.driverOk ? "Driver OK" : "Fault"}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -268,14 +264,17 @@ const styles = StyleSheet.create({
   badgeGray:      { backgroundColor: "#f3f4f6" },
   badgeGreen:     { backgroundColor: "#dcfce7" },
   badgeBlue:      { backgroundColor: "#dbeafe" },
+  badgeRed:       { backgroundColor: "#fee2e2" },
 
   dotGray:        { backgroundColor: "#9ca3af" },
   dotGreen:       { backgroundColor: "#16a34a" },
   dotBlue:        { backgroundColor: "#2563eb" },
+  dotRed:         { backgroundColor: "#dc2626" },
 
   badgeTextGray:  { color: "#6b7280" },
   badgeTextGreen: { color: "#166534" },
   badgeTextBlue:  { color: "#1d4ed8" },
+  badgeTextRed:   { color: "#991b1b" },
 
   // ── Section headings ─────────────────────────────────────────────────────
   sectionLabel: {

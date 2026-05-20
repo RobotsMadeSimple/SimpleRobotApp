@@ -320,6 +320,7 @@ export class RobotConnectService {
       a.moving          === b.moving          &&
       a.wasHomed        === b.wasHomed        &&
       a.driverConnected === b.driverConnected &&
+      a.driverOk        === b.driverOk        &&
       a.homingState     === b.homingState     &&
       a.activeTool      === b.activeTool      &&
       a.lastPointUpdate        === b.lastPointUpdate        &&
