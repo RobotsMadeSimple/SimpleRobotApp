@@ -50,7 +50,8 @@
       [
         "expo-build-properties", {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "enableMultidex": true
           }
         }
       ]
