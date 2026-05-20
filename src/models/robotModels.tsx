@@ -205,6 +205,7 @@ export type RobotStatus = {
 
   homingState: string,
   driverConnected: boolean,
+  driverOk: boolean,
 
   programs: ProgramSummary[],
 
@@ -262,6 +263,7 @@ export function createDefaultStatus(): RobotStatus {
 
     homingState: "WaitingForStart",
     driverConnected: false,
+    driverOk: false,
 
     programs: [],
 

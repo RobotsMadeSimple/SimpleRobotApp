@@ -385,7 +385,14 @@ export default function AboutRobot() {
             icon={<Cpu size={16} color={status.driverConnected ? "#16a34a" : "#dc2626"} />}
             tileBg={status.driverConnected ? "#f0fdf4" : "#fef2f2"}
             label="Motor Driver"
-            value={<StatusDot ok={status.driverConnected} label={status.driverConnected ? "Online" : "Offline"} />}
+            value={
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <StatusDot ok={status.driverConnected} label={status.driverConnected ? "Connected" : "Disconnected"} />
+                {status.driverConnected && (
+                  <StatusDot ok={status.driverOk} label={status.driverOk ? "OK" : "Fault"} />
+                )}
+              </View>
+            }
           />
           <InfoRow
             icon={<Activity size={16} color={status.wasHomed ? "#16a34a" : "#f97316"} />}
