@@ -31,7 +31,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "defaultInstallDir": "$PROGRAMFILES64\\RobotsMadeSimple\\Simple Robot App"
     }
   },
   "dependencies": {
