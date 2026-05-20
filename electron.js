@@ -1,8 +1,67 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
+const { spawn } = require('child_process');
+const os = require('os');
 const { Bonjour } = require('bonjour-service');
+
+const GITHUB_REPO    = 'RobotsMadeSimple/SimpleRobotApp';
+const INSTALLER_ASSET = 'SimpleRobotApp-Setup.exe';
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'SimpleRobotApp' } }, res => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return fetchJson(res.headers.location).then(resolve).catch(reject);
+      }
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
+    }).on('error', reject);
+  });
+}
+
+function downloadFile(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    const download = (u) => {
+      const mod = u.startsWith('https') ? https : http;
+      mod.get(u, { headers: { 'User-Agent': 'SimpleRobotApp' } }, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) { download(res.headers.location); return; }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let received = 0;
+        const stream = fs.createWriteStream(dest);
+        res.on('data', chunk => { received += chunk.length; if (total) onProgress(received / total); stream.write(chunk); });
+        res.on('end', () => { stream.end(); resolve(); });
+        res.on('error', reject);
+        stream.on('error', reject);
+      }).on('error', reject);
+    };
+    download(url);
+  });
+}
+
+ipcMain.handle('get-version', () => app.getVersion());
+
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    const data = await fetchJson(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    return { version: (data.tag_name || '').replace(/^v/, '') };
+  } catch { return null; }
+});
+
+ipcMain.handle('download-and-install', async (event) => {
+  const data = await fetchJson(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+  const asset = (data.assets || []).find(a => a.name === INSTALLER_ASSET);
+  if (!asset) throw new Error('Installer asset not found in latest release');
+  const dest = path.join(os.tmpdir(), INSTALLER_ASSET);
+  await downloadFile(asset.browser_download_url, dest, progress => {
+    event.sender.send('update-progress', progress);
+  });
+  spawn(dest, [], { detached: true, stdio: 'ignore' }).unref();
+  app.quit();
+});
 
 // Serve the dist folder over a local HTTP server so that
 // asset paths (/_expo/...) resolve correctly in Electron.
@@ -90,6 +149,7 @@ app.whenReady().then(() => {
     width: 1280,
     height: 800,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
     },
   });

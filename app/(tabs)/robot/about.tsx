@@ -124,6 +124,20 @@ export default function AboutRobot() {
   const appVersion = Constants.expoConfig?.version ?? "0.0.0";
   const isAndroid  = Platform.OS === "android";
 
+  // ── Electron update state ──────────────────────────────────────────────────
+  const electronAPI = typeof window !== "undefined" ? (window as any).electronAPI : null;
+  const isElectron  = !!electronAPI;
+  const [electronVersion,        setElectronVersion]        = useState<string | null>(null);
+  const [electronLatestVersion,  setElectronLatestVersion]  = useState<string | null>(null);
+  const [checkingElectronUpdate, setCheckingElectronUpdate] = useState(false);
+  const [downloadingElectron,    setDownloadingElectron]    = useState(false);
+  const [electronDownloadProgress, setElectronDownloadProgress] = useState(0);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    electronAPI.getVersion().then(setElectronVersion);
+  }, [isElectron]);
+
   async function fetchLatestRelease(repo: string): Promise<{ version: string; assets: { name: string; browser_download_url: string }[] } | null> {
     try {
       const res  = await fetch(`https://api.github.com/repos/${repo}/releases/latest`);
@@ -149,6 +163,26 @@ export default function AboutRobot() {
     const rel = await fetchLatestRelease(APP_REPO);
     setAppLatestVersion(rel?.version ?? null);
     setCheckingAppUpdate(false);
+  }
+
+  async function checkElectronForUpdates() {
+    setCheckingElectronUpdate(true);
+    setElectronLatestVersion(null);
+    const result = await electronAPI.checkForUpdates();
+    setElectronLatestVersion(result?.version ?? null);
+    setCheckingElectronUpdate(false);
+  }
+
+  async function handleElectronUpdate() {
+    setDownloadingElectron(true);
+    setElectronDownloadProgress(0);
+    electronAPI.onUpdateProgress((p: number) => setElectronDownloadProgress(p));
+    try {
+      await electronAPI.downloadAndInstall();
+    } finally {
+      electronAPI.offUpdateProgress();
+      setDownloadingElectron(false);
+    }
   }
 
   async function handleUpdate() {
@@ -246,6 +280,10 @@ export default function AboutRobot() {
   const hasUpdate       = latestVersion !== null && status.version !== "0.0.0" && latestVersion !== status.version;
   const appIsUpToDate   = appLatestVersion !== null && appLatestVersion === appVersion;
   const appHasUpdate    = appLatestVersion !== null && appLatestVersion !== appVersion;
+
+  const evCurrent    = electronVersion ?? "0.0.0";
+  const electronIsUpToDate = electronLatestVersion !== null && electronLatestVersion === evCurrent;
+  const electronHasUpdate  = electronLatestVersion !== null && electronLatestVersion !== evCurrent;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
@@ -433,6 +471,66 @@ export default function AboutRobot() {
               <Text style={[styles.updateButtonText, !appHasUpdate && styles.updateButtonTextDisabled]}>
                 {downloadingApp
                   ? `Downloading… ${Math.round(downloadProgress * 100)}%`
+                  : "Update App"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Electron / Windows app update */}
+        {isElectron && (
+          <>
+            <Text style={styles.sectionLabel}>APP</Text>
+            <View style={styles.card}>
+              <View style={[styles.infoRow, styles.infoRowBorder]}>
+                <View style={[styles.rowTile, { backgroundColor: "#eff6ff" }]}>
+                  <Download size={16} color="#2563eb" />
+                </View>
+                <Text style={styles.infoLabel}>App Version</Text>
+                <View style={styles.versionRight}>
+                  {electronIsUpToDate && (
+                    <View style={styles.upToDateChip}>
+                      <CheckCircle2 size={11} color="#16a34a" />
+                      <Text style={styles.upToDateText}>Up to date</Text>
+                    </View>
+                  )}
+                  {electronHasUpdate && (
+                    <View style={styles.updateChip}>
+                      <Text style={styles.updateChipText}>v{electronLatestVersion} available</Text>
+                    </View>
+                  )}
+                  <Text style={[styles.infoValue, { maxWidth: undefined }]} numberOfLines={1}>
+                    {electronVersion ? `v${electronVersion}` : "—"}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.infoRow}
+                onPress={checkElectronForUpdates}
+                activeOpacity={0.7}
+                disabled={checkingElectronUpdate || downloadingElectron}
+              >
+                <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
+                  {checkingElectronUpdate
+                    ? <ActivityIndicator size="small" color="#2563eb" />
+                    : <RefreshCw size={16} color="#2563eb" />}
+                </View>
+                <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.updateButton, !electronHasUpdate && styles.updateButtonDisabled]}
+              onPress={handleElectronUpdate}
+              activeOpacity={electronHasUpdate ? 0.8 : 1}
+              disabled={!electronHasUpdate || downloadingElectron || checkingElectronUpdate}
+            >
+              {downloadingElectron
+                ? <ActivityIndicator size="small" color="#2563eb" />
+                : <Download size={15} color={electronHasUpdate ? "#2563eb" : "#9ca3af"} />}
+              <Text style={[styles.updateButtonText, !electronHasUpdate && styles.updateButtonTextDisabled]}>
+                {downloadingElectron
+                  ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%`
                   : "Update App"}
               </Text>
             </TouchableOpacity>
