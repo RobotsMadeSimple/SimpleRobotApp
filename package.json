@@ -33,7 +33,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "defaultInstallDir": "$PROGRAMFILES64\\RobotsMadeSimple\\Simple Robot App"
+      "include": "build/installer.nsh"
     }
   },
   "dependencies": {
