@@ -255,6 +255,7 @@ function ExpressionInput({
       const n = parseFloat(t);
       if (!isNaN(n)) { onChangeValue(n); onChangeExpr(fieldKey, undefined); }
     } else {
+      onChangeValue(undefined); // clear stale numeric so expression is the only active value
       onChangeExpr(fieldKey, t);
     }
   }
@@ -370,8 +371,10 @@ function stepLabel(step: ProgramStep): string {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
-      const hasOffset    = step.offsetX || step.offsetY || step.offsetZ || step.offsetRX || step.offsetRY || step.offsetRZ;
-      const hasToolOff   = step.toolOffsetX || step.toolOffsetY || step.toolOffsetZ || step.toolOffsetRX || step.toolOffsetRY || step.toolOffsetRZ;
+      const offsetKeys   = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
+      const toolOffKeys  = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
+      const hasOffset    = offsetKeys.some(k  => (step as any)[k] != null || step.expressions?.[k] != null);
+      const hasToolOff   = toolOffKeys.some(k => (step as any)[k] != null || step.expressions?.[k] != null);
       const suffix = [
         hasToolOff ? "toolOffset" : null,
         hasOffset  ? "offset"     : null,
@@ -796,10 +799,10 @@ function StepConfigModal({
       return { ...d, expressions: Object.keys(exprs).length > 0 ? exprs : undefined };
     });
 
-  const hasOffset  = draft.offsetX || draft.offsetY || draft.offsetZ ||
-                     draft.offsetRX || draft.offsetRY || draft.offsetRZ;
-  const hasToolOff = draft.toolOffsetX || draft.toolOffsetY || draft.toolOffsetZ ||
-                     draft.toolOffsetRX || draft.toolOffsetRY || draft.toolOffsetRZ;
+  const offsetKeys  = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
+  const toolOffKeys = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
+  const hasOffset  = offsetKeys.some(k  => (draft as any)[k] != null || draft.expressions?.[k] != null);
+  const hasToolOff = toolOffKeys.some(k => (draft as any)[k] != null || draft.expressions?.[k] != null);
 
   // ── Sub-page content ──────────────────────────────────────────────────────
 
@@ -862,29 +865,25 @@ function StepConfigModal({
       case "posOffset":
         return (
           <>
-            <View style={ms.twoCol}>
-              {(["offsetX","offsetY","offsetZ"] as const).map(k => (
-                <View key={k} style={ms.twoColItem}>
-                  <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (mm)</Text>
-                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                    value={draft![k]} expressions={draft!.expressions}
-                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-                </View>
-              ))}
-            </View>
-            <View style={[ms.twoCol, { marginTop: 8 }]}>
-              {(["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
-                <View key={k} style={ms.twoColItem}>
-                  <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
-                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                    value={draft![k]} expressions={draft!.expressions}
-                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-                </View>
-              ))}
-            </View>
+            {(["offsetX","offsetY","offsetZ"] as const).map(k => (
+              <View key={k} style={{ marginBottom: 10 }}>
+                <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (mm)</Text>
+                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                  value={draft![k]} expressions={draft!.expressions}
+                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
+              </View>
+            ))}
+            {(["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
+              <View key={k} style={{ marginBottom: 10 }}>
+                <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
+                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                  value={draft![k]} expressions={draft!.expressions}
+                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
+              </View>
+            ))}
             <TouchableOpacity
               onPress={() => set({ offsetX:undefined,offsetY:undefined,offsetZ:undefined,offsetRX:undefined,offsetRY:undefined,offsetRZ:undefined })}
-              style={{ marginTop: 12 }} activeOpacity={0.7}>
+              style={{ marginTop: 4 }} activeOpacity={0.7}>
               <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
             </TouchableOpacity>
           </>
@@ -893,29 +892,25 @@ function StepConfigModal({
       case "toolOffset":
         return (
           <>
-            <View style={ms.twoCol}>
-              {(["toolOffsetX","toolOffsetY","toolOffsetZ"] as const).map(k => (
-                <View key={k} style={ms.twoColItem}>
-                  <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (mm)</Text>
-                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                    value={draft![k]} expressions={draft!.expressions}
-                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-                </View>
-              ))}
-            </View>
-            <View style={[ms.twoCol, { marginTop: 8 }]}>
-              {(["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
-                <View key={k} style={ms.twoColItem}>
-                  <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
-                  <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                    value={draft![k]} expressions={draft!.expressions}
-                    onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-                </View>
-              ))}
-            </View>
+            {(["toolOffsetX","toolOffsetY","toolOffsetZ"] as const).map(k => (
+              <View key={k} style={{ marginBottom: 10 }}>
+                <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (mm)</Text>
+                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                  value={draft![k]} expressions={draft!.expressions}
+                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
+              </View>
+            ))}
+            {(["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
+              <View key={k} style={{ marginBottom: 10 }}>
+                <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
+                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                  value={draft![k]} expressions={draft!.expressions}
+                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
+              </View>
+            ))}
             <TouchableOpacity
               onPress={() => set({ toolOffsetX:undefined,toolOffsetY:undefined,toolOffsetZ:undefined,toolOffsetRX:undefined,toolOffsetRY:undefined,toolOffsetRZ:undefined })}
-              style={{ marginTop: 12 }} activeOpacity={0.7}>
+              style={{ marginTop: 4 }} activeOpacity={0.7}>
               <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
             </TouchableOpacity>
           </>
