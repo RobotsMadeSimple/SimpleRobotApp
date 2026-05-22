@@ -262,9 +262,19 @@ function ExpressionInput({
 
   function insertVar(varName: string) {
     const ref = text.trim();
-    const next = ref ? `${ref} + $${varName}` : `$${varName}`;
+    const next = ref ? `${ref} $${varName}` : `$${varName}`;
     setText(next);
+    onChangeValue(undefined);
     onChangeExpr(fieldKey, next);
+    inputRef.current?.focus();
+  }
+
+  function insertOp(op: string) {
+    const ref = text.trim();
+    const next = ref ? `${ref} ${op} ` : `${op} `;
+    setText(next);
+    onChangeValue(undefined);
+    onChangeExpr(fieldKey, next.trim());
     inputRef.current?.focus();
   }
 
@@ -324,24 +334,38 @@ function ExpressionInput({
         )}
       </View>
       {hasVars && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ marginTop: 6 }}
-          contentContainerStyle={{ gap: 5 }}
-          keyboardShouldPersistTaps="always"
-        >
-          {sortedVars.map(v => (
-            <TouchableOpacity
-              key={v.id}
-              onPress={() => insertVar(v.name)}
-              activeOpacity={0.7}
-              style={exprStyles.chip}
-            >
-              <Text style={exprStyles.chipText}>${v.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <>
+          <View style={{ flexDirection: "row", gap: 5, marginTop: 6 }}>
+            {([["×","*"],["+","+"],["-","-"],["÷","/"]] as [string,string][]).map(([label, op]) => (
+              <TouchableOpacity
+                key={op}
+                onPress={() => insertOp(op)}
+                activeOpacity={0.7}
+                style={exprStyles.opChip}
+              >
+                <Text style={exprStyles.opChipText}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginTop: 5 }}
+            contentContainerStyle={{ gap: 5 }}
+            keyboardShouldPersistTaps="always"
+          >
+            {sortedVars.map(v => (
+              <TouchableOpacity
+                key={v.id}
+                onPress={() => insertVar(v.name)}
+                activeOpacity={0.7}
+                style={exprStyles.chip}
+              >
+                <Text style={exprStyles.chipText}>${v.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
       )}
     </View>
   );
@@ -359,6 +383,16 @@ const exprStyles = StyleSheet.create({
   },
   chipText: { fontSize: 13, fontWeight: "700", color: "#7c3aed" },
   chipHint: { fontSize: 10, color: "#a78bfa", marginTop: 1 },
+  opChip: {
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    alignItems: "center",
+  },
+  opChipText: { fontSize: 15, fontWeight: "600", color: "#374151" },
 });
 
 function newId() {
