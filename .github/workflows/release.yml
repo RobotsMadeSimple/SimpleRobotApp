@@ -76,6 +76,19 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper
+          key: gradle-wrapper-${{ hashFiles('package-lock.json') }}
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-caches-${{ hashFiles('package-lock.json') }}
+          restore-keys: gradle-caches-
+
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
@@ -88,7 +101,7 @@ jobs:
         run: npx expo prebuild --platform android --clean
 
       - name: Build release APK
-        run: cd android && ./gradlew assembleRelease
+        run: cd android && ./gradlew assembleRelease -Dorg.gradle.parallel=true -Dorg.gradle.caching=true
 
       - name: Rename APK to fixed filename
         run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/SimpleRobotApp.apk
