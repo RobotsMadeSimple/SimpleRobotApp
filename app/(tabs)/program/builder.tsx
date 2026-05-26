@@ -22,6 +22,7 @@ import {
   ImagePlus,
   MessageSquare,
   OctagonX,
+  PauseCircle,
   Play,
   Plus,
   Radio,
@@ -446,6 +447,7 @@ function stepLabel(step: ProgramStep): string {
       return parts.length ? `${label}  →  ${parts.join("  ·  ")}` : label;
     }
     case "SetVariable":  return fmtSetVar(step.variableName, step.variableExpr);
+    case "PauseProgram": return "Pause Program";
     default:             return step.type;
   }
 }
@@ -462,6 +464,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "SetSpeedL":
     case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
     case "SetVariable":  return <Hash          size={size} color={color} />;
+    case "PauseProgram": return <PauseCircle  size={size} color={color} />;
     default:             return <Cpu           size={size} color={color} />;
   }
 }
@@ -479,6 +482,7 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   SetSpeedL:    { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed (Linear)" },
   SetSpeedJ:    { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Set Speed (Joint)"  },
   SetVariable:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Variable"       },
+  PauseProgram: { accent: "#374151", iconBg: "#f3f4f6", iconColor: "#374151", label: "Pause Program"      },
 };
 
 function stepDetail(step: ProgramStep): string | null {
@@ -533,6 +537,7 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SetSpeedL",    label: "Set Speed (Linear)", desc: "Update the linear move speed, accel and decel" },
   { type: "SetSpeedJ",    label: "Set Speed (Joint)",  desc: "Update the joint move speed, accel and decel" },
   { type: "SetVariable",  label: "Set Variable",       desc: "Assign a new value or expression to a program variable" },
+  { type: "PauseProgram", label: "Pause Program",      desc: "Stop the program — operator can Continue or Exit from the monitor" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
