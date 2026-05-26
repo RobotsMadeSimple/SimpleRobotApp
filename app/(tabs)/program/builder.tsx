@@ -578,26 +578,28 @@ function StepTypePicker({
               <X size={18} color="#9ca3af" />
             </TouchableOpacity>
           </View>
-          {STEP_TYPES.map((s, i) => {
-            const theme = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
-            return (
-              <TouchableOpacity
-                key={s.type}
-                style={[ms.row, i < STEP_TYPES.length - 1 && ms.rowBorder]}
-                onPress={() => { onPick(s.type); onClose(); }}
-                activeOpacity={0.7}
-              >
-                <View style={[ms.iconTile, { backgroundColor: theme.iconBg }]}>
-                  <StepIcon type={s.type} size={18} color={theme.iconColor} />
-                </View>
-                <View style={ms.rowText}>
-                  <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
-                  <Text style={ms.rowDesc}>{s.desc}</Text>
-                </View>
-                <ChevronRight size={16} color="#d1d5db" />
-              </TouchableOpacity>
-            );
-          })}
+          <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={{ paddingBottom: 20 }}>
+            {STEP_TYPES.map((s, i) => {
+              const theme = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
+              return (
+                <TouchableOpacity
+                  key={s.type}
+                  style={[ms.row, i < STEP_TYPES.length - 1 && ms.rowBorder]}
+                  onPress={() => { onPick(s.type); onClose(); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.iconTile, { backgroundColor: theme.iconBg }]}>
+                    <StepIcon type={s.type} size={18} color={theme.iconColor} />
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
+                    <Text style={ms.rowDesc}>{s.desc}</Text>
+                  </View>
+                  <ChevronRight size={16} color="#d1d5db" />
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -2648,8 +2650,10 @@ const ms = StyleSheet.create({
   },
   card: {
     width: "100%", maxWidth: 360, maxHeight: "88%",
-    backgroundColor: "#fff", borderRadius: 18, padding: 20,
+    backgroundColor: "#fff", borderRadius: 18,
+    paddingTop: 20, paddingHorizontal: 20,
     shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 16, elevation: 10,
+    overflow: "hidden",
   },
   header: {
     flexDirection: "row", justifyContent: "space-between",
