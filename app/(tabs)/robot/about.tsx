@@ -173,6 +173,26 @@ export default function AboutRobot() {
     }
   }
 
+  // Finds the most recent release that contains the given asset filename.
+  // The Android APK build takes ~15 min while the Windows build takes ~5 min,
+  // so the absolute latest release often exists before the APK is uploaded.
+  async function fetchLatestReleaseWithAsset(repo: string, assetName: string): Promise<{ version: string; asset: { name: string; browser_download_url: string } } | null> {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=5`);
+      const releases = await res.json();
+      if (!Array.isArray(releases)) return null;
+      for (const rel of releases) {
+        const asset = (rel.assets ?? []).find((a: any) => a.name === assetName);
+        if (asset) {
+          return { version: (rel.tag_name as string ?? "").replace(/^v/, ""), asset };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Controller update ──────────────────────────────────────────────────────
 
   async function checkForUpdates() {
@@ -208,7 +228,7 @@ export default function AboutRobot() {
   async function checkAppForUpdates() {
     setCheckingAppUpdate(true);
     setAppLatestVersion(null);
-    const rel = await fetchLatestRelease(APP_REPO);
+    const rel = await fetchLatestReleaseWithAsset(APP_REPO, APP_APK_ASSET);
     setCheckingAppUpdate(false);
     if (!rel) { showToast("Could not reach GitHub", true); return; }
     setAppLatestVersion(rel.version);
@@ -216,14 +236,13 @@ export default function AboutRobot() {
 
   async function handleAppUpdate() {
     setCheckingAppUpdate(true);
-    const rel = await fetchLatestRelease(APP_REPO);
+    const rel = await fetchLatestReleaseWithAsset(APP_REPO, APP_APK_ASSET);
     setCheckingAppUpdate(false);
-    if (!rel) { showToast("Could not reach GitHub", true); return; }
+    if (!rel) { showToast("APK not available yet — Android build may still be in progress", true); return; }
     setAppLatestVersion(rel.version);
     if (rel.version === appVersion) { showToast("App is already up to date"); return; }
 
-    const asset = rel.assets.find(a => a.name === APP_APK_ASSET);
-    if (!asset) { showToast("APK not found in latest release", true); return; }
+    const { asset } = rel;
 
     const destPath = (FileSystem.cacheDirectory ?? "") + APP_APK_ASSET;
     setDownloadingApp(true);
