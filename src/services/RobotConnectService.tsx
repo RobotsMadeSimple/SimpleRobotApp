@@ -317,6 +317,7 @@ export class RobotConnectService {
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
     return (
       a.connected       === b.connected       &&
+      a.version         === b.version         &&
       a.moving          === b.moving          &&
       a.wasHomed        === b.wasHomed        &&
       a.driverConnected === b.driverConnected &&
