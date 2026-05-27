@@ -414,7 +414,7 @@ function stepLabel(step: ProgramStep): string {
         hasToolOff ? "toolOffset" : null,
         hasOffset  ? "offset"     : null,
       ].filter(Boolean).join("  ");
-      const base = `${step.type}  →  ${step.pointName ?? "—"}`;
+      const base = `${step.type}  →  ${step.pointName ?? "Current Position"}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
     case "SetOutput": {
@@ -490,7 +490,7 @@ function stepDetail(step: ProgramStep): string | null {
     case "MoveL":
     case "MoveJ": {
       const parts: string[] = [];
-      if (step.pointName) parts.push(`→ ${step.pointName}`);
+      parts.push(`→ ${step.pointName ?? "current pos"}`);
       if (step.speed != null) parts.push(`${step.speed} mm/s`);
       return parts.length ? parts.join("  ·  ") : null;
     }
@@ -849,9 +849,24 @@ function StepConfigModal({
 
   function renderSubPage() {
     switch (subPage) {
-      case "point":
+      case "point": {
+        const noneActive = !draft!.pointName;
         return (
           <>
+            {/* "Current Position" option — no point name, offsets act as relative displacements */}
+            <TouchableOpacity
+              style={[ms.row, ms.rowBorder, noneActive && ms.rowActive]}
+              onPress={() => { set({ pointName: undefined }); setSubPage(null); }}
+              activeOpacity={0.7}
+            >
+              <View style={[ms.radioRing, noneActive && ms.radioRingActive]}>
+                {noneActive && <View style={ms.radioDot} />}
+              </View>
+              <View style={ms.rowText}>
+                <Text style={[ms.rowLabel, noneActive && ms.rowLabelActive]}>Current Position</Text>
+                <Text style={ms.rowDesc}>Use the robot's live position — offsets become relative moves</Text>
+              </View>
+            </TouchableOpacity>
             {points.length === 0 && <Text style={ms.emptyHint}>No points saved yet.</Text>}
             {points.map((p, i) => {
               const active = draft!.pointName === p.name;
@@ -874,6 +889,7 @@ function StepConfigModal({
             })}
           </>
         );
+      }
 
       case "speed":
         return (
@@ -973,7 +989,7 @@ function StepConfigModal({
             <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
-                <Text style={ms.subRowValue}>{draft!.pointName ?? "Not set"}</Text>
+                <Text style={ms.subRowValue}>{draft!.pointName ?? "Current Position"}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
