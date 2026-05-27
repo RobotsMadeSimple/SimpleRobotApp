@@ -80,6 +80,7 @@ export type ProgramStep = {
   variableExpr?: string;
   // Variable expressions — keyed by camelCase field name, override literal numeric values at execution time
   expressions?: Record<string, string>;
+  gridPoint?: GridPoint;
 };
 
 export type BuiltProgram = {
@@ -152,6 +153,26 @@ export type Tool = {
   rz: number
 }
 
+export type Grid = {
+  id: string;
+  name: string;
+  basePointName: string;
+  rowOffsetX: number; rowOffsetY: number; rowOffsetZ: number;
+  colOffsetX: number; colOffsetY: number; colOffsetZ: number;
+  rowCount?: number;
+  colCount?: number;
+  rotation: number;
+  lastUpdatedUnixMs: number;
+};
+
+export type GridPoint = {
+  gridId: string;
+  rowIndex?: number;
+  colIndex?: number;
+  gridIndex?: number;
+  useGridIndex: boolean;
+};
+
 export type RobotStatus = {
   connected: boolean,
   moving: boolean,
@@ -213,6 +234,7 @@ export type RobotStatus = {
   activeTool: string,
 
   lastBuiltProgramUpdate: number,
+  lastGridUpdate: number,
   version: string,
   isLinux: boolean,
 }
@@ -271,6 +293,7 @@ export function createDefaultStatus(): RobotStatus {
     activeTool: "",
 
     lastBuiltProgramUpdate: 0,
+    lastGridUpdate: 0,
     version: "0.0.0",
     isLinux: false,
   };
