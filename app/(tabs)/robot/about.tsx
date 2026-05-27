@@ -139,6 +139,7 @@ export default function AboutRobot() {
 
   // ── App update state ───────────────────────────────────────────────────────
   const [appLatestVersion,  setAppLatestVersion]  = useState<string | null>(null);
+  const [appAssetUrl,       setAppAssetUrl]       = useState<string | null>(null);
   const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
   const [downloadingApp,    setDownloadingApp]    = useState(false);
   const [downloadProgress,  setDownloadProgress]  = useState(0);
@@ -228,29 +229,23 @@ export default function AboutRobot() {
   async function checkAppForUpdates() {
     setCheckingAppUpdate(true);
     setAppLatestVersion(null);
+    setAppAssetUrl(null);
     const rel = await fetchLatestReleaseWithAsset(APP_REPO, APP_APK_ASSET);
     setCheckingAppUpdate(false);
     if (!rel) { showToast("Could not reach GitHub", true); return; }
     setAppLatestVersion(rel.version);
+    setAppAssetUrl(rel.asset.browser_download_url);
   }
 
   async function handleAppUpdate() {
-    setCheckingAppUpdate(true);
-    const rel = await fetchLatestReleaseWithAsset(APP_REPO, APP_APK_ASSET);
-    setCheckingAppUpdate(false);
-    if (!rel) { showToast("APK not available yet — Android build may still be in progress", true); return; }
-    setAppLatestVersion(rel.version);
-    if (rel.version === appVersion) { showToast("App is already up to date"); return; }
-
-    const { asset } = rel;
-
-    const destPath = (FileSystem.cacheDirectory ?? "") + APP_APK_ASSET;
+    if (!appAssetUrl) return;
+    const destPath = (FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "") + APP_APK_ASSET;
     setDownloadingApp(true);
     setDownloadProgress(0);
     try {
       showToast("Downloading update…");
       const dl = FileSystem.createDownloadResumable(
-        asset.browser_download_url,
+        appAssetUrl,
         destPath,
         {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
@@ -258,7 +253,7 @@ export default function AboutRobot() {
         }
       );
       const result = await dl.downloadAsync();
-      if (!result) { showToast("Download failed", true); return; }
+      if (!result?.uri) { showToast("Download failed", true); return; }
       showToast("Download complete — opening installer");
       const contentUri = await FileSystem.getContentUriAsync(result.uri);
       await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
@@ -267,6 +262,7 @@ export default function AboutRobot() {
         type: "application/vnd.android.package-archive",
       });
     } catch (err: any) {
+      console.error("App update failed:", err);
       showToast(err?.message ?? "Update failed", true);
     } finally {
       setDownloadingApp(false);
@@ -532,7 +528,7 @@ export default function AboutRobot() {
                 style={styles.cardAction}
                 onPress={handleAppUpdate}
                 activeOpacity={appHasUpdate ? 0.7 : 1}
-                disabled={!appHasUpdate || downloadingApp || checkingAppUpdate}
+                disabled={!appAssetUrl || !appHasUpdate || downloadingApp}
               >
                 {downloadingApp
                   ? <ActivityIndicator size="small" color="#2563eb" />
