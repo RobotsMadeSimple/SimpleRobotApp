@@ -92,7 +92,7 @@ function OptionalCountInput({
 
 function makeDefaultGrid(): Grid {
   return {
-    id: crypto.randomUUID(),
+    id: "",
     name: "",
     basePointName: "",
     rowOffsetX: 0, rowOffsetY: 0, rowOffsetZ: 0,
