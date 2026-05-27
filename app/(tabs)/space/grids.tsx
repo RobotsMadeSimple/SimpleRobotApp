@@ -88,11 +88,19 @@ function OptionalCountInput({
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function newId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+}
+
 // ── Default grid factory ──────────────────────────────────────────────────────
 
 function makeDefaultGrid(): Grid {
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     name: "",
     basePointName: "",
     rowOffsetX: 0, rowOffsetY: 0, rowOffsetZ: 0,
