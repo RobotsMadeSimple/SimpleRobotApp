@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { BuiltProgram, NanoState, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, Grid, NanoState, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -36,6 +36,7 @@ type DataContextType = {
   builtProgramsLoaded: boolean;
   nanoIO:              NanoState[];
   relayIO:             UsbRelayState | null;
+  grids:               Grid[];
 };
 
 const DataContext = createContext<DataContextType>({
@@ -45,6 +46,7 @@ const DataContext = createContext<DataContextType>({
   builtProgramsLoaded: false,
   nanoIO:              [],
   relayIO:             null,
+  grids:               [],
 });
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [builtProgramsLoaded, setBuiltProgramsLoaded] = useState(false);
   const [nanoIO,              setNanoIO]              = useState<NanoState[]>([]);
   const [relayIO,             setRelayIO]             = useState<UsbRelayState | null>(null);
+  const [grids,               setGrids]               = useState<Grid[]>([]);
   const [selectedSerial,      setSelectedSerial]      = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,6 +74,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     });
     const unsubNanoIO   = robotClient.onNanoIO(setNanoIO);
     const unsubRelayIO  = robotClient.onRelayIO(setRelayIO);
+    const unsubGrids    = robotClient.onGrids(setGrids);
     const unsubSelected = subscribeRobot(robot =>
       setSelectedSerial(robot?.serialNumber ?? null)
     );
@@ -87,6 +91,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubBuiltPrograms();
       unsubNanoIO();
       unsubRelayIO();
+      unsubGrids();
       robotDiscovery.stop();
       robotClient.disconnect();
     };
@@ -121,7 +126,8 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     builtProgramsLoaded,
     nanoIO,
     relayIO,
-  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO, relayIO]);
+    grids,
+  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO, relayIO, grids]);
 
   return (
     <StatusContext.Provider value={statusContextValue}>
@@ -148,3 +154,4 @@ export function useBuiltPrograms()       { return useContext(DataContext).builtP
 export function useBuiltProgramsLoaded() { return useContext(DataContext).builtProgramsLoaded; }
 export function useNanoIO()              { return useContext(DataContext).nanoIO; }
 export function useRelayIO()             { return useContext(DataContext).relayIO; }
+export function useGrids()               { return useContext(DataContext).grids; }

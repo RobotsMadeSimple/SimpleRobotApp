@@ -1,7 +1,7 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { usePoints, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useGrids, usePoints, useRobotStatus } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { ChevronRight, Grid3x3, MapPin, Wrench } from "lucide-react-native";
+import { ChevronRight, Grid3x3, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 const MENU_ITEMS = [
@@ -29,17 +29,27 @@ const MENU_ITEMS = [
     iconColor: "#7c3aed",
     onPress: () => router.navigate("/space/locals"),
   },
+  {
+    label: "Grids",
+    description: "Define 2D position arrays for pick-and-place and pallet operations",
+    icon: LayoutGrid,
+    tileColor: "#fef3c7",
+    iconColor: "#d97706",
+    onPress: () => router.navigate("/space/grids"),
+  },
 ];
 
 const SUMMARY_ITEMS = [
   { label: "Points",  color: "#16a34a", bgColor: "#f0fdf4" },
   { label: "Tools",   color: "#2563eb", bgColor: "#eff6ff" },
   { label: "Locals",  color: "#7c3aed", bgColor: "#f5f3ff" },
+  { label: "Grids",   color: "#d97706", bgColor: "#fef3c7" },
 ];
 
 export default function SpacePage() {
   const status = useRobotStatus();
   const points = usePoints();
+  const grids  = useGrids();
 
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
@@ -51,7 +61,7 @@ export default function SpacePage() {
   ];
 
   // Counts per category — tools and locals not yet implemented
-  const counts = [points.length, 0, 0];
+  const counts = [points.length, 0, 0, grids.length];
 
   return (
     <View style={styles.container}>

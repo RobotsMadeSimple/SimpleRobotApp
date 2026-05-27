@@ -1,7 +1,7 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useBuiltPrograms, useNanoIO, usePoints, useRelayIO, useTools } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useGrids, useNanoIO, usePoints, useRelayIO, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
+import { BuiltProgram, Grid, GridPoint, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -376,7 +376,9 @@ function stepLabel(step: ProgramStep): string {
         hasToolOff ? "toolOffset" : null,
         hasOffset  ? "offset"     : null,
       ].filter(Boolean).join("  ");
-      const base = `${step.type}  →  ${step.pointName ?? "—"}`;
+      const base = step.gridPoint
+        ? `${step.type}  →  Grid Point`
+        : `${step.type}  →  ${step.pointName ?? "—"}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
     case "SetOutput": {
@@ -582,6 +584,7 @@ function StepConfigModal({
   onClose: () => void;
 }) {
   const points        = usePoints();
+  const grids         = useGrids();
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
   const nanos         = useNanoIO();
@@ -589,14 +592,18 @@ function StepConfigModal({
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
+  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint'>('savedPoint');
+  const [gridPickerOpen, setGridPickerOpen] = useState(false);
 
   useEffect(() => {
     if (step) {
       setDraft({ ...step });
       setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
+      setGridPointMode(step.gridPoint != null ? 'gridPoint' : 'savedPoint');
     } else {
       setDraft(null);
       setPulseMs("");
+      setGridPointMode('savedPoint');
     }
     setSubPage(null);
   }, [step]);
@@ -624,29 +631,196 @@ function StepConfigModal({
 
   function renderSubPage() {
     switch (subPage) {
-      case "point":
+      case "point": {
         return (
           <>
-            {points.length === 0 && <Text style={ms.emptyHint}>No points saved yet.</Text>}
-            {points.map((p, i) => {
-              const active = draft!.pointName === p.name;
-              return (
+            {/* Mode tabs */}
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+              {(['savedPoint', 'gridPoint'] as const).map(mode => (
                 <TouchableOpacity
-                  key={p.name}
-                  style={[ms.row, i < points.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                  onPress={() => { set({ pointName: p.name }); setSubPage(null); }}
+                  key={mode}
+                  style={[
+                    { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+                      backgroundColor: gridPointMode === mode ? '#2563eb' : '#f3f4f6',
+                      borderWidth: 1, borderColor: gridPointMode === mode ? '#2563eb' : '#e5e7eb' }
+                  ]}
+                  onPress={() => {
+                    setGridPointMode(mode);
+                    if (mode === 'savedPoint') {
+                      set({ gridPoint: undefined });
+                    } else {
+                      if (!draft!.gridPoint) {
+                        set({ pointName: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                      }
+                    }
+                  }}
                   activeOpacity={0.7}
                 >
-                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                    {active && <View style={ms.radioDot} />}
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
+                    {mode === 'savedPoint' ? 'Saved Point' : 'Grid Point'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {gridPointMode === 'savedPoint' ? (
+              <>
+                {/* "Current Position" option */}
+                <TouchableOpacity
+                  style={[ms.row, ms.rowBorder, !draft!.pointName && ms.rowActive]}
+                  onPress={() => { set({ pointName: undefined }); setSubPage(null); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, !draft!.pointName && ms.radioRingActive]}>
+                    {!draft!.pointName && <View style={ms.radioDot} />}
                   </View>
                   <View style={ms.rowText}>
-                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
-                    <Text style={ms.rowDesc}>{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</Text>
+                    <Text style={[ms.rowLabel, !draft!.pointName && ms.rowLabelActive]}>Current Position</Text>
+                    <Text style={ms.rowDesc}>Use the robot's live position — offsets become relative moves</Text>
                   </View>
                 </TouchableOpacity>
-              );
-            })}
+                {points.length === 0 && <Text style={ms.emptyHint}>No points saved yet.</Text>}
+                {points.map((p, i) => {
+                  const active = draft!.pointName === p.name;
+                  return (
+                    <TouchableOpacity
+                      key={p.name}
+                      style={[ms.row, i < points.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                      onPress={() => { set({ pointName: p.name }); setSubPage(null); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                        {active && <View style={ms.radioDot} />}
+                      </View>
+                      <View style={ms.rowText}>
+                        <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
+                        <Text style={ms.rowDesc}>{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                {/* Grid picker button */}
+                <TouchableOpacity
+                  style={[ms.subRow, { marginBottom: 4 }]}
+                  onPress={() => setGridPickerOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={ms.subRowLeft}>
+                    <Text style={ms.subRowLabel}>Grid</Text>
+                    <Text style={ms.subRowValue}>
+                      {grids.find(g => g.id === draft!.gridPoint?.gridId)?.name ?? 'Select grid…'}
+                    </Text>
+                  </View>
+                  <ChevronRight size={16} color="#d1d5db" />
+                </TouchableOpacity>
+
+                {/* Row & Column vs Grid Index toggle */}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 8 }}>
+                  {[false, true].map(useIdx => (
+                    <TouchableOpacity
+                      key={String(useIdx)}
+                      style={[{ flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center',
+                        backgroundColor: draft!.gridPoint?.useGridIndex === useIdx ? '#eff6ff' : '#f9fafb',
+                        borderWidth: 1, borderColor: draft!.gridPoint?.useGridIndex === useIdx ? '#2563eb' : '#e5e7eb' }]}
+                      onPress={() => {
+                        set({ gridPoint: { ...(draft!.gridPoint ?? { gridId: '', rowIndex: 0, colIndex: 0 }), useGridIndex: useIdx } });
+                        if (useIdx) {
+                          setExpr('gridRowIndex', undefined);
+                          setExpr('gridColIndex', undefined);
+                        } else {
+                          setExpr('gridGridIndex', undefined);
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: draft!.gridPoint?.useGridIndex === useIdx ? '#2563eb' : '#6b7280' }}>
+                        {useIdx ? 'Grid Index' : 'Row & Column'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {!draft!.gridPoint?.useGridIndex ? (
+                  <>
+                    <Text style={ms.fieldLabel}>ROW INDEX</Text>
+                    <ExpressionInput
+                      style={ms.input}
+                      fieldKey="gridRowIndex"
+                      value={draft!.gridPoint?.rowIndex}
+                      expressions={draft!.expressions}
+                      onChangeValue={v => set({ gridPoint: { ...(draft!.gridPoint ?? { gridId: '', colIndex: 0, useGridIndex: false }), rowIndex: v ?? 0 } })}
+                      onChangeExpr={setExpr}
+                      variables={variables}
+                    />
+                    <Text style={[ms.fieldLabel, { marginTop: 10 }]}>COL INDEX</Text>
+                    <ExpressionInput
+                      style={ms.input}
+                      fieldKey="gridColIndex"
+                      value={draft!.gridPoint?.colIndex}
+                      expressions={draft!.expressions}
+                      onChangeValue={v => set({ gridPoint: { ...(draft!.gridPoint ?? { gridId: '', rowIndex: 0, useGridIndex: false }), colIndex: v ?? 0 } })}
+                      onChangeExpr={setExpr}
+                      variables={variables}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text style={ms.fieldLabel}>GRID INDEX</Text>
+                    <ExpressionInput
+                      style={ms.input}
+                      fieldKey="gridGridIndex"
+                      value={draft!.gridPoint?.gridIndex}
+                      expressions={draft!.expressions}
+                      onChangeValue={v => set({ gridPoint: { ...(draft!.gridPoint ?? { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: true }), gridIndex: v ?? 0 } })}
+                      onChangeExpr={setExpr}
+                      variables={variables}
+                    />
+                  </>
+                )}
+
+                {/* Grid picker modal */}
+                <Modal visible={gridPickerOpen} transparent animationType="fade" onRequestClose={() => setGridPickerOpen(false)}>
+                  <Pressable style={ms.overlay} onPress={() => setGridPickerOpen(false)}>
+                    <Pressable style={ms.card} onPress={() => {}}>
+                      <View style={ms.header}>
+                        <Text style={ms.title}>Select Grid</Text>
+                        <TouchableOpacity onPress={() => setGridPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
+                          <X size={18} color="#9ca3af" />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                        {grids.length === 0 && <Text style={ms.emptyHint}>No grids defined yet.</Text>}
+                        {grids.map((g, i) => {
+                          const active = draft!.gridPoint?.gridId === g.id;
+                          return (
+                            <TouchableOpacity
+                              key={g.id}
+                              style={[ms.row, i < grids.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                              onPress={() => {
+                                set({ gridPoint: { ...(draft!.gridPoint ?? { rowIndex: 0, colIndex: 0, useGridIndex: false }), gridId: g.id } });
+                                setGridPickerOpen(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                                {active && <View style={ms.radioDot} />}
+                              </View>
+                              <View style={ms.rowText}>
+                                <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{g.name}</Text>
+                                <Text style={ms.rowDesc}>Base: {g.basePointName}</Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </Pressable>
+                  </Pressable>
+                </Modal>
+              </>
+            )}
           </>
         );
 
@@ -750,13 +924,16 @@ function StepConfigModal({
   function renderMainBody() {
     switch (draft!.type) {
       case "MoveL":
-      case "MoveJ":
+      case "MoveJ": {
+        const pointLabel = draft!.gridPoint
+          ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
+          : (draft!.pointName ?? "Current Position");
         return (
           <>
             <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
-                <Text style={ms.subRowValue}>{draft!.pointName ?? "Not set"}</Text>
+                <Text style={ms.subRowValue}>{pointLabel}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
@@ -783,6 +960,7 @@ function StepConfigModal({
             </TouchableOpacity>
           </>
         );
+      }
 
       case "SetOutput": {
         const selectedCard = draft!.outputCard ?? "stb";
