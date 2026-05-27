@@ -142,6 +142,7 @@ export default function MonitorProgramScreen() {
   // ── Log polling ────────────────────────────────────────────────────────────
   const [logs, setLogs] = useState<string[]>([]);
   const [totalLogCount, setTotalLogCount] = useState(0);
+  const [visibleLogCount, setVisibleLogCount] = useState(50);
 
   useFocusEffect(
     useCallback(() => {
@@ -164,6 +165,7 @@ export default function MonitorProgramScreen() {
 
       setLogs([]);
       setTotalLogCount(0);
+      setVisibleLogCount(50);
       fetchedUntil = 0;
 
       fetchLogs();
@@ -524,15 +526,28 @@ export default function MonitorProgramScreen() {
             {logs.length === 0 ? (
               <Text style={styles.logsEmpty}>No log entries yet.</Text>
             ) : (
-              [...logs].reverse().map((entry, i) => {
-                const entryNumber = logs.length - i;
-                return (
-                  <View key={entryNumber} style={[styles.logEntry, i % 2 === 0 && styles.logEntryAlt]}>
-                    <Text style={styles.logIndex}>{String(entryNumber).padStart(4, " ")}</Text>
-                    <Text style={styles.logText}>{entry}</Text>
-                  </View>
-                );
-              })
+              <>
+                {[...logs].reverse().slice(0, visibleLogCount).map((entry, i) => {
+                  const entryNumber = logs.length - i;
+                  return (
+                    <View key={entryNumber} style={[styles.logEntry, i % 2 === 0 && styles.logEntryAlt]}>
+                      <Text style={styles.logIndex}>{String(entryNumber).padStart(4, " ")}</Text>
+                      <Text style={styles.logText}>{entry}</Text>
+                    </View>
+                  );
+                })}
+                {visibleLogCount < logs.length && (
+                  <TouchableOpacity
+                    style={styles.loadMoreBtn}
+                    onPress={() => setVisibleLogCount(c => c + 50)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.loadMoreText}>
+                      Load 50 more  ({logs.length - visibleLogCount} remaining)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
           </ScrollView>
         </View>
@@ -737,6 +752,8 @@ const styles = StyleSheet.create({
     height: 260, borderRadius: 8,
   },
   logsEmpty:    { color: "#64748b", fontSize: 13, fontStyle: "italic" },
+  loadMoreBtn:  { paddingVertical: 10, alignItems: "center" },
+  loadMoreText: { fontSize: 12, fontWeight: "600", color: "#475569" },
   logEntry:     { flexDirection: "row", gap: 10, paddingVertical: 3, paddingHorizontal: 2 },
   logEntryAlt:  { backgroundColor: "rgba(255,255,255,0.04)" },
   logIndex: {
