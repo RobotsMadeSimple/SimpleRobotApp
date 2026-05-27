@@ -50,20 +50,20 @@ const MENU_ITEMS = [
     onPress: () => router.navigate("/control"),
   },
   {
-    label: "Points, Tools & Locals",
-    description: "Manage saved positions and tool frames",
-    icon: Move3d,
-    tileColor: "#f5f3ff",
-    iconColor: "#7c3aed",
-    onPress: () => router.navigate("/space"),
-  },
-  {
     label: "Inputs and Outputs",
     description: "Monitor and control digital I/O",
     icon: ArrowLeftRight,
     tileColor: "#fff7ed",
     iconColor: "#ea580c",
     onPress: () => router.navigate("/io"),
+  },
+  {
+    label: "Points, Tools & Locals",
+    description: "Manage saved positions and tool frames",
+    icon: Move3d,
+    tileColor: "#f5f3ff",
+    iconColor: "#7c3aed",
+    onPress: () => router.navigate("/space"),
   },
   {
     label: "Configure",
@@ -95,6 +95,9 @@ export default function ConnectedRobot() {
     return (
       <View style={styles.center}>
         <Text style={styles.centerText}>No robot selected</Text>
+        <TouchableOpacity style={styles.disconnectBtn} onPress={changeRobot} activeOpacity={0.8}>
+          <Text style={styles.disconnectBtnText}>Back to Robot Selection</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -180,10 +183,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#f3f4f6",
+    gap: 16,
   },
   centerText: {
     fontSize: 15,
     color: "#6b7280",
+  },
+  disconnectBtn: {
+    backgroundColor: "#2563eb",
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  disconnectBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 14,
   },
   sectionLabel: {
     fontSize: 11,

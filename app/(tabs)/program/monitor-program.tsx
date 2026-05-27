@@ -119,6 +119,16 @@ export default function MonitorProgramScreen() {
   const program: ProgramSummary | null =
     liveProgram ?? (builtProgram ? syntheticSummary(builtProgram) : null);
 
+  // Guard against double-tap opening two builder screens
+  const navigatingToEdit = useRef(false);
+  useFocusEffect(useCallback(() => { navigatingToEdit.current = false; }, []));
+
+  function handleEditPress() {
+    if (navigatingToEdit.current) return;
+    navigatingToEdit.current = true;
+    router.push(`/program/builder?name=${encodeURIComponent(programName)}`);
+  }
+
   // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
   useEffect(() => {
@@ -132,8 +142,6 @@ export default function MonitorProgramScreen() {
   // ── Log polling ────────────────────────────────────────────────────────────
   const [logs, setLogs] = useState<string[]>([]);
   const [totalLogCount, setTotalLogCount] = useState(0);
-  const logsScrollRef = useRef<ScrollView>(null);
-  const atBottomRef = useRef(true);
 
   useFocusEffect(
     useCallback(() => {
@@ -167,11 +175,6 @@ export default function MonitorProgramScreen() {
     }, [programName])
   );
 
-  useEffect(() => {
-    if (atBottomRef.current && logs.length > 0) {
-      setTimeout(() => logsScrollRef.current?.scrollToEnd({ animated: true }), 80);
-    }
-  }, [logs]);
 
   // ── Loading / not-found states ─────────────────────────────────────────────
 
@@ -464,9 +467,7 @@ export default function MonitorProgramScreen() {
               <View style={styles.managementRow}>
                 <TouchableOpacity
                   style={styles.editBtn}
-                  onPress={() =>
-                    router.push(`/program/builder?name=${encodeURIComponent(programName)}`)
-                  }
+                  onPress={handleEditPress}
                   activeOpacity={0.8}
                 >
                   <Edit2 size={15} color="#2563eb" />
@@ -516,25 +517,22 @@ export default function MonitorProgramScreen() {
             </View>
           </View>
           <ScrollView
-            ref={logsScrollRef}
             style={styles.logsScroll}
             showsVerticalScrollIndicator
             nestedScrollEnabled
-            onScrollEndDrag={(e) => {
-              const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
-              atBottomRef.current =
-                contentOffset.y + layoutMeasurement.height >= contentSize.height - 20;
-            }}
           >
             {logs.length === 0 ? (
               <Text style={styles.logsEmpty}>No log entries yet.</Text>
             ) : (
-              logs.map((entry, i) => (
-                <View key={i} style={[styles.logEntry, i % 2 === 0 && styles.logEntryAlt]}>
-                  <Text style={styles.logIndex}>{String(i + 1).padStart(4, " ")}</Text>
-                  <Text style={styles.logText}>{entry}</Text>
-                </View>
-              ))
+              [...logs].reverse().map((entry, i) => {
+                const entryNumber = logs.length - i;
+                return (
+                  <View key={entryNumber} style={[styles.logEntry, i % 2 === 0 && styles.logEntryAlt]}>
+                    <Text style={styles.logIndex}>{String(entryNumber).padStart(4, " ")}</Text>
+                    <Text style={styles.logText}>{entry}</Text>
+                  </View>
+                );
+              })
             )}
           </ScrollView>
         </View>

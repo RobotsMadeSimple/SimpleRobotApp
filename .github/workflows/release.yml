@@ -30,6 +30,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $version = ("${{ inputs.tag || github.ref_name }}").TrimStart('v')
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.version='$version';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+
       - name: Build Electron installer
         run: npm run electron:build
         env:
@@ -70,14 +76,32 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper
+          key: gradle-wrapper-${{ hashFiles('package-lock.json') }}
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-caches-${{ hashFiles('package-lock.json') }}
+          restore-keys: gradle-caches-
+
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Set version from tag
+        run: |
+          VERSION=$(echo "${{ inputs.tag || github.ref_name }}" | sed 's/^v//')
+          jq ".expo.version = \"$VERSION\"" app.json > app.json.tmp && mv app.json.tmp app.json
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
       - name: Build release APK
-        run: cd android && ./gradlew assembleRelease
+        run: cd android && ./gradlew assembleRelease -Dorg.gradle.parallel=true -Dorg.gradle.caching=true
 
       - name: Rename APK to fixed filename
         run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/SimpleRobotApp.apk

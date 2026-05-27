@@ -16,7 +16,8 @@
         "INTERNET",
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
-        "CHANGE_WIFI_MULTICAST_STATE"
+        "CHANGE_WIFI_MULTICAST_STATE",
+        "REQUEST_INSTALL_PACKAGES"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -49,7 +50,8 @@
       [
         "expo-build-properties", {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "enableMultidex": true
           }
         }
       ]

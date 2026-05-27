@@ -326,9 +326,11 @@ export class RobotConnectService {
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
     return (
       a.connected       === b.connected       &&
+      a.version         === b.version         &&
       a.moving          === b.moving          &&
       a.wasHomed        === b.wasHomed        &&
       a.driverConnected === b.driverConnected &&
+      a.driverOk        === b.driverOk        &&
       a.homingState     === b.homingState     &&
       a.activeTool      === b.activeTool      &&
       a.lastPointUpdate        === b.lastPointUpdate        &&
@@ -796,6 +798,10 @@ export class RobotConnectService {
 
   public restartController() {
     return this.sendCommand("RestartController");
+  }
+
+  public updateController() {
+    return this.sendCommand("Update");
   }
 
   public getRobotConfig(): Promise<{

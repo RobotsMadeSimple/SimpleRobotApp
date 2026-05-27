@@ -61,7 +61,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [nanoIO,              setNanoIO]              = useState<NanoState[]>([]);
   const [relayIO,             setRelayIO]             = useState<UsbRelayState | null>(null);
   const [grids,               setGrids]               = useState<Grid[]>([]);
-  const [selectedSerial,      setSelectedSerial]      = useState<string | null>(null);
+  const [selectedRobotInfo,   setSelectedRobotInfo]   = useState<RobotInfo | null>(null);
 
   useEffect(() => {
     const unsubDiscovery     = robotDiscovery.subscribe(setRobots);
@@ -75,9 +75,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     const unsubNanoIO   = robotClient.onNanoIO(setNanoIO);
     const unsubRelayIO  = robotClient.onRelayIO(setRelayIO);
     const unsubGrids    = robotClient.onGrids(setGrids);
-    const unsubSelected = subscribeRobot(robot =>
-      setSelectedSerial(robot?.serialNumber ?? null)
-    );
+    const unsubSelected = subscribeRobot(robot => setSelectedRobotInfo(robot));
 
     robotDiscovery.start();
     robotClient.start();
@@ -104,10 +102,15 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     [robots, status]
   );
 
-  const selectedRobot = useMemo(
-    () => robotsWithStatus.find(r => r.serialNumber === selectedSerial) ?? null,
-    [robotsWithStatus, selectedSerial]
-  );
+  const selectedRobot = useMemo<RobotWithStatus | null>(() => {
+    if (!selectedRobotInfo) return null;
+    if (selectedRobotInfo.serialNumber) {
+      return robotsWithStatus.find(r => r.serialNumber === selectedRobotInfo.serialNumber)
+        ?? { ...selectedRobotInfo, status };
+    }
+    // Manual connection — no serial number, not in discovery list
+    return { ...selectedRobotInfo, status };
+  }, [selectedRobotInfo, robotsWithStatus, status]);
 
   const statusContextValue = useMemo<StatusContextType>(() => ({
     connected:        status.connected,

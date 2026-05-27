@@ -1,5 +1,5 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
@@ -8,7 +8,6 @@ import {
   Gamepad2,
   HomeIcon,
   OctagonX,
-  RotateCcw,
   Zap,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -17,20 +16,31 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 // ── Homing state → human-readable label ───────────────────────────────────────
 const HOMING_LABELS: Record<string, string> = {
   HomeVertical:              "Moving to vertical limit…",
+  WaitVerticalStop1:         "Stopping vertical axis…",
+  BackOffVertical:           "Backing off vertical sensor…",
+  WaitVerticalBackoff:       "Backing off vertical sensor…",
+  HomeVerticalSlow:          "Fine-homing vertical axis…",
   WaitVerticalMoveComplete:  "Stopping vertical axis…",
   SetVerticalHomed:          "Setting vertical zero…",
   HomeHorizontal:            "Moving to horizontal limit…",
+  WaitHorizontalStop1:       "Stopping horizontal axis…",
+  BackOffHorizontal:         "Backing off horizontal sensor…",
+  WaitHorizontalBackoff:     "Backing off horizontal sensor…",
+  HomeHorizontalSlow:        "Fine-homing horizontal axis…",
   WaitHorizontalMoveComplete:"Stopping horizontal axis…",
   SetHorizontalHomed:        "Setting horizontal zero…",
   HomeJ1:                    "Moving J1 to limit…",
+  WaitJ1Stop1:               "Stopping J1…",
+  BackOffJ1:                 "Backing off J1 sensor…",
+  WaitJ1Backoff:             "Backing off J1 sensor…",
+  HomeJ1Slow:                "Fine-homing J1…",
   WaitJ1MoveComplete:        "Stopping J1…",
   SetJ1MotorHomed:           "Setting J1 zero…",
   HomingComplete:            "Homing complete!",
 };
 
 export default function Control() {
-  const robot = useSelectedRobot();
-  const s = robot?.status;
+  const s = useRobotStatus();
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
   const isHoming = !!s?.homingState && s.homingState !== "WaitingForStart";
@@ -64,18 +74,6 @@ export default function Control() {
         sub: "The robot will move to its home position. Make sure the workspace is clear.",
         icon: <HomeIcon size={28} color="#2563eb" />,
         run: () => robotClient.sendCommand("Home"),
-      }),
-    },
-    {
-      label: "Reset Driver",
-      sub: "Clear driver faults",
-      icon: <RotateCcw size={20} color="#d97706" />,
-      iconBg: "#fef3c7",
-      onPress: () => setConfirm({
-        label: "Reset Driver",
-        sub: "This will reset the motor driver and clear any active faults.",
-        icon: <RotateCcw size={28} color="#d97706" />,
-        run: () => robotClient.sendCommand("Reset"),
       }),
     },
   ];
@@ -115,9 +113,18 @@ export default function Control() {
             <View style={[styles.badge, s?.driverConnected ? styles.badgeGreen : styles.badgeGray]}>
               <Cpu size={11} color={s?.driverConnected ? "#166534" : "#6b7280"} />
               <Text style={[styles.badgeText, s?.driverConnected ? styles.badgeTextGreen : styles.badgeTextGray]}>
-                {s?.driverConnected ? "Driver OK" : "No Driver"}
+                {s?.driverConnected ? "Driver" : "No Driver"}
               </Text>
             </View>
+
+            {s?.driverConnected && (
+              <View style={[styles.badge, s?.driverOk ? styles.badgeGreen : styles.badgeRed]}>
+                <View style={[styles.badgeDot, s?.driverOk ? styles.dotGreen : styles.dotRed]} />
+                <Text style={[styles.badgeText, s?.driverOk ? styles.badgeTextGreen : styles.badgeTextRed]}>
+                  {s?.driverOk ? "Driver OK" : "Fault"}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -269,14 +276,17 @@ const styles = StyleSheet.create({
   badgeGray:      { backgroundColor: "#f3f4f6" },
   badgeGreen:     { backgroundColor: "#dcfce7" },
   badgeBlue:      { backgroundColor: "#dbeafe" },
+  badgeRed:       { backgroundColor: "#fee2e2" },
 
   dotGray:        { backgroundColor: "#9ca3af" },
   dotGreen:       { backgroundColor: "#16a34a" },
   dotBlue:        { backgroundColor: "#2563eb" },
+  dotRed:         { backgroundColor: "#dc2626" },
 
   badgeTextGray:  { color: "#6b7280" },
   badgeTextGreen: { color: "#166534" },
   badgeTextBlue:  { color: "#1d4ed8" },
+  badgeTextRed:   { color: "#991b1b" },
 
   // ── Section headings ─────────────────────────────────────────────────────
   sectionLabel: {
