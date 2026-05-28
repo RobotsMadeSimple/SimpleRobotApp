@@ -1968,7 +1968,7 @@ function VariableEditModal({
     } else {
       setName(""); setValue("0"); setDesc(""); setIsList(false); setListValues(["0"]);
     }
-  }, [variable]);
+  }, [variable, visible]);
 
   const isNew   = variable === null;
   const canSave = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
