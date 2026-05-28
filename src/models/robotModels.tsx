@@ -32,7 +32,7 @@ export type UsbRelayState = {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram';
+export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel';
 
 export type ProgramVariable = {
   id: string;
@@ -89,6 +89,9 @@ export type ProgramStep = {
   // Variable expressions — keyed by camelCase field name, override literal numeric values at execution time
   expressions?: Record<string, string>;
   gridPoint?: GridPoint;
+  // Label / GoToLabel
+  labelId?: string;
+  labelName?: string;
 };
 
 export type BuiltProgram = {
