@@ -24,7 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
 import { ActivityIndicator, Animated, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import Constants from "expo-constants";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
 
 const CONTROLLER_REPO = "RobotsMadeSimple/SimpleRobotController";
