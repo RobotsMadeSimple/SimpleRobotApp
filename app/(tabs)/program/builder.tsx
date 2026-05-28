@@ -33,6 +33,7 @@ import {
   Repeat2,
   Trash2,
   Wrench,
+  Home,
   X,
   Zap,
 } from "lucide-react-native";
@@ -465,6 +466,8 @@ function stepLabel(step: ProgramStep): string {
       if (g.items.length === 1) return `If  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
       return `If  ${g.combinator} of ${g.items.length} conditions`;
     }
+    case "SetTool":   return step.toolName ? `Set Tool  →  ${step.toolName}` : "Set Tool  →  None";
+    case "RunHoming": return "Run Homing";
     default:              return step.type;
   }
 }
@@ -485,6 +488,8 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "Label":        return <Bookmark      size={size} color={color} />;
     case "GoToLabel":    return <CornerUpLeft  size={size} color={color} />;
     case "IfCondition":  return <GitBranch     size={size} color={color} />;
+    case "SetTool":      return <Wrench        size={size} color={color} />;
+    case "RunHoming":    return <Home          size={size} color={color} />;
     default:             return <Cpu           size={size} color={color} />;
   }
 }
@@ -506,6 +511,8 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   Label:        { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Label"          },
   GoToLabel:    { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Go To Label"    },
   IfCondition:  { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "If Condition"    },
+  SetTool:      { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Tool"         },
+  RunHoming:    { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"       },
 };
 
 function stepDetail(step: ProgramStep, grids?: Grid[]): string | null {
@@ -554,6 +561,10 @@ function stepDetail(step: ProgramStep, grids?: Grid[]): string | null {
       if (g.items.length === 1) return `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
       return `${g.combinator} of ${g.items.length} conditions`;
     }
+    case "SetTool":
+      return step.toolName ? `→ ${step.toolName}` : "→ None";
+    case "RunHoming":
+      return "Runs the full homing sequence";
     default:
       return null;
   }
@@ -573,7 +584,9 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "PauseProgram", label: "Pause Program",      desc: "Stop the program — operator can Continue or Exit from the monitor" },
   { type: "Label",        label: "Label",              desc: "Mark a named point in the program that GoToLabel can jump back to" },
   { type: "GoToLabel",    label: "Go To Label",        desc: "Jump to a Label in the same scope (forward or backward, no scope crossing)" },
-  { type: "IfCondition",  label: "If Condition",        desc: "Branch execution based on IO state, sensor values, or variable expressions" },
+  { type: "IfCondition",  label: "If Condition",  desc: "Branch execution based on IO state, sensor values, or variable expressions" },
+  { type: "SetTool",      label: "Set Tool",      desc: "Change the active tool TCP offset used for subsequent move steps" },
+  { type: "RunHoming",    label: "Run Homing",    desc: "Run the full homing sequence and wait for it to complete before continuing" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -980,6 +993,7 @@ function StepConfigModal({
 }) {
   const points        = usePoints();
   const grids         = useGrids();
+  const tools         = useTools();
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
   const nanos         = useNanoIO();
@@ -1722,6 +1736,47 @@ function StepConfigModal({
           </>
         );
       }
+
+      case "SetTool": {
+        const allTools = tools ?? [];
+        return (
+          <>
+            <Text style={ms.fieldLabel}>ACTIVE TOOL</Text>
+            <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+              Select which tool TCP offset to activate for subsequent move steps.
+            </Text>
+            {[{ name: 'none', label: 'None (clear tool)' }, ...allTools.map(t => ({ name: t.name, label: t.name }))].map((t, i, arr) => {
+              const active = (draft!.toolName ?? 'none') === t.name;
+              return (
+                <TouchableOpacity
+                  key={t.name}
+                  style={[ms.row, i < arr.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ toolName: t.name === 'none' ? undefined : t.name })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{t.label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            {allTools.length === 0 && (
+              <Text style={[ms.emptyHint, { marginTop: 8 }]}>No tools defined. Add tools in the Space tab first.</Text>
+            )}
+          </>
+        );
+      }
+
+      case "RunHoming":
+        return (
+          <Text style={ms.hintText}>
+            Runs the full homing sequence and waits for it to complete before continuing to the next step.
+            The robot must be in a safe position before homing begins.
+          </Text>
+        );
 
       case "IfCondition": {
         return (
@@ -2911,6 +2966,7 @@ export default function BuilderScreen() {
       labelName: undefined,
       condition: type === "IfCondition" ? { combinator: 'ALL' as const, items: [] } : undefined,
       ifSteps:   type === "IfCondition" ? [] : undefined,
+      toolName:  undefined,
     };
   }
 
