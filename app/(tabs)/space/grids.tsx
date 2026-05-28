@@ -39,13 +39,13 @@ export default function GridsPage() {
       activeOpacity={0.7}
     >
       <View style={gs.gridIconTile}>
-        <Grid3x3 size={18} color="#d97706" />
+        <Grid3x3 size={20} color="#d97706" />
       </View>
       <View style={gs.gridRowText}>
         <Text style={gs.gridRowName}>{item.name}</Text>
-        <Text style={gs.gridRowDesc} numberOfLines={1}>
+        <Text style={gs.gridRowDesc} numberOfLines={2}>
           Base: {item.basePointName || "—"}
-          {"  ·  "}
+          {"\n"}
           Row ({item.rowOffsetX}, {item.rowOffsetY}, {item.rowOffsetZ})
           {"  ·  "}
           Col ({item.colOffsetX}, {item.colOffsetY}, {item.colOffsetZ})
@@ -69,19 +69,7 @@ export default function GridsPage() {
   return (
     <View style={gs.page}>
       <NotConnectedOverlay />
-      <SubPageHeader
-        title="Grids"
-        right={
-          <TouchableOpacity
-            onPress={() => router.push("/space/grid-edit")}
-            hitSlop={8}
-            activeOpacity={0.7}
-            style={gs.addBtn}
-          >
-            <Plus size={20} color="#2563eb" />
-          </TouchableOpacity>
-        }
-      />
+      <SubPageHeader title="Grids" />
 
       <FlatList
         data={grids}
@@ -93,11 +81,20 @@ export default function GridsPage() {
             <Grid3x3 size={40} color="#d1d5db" />
             <Text style={gs.emptyTitle}>No Grids</Text>
             <Text style={gs.emptyBody}>
-              Tap the + button to define a 2D position array.
+              Tap below to define a 2D position array.
             </Text>
           </View>
         }
-        ItemSeparatorComponent={() => <View style={gs.separator} />}
+        ListFooterComponent={
+          <TouchableOpacity
+            style={gs.addCard}
+            onPress={() => router.push("/space/grid-edit")}
+            activeOpacity={0.7}
+          >
+            <Plus size={16} color="#2563eb" />
+            <Text style={gs.addCardText}>New Grid</Text>
+          </TouchableOpacity>
+        }
       />
     </View>
   );
@@ -107,36 +104,51 @@ export default function GridsPage() {
 
 const gs = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f3f4f6" },
-  addBtn: { padding: 4 },
 
-  listContent: { padding: 16, paddingBottom: 40 },
-  separator:   { height: 1, backgroundColor: "#e5e7eb" },
+  listContent: { padding: 16, paddingBottom: 32, gap: 10 },
 
   gridRow: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 14,
+    padding: 16,
     gap: 12,
     shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
-    marginBottom: 10,
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   gridIconTile: {
-    width: 36, height: 36, borderRadius: 9,
+    width: 42, height: 42, borderRadius: 11,
     backgroundColor: "#fef3c7",
     justifyContent: "center", alignItems: "center",
   },
-  gridRowText: { flex: 1, gap: 2 },
+  gridRowText: { flex: 1, gap: 4 },
   gridRowName: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  gridRowDesc: { fontSize: 11, color: "#9ca3af" },
+  gridRowDesc: { fontSize: 12, color: "#9ca3af", lineHeight: 17 },
   deleteBtn:   { padding: 4 },
 
-  emptyContainer: { alignItems: "center", marginTop: 60, gap: 10 },
+  addCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#2563eb",
+    borderRadius: 14,
+    paddingVertical: 14,
+    backgroundColor: "transparent",
+    marginTop: 2,
+  },
+  addCardText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2563eb",
+  },
+
+  emptyContainer: { alignItems: "center", marginTop: 60, marginBottom: 24, gap: 10 },
   emptyTitle:     { fontSize: 16, fontWeight: "700", color: "#374151" },
   emptyBody: {
     fontSize: 13, color: "#9ca3af",
