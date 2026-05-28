@@ -1,5 +1,5 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { useGrids, usePoints, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useGrids, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
 import { ChevronRight, Grid3x3, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -50,6 +50,7 @@ export default function SpacePage() {
   const status = useRobotStatus();
   const points = usePoints();
   const grids  = useGrids();
+  const tools  = useTools();
 
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
@@ -60,8 +61,7 @@ export default function SpacePage() {
     { label: "RZ", value: status.rz },
   ];
 
-  // Counts per category — tools and locals not yet implemented
-  const counts = [points.length, 0, 0, grids.length];
+  const counts = [points.length, tools.length, 0, grids.length];
 
   return (
     <View style={styles.container}>
