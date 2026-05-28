@@ -409,13 +409,16 @@ function stepLabel(step: ProgramStep): string {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
-      const offsetKeys   = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
-      const toolOffKeys  = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
-      const hasOffset    = offsetKeys.some(k  => (step as any)[k] != null || step.expressions?.[k] != null);
-      const hasToolOff   = toolOffKeys.some(k => (step as any)[k] != null || step.expressions?.[k] != null);
+      const offsetKeys    = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
+      const toolOffKeys   = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
+      const overrideKeys  = ["overrideX","overrideY","overrideZ","overrideRX","overrideRY","overrideRZ"];
+      const hasOffset     = offsetKeys.some(k   => (step as any)[k] != null || step.expressions?.[k] != null);
+      const hasToolOff    = toolOffKeys.some(k  => (step as any)[k] != null || step.expressions?.[k] != null);
+      const hasOverride   = overrideKeys.some(k => (step as any)[k] != null || step.expressions?.[k] != null);
       const suffix = [
-        hasToolOff ? "toolOffset" : null,
-        hasOffset  ? "offset"     : null,
+        hasToolOff  ? "toolOffset" : null,
+        hasOffset   ? "offset"     : null,
+        hasOverride ? "override"   : null,
       ].filter(Boolean).join("  ");
       const base = step.gridPoint
         ? `${step.type}  →  Grid Point`
@@ -613,7 +616,7 @@ function StepTypePicker({
 
 // ── Step config modal ─────────────────────────────────────────────────────────
 
-type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset";
+type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride";
 
 // ── SetVariable helpers ───────────────────────────────────────────────────────
 
@@ -850,10 +853,26 @@ function StepConfigModal({
       return { ...d, expressions: Object.keys(exprs).length > 0 ? exprs : undefined };
     });
 
-  const offsetKeys  = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
-  const toolOffKeys = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
-  const hasOffset  = offsetKeys.some(k  => (draft as any)[k] != null || draft.expressions?.[k] != null);
-  const hasToolOff = toolOffKeys.some(k => (draft as any)[k] != null || draft.expressions?.[k] != null);
+  const offsetKeys    = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
+  const toolOffKeys   = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
+  const overrideKeys  = ["overrideX","overrideY","overrideZ","overrideRX","overrideRY","overrideRZ"];
+  const hasOffset    = offsetKeys.some(k   => (draft as any)[k] != null || draft.expressions?.[k] != null);
+  const hasToolOff   = toolOffKeys.some(k  => (draft as any)[k] != null || draft.expressions?.[k] != null);
+  const hasOverride  = overrideKeys.some(k => (draft as any)[k] != null || draft.expressions?.[k] != null);
+
+  // Summary label for the override button, e.g. "Z=100"
+  const overrideSummary = (() => {
+    if (!hasOverride) return "None";
+    const parts: string[] = [];
+    (["overrideX","overrideY","overrideZ","overrideRX","overrideRY","overrideRZ"] as const).forEach(k => {
+      if ((draft as any)[k] != null || draft.expressions?.[k] != null) {
+        const axis = k.replace("override","");
+        const val  = draft.expressions?.[k] ?? (draft as any)[k];
+        parts.push(`${axis}=${val}`);
+      }
+    });
+    return parts.join("  ");
+  })();
 
   // ── Sub-page content ──────────────────────────────────────────────────────
 
@@ -1135,6 +1154,39 @@ function StepConfigModal({
           </>
         );
 
+      case "posOverride":
+        return (
+          <>
+            <Text style={[ms.hintText, { marginBottom: 12 }]}>
+              When set, locks that axis to the exact value regardless of the target point or offsets.
+              Leave blank to use the calculated value.
+            </Text>
+            {(["overrideX","overrideY","overrideZ"] as const).map(k => (
+              <View key={k} style={{ marginBottom: 10 }}>
+                <Text style={ms.fieldLabel}>{k.replace("override","").toUpperCase()}  (mm)</Text>
+                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                  value={draft![k]} expressions={draft!.expressions}
+                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr}
+                  variables={variables} allowUndefined placeholder="not set" />
+              </View>
+            ))}
+            {(["overrideRX","overrideRY","overrideRZ"] as const).map(k => (
+              <View key={k} style={{ marginBottom: 10 }}>
+                <Text style={ms.fieldLabel}>{k.replace("override","").toUpperCase()}  (°)</Text>
+                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
+                  value={draft![k]} expressions={draft!.expressions}
+                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr}
+                  variables={variables} allowUndefined placeholder="not set" />
+              </View>
+            ))}
+            <TouchableOpacity
+              onPress={() => set({ overrideX:undefined,overrideY:undefined,overrideZ:undefined,overrideRX:undefined,overrideRY:undefined,overrideRZ:undefined })}
+              style={{ marginTop: 4 }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear all overrides</Text>
+            </TouchableOpacity>
+          </>
+        );
+
       default:
         return null;
     }
@@ -1169,6 +1221,13 @@ function StepConfigModal({
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Position Offset</Text>
                 <Text style={ms.subRowValue}>{hasOffset ? "Set" : "None"}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOverride")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Position Override</Text>
+                <Text style={ms.subRowValue} numberOfLines={1}>{overrideSummary}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
@@ -1440,6 +1499,7 @@ function StepConfigModal({
   const subPageTitle: Record<NonNullable<SubPage>, string> = {
     point: "Select Point", speed: "Override Speed",
     posOffset: "Position Offset", toolOffset: "Tool Offset",
+    posOverride: "Position Override",
   };
 
   const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ";
