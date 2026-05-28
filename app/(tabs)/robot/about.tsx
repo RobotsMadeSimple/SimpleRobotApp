@@ -24,8 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
 import { ActivityIndicator, Animated, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import Constants from "expo-constants";
-import * as FileSystem from "expo-file-system/legacy";
-import * as IntentLauncher from "expo-intent-launcher";
+import * as WebBrowser from "expo-web-browser";
 
 const CONTROLLER_REPO = "RobotsMadeSimple/SimpleRobotController";
 const APP_REPO        = "RobotsMadeSimple/SimpleRobotApp";
@@ -141,8 +140,6 @@ export default function AboutRobot() {
   const [appLatestVersion,  setAppLatestVersion]  = useState<string | null>(null);
   const [appAssetUrl,       setAppAssetUrl]       = useState<string | null>(null);
   const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
-  const [downloadingApp,    setDownloadingApp]    = useState(false);
-  const [downloadProgress,  setDownloadProgress]  = useState(0);
 
   const appVersion = Constants.expoConfig?.version ?? "0.0.0";
   const isAndroid  = Platform.OS === "android";
@@ -239,33 +236,11 @@ export default function AboutRobot() {
 
   async function handleAppUpdate() {
     if (!appAssetUrl) return;
-    const destPath = (FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "") + APP_APK_ASSET;
-    setDownloadingApp(true);
-    setDownloadProgress(0);
     try {
-      showToast("Downloading update…");
-      const dl = FileSystem.createDownloadResumable(
-        appAssetUrl,
-        destPath,
-        {},
-        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          setDownloadProgress(totalBytesExpectedToWrite > 0 ? totalBytesWritten / totalBytesExpectedToWrite : 0);
-        }
-      );
-      const result = await dl.downloadAsync();
-      if (!result?.uri) { showToast("Download failed", true); return; }
-      showToast("Download complete — opening installer");
-      const contentUri = await FileSystem.getContentUriAsync(result.uri);
-      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
-        data: contentUri,
-        flags: 1,
-        type: "application/vnd.android.package-archive",
-      });
+      showToast("Opening download in browser…");
+      await WebBrowser.openBrowserAsync(appAssetUrl);
     } catch (err: any) {
-      console.error("App update failed:", err);
       showToast(err?.message ?? "Update failed", true);
-    } finally {
-      setDownloadingApp(false);
     }
   }
 
@@ -514,7 +489,7 @@ export default function AboutRobot() {
                 style={[styles.infoRow, styles.infoRowBorder]}
                 onPress={checkAppForUpdates}
                 activeOpacity={0.7}
-                disabled={checkingAppUpdate || downloadingApp}
+                disabled={checkingAppUpdate}
               >
                 <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
                   {checkingAppUpdate
@@ -523,18 +498,15 @@ export default function AboutRobot() {
                 </View>
                 <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
               </TouchableOpacity>
-              {downloadingApp && <ProgressBar progress={downloadProgress} />}
               <TouchableOpacity
                 style={styles.cardAction}
                 onPress={handleAppUpdate}
                 activeOpacity={appHasUpdate ? 0.7 : 1}
-                disabled={!appAssetUrl || !appHasUpdate || downloadingApp}
+                disabled={!appAssetUrl || !appHasUpdate}
               >
-                {downloadingApp
-                  ? <ActivityIndicator size="small" color="#2563eb" />
-                  : <Download size={15} color={appHasUpdate ? "#2563eb" : "#9ca3af"} />}
+                <Download size={15} color={appHasUpdate ? "#2563eb" : "#9ca3af"} />
                 <Text style={[styles.cardActionText, !appHasUpdate && styles.cardActionTextDisabled]}>
-                  {downloadingApp ? `Downloading… ${Math.round(downloadProgress * 100)}%` : "Update App"}
+                  Update App
                 </Text>
               </TouchableOpacity>
             </View>
