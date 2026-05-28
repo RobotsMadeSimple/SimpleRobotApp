@@ -6,7 +6,9 @@ import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
   ArrowRight,
+  Bookmark,
   Camera,
+  CornerUpLeft,
   Check,
   ChevronDown,
   ChevronRight,
@@ -472,7 +474,9 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "SetSpeedL":
     case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
     case "SetVariable":  return <Hash          size={size} color={color} />;
-    case "PauseProgram": return <PauseCircle  size={size} color={color} />;
+    case "PauseProgram": return <PauseCircle   size={size} color={color} />;
+    case "Label":        return <Bookmark      size={size} color={color} />;
+    case "GoToLabel":    return <CornerUpLeft  size={size} color={color} />;
     default:             return <Cpu           size={size} color={color} />;
   }
 }
@@ -490,10 +494,12 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   SetSpeedL:    { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed (Linear)" },
   SetSpeedJ:    { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Set Speed (Joint)"  },
   SetVariable:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Variable"       },
-  PauseProgram: { accent: "#374151", iconBg: "#f3f4f6", iconColor: "#374151", label: "Pause Program"      },
+  PauseProgram: { accent: "#374151", iconBg: "#f3f4f6", iconColor: "#374151", label: "Pause Program"  },
+  Label:        { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Label"          },
+  GoToLabel:    { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Go To Label"    },
 };
 
-function stepDetail(step: ProgramStep): string | null {
+function stepDetail(step: ProgramStep, grids?: Grid[]): string | null {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
@@ -529,6 +535,10 @@ function stepDetail(step: ProgramStep): string | null {
     }
     case "SetVariable":
       return step.variableName ? fmtSetVar(step.variableName, step.variableExpr) : null;
+    case "Label":
+      return step.labelName ? `⬤ ${step.labelName}` : null;
+    case "GoToLabel":
+      return step.labelName ? `↩ ${step.labelName}` : null;
     default:
       return null;
   }
@@ -546,6 +556,8 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SetSpeedJ",    label: "Set Speed (Joint)",  desc: "Update the joint move speed, accel and decel" },
   { type: "SetVariable",  label: "Set Variable",       desc: "Assign a new value or expression to a program variable" },
   { type: "PauseProgram", label: "Pause Program",      desc: "Stop the program — operator can Continue or Exit from the monitor" },
+  { type: "Label",        label: "Label",              desc: "Mark a named point in the program that GoToLabel can jump back to" },
+  { type: "GoToLabel",    label: "Go To Label",        desc: "Jump to a Label in the same scope (forward or backward, no scope crossing)" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -805,12 +817,16 @@ function StepConfigModal({
   visible,
   step,
   variables,
+  scopeSteps,
+  stepIndex,
   onSave,
   onClose,
 }: {
   visible: boolean;
   step: ProgramStep | null;
   variables?: ProgramVariable[];
+  scopeSteps?: ProgramStep[];
+  stepIndex?: number;
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
 }) {
@@ -1491,6 +1507,74 @@ function StepConfigModal({
       case "SetVariable":
         return <SetVariableFields draft={draft!} variables={variables} set={set} />;
 
+      case "Label": {
+        const otherLabels = (scopeSteps ?? [])
+          .filter(s => s.type === "Label" && s.id !== draft!.id && s.labelName);
+        const isDuplicate = !!draft!.labelName?.trim() &&
+          otherLabels.some(s => s.labelName?.toLowerCase() === draft!.labelName?.trim().toLowerCase());
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Give this marker a unique name. GoToLabel steps in this scope can jump back to it.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>LABEL NAME</Text>
+            <TextInput
+              style={[ms.input, isDuplicate && { borderColor: "#ef4444", borderWidth: 1 }]}
+              value={draft!.labelName ?? ""}
+              onChangeText={v => set({ labelName: v || undefined })}
+              placeholder="e.g. loop_start, retry…"
+              placeholderTextColor="#9ca3af"
+              autoFocus
+              autoCapitalize="none"
+              returnKeyType="done"
+            />
+            {isDuplicate && (
+              <Text style={ms.fieldError}>Another label in this scope already uses this name.</Text>
+            )}
+          </>
+        );
+      }
+
+      case "GoToLabel": {
+        const labelsInScope = (scopeSteps ?? [])
+          .filter(s => s.type === "Label" && s.labelId && s.labelName);
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Jumps to a Label in this scope. Can jump forward or backward — crossing into or out of a loop is not allowed.
+            </Text>
+            {labelsInScope.length === 0 && (
+              <Text style={[ms.emptyHint, { marginTop: 12 }]}>
+                No labels defined in this scope. Add a Label step first.
+              </Text>
+            )}
+            {labelsInScope.length > 0 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>JUMP TO</Text>
+                {labelsInScope.map((s, i) => {
+                  const active = draft!.labelId === s.labelId;
+                  return (
+                    <TouchableOpacity
+                      key={s.id}
+                      style={[ms.row, i < labelsInScope.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                      onPress={() => set({ labelId: s.labelId, labelName: s.labelName })}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                        {active && <View style={ms.radioDot} />}
+                      </View>
+                      <View style={ms.rowText}>
+                        <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{s.labelName}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </>
+        );
+      }
+
       default:
         return null;
     }
@@ -1503,7 +1587,8 @@ function StepConfigModal({
   };
 
   const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ";
-  const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable";
+  const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable"
+                  || draft.type === "Label"      || draft.type === "GoToLabel";
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
@@ -1698,7 +1783,8 @@ function LoopInnerRow({
 }) {
   const theme      = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
   const detail     = stepDetail(step);
-  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ";
+  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
+                  || step.type === "Label"      || step.type === "GoToLabel";
 
   return (
     <View
@@ -1809,7 +1895,8 @@ function StepRow({
   onItemLayout: (id: string, height: number) => void;
 }) {
   const isLoop     = step.type === "Loop";
-  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ";
+  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
+                  || step.type === "Label"      || step.type === "GoToLabel";
   const innerSteps = step.loopSteps ?? [];
   const isExpanded = isLoop && !collapsed;
   const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
@@ -2295,6 +2382,21 @@ export default function BuilderScreen() {
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [configOpen, setConfigOpen]         = useState(false);
   const [editingStep, setEditingStep]       = useState<ProgramStep | null>(null);
+
+  // Derive the step list scope and index for the currently-editing step (for Label/GoToLabel pickers)
+  const editingScope = useMemo<ProgramStep[]>(() => {
+    if (!editingStep) return steps;
+    if (steps.some(s => s.id === editingStep.id)) return steps;
+    for (const s of steps) {
+      if (s.loopSteps?.some(ls => ls.id === editingStep.id)) return s.loopSteps!;
+    }
+    return steps;
+  }, [editingStep, steps]);
+
+  const editingStepIndex = useMemo(() => {
+    if (!editingStep) return -1;
+    return editingScope.findIndex(s => s.id === editingStep.id);
+  }, [editingStep, editingScope]);
   const [insertTarget, setInsertTarget]     = useState<InsertTarget>({ mode: "append" });
   // Ref mirrors state so addStep always reads the latest value regardless of closure age
   const insertTargetRef = useRef<InsertTarget>({ mode: "append" });
@@ -2406,6 +2508,8 @@ export default function BuilderScreen() {
       routineName: undefined,
       variableName: undefined, variableExpr: undefined,
       expressions: undefined,
+      labelId: type === "Label" ? newId() : undefined,
+      labelName: undefined,
     };
   }
 
@@ -2719,6 +2823,8 @@ export default function BuilderScreen() {
         visible={configOpen}
         step={editingStep}
         variables={variables}
+        scopeSteps={editingScope}
+        stepIndex={editingStepIndex}
         onSave={updateStep}
         onClose={() => setConfigOpen(false)}
       />
