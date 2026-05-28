@@ -261,9 +261,10 @@ function ExpressionInput({
     }
   }
 
-  function insertVar(varName: string) {
+  function insertVar(v: ProgramVariable) {
+    const token = v.values && v.values.length > 0 ? `$${v.name}[0]` : `$${v.name}`;
     const ref = text.trim();
-    const next = ref ? `${ref} $${varName}` : `$${varName}`;
+    const next = ref ? `${ref} ${token}` : token;
     setText(next);
     onChangeValue(undefined);
     onChangeExpr(fieldKey, next);
@@ -358,11 +359,13 @@ function ExpressionInput({
             {sortedVars.map(v => (
               <TouchableOpacity
                 key={v.id}
-                onPress={() => insertVar(v.name)}
+                onPress={() => insertVar(v)}
                 activeOpacity={0.7}
                 style={exprStyles.chip}
               >
-                <Text style={exprStyles.chipText}>${v.name}</Text>
+                <Text style={exprStyles.chipText}>
+                  ${v.name}{v.values && v.values.length > 0 ? "[…]" : ""}
+                </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -1882,22 +1885,50 @@ function VariableEditModal({
   onSave: (v: ProgramVariable) => void;
   onClose: () => void;
 }) {
-  const [name,  setName]  = useState("");
-  const [value, setValue] = useState("0");
-  const [desc,  setDesc]  = useState("");
+  const [name,       setName]       = useState("");
+  const [value,      setValue]      = useState("0");
+  const [desc,       setDesc]       = useState("");
+  const [isList,     setIsList]     = useState(false);
+  const [listValues, setListValues] = useState<string[]>(["0"]);
 
   useEffect(() => {
     if (variable) {
       setName(variable.name);
-      setValue(String(variable.value));
       setDesc(variable.description ?? "");
+      const hasList = variable.values != null && variable.values.length > 0;
+      setIsList(hasList);
+      if (hasList) {
+        setListValues(variable.values!.map(String));
+        setValue("0");
+      } else {
+        setValue(String(variable.value));
+        setListValues(["0"]);
+      }
     } else {
-      setName(""); setValue("0"); setDesc("");
+      setName(""); setValue("0"); setDesc(""); setIsList(false); setListValues(["0"]);
     }
   }, [variable]);
 
-  const isNew = variable === null;
+  const isNew   = variable === null;
   const canSave = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
+
+  function updateListItem(index: number, raw: string) {
+    if (raw === "" || /^-?\d*\.?\d*$/.test(raw)) {
+      setListValues(prev => prev.map((v, i) => i === index ? raw : v));
+    }
+  }
+
+  function addListItem() {
+    setListValues(prev => [...prev, "0"]);
+  }
+
+  function removeListItem(index: number) {
+    setListValues(prev => prev.filter((_, i) => i !== index));
+  }
+
+  const refLabel = isList
+    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions.</Text>
+    : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -1910,6 +1941,7 @@ function VariableEditModal({
               <X size={18} color="#9ca3af" />
             </TouchableOpacity>
           </View>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
           <Text style={ms.fieldLabel}>NAME</Text>
           <TextInput
@@ -1925,16 +1957,66 @@ function VariableEditModal({
           {name.trim().length > 0 && !canSave && (
             <Text style={ms.fieldError}>Use letters, digits, and _ only. Must start with a letter.</Text>
           )}
-          <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>
 
-          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
-          <TextInput
-            style={ms.input}
-            value={value}
-            onChangeText={v => { if (v === "" || /^-?\d*\.?\d*$/.test(v)) setValue(v); }}
-            keyboardType="numbers-and-punctuation"
-            selectTextOnFocus
-          />
+          {/* Type toggle */}
+          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>TYPE</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
+            <TouchableOpacity
+              style={[ms.typeBtn, !isList && ms.typeBtnActive]}
+              onPress={() => setIsList(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={[ms.typeBtnText, !isList && ms.typeBtnTextActive]}>Number</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.typeBtn, isList && ms.typeBtnActive]}
+              onPress={() => setIsList(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[ms.typeBtnText, isList && ms.typeBtnTextActive]}>List</Text>
+            </TouchableOpacity>
+          </View>
+          {refLabel}
+
+          {!isList ? (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
+              <TextInput
+                style={ms.input}
+                value={value}
+                onChangeText={v => { if (v === "" || /^-?\d*\.?\d*$/.test(v)) setValue(v); }}
+                keyboardType="numbers-and-punctuation"
+                selectTextOnFocus
+              />
+            </>
+          ) : (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUES</Text>
+              {listValues.map((v, idx) => (
+                <View key={idx} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <Text style={{ fontSize: 12, color: "#9ca3af", width: 22, textAlign: "right" }}>{idx}</Text>
+                  <TextInput
+                    style={[ms.input, { flex: 1, marginBottom: 0 }]}
+                    value={v}
+                    onChangeText={raw => updateListItem(idx, raw)}
+                    keyboardType="numbers-and-punctuation"
+                    selectTextOnFocus
+                  />
+                  <TouchableOpacity onPress={() => removeListItem(idx)} hitSlop={8} activeOpacity={0.7}>
+                    <X size={15} color="#9ca3af" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2, paddingVertical: 6 }}
+                onPress={addListItem}
+                activeOpacity={0.7}
+              >
+                <Plus size={14} color="#7c3aed" />
+                <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600" }}>Add item</Text>
+              </TouchableOpacity>
+            </>
+          )}
 
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DESCRIPTION  (optional)</Text>
           <TextInput
@@ -1946,6 +2028,7 @@ function VariableEditModal({
             returnKeyType="done"
           />
 
+          </ScrollView>
           <View style={[ms.actions, { marginTop: 16 }]}>
             <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
               <Text style={ms.cancelText}>Cancel</Text>
@@ -1957,7 +2040,8 @@ function VariableEditModal({
                 onSave({
                   id: variable?.id ?? newId(),
                   name: name.trim(),
-                  value: parseFloat(value) || 0,
+                  value: isList ? 0 : (parseFloat(value) || 0),
+                  values: isList ? listValues.map(v => parseFloat(v) || 0) : undefined,
                   description: desc.trim() || undefined,
                 });
                 onClose();
@@ -2868,6 +2952,14 @@ const ms = StyleSheet.create({
   emptyHint: { fontSize: 13, color: "#9ca3af", paddingVertical: 8, textAlign: "center" },
   hintText:   { fontSize: 12, color: "#9ca3af", marginTop: 8, lineHeight: 16 },
   fieldError: { fontSize: 12, color: "#dc2626", marginTop: 6 },
+
+  typeBtn: {
+    flex: 1, paddingVertical: 9, borderRadius: 10,
+    borderWidth: 1, borderColor: "#e5e7eb", alignItems: "center", marginTop: 6,
+  },
+  typeBtnActive:     { borderColor: "#7c3aed", backgroundColor: "#f5f3ff" },
+  typeBtnText:       { fontSize: 14, fontWeight: "600", color: "#6b7280" },
+  typeBtnTextActive: { color: "#7c3aed" },
 
   // Two-column layout for accel/decel
   twoCol:     { flexDirection: "row", gap: 10 },

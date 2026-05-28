@@ -38,6 +38,7 @@ export type ProgramVariable = {
   id: string;
   name: string;
   value: number;
+  values?: number[];
   description?: string;
 };
 
