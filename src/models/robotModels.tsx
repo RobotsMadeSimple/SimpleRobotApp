@@ -64,6 +64,13 @@ export type ProgramStep = {
   toolOffsetRX?: number;
   toolOffsetRY?: number;
   toolOffsetRZ?: number;
+  // Per-axis absolute overrides — replace the calculated axis value (base + offset) (mm / deg)
+  overrideX?: number;
+  overrideY?: number;
+  overrideZ?: number;
+  overrideRX?: number;
+  overrideRY?: number;
+  overrideRZ?: number;
   outputNumber?: number;
   outputValue?: boolean;
   outputCard?: string;     // "stb" | "relay" | "nano"
