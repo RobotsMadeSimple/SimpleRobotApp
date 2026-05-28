@@ -32,7 +32,27 @@ export type UsbRelayState = {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel';
+export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition';
+
+export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
+
+export type ConditionItem = {
+  id: string;
+  left: string;
+  operator: ConditionOp;
+  right: string;
+};
+
+export type ConditionGroup = {
+  combinator: 'ALL' | 'ANY';
+  items: ConditionItem[];
+};
+
+export type ElseIfBranch = {
+  id: string;
+  condition: ConditionGroup;
+  steps: ProgramStep[];
+};
 
 export type ProgramVariable = {
   id: string;
@@ -92,6 +112,11 @@ export type ProgramStep = {
   // Label / GoToLabel
   labelId?: string;
   labelName?: string;
+  // IfCondition
+  condition?: ConditionGroup;
+  ifSteps?: ProgramStep[];
+  elseIfBranches?: ElseIfBranch[];
+  elseSteps?: ProgramStep[];
 };
 
 export type BuiltProgram = {
