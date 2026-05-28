@@ -1522,7 +1522,8 @@ function StepConfigModal({
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 8 }}>
               {subPage ? (
                 renderSubPage()
               ) : (
@@ -3039,7 +3040,8 @@ const ms = StyleSheet.create({
 
   actions: {
     flexDirection: "row", gap: 10, marginTop: 16,
-    paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+    paddingTop: 14, paddingBottom: 20,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
   },
   cancelBtn: {
     flex: 1, paddingVertical: 13, borderRadius: 12,
