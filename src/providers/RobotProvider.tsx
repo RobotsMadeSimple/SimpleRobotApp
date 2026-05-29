@@ -3,7 +3,9 @@ import { BuiltProgram, Grid, NanoState, Point, ProgramSummary, Tool, RobotInfo, 
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { RobotSnapshot, RobotSnapshotService } from "@/src/services/RobotSnapshotService";
+import { router } from "expo-router";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Alert } from "react-native";
 
 type RobotWithStatus = RobotInfo & { status: RobotStatus };
 
@@ -67,6 +69,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [snapshot,      setSnapshot]      = useState<RobotSnapshot | null>(null);
   const lastSerialRef                     = useRef<string | null>(null);
   const savedFingerprintRef               = useRef<string>('');
+  const justReconnectedRef                = useRef<boolean>(false);
 
   useEffect(() => {
     const unsubDiscovery     = robotDiscovery.subscribe(setRobots);
@@ -100,10 +103,11 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Track the serial number of the last robot we connected to
+  // Track the serial number of the last robot we connected to; mark reconnection
   useEffect(() => {
     if (status.connected && selectedRobotInfo?.serialNumber) {
       lastSerialRef.current = selectedRobotInfo.serialNumber;
+      justReconnectedRef.current = true;
     }
   }, [status.connected, selectedRobotInfo]);
 
@@ -117,8 +121,31 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     const fp = `${serial}_${status.lastBuiltProgramUpdate}_${status.lastPointUpdate}_${status.lastToolUpdate}_${status.lastGridUpdate}`;
     if (fp === savedFingerprintRef.current) return;
 
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       savedFingerprintRef.current = fp;
+
+      if (justReconnectedRef.current) {
+        justReconnectedRef.current = false;
+        const oldSnap = await RobotSnapshotService.load(serial);
+        if (oldSnap) {
+          const diff = RobotSnapshotService.computeDiff(oldSnap, {
+            programs: builtPrograms,
+            tools,
+            grids,
+          });
+          if (RobotSnapshotService.hasDifferences(diff)) {
+            Alert.alert(
+              'Sync Available',
+              'Changes were detected between your phone and the robot. Would you like to review and sync?',
+              [
+                { text: 'Later', style: 'cancel' },
+                { text: 'Sync Now', onPress: () => router.push('/(tabs)/robot/sync') },
+              ],
+            );
+          }
+        }
+      }
+
       const snap: RobotSnapshot = {
         robotSerial: serial,
         robotName:   selectedRobotInfo?.robotName ?? '',
