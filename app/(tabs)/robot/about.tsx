@@ -2,6 +2,7 @@ import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "@/src/connec
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
+import { router } from "expo-router";
 import {
   Activity,
   CheckCircle2,
@@ -571,6 +572,12 @@ export default function AboutRobot() {
           </>
         )}
 
+        {/* Sync */}
+        <TouchableOpacity style={styles.syncButton} onPress={() => router.push("/(tabs)/robot/sync")} activeOpacity={0.7}>
+          <RefreshCw size={15} color="#2563eb" />
+          <Text style={styles.syncButtonText}>Sync with Robot</Text>
+        </TouchableOpacity>
+
         {/* Restart */}
         <TouchableOpacity style={styles.restartButton} onPress={() => setRestartVisible(true)}>
           <RefreshCw size={15} color="#dc2626" />
@@ -741,6 +748,20 @@ const styles = StyleSheet.create({
 
   progressBarTrack: { height: 3, backgroundColor: "#e5e7eb", marginHorizontal: 16, marginBottom: 2 },
   progressBarFill:  { height: 3, backgroundColor: "#2563eb", borderRadius: 2 },
+
+  syncButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff",
+    marginBottom: 12,
+  },
+  syncButtonText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
 
   restartButton: {
     flexDirection: "row",
