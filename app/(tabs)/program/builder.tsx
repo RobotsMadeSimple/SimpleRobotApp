@@ -1,5 +1,6 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useBuiltPrograms, useGrids, useNanoIO, usePoints, useRelayIO, useTools } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useTools } from "@/src/providers/RobotProvider";
+import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
@@ -32,6 +33,7 @@ import {
   RefreshCw,
   Repeat2,
   Trash2,
+  Upload,
   Wrench,
   Home,
   X,
@@ -2645,23 +2647,49 @@ function VariableEditModal({
 // ── Builder screen ────────────────────────────────────────────────────────────
 
 export default function BuilderScreen() {
-  const { name: editName, isRoutine: isRoutineParam } = useLocalSearchParams<{ name?: string; isRoutine?: string }>();
+  const { name: editName, isRoutine: isRoutineParam, source: sourceParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string }>();
   const builtPrograms = useBuiltPrograms();
-  const isRoutineMode = isRoutineParam === "1" || builtPrograms.find(p => p.name === editName)?.isRoutine === true;
+  const connected     = useConnected();
+  const isLocalMode   = sourceParam === 'local';
 
-  const existing = editName
+  const existing = !isLocalMode && editName
     ? builtPrograms.find(p => p.name === editName) ?? null
     : null;
+
+  const [isRoutineMode, setIsRoutineMode] = useState(
+    () => isRoutineParam === "1" || (!isLocalMode && builtPrograms.find(p => p.name === editName)?.isRoutine === true)
+  );
 
   const [programName, setProgramName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [steps, setSteps]             = useState<ProgramStep[]>(existing?.steps ?? []);
   const [variables, setVariables]     = useState<ProgramVariable[]>(existing?.variables ?? []);
   const [coverImage, setCoverImage]   = useState<string | null>(null);
+  const [localLoading, setLocalLoading] = useState(isLocalMode && !!editName);
 
-  // Load existing cover image when editing
+  // Load local program from AsyncStorage when editing in local mode
   useEffect(() => {
-    if (!editName) return;
+    if (!isLocalMode || !editName) return;
+    Promise.all([
+      LocalProgramService.getAll(),
+      LocalProgramService.getImage(editName),
+    ]).then(([programs, img]) => {
+      const prog = programs.find(p => p.name === editName);
+      if (prog) {
+        setProgramName(prog.name);
+        setDescription(prog.description);
+        setSteps(rehydrateIds(prog.steps));
+        setVariables(prog.variables ?? []);
+        setIsRoutineMode(prog.isRoutine ?? false);
+      }
+      if (img) setCoverImage(img);
+      setLocalLoading(false);
+    });
+  }, []);
+
+  // Load existing cover image when editing a robot program
+  useEffect(() => {
+    if (!editName || isLocalMode) return;
     robotClient.getProgramImages()
       .then(imgs => { if (imgs[editName]) setCoverImage(imgs[editName]!); })
       .catch(() => {});
@@ -3088,23 +3116,42 @@ export default function BuilderScreen() {
 
   // ── Save / Run ────────────────────────────────────────────────────────────
 
+  function buildProg(): BuiltProgram {
+    return {
+      name: programName.trim(),
+      description: description.trim(),
+      steps,
+      variables: variables.length > 0 ? variables : undefined,
+      lastUpdatedUnixMs: Date.now(),
+      isRoutine: isRoutineMode,
+    };
+  }
+
   async function save(): Promise<boolean> {
     const name = programName.trim();
     if (!name) {
       Alert.alert("Name required", "Please give the program a name.");
       return false;
     }
-    const prog: BuiltProgram = {
-      name, description: description.trim(), steps,
-      variables: variables.length > 0 ? variables : undefined,
-      lastUpdatedUnixMs: 0,
-      isRoutine: isRoutineMode,
-    };
-    await robotClient.saveBuiltProgram(prog).catch(() => {});
-    if (coverImage) {
-      await robotClient.saveProgramImage(name, coverImage).catch(() => {});
+    const prog = buildProg();
+    if (isLocalMode) {
+      if (editName && editName !== name) await LocalProgramService.delete(editName);
+      await LocalProgramService.save(prog);
+      if (coverImage) await LocalProgramService.saveImage(name, coverImage);
+    } else {
+      await robotClient.saveBuiltProgram(prog).catch(() => {});
+      if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
     }
     return true;
+  }
+
+  async function saveToRobot() {
+    const name = programName.trim();
+    if (!name) { Alert.alert("Name required", "Please give the program a name."); return; }
+    const prog = buildProg();
+    await robotClient.saveBuiltProgram(prog).catch(() => {});
+    if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
+    Alert.alert("Saved to Robot", `"${name}" has been saved to the robot.`);
   }
 
   async function handleSave() { if (await save()) router.back(); }
@@ -3118,9 +3165,22 @@ export default function BuilderScreen() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  if (localLoading) {
+    return (
+      <View style={styles.container}>
+        <SubPageHeader title="Loading…" />
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <Text style={{ fontSize: 14, color: "#9ca3af" }}>Loading local program…</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const builderTitle = `${isRoutineMode ? "Routine" : "Program"} Builder${isLocalMode ? " · Local" : ""}`;
+
   return (
     <View style={styles.container}>
-      <SubPageHeader title={isRoutineMode ? "Routine Builder" : "Program Builder"} />
+      <SubPageHeader title={builderTitle} />
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -3306,6 +3366,12 @@ export default function BuilderScreen() {
 
       {/* Bottom bar */}
       <View style={styles.bottomBar}>
+        {isLocalMode && connected && (
+          <TouchableOpacity style={styles.uploadBtn} onPress={saveToRobot} activeOpacity={0.8}>
+            <Upload size={15} color="#16a34a" />
+            <Text style={styles.uploadBtnText}>Save to Robot</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.8}>
           <Wrench size={16} color="#2563eb" />
           <Text style={styles.saveBtnText}>Save</Text>
@@ -3562,6 +3628,12 @@ const styles = StyleSheet.create({
     paddingVertical: 13, backgroundColor: "#eff6ff",
   },
   saveBtnText: { fontSize: 15, fontWeight: "600", color: "#2563eb" },
+  uploadBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 7, borderWidth: 1.5, borderColor: "#16a34a", borderRadius: 12,
+    paddingVertical: 13, backgroundColor: "#f0fdf4",
+  },
+  uploadBtnText: { fontSize: 15, fontWeight: "600", color: "#16a34a" },
   runBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 7, backgroundColor: "#2563eb", borderRadius: 12, paddingVertical: 13,
