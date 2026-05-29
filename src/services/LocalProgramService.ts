@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
+import { Share } from 'react-native';
 import { BuiltProgram } from '../models/robotModels';
 
 const PROGRAMS_KEY = 'local_programs_v1';
@@ -37,10 +37,7 @@ export const LocalProgramService = {
 
   async exportAsFile(program: BuiltProgram): Promise<void> {
     const json = JSON.stringify(program, null, 2);
-    const safe = program.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const path = `${FileSystem.cacheDirectory ?? ''}${safe}.json`;
-    await FileSystem.writeAsStringAsync(path, json, { encoding: FileSystem.EncodingType.UTF8 });
-    await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: `Export "${program.name}"` });
+    await Share.share({ message: json, title: `Export "${program.name}"` });
   },
 
   async importFromFile(): Promise<BuiltProgram | null> {
