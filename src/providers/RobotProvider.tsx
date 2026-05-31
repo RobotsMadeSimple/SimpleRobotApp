@@ -2,10 +2,7 @@ import { subscribeRobot } from "@/src/connections/robotState";
 import { BuiltProgram, Grid, NanoState, Point, ProgramSummary, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
-import { RobotSnapshot, RobotSnapshotService } from "@/src/services/RobotSnapshotService";
-import { router } from "expo-router";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Alert } from "react-native";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 type RobotWithStatus = RobotInfo & { status: RobotStatus };
 
@@ -37,7 +34,6 @@ type DataContextType = {
   nanoIO:              NanoState[];
   relayIO:             UsbRelayState | null;
   grids:               Grid[];
-  snapshot:            RobotSnapshot | null;
 };
 
 const DataContext = createContext<DataContextType>({
@@ -48,7 +44,6 @@ const DataContext = createContext<DataContextType>({
   nanoIO:              [],
   relayIO:             null,
   grids:               [],
-  snapshot:            null,
 });
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -64,12 +59,6 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [relayIO,             setRelayIO]             = useState<UsbRelayState | null>(null);
   const [grids,               setGrids]               = useState<Grid[]>([]);
   const [selectedRobotInfo,   setSelectedRobotInfo]   = useState<RobotInfo | null>(null);
-
-  // ── Snapshot state ────────────────────────────────────────────────────────
-  const [snapshot,      setSnapshot]      = useState<RobotSnapshot | null>(null);
-  const lastSerialRef                     = useRef<string | null>(null);
-  const savedFingerprintRef               = useRef<string>('');
-  const justReconnectedRef                = useRef<boolean>(false);
 
   useEffect(() => {
     const unsubDiscovery     = robotDiscovery.subscribe(setRobots);
@@ -103,96 +92,6 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Track the serial number of the last robot we connected to; mark reconnection
-  useEffect(() => {
-    if (status.connected && selectedRobotInfo?.serialNumber) {
-      lastSerialRef.current = selectedRobotInfo.serialNumber;
-      justReconnectedRef.current = true;
-    }
-  }, [status.connected, selectedRobotInfo]);
-
-  // Auto-save snapshot whenever connected data changes (debounced 1s)
-  useEffect(() => {
-    if (!status.connected || !builtProgramsLoaded) return;
-    const serial = lastSerialRef.current ?? selectedRobotInfo?.serialNumber;
-    if (!serial) return;
-
-    // Fingerprint prevents saving identical snapshots on every render
-    const fp = `${serial}_${status.lastBuiltProgramUpdate}_${status.lastPointUpdate}_${status.lastToolUpdate}_${status.lastGridUpdate}`;
-    if (fp === savedFingerprintRef.current) return;
-
-    const timer = setTimeout(async () => {
-      savedFingerprintRef.current = fp;
-
-      if (justReconnectedRef.current) {
-        justReconnectedRef.current = false;
-        const oldSnap = await RobotSnapshotService.load(serial);
-        if (oldSnap) {
-          const diff = RobotSnapshotService.computeDiff(oldSnap, {
-            programs: builtPrograms,
-            tools,
-            grids,
-          });
-          if (RobotSnapshotService.hasDifferences(diff)) {
-            Alert.alert(
-              'Sync Available',
-              'Changes were detected between your phone and the robot. Would you like to review and sync?',
-              [
-                { text: 'Later', style: 'cancel' },
-                { text: 'Sync Now', onPress: () => router.push('/(tabs)/robot/sync') },
-              ],
-            );
-          }
-        }
-      }
-
-      const snap: RobotSnapshot = {
-        robotSerial: serial,
-        robotName:   selectedRobotInfo?.robotName ?? '',
-        savedAt:     Date.now(),
-        programs:    builtPrograms.filter(p => !p.isRoutine),
-        routines:    builtPrograms.filter(p =>  p.isRoutine),
-        tools,
-        grids,
-        points,
-      };
-      RobotSnapshotService.save(snap);
-      setSnapshot(snap);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [
-    status.connected,
-    builtProgramsLoaded,
-    status.lastBuiltProgramUpdate,
-    status.lastPointUpdate,
-    status.lastToolUpdate,
-    status.lastGridUpdate,
-  ]);
-
-  // Load snapshot from storage when offline so pickers keep working
-  useEffect(() => {
-    if (status.connected) {
-      setSnapshot(null);
-      return;
-    }
-    const serial = lastSerialRef.current;
-    if (!serial) return;
-    RobotSnapshotService.load(serial).then(snap => {
-      if (snap) setSnapshot(snap);
-    });
-  }, [status.connected]);
-
-  // ── Effective data: live when connected, snapshot fallback when offline ───
-  const isOffline = !status.connected;
-  const effectivePoints   = isOffline && snapshot ? snapshot.points   : points;
-  const effectiveTools    = isOffline && snapshot ? snapshot.tools    : tools;
-  const effectiveGrids    = isOffline && snapshot ? snapshot.grids    : grids;
-  const effectivePrograms = isOffline && snapshot
-    ? [...snapshot.programs, ...snapshot.routines]
-    : builtPrograms;
-  const effectiveLoaded   = isOffline && snapshot ? true : builtProgramsLoaded;
-
   // ── Status context value ─────────────────────────────────────────────────
 
   const robotsWithStatus = useMemo<RobotWithStatus[]>(
@@ -220,15 +119,14 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   // ── Data context value ───────────────────────────────────────────────────
 
   const dataContextValue = useMemo<DataContextType>(() => ({
-    points:              effectivePoints,
-    tools:               effectiveTools,
-    builtPrograms:       effectivePrograms,
-    builtProgramsLoaded: effectiveLoaded,
+    points,
+    tools,
+    builtPrograms,
+    builtProgramsLoaded,
     nanoIO,
     relayIO,
-    grids:               effectiveGrids,
-    snapshot,
-  }), [effectivePoints, effectiveTools, effectivePrograms, effectiveLoaded, nanoIO, relayIO, effectiveGrids, snapshot]);
+    grids,
+  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO, relayIO, grids]);
 
   return (
     <StatusContext.Provider value={statusContextValue}>
@@ -256,4 +154,3 @@ export function useBuiltProgramsLoaded() { return useContext(DataContext).builtP
 export function useNanoIO()              { return useContext(DataContext).nanoIO; }
 export function useRelayIO()             { return useContext(DataContext).relayIO; }
 export function useGrids()               { return useContext(DataContext).grids; }
-export function useSnapshot()            { return useContext(DataContext).snapshot; }

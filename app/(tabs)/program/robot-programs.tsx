@@ -1,18 +1,20 @@
-import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
+import { useBuiltPrograms, useConnected, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ChevronRight, Cpu, Repeat2 } from "lucide-react-native";
+import { Box, Cpu, Plus, Trash2 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-
 // ── Status theming ─────────────────────────────────────────────────────────────
 
 type StatusTheme = { bg: string; text: string; bar: string; dot: string };
@@ -27,8 +29,6 @@ const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
   Complete:  { bg: "#dcfce7", text: "#15803d", bar: "#22c55e", dot: "#22c55e" },
   Error:     { bg: "#fef2f2", text: "#dc2626", bar: "#ef4444", dot: "#ef4444" },
 };
-
-// ── Action buttons ─────────────────────────────────────────────────────────────
 
 type ActionBtn = { label: string; bg: string; onPress: () => void };
 
@@ -67,16 +67,22 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   }
 }
 
-// ── Running Program Card ───────────────────────────────────────────────────────
+// ── Program Card ───────────────────────────────────────────────────────────────
 
-function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
+function ProgramCard({
+  p,
+  image,
+  isBuilt,
+  anotherBuiltRunning,
+}: {
   p: ProgramSummary;
-  isBuilt: boolean;
-  anotherBuiltRunning: boolean;
+  image: string | null;
+  isBuilt?: boolean;
+  anotherBuiltRunning?: boolean;
 }) {
   const theme = STATUS_THEME[p.status] ?? STATUS_THEME.Ready;
   const pct = p.maxStepCount > 0 ? Math.round((p.currentStepNumber / p.maxStepCount) * 100) : 0;
-  const buttons = getButtons(p, isBuilt);
+  const buttons = getButtons(p, isBuilt ?? false);
 
   const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => { progressAnim.setValue(pct); }, [pct]);
@@ -88,11 +94,11 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
     <TouchableOpacity
       activeOpacity={0.85}
       onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`)}
-      style={styles.runningCard}
+      style={styles.card}
     >
       <View style={[styles.statusBar, { backgroundColor: theme.bg }]}>
         <View style={[styles.statusDot, { backgroundColor: theme.dot }]} />
-        <Text style={[styles.statusText, { color: theme.text }]} numberOfLines={1}>
+        <Text style={[styles.statusText, { color: theme.text }]} numberOfLines={1} ellipsizeMode="tail">
           {statusLabel}
         </Text>
         {isBuilt && (
@@ -103,17 +109,27 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
         )}
       </View>
 
-      <View style={styles.runningCardBody}>
-        <View style={styles.runningNameRow}>
-          <Text style={styles.runningName} numberOfLines={1}>{p.name}</Text>
+      <View style={styles.cardBody}>
+        <View style={styles.headerRow}>
+          <View style={styles.imageWrap}>
+            {image ? (
+              <Image source={{ uri: `data:image/png;base64,${image}` }} style={styles.image} resizeMode="cover" />
+            ) : (
+              <View style={styles.imageFallback}><Box size={28} color="#9ca3af" /></View>
+            )}
+          </View>
+          <View style={styles.infoCol}>
+            <Text style={styles.programName} numberOfLines={1}>{p.name}</Text>
+            <Text style={styles.programDesc} numberOfLines={2}>{p.description || "No description"}</Text>
+          </View>
         </View>
 
-        {!!p.currentStepDescription && (
-          <View style={styles.stepRow}>
-            <Text style={styles.stepLabel}>STEP</Text>
-            <Text style={styles.stepText} numberOfLines={2}>{p.currentStepDescription}</Text>
-          </View>
-        )}
+        <View style={styles.stepRow}>
+          <Text style={styles.stepLabel}>STEP</Text>
+          <Text style={styles.stepText} numberOfLines={2} ellipsizeMode="tail">
+            {p.currentStepDescription || "—"}
+          </Text>
+        </View>
 
         <View style={styles.progressRow}>
           <View style={styles.progressTrack}>
@@ -154,161 +170,128 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
   );
 }
 
-// ── Nav Tile ───────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function NavTile({
-  icon,
-  label,
-  count,
-  countLabel,
-  color,
-  bg,
-  onPress,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  count: number;
-  countLabel: string;
-  color: string;
-  bg: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity style={styles.navTile} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.navTileIcon, { backgroundColor: bg }]}>
-        {icon}
-      </View>
-      <View style={styles.navTileBody}>
-        <Text style={styles.navTileLabel}>{label}</Text>
-        <Text style={styles.navTileCount}>{count} {countLabel}</Text>
-      </View>
-      <ChevronRight size={18} color="#9ca3af" />
-    </TouchableOpacity>
-  );
+function syntheticSummary(bp: BuiltProgram): ProgramSummary {
+  return {
+    name: bp.name,
+    description: bp.description,
+    status: "Ready",
+    currentStepDescription: "",
+    currentStepNumber: 0,
+    maxStepCount: bp.steps.length,
+    errorDescription: "",
+    warningDescription: "",
+    start: false,
+    stop: false,
+    reset: false,
+    abort: false,
+  };
 }
 
-// ── Screen ─────────────────────────────────────────────────────────────────────
+// ── Screen ────────────────────────────────────────────────────────────────────
 
-export default function ProgramScreen() {
+export default function RobotProgramsScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
+  const connected        = useConnected();
+  const [images, setImages] = useState<Record<string, string | null>>({});
+
+  useEffect(() => robotClient.onProgramImages(setImages), []);
 
   const builtNames = new Set(builtPrograms.map(p => p.name));
 
-  const isActiveStatus = (s: ProgramStatus) => s !== "Ready";
-  const activePrograms = programSummaries.filter(p => isActiveStatus(p.status));
+  const builtCards = builtPrograms
+    .filter(bp => !bp.isRoutine)
+    .map(bp => {
+      const live = programSummaries.find(p => p.name === bp.name);
+      return { summary: live ?? syntheticSummary(bp), bp, isBuilt: true as const };
+    });
 
-  // Track the last program that was in a non-Ready state so it stays visible
-  const lastRanNameRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (activePrograms.length > 0) {
-      lastRanNameRef.current = activePrograms[0].name;
-    }
-  }, [activePrograms]);
+  const externalCards = programSummaries
+    .filter(p => !builtNames.has(p.name))
+    .map(p => ({ summary: p, isBuilt: false as const }));
 
-  const displayedProgram: ProgramSummary | null =
-    activePrograms.length > 0
-      ? activePrograms[0]
-      : lastRanNameRef.current
-        ? (programSummaries.find(p => p.name === lastRanNameRef.current) ?? null)
-        : null;
+  const allCards = [...builtCards, ...externalCards];
+
+  const isActiveStatus = (s: ProgramStatus) =>
+    s === "Running" || s === "Starting" || s === "Finishing";
 
   function anotherBuiltRunning(forName: string) {
     return programSummaries.some(
-      p => p.name !== forName && builtNames.has(p.name) &&
-        (p.status === "Running" || p.status === "Starting" || p.status === "Finishing")
+      p => p.name !== forName && builtNames.has(p.name) && isActiveStatus(p.status)
     );
   }
 
-  const robotProgramCount = builtPrograms.filter(p => !p.isRoutine).length +
-    programSummaries.filter(p => !builtNames.has(p.name)).length;
-  const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
+  function handleDelete(name: string) {
+    Alert.alert("Delete Program", `Delete "${name}" from the robot? This cannot be undone.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}),
+      },
+    ]);
+  }
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Now Running / Last Ran */}
-      <Text style={styles.sectionLabel}>
-        {displayedProgram && displayedProgram.status === "Ready" ? "LAST RAN" : "NOW RUNNING"}
-      </Text>
-      {displayedProgram ? (
-        <RunningCard
-          key={displayedProgram.name}
-          p={displayedProgram}
-          isBuilt={builtNames.has(displayedProgram.name)}
-          anotherBuiltRunning={anotherBuiltRunning(displayedProgram.name)}
-        />
-      ) : (
-        <View style={styles.nothingRunning}>
-          <Text style={styles.nothingRunningText}>No program has been run yet</Text>
-        </View>
-      )}
+    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+      <SubPageHeader title="Programs" />
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {allCards.length === 0 ? (
+          <View style={styles.empty}>
+            <Box size={44} color="#d1d5db" />
+            <Text style={styles.emptyTitle}>{connected ? "No Programs" : "Not Connected"}</Text>
+            <Text style={styles.emptySubtitle}>
+              {connected
+                ? "Create a program below to get started."
+                : "Connect to a robot to see its programs."}
+            </Text>
+          </View>
+        ) : (
+          allCards.map(c => (
+            <ProgramCard
+              key={c.summary.name}
+              p={c.summary}
+              image={images[c.summary.name] ?? null}
+              isBuilt={c.isBuilt}
+              anotherBuiltRunning={c.isBuilt ? anotherBuiltRunning(c.summary.name) : false}
+            />
+          ))
+        )}
 
-      {/* Nav tiles */}
-      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>PROGRAMS</Text>
-
-      <NavTile
-        icon={<Cpu size={20} color="#2563eb" />}
-        label="Programs"
-        count={robotProgramCount}
-        countLabel={robotProgramCount === 1 ? "program" : "programs"}
-        color="#2563eb"
-        bg="#eff6ff"
-        onPress={() => router.push("/(tabs)/program/robot-programs")}
-      />
-
-      <NavTile
-        icon={<Repeat2 size={20} color="#7c3aed" />}
-        label="Routines"
-        count={routineCount}
-        countLabel={routineCount === 1 ? "routine" : "routines"}
-        color="#7c3aed"
-        bg="#f5f3ff"
-        onPress={() => router.navigate("/program/routines")}
-      />
-    </ScrollView>
+        <TouchableOpacity
+          style={styles.addCard}
+          onPress={() => router.navigate("/program/builder")}
+          activeOpacity={0.7}
+        >
+          <Plus size={16} color="#2563eb" />
+          <Text style={styles.addCardText}>New Program</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  scroll:   { flex: 1, backgroundColor: "#f3f4f6" },
-  content:  { padding: 16, paddingBottom: 32, gap: 10 },
+  scroll:  { flex: 1, backgroundColor: "#f3f4f6" },
+  content: { padding: 16, paddingBottom: 32, gap: 12 },
 
-  nothingRunning: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  nothingRunningText: { fontSize: 13, color: "#9ca3af" },
-
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 2,
-  },
-
-  // Running program card
-  runningCard: {
+  card: {
     backgroundColor: "#fff",
     borderRadius: 16,
     overflow: "hidden",
     shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    elevation: 3,
   },
   statusBar: {
     flexDirection: "row",
@@ -331,10 +314,17 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   builtBadgeText: { fontSize: 10, fontWeight: "700", color: "#2563eb", letterSpacing: 0.4 },
-
-  runningCardBody: { padding: 14, gap: 10 },
-  runningNameRow:  { flexDirection: "row", alignItems: "center" },
-  runningName:     { flex: 1, fontSize: 17, fontWeight: "700", color: "#111827" },
+  cardBody:   { padding: 14, gap: 12 },
+  headerRow:  { flexDirection: "row", gap: 12, alignItems: "center" },
+  imageWrap:  { width: 72, height: 72, borderRadius: 10, overflow: "hidden" },
+  image:      { width: 72, height: 72 },
+  imageFallback: {
+    width: 72, height: 72, borderRadius: 10,
+    backgroundColor: "#f3f4f6", justifyContent: "center", alignItems: "center",
+  },
+  infoCol:     { flex: 1, gap: 4, justifyContent: "center" },
+  programName: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  programDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
 
   stepRow:   { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   stepLabel: { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.6, paddingTop: 2 },
@@ -349,28 +339,26 @@ const styles = StyleSheet.create({
   actionBtn:  { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 
-  // Nav tiles
-  navTile: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
+  addCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 14,
-    gap: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  navTileIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
     justifyContent: "center",
-    alignItems: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#2563eb",
+    borderRadius: 14,
+    paddingVertical: 14,
+    backgroundColor: "transparent",
   },
-  navTileBody:  { flex: 1 },
-  navTileLabel: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  navTileCount: { fontSize: 12, color: "#6b7280", marginTop: 1 },
+  addCardText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+
+  empty: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 40,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  emptyTitle:    { fontSize: 18, fontWeight: "700", color: "#374151" },
+  emptySubtitle: { fontSize: 13, color: "#9ca3af", textAlign: "center", paddingHorizontal: 40, lineHeight: 20 },
 });

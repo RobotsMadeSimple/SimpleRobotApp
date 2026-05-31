@@ -3208,8 +3208,8 @@ export default function BuilderScreen() {
           />
           <View style={styles.metaSep} />
 
-          {/* Cover image row */}
-          <View style={styles.imageRow}>
+          {/* Cover image row — hidden for routines */}
+          {!isRoutineMode && <View style={styles.imageRow}>
             {/* Preview */}
             <View style={styles.imagePreviewWrap}>
               {coverImage ? (
@@ -3235,7 +3235,7 @@ export default function BuilderScreen() {
                 <Text style={styles.imageBtnText}>Photo Library</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </View>}
         </View>
 
         {/* Variables */}
