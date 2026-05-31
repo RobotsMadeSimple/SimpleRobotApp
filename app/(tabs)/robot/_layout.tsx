@@ -10,7 +10,6 @@ export default function RobotLayout() {
         name="config"
         options={{ headerShown: false }}
       />
-      <Stack.Screen name="sync" options={{ headerShown: false }} />
     </Stack>
   );
 }

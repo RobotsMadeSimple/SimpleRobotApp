@@ -8,6 +8,7 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,7 +17,7 @@ import {
 } from "react-native";
 
 export default function Robot() {
-  const robots = useRobots();
+  const robots        = useRobots();
   const selectedRobot = useSelectedRobot();
   const [manualIp, setManualIp] = useState("");
 
@@ -27,11 +28,11 @@ export default function Robot() {
   function connectManual() {
     if (!manualIp.trim()) return;
     const robot = {
-      robotName: "Manual",
-      robotType: "",
-      ipAddress: manualIp.trim(),
-      port: 9000,
-      serialNumber: "",
+      robotName:       "Manual",
+      robotType:       "",
+      ipAddress:       manualIp.trim(),
+      port:            9000,
+      serialNumber:    "",
       controlEndpoint: "control",
     };
     setSelectedRobot(robot);
@@ -40,7 +41,7 @@ export default function Robot() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Manual connection card */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>MANUAL CONNECTION</Text>
@@ -82,40 +83,34 @@ export default function Robot() {
         </View>
       </View>
 
-      <FlatList
-        contentContainerStyle={styles.list}
-        data={robots}
-        keyExtractor={(r) => r.serialNumber || r.ipAddress}
-        renderItem={({ item }) => <RobotCard robot={item} />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <WifiOff size={32} color="#9ca3af" />
-            </View>
-            <Text style={styles.emptyTitle}>Scanning for robots…</Text>
-            <Text style={styles.emptySubtext}>
-              Make sure your robot is powered on and on the same network.
-            </Text>
+      {robots.length === 0 ? (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <WifiOff size={32} color="#9ca3af" />
           </View>
-        }
-      />
-    </View>
+          <Text style={styles.emptyTitle}>Scanning for robots…</Text>
+          <Text style={styles.emptySubtext}>
+            Make sure your robot is powered on and on the same network.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          scrollEnabled={false}
+          contentContainerStyle={styles.list}
+          data={robots}
+          keyExtractor={(r) => r.serialNumber || r.ipAddress}
+          renderItem={({ item }) => <RobotCard robot={item} />}
+        />
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f3f4f6",
-  },
-  section: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  sectionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+  container:     { flex: 1, backgroundColor: "#f3f4f6" },
+  scrollContent: { paddingBottom: 32 },
+  section:       { paddingHorizontal: 16, paddingTop: 16 },
+  sectionRow:    { flexDirection: "row", alignItems: "center" },
   sectionLabel: {
     fontSize: 11,
     fontWeight: "700",
@@ -133,11 +128,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
+  inputRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   iconTile: {
     width: 36,
     height: 36,
@@ -157,30 +148,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#f9fafb",
     color: "#111827",
   },
-  connectBtn: {
-    backgroundColor: "#2563eb",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 9,
-  },
-  connectBtnDisabled: {
-    backgroundColor: "#93c5fd",
-  },
-  connectBtnText: {
-    color: "#ffffff",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  list: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 20,
-  },
+  connectBtn:         { backgroundColor: "#2563eb", paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9 },
+  connectBtnDisabled: { backgroundColor: "#93c5fd" },
+  connectBtnText:     { color: "#ffffff", fontWeight: "600", fontSize: 14 },
+  list:               { paddingHorizontal: 16, paddingTop: 8 },
   emptyState: {
     alignItems: "center",
     paddingTop: 40,
     paddingHorizontal: 32,
     gap: 10,
+    marginBottom: 8,
   },
   emptyIcon: {
     width: 64,
@@ -193,15 +170,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#374151",
-  },
-  emptySubtext: {
-    fontSize: 13,
-    color: "#9ca3af",
-    textAlign: "center",
-    lineHeight: 19,
-  },
+  emptyTitle:   { fontSize: 16, fontWeight: "600", color: "#374151" },
+  emptySubtext: { fontSize: 13, color: "#9ca3af", textAlign: "center", lineHeight: 19 },
 });

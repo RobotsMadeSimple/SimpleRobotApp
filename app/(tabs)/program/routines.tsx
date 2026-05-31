@@ -1,11 +1,9 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
-import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Plus, Repeat2, Trash2 } from "lucide-react-native";
+import { Box, Plus, Repeat2 } from "lucide-react-native";
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,17 +14,6 @@ import {
 export default function RoutinesScreen() {
   const allPrograms = useBuiltPrograms();
   const routines = allPrograms.filter(p => p.isRoutine);
-
-  function deleteRoutine(name: string) {
-    Alert.alert("Delete Routine", `Delete "${name}"? This cannot be undone.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete", style: "destructive", onPress: () => {
-          robotClient.deleteBuiltProgram(name).catch(() => {});
-        },
-      },
-    ]);
-  }
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
@@ -47,7 +34,12 @@ export default function RoutinesScreen() {
           </View>
         ) : (
           routines.map(r => (
-            <View key={r.name} style={styles.card}>
+            <TouchableOpacity
+              key={r.name}
+              style={styles.card}
+              onPress={() => router.push(`/program/builder?name=${encodeURIComponent(r.name)}`)}
+              activeOpacity={0.75}
+            >
               <View style={styles.cardIcon}>
                 <Repeat2 size={20} color="#7c3aed" />
               </View>
@@ -58,21 +50,7 @@ export default function RoutinesScreen() {
                 )}
                 <Text style={styles.cardMeta}>{r.steps.length} step{r.steps.length !== 1 ? "s" : ""}</Text>
               </View>
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() => router.push(`/program/builder?name=${encodeURIComponent(r.name)}`)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.editBtnText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteBtn}
-                onPress={() => deleteRoutine(r.name)}
-                activeOpacity={0.7}
-              >
-                <Trash2 size={16} color="#dc2626" />
-              </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
           ))
         )}
 
@@ -119,23 +97,6 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
   cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
   cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
-
-  editBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: "#eff6ff",
-    borderRadius: 8,
-  },
-  editBtnText: { fontSize: 13, fontWeight: "600", color: "#2563eb" },
-
-  deleteBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: "#fef2f2",
-    justifyContent: "center",
-    alignItems: "center",
-  },
 
   addCard: {
     flexDirection: "row",
