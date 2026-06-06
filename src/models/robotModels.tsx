@@ -95,7 +95,8 @@ export type ProgramStep = {
   outputValue?: boolean;
   outputCard?: string;     // "stb" | "relay" | "nano"
   outputNanoId?: string;   // only for nano
-  pulseMs?: number;        // >0 = non-blocking pulse; set to outputValue for pulseMs then flip
+  pulseMs?: number;        // >0 = pulse; set to outputValue for pulseMs then flip
+  pulseBlocking?: boolean; // when true, block program execution until pulse completes
   waitMs?: number;
   loopCount?: number;
   loopSteps?: ProgramStep[];

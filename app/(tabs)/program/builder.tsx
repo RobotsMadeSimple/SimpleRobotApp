@@ -1023,6 +1023,18 @@ function StepConfigModal({
   const [subPage, setSubPage]       = useState<SubPage>(null);
   const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint'>('savedPoint');
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
+  const [ioConfig, setIoConfig]     = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    robotClient.getRobotConfig()
+      .then(cfg => setIoConfig({
+        enableStbCard:   cfg.enableStbCard   ?? true,
+        enableNanoCards: cfg.enableNanoCards ?? true,
+        enableRelayCard: cfg.enableRelayCard ?? false,
+      }))
+      .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false }));
+  }, [visible]);
 
   useEffect(() => {
     if (step) {
@@ -1542,10 +1554,10 @@ function StepConfigModal({
             <Text style={ms.fieldLabel}>CARD</Text>
             <View style={ms.segRow}>
               {([
-                { key: "stb",   label: "STB4100", Icon: CircuitBoard, color: "#16a34a" },
-                { key: "relay", label: "Relay",   Icon: Radio,        color: "#0891b2" },
-                { key: "nano",  label: "Nano",    Icon: Cpu,          color: "#4f46e5" },
-              ] as const).map(({ key, label, Icon, color }) => {
+                { key: "stb",   label: "STB4100", Icon: CircuitBoard, color: "#16a34a", enabled: ioConfig?.enableStbCard   ?? true  },
+                { key: "relay", label: "Relay",   Icon: Radio,        color: "#0891b2", enabled: ioConfig?.enableRelayCard  ?? false },
+                { key: "nano",  label: "Nano",    Icon: Cpu,          color: "#4f46e5", enabled: ioConfig?.enableNanoCards  ?? true  },
+              ] as const).filter(c => c.enabled).map(({ key, label, Icon, color }) => {
                 const active = selectedCard === key;
                 return (
                   <TouchableOpacity key={key} style={[ms.seg, active && ms.segActive, { flex: 1, flexDirection: "column", alignItems: "center", gap: 2, paddingVertical: 6 }]}
@@ -1673,8 +1685,17 @@ function StepConfigModal({
                   />
                   <Text style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 6 }}>ms</Text>
                 </View>
+                <View style={[ms.switchRow, { marginTop: 10 }]}>
+                  <Text style={ms.switchLabel}>Block until pulse completes</Text>
+                  <Switch
+                    value={draft!.pulseBlocking ?? false}
+                    onValueChange={v => set({ pulseBlocking: v || undefined })}
+                    trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+                  />
+                </View>
                 <Text style={ms.hintText}>
-                  Output goes {draft!.outputValue ? "ON" : "OFF"} immediately, then flips {draft!.outputValue ? "OFF" : "ON"} after the pulse. Program continues without waiting.
+                  Output goes {draft!.outputValue ? "ON" : "OFF"} immediately, then flips {draft!.outputValue ? "OFF" : "ON"} after the pulse.{" "}
+                  {draft!.pulseBlocking ? "Program waits for the pulse to complete before continuing." : "Program continues without waiting."}
                 </Text>
               </>
             )}
@@ -3094,7 +3115,7 @@ export default function BuilderScreen() {
       offsetRX: undefined, offsetRY: undefined, offsetRZ: undefined,
       toolOffsetX: undefined, toolOffsetY: undefined, toolOffsetZ: undefined,
       toolOffsetRX: undefined, toolOffsetRY: undefined, toolOffsetRZ: undefined,
-      outputNumber: 1, outputValue: false,
+      outputNumber: 1, outputValue: true,
       waitMs: 500,
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined,
