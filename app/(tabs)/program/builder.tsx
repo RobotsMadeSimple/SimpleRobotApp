@@ -46,6 +46,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   BackHandler,
+  Dimensions,
   Image,
   Modal,
   PanResponder,
@@ -2160,6 +2161,13 @@ function IfConditionBody({
         {steps.length === 0 && (
           <Text style={[styles.loopEmptyText, { color: '#9ca3af' }]}>No steps in this branch</Text>
         )}
+        {steps.length > 0 && (
+          <InsertDivider inner
+            onPress={() => onInsertIfInner(branchKey, -1)}
+            onPaste={onPasteIfInner ? () => onPasteIfInner!(branchKey, -1) : undefined}
+            disabled={isDragging}
+          />
+        )}
         {steps.map((inner, j) => (
           <React.Fragment key={inner.id}>
             <LoopInnerRow
@@ -2358,7 +2366,7 @@ function DragHandle({
   stepId: string;
   loopId?: string;
   onStart: (id: string, loopId?: string) => void;
-  onMove: (id: string, dy: number, loopId?: string) => void;
+  onMove: (id: string, dy: number, absY: number, loopId?: string) => void;
   onEnd: (id: string, loopId?: string) => void;
 }) {
   // Keep latest callbacks in refs so the PanResponder (created once) always calls current versions
@@ -2378,7 +2386,7 @@ function DragHandle({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder:  () => true,
       onPanResponderGrant:     ()       => startRef.current(sidRef.current, lidRef.current),
-      onPanResponderMove:      (_, gs)  => moveRef.current(sidRef.current, gs.dy, lidRef.current),
+      onPanResponderMove:      (_, gs)  => moveRef.current(sidRef.current, gs.dy, gs.moveY, lidRef.current),
       onPanResponderRelease:   ()       => endRef.current(sidRef.current, lidRef.current),
       onPanResponderTerminate: ()       => endRef.current(sidRef.current, lidRef.current),
     })
@@ -2418,7 +2426,7 @@ function LoopInnerRow({
   onCopy: () => void;
   onDelete: () => void;
   onDragStart: (id: string, loopId?: string) => void;
-  onDragMove: (id: string, dy: number, loopId?: string) => void;
+  onDragMove: (id: string, dy: number, absY: number, loopId?: string) => void;
   onDragEnd: (id: string, loopId?: string) => void;
   onItemLayout: (id: string, height: number) => void;
 }) {
@@ -2526,7 +2534,7 @@ function StepRow({
   onCopy: () => void;
   onDelete: () => void;
   onDragStart: (id: string, loopId?: string) => void;
-  onDragMove: (id: string, dy: number, loopId?: string) => void;
+  onDragMove: (id: string, dy: number, absY: number, loopId?: string) => void;
   onDragEnd: (id: string, loopId?: string) => void;
   onInsertAfter: () => void;
   onPasteAfter?: () => void;
@@ -2624,6 +2632,13 @@ function StepRow({
           <View style={[styles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
             {innerSteps.length === 0 && (
               <Text style={styles.loopEmptyText}>No steps inside this loop</Text>
+            )}
+            {innerSteps.length > 0 && (
+              <InsertDivider inner
+                onPress={() => onInsertAfterInner(-1)}
+                onPaste={onPasteAfterInner ? () => onPasteAfterInner(-1) : undefined}
+                disabled={isDragging || !!innerDrag}
+              />
             )}
             {innerSteps.map((inner, j) => (
               <React.Fragment key={inner.id}>
@@ -3138,6 +3153,23 @@ export default function BuilderScreen() {
   const [drag, setDrag] = useState<DragInfo | null>(null);
   const dragRef = useRef<DragInfo | null>(null);
 
+  // Auto-scroll while dragging
+  const scrollViewRef      = useRef<ScrollView>(null);
+  const scrollYRef         = useRef(0);
+  const autoScrollTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function startAutoScroll(dir: 1 | -1) {
+    if (autoScrollTimer.current) return;
+    autoScrollTimer.current = setInterval(() => {
+      scrollYRef.current = Math.max(0, scrollYRef.current + dir * 8);
+      scrollViewRef.current?.scrollTo({ y: scrollYRef.current, animated: false });
+    }, 16);
+  }
+
+  function stopAutoScroll() {
+    if (autoScrollTimer.current) { clearInterval(autoScrollTimer.current); autoScrollTimer.current = null; }
+  }
+
   // Heights of every row (step.id → px) — measured via onLayout
   const itemHeightsRef = useRef<Map<string, number>>(new Map());
 
@@ -3182,7 +3214,7 @@ export default function BuilderScreen() {
     }
   }
 
-  function handleDragMove(stepId: string, dy: number, loopId?: string) {
+  function handleDragMove(stepId: string, dy: number, absY: number, loopId?: string) {
     const d = dragRef.current;
     if (!d || d.id !== stepId) return;
 
@@ -3196,9 +3228,16 @@ export default function BuilderScreen() {
       dragRef.current = updated;
       setDrag(updated);
     }
+
+    const screenH = Dimensions.get('window').height;
+    const ZONE = 110;
+    if (absY < ZONE) startAutoScroll(-1);
+    else if (absY > screenH - ZONE) startAutoScroll(1);
+    else stopAutoScroll();
   }
 
   function handleDragEnd(stepId: string, loopId?: string) {
+    stopAutoScroll();
     const d = dragRef.current;
     if (d && d.id === stepId && d.toIndex !== d.fromIndex) {
       if (loopId) {
@@ -3448,10 +3487,13 @@ export default function BuilderScreen() {
     <View style={styles.container}>
       <SubPageHeader title={builderTitle} onBack={handleBack} />
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={drag === null}
+        onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+        scrollEventThrottle={16}
       >
         {/* Name + description */}
         <View style={styles.metaCard}>
@@ -3556,6 +3598,11 @@ export default function BuilderScreen() {
           </View>
         ) : (
           <View style={styles.stepsList}>
+            <InsertDivider
+              onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
+              onPaste={clipboard ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
+              disabled={!!drag}
+            />
             {steps.map((step, i) => (
               <StepRow
                 key={step.id}
