@@ -1728,45 +1728,67 @@ function StepConfigModal({
 
       case "StatusUpdate": {
         const hasVars = (variables ?? []).length > 0;
-        function varChips(field: 'statusMessage' | 'statusWarning' | 'statusError') {
-          if (!hasVars) return null;
-          return (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              style={{ marginTop: 5 }} contentContainerStyle={{ gap: 5 }}
-              keyboardShouldPersistTaps="always">
-              {(variables ?? []).map(v => (
-                <TouchableOpacity key={v.id} onPress={() => {
-                  const cur = (draft![field] ?? '').trimEnd();
-                  set({ [field]: (cur ? cur + ' ' : '') + '$' + v.name });
-                }} activeOpacity={0.7} style={exprStyles.chip}>
-                  <Text style={exprStyles.chipText}>${v.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          );
-        }
+        const severity: 'Info' | 'Warning' | 'Error' =
+          draft!.statusSeverity ??
+          (draft!.statusWarning ? 'Warning' : draft!.statusError ? 'Error' : 'Info');
+        const msgField =
+          severity === 'Warning' ? 'statusWarning' :
+          severity === 'Error'   ? 'statusError'   : 'statusMessage';
+        const msgValue = draft![msgField] ?? '';
+        const SEVERITIES = [
+          { key: 'Info'    as const, label: 'Info'    },
+          { key: 'Warning' as const, label: 'Warning' },
+          { key: 'Error'   as const, label: 'Error'   },
+        ];
         return (
           <>
-            <Text style={ms.fieldLabel}>MESSAGE</Text>
-            <TextInput style={ms.input} value={draft!.statusMessage ?? ""}
-              onChangeText={v => set({ statusMessage: v || undefined })}
+            <Text style={ms.fieldLabel}>SEVERITY</Text>
+            <View style={ms.segRow}>
+              {SEVERITIES.map(({ key, label }) => {
+                const active = severity === key;
+                const color =
+                  key === 'Warning' ? '#d97706' :
+                  key === 'Error'   ? '#dc2626' : '#6b7280';
+                return (
+                  <TouchableOpacity key={key} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => {
+                      const cur = draft![msgField] ?? '';
+                      const newField =
+                        key === 'Warning' ? 'statusWarning' :
+                        key === 'Error'   ? 'statusError'   : 'statusMessage';
+                      set({
+                        statusSeverity: key,
+                        statusMessage: newField === 'statusMessage' ? (cur || undefined) : undefined,
+                        statusWarning: newField === 'statusWarning' ? (cur || undefined) : undefined,
+                        statusError:   newField === 'statusError'   ? (cur || undefined) : undefined,
+                      });
+                    }} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && { color }]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MESSAGE</Text>
+            <TextInput style={ms.input} value={msgValue}
+              onChangeText={v => set({ [msgField]: v || undefined })}
               placeholder={hasVars ? "e.g. Processing item $i of $total…" : "e.g. Picking part from tray…"}
               placeholderTextColor="#c4c4c4" returnKeyType="done" autoFocus />
-            {varChips('statusMessage')}
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>WARNING  (optional)</Text>
-            <TextInput style={ms.input} value={draft!.statusWarning ?? ""}
-              onChangeText={v => set({ statusWarning: v || undefined })}
-              placeholder="Shown as a warning in the monitor" placeholderTextColor="#c4c4c4"
-              returnKeyType="done" />
-            {varChips('statusWarning')}
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ERROR  (optional)</Text>
-            <TextInput style={ms.input} value={draft!.statusError ?? ""}
-              onChangeText={v => set({ statusError: v || undefined })}
-              placeholder="Shown as an error in the monitor" placeholderTextColor="#c4c4c4"
-              returnKeyType="done" />
-            {varChips('statusError')}
+            {hasVars && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                style={{ marginTop: 5 }} contentContainerStyle={{ gap: 5 }}
+                keyboardShouldPersistTaps="always">
+                {(variables ?? []).map(v => (
+                  <TouchableOpacity key={v.id} onPress={() => {
+                    const cur = (draft![msgField] ?? '').trimEnd();
+                    set({ [msgField]: (cur ? cur + ' ' : '') + '$' + v.name });
+                  }} activeOpacity={0.7} style={exprStyles.chip}>
+                    <Text style={exprStyles.chipText}>${v.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
             <Text style={[ms.hintText, { marginTop: 8 }]}>
-              {hasVars ? "Use $varName to embed variable values in any field." : "Appears in the monitor while this step runs."}
+              {hasVars ? "Use $varName to embed variable values." : "Appears in the monitor while this step runs."}
             </Text>
           </>
         );
@@ -3152,7 +3174,7 @@ export default function BuilderScreen() {
       outputNumber: 1, outputValue: true,
       waitMs: 500,
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
-      statusMessage: undefined, statusWarning: undefined, statusError: undefined,
+      statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
       routineName: undefined,
       variableName: undefined, variableExpr: undefined,
       expressions: undefined,

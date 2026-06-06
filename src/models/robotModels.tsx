@@ -103,6 +103,7 @@ export type ProgramStep = {
   statusMessage?: string;
   statusWarning?: string;
   statusError?: string;
+  statusSeverity?: 'Info' | 'Warning' | 'Error';
   routineName?: string;
   // SetVariable
   variableName?: string;
