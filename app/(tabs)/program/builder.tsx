@@ -1,5 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useTools } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
@@ -1016,6 +1016,8 @@ function StepConfigModal({
   const routines      = allPrograms.filter(p => p.isRoutine);
   const nanos         = useNanoIO();
   const relay         = useRelayIO();
+  const robot         = useSelectedRobot();
+  const isAstro       = robot?.robotType === 'ASTRO';
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
@@ -1338,11 +1340,11 @@ function StepConfigModal({
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
               </View>
             ))}
-            {(["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
+            {(isAstro ? ["offsetRZ"] : ["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
               <View key={k} style={{ marginBottom: 10 }}>
                 <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
                 <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k]} expressions={draft!.expressions}
+                  value={draft![k as keyof typeof draft]} expressions={draft!.expressions}
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
               </View>
             ))}
@@ -1365,11 +1367,11 @@ function StepConfigModal({
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
               </View>
             ))}
-            {(["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
+            {(isAstro ? ["toolOffsetRZ"] : ["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
               <View key={k} style={{ marginBottom: 10 }}>
                 <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
                 <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k]} expressions={draft!.expressions}
+                  value={draft![k as keyof typeof draft]} expressions={draft!.expressions}
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
               </View>
             ))}
@@ -1397,11 +1399,11 @@ function StepConfigModal({
                   variables={variables} allowUndefined placeholder="not set" />
               </View>
             ))}
-            {(["overrideRX","overrideRY","overrideRZ"] as const).map(k => (
+            {(isAstro ? ["overrideRZ"] : ["overrideRX","overrideRY","overrideRZ"] as const).map(k => (
               <View key={k} style={{ marginBottom: 10 }}>
                 <Text style={ms.fieldLabel}>{k.replace("override","").toUpperCase()}  (°)</Text>
                 <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k]} expressions={draft!.expressions}
+                  value={draft![k as keyof typeof draft]} expressions={draft!.expressions}
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr}
                   variables={variables} allowUndefined placeholder="not set" />
               </View>
