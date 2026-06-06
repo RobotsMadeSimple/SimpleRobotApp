@@ -27,6 +27,7 @@ import {
   MessageSquare,
   OctagonX,
   PauseCircle,
+  Pencil,
   Play,
   Plus,
   Radio,
@@ -601,7 +602,7 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SetVariable",  label: "Set Variable",       desc: "Assign a new value or expression to a program variable" },
   { type: "PauseProgram", label: "Pause Program",      desc: "Stop the program — operator can Continue or Exit from the monitor" },
   { type: "Label",        label: "Label",              desc: "Mark a named point in the program that GoToLabel can jump back to" },
-  { type: "GoToLabel",    label: "Go To Label",        desc: "Jump to a Label in the same scope (forward or backward, no scope crossing)" },
+  { type: "GoToLabel",    label: "Go To Label",        desc: "Jump to a Label anywhere in the program (forward, backward, or across scopes)" },
   { type: "IfCondition",  label: "If Condition",  desc: "Branch execution based on IO state, sensor values, or variable expressions" },
   { type: "SetTool",      label: "Set Tool",      desc: "Change the active tool TCP offset used for subsequent move steps" },
   { type: "RunHoming",    label: "Run Homing",    desc: "Run the full homing sequence and wait for it to complete before continuing" },
@@ -1967,54 +1968,12 @@ function StepConfigModal({
           </Text>
         );
 
-      case "IfCondition": {
+      case "IfCondition":
         return (
-          <>
-            <Text style={ms.fieldLabel}>IF CONDITION</Text>
-            <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-              Variables: <Text style={{ color: '#0891b2' }}>$varName</Text>. IO: <Text style={{ color: '#0891b2' }}>$stb.in1</Text>-in4, <Text style={{ color: '#0891b2' }}>$stb.out1</Text>-out4, <Text style={{ color: '#0891b2' }}>$relay.1</Text>-$relay.4, <Text style={{ color: '#0891b2' }}>$nano.name.pin</Text>
-            </Text>
-            <ConditionGroupEditor
-              group={draft!.condition ?? { combinator: 'ALL', items: [] }}
-              onChange={c => set({ condition: c })}
-              variables={variables}
-            />
-            {(draft!.elseIfBranches ?? []).map((branch, bi) => (
-              <React.Fragment key={branch.id}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, marginBottom: 2 }}>
-                  <Text style={[ms.fieldLabel, { flex: 1, marginBottom: 0 }]}>ELSE IF {bi + 1}</Text>
-                  <TouchableOpacity
-                    onPress={() => set({ elseIfBranches: (draft!.elseIfBranches ?? []).filter(b => b.id !== branch.id) })}
-                    hitSlop={8} activeOpacity={0.7}>
-                    <X size={14} color="#9ca3af" />
-                  </TouchableOpacity>
-                </View>
-                <ConditionGroupEditor
-                  group={branch.condition}
-                  onChange={updated => set({ elseIfBranches: (draft!.elseIfBranches ?? []).map(b => b.id === branch.id ? { ...b, condition: updated } : b) })}
-                  variables={variables}
-                />
-              </React.Fragment>
-            ))}
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 12, paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, alignSelf: 'flex-start' }}
-              onPress={() => set({ elseIfBranches: [...(draft!.elseIfBranches ?? []), { id: newId(), condition: { combinator: 'ALL', items: [] }, steps: [] }] })}
-              activeOpacity={0.7}>
-              <Plus size={12} color="#374151" />
-              <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151' }}>Add Else If</Text>
-            </TouchableOpacity>
-            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>ELSE BRANCH</Text>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderWidth: 1, borderColor: draft!.elseSteps !== undefined ? '#fca5a5' : '#0891b2', borderRadius: 8, alignSelf: 'flex-start', backgroundColor: draft!.elseSteps !== undefined ? '#fef2f2' : '#e0f2fe' }}
-              onPress={() => set({ elseSteps: draft!.elseSteps !== undefined ? undefined : [] })}
-              activeOpacity={0.7}>
-              {draft!.elseSteps !== undefined
-                ? <><X size={13} color="#ef4444" /><Text style={{ fontSize: 12, fontWeight: '600', color: '#ef4444' }}>  Remove Else</Text></>
-                : <><Plus size={13} color="#0891b2" /><Text style={{ fontSize: 12, fontWeight: '600', color: '#0891b2' }}>  Add Else</Text></>}
-            </TouchableOpacity>
-          </>
+          <Text style={ms.hintText}>
+            Edit conditions using the pencil icon on each branch. Add or remove Else If / Else branches from the block controls at the bottom.
+          </Text>
         );
-      }
 
       default:
         return null;
@@ -2126,13 +2085,18 @@ const ifStyles = StyleSheet.create({
   },
   branchLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
   condSummary: { flex: 1, fontSize: 12, color: '#6b7280' },
-  addBranchBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingVertical: 6, paddingHorizontal: 10,
-    borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
-    backgroundColor: 'transparent', alignSelf: 'flex-start',
+  branchControlRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 10, paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb',
   },
-  addBranchText: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  branchControlBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingVertical: 5, paddingHorizontal: 10,
+    borderRadius: 6, backgroundColor: '#f3f4f6',
+    borderWidth: 1, borderColor: '#e5e7eb',
+  },
+  branchControlText: { fontSize: 11, fontWeight: '700', color: '#6b7280', letterSpacing: 0.3 },
 });
 
 function IfConditionBody({
@@ -2144,6 +2108,7 @@ function IfConditionBody({
   onInsertIfInner,
   onPasteIfInner,
   onUpdateIfCondition,
+  variables,
 }: {
   step: ProgramStep;
   isDragging: boolean;
@@ -2153,11 +2118,40 @@ function IfConditionBody({
   onInsertIfInner: (branchKey: string, afterIndex?: number) => void;
   onPasteIfInner?: (branchKey: string, afterIndex?: number) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
+  variables?: ProgramVariable[];
 }) {
   const theme = STEP_THEME['IfCondition'] ?? STEP_THEME['MoveL'];
-  const ifSteps       = step.ifSteps       ?? [];
+  const ifSteps        = step.ifSteps        ?? [];
   const elseIfBranches = step.elseIfBranches ?? [];
-  const elseSteps     = step.elseSteps;
+  const elseSteps      = step.elseSteps;
+
+  const [editingKey, setEditingKey]           = useState<null | 'if' | string>(null);
+  const [draftCondition, setDraftCondition]   = useState<ConditionGroup | null>(null);
+
+  function openConditionEditor(key: 'if' | string) {
+    const cond =
+      key === 'if'
+        ? (step.condition ?? { combinator: 'ALL' as const, items: [] })
+        : (elseIfBranches.find(b => b.id === key)?.condition ?? { combinator: 'ALL' as const, items: [] });
+    setDraftCondition({ ...cond, items: [...cond.items] });
+    setEditingKey(key);
+  }
+
+  function saveCondition() {
+    if (!editingKey || !draftCondition) return;
+    if (editingKey === 'if') {
+      onUpdateIfCondition({ ...step, condition: draftCondition });
+    } else {
+      onUpdateIfCondition({
+        ...step,
+        elseIfBranches: elseIfBranches.map(b =>
+          b.id === editingKey ? { ...b, condition: draftCondition } : b
+        ),
+      });
+    }
+    setEditingKey(null);
+    setDraftCondition(null);
+  }
 
   function renderBranchSteps(steps: ProgramStep[], branchKey: string) {
     return (
@@ -2207,12 +2201,48 @@ function IfConditionBody({
 
   return (
     <View style={[styles.loopCardBody, { borderTopColor: theme.accent + '40' }]}>
-      {/* IF */}
+
+      {/* Condition editing modal */}
+      <Modal visible={editingKey !== null} transparent animationType="fade"
+        onRequestClose={() => setEditingKey(null)}>
+        <Pressable style={ms.overlay} onPress={() => setEditingKey(null)}>
+          <Pressable style={ms.card} onPress={() => {}}>
+            <View style={ms.header}>
+              <View style={{ width: 18 }} />
+              <Text style={ms.title}>Edit Condition</Text>
+              <TouchableOpacity onPress={() => setEditingKey(null)} hitSlop={12} activeOpacity={0.7}>
+                <X size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 8 }}>
+              {draftCondition && (
+                <ConditionGroupEditor
+                  group={draftCondition}
+                  onChange={setDraftCondition}
+                  variables={variables}
+                />
+              )}
+            </ScrollView>
+            <View style={ms.actions}>
+              <TouchableOpacity style={ms.saveBtn} onPress={saveCondition} activeOpacity={0.7}>
+                <Check size={15} color="white" />
+                <Text style={ms.saveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* IF branch */}
       <View style={ifStyles.branchHeader}>
         <View style={[ifStyles.branchBadge, { backgroundColor: theme.iconBg }]}>
           <Text style={[ifStyles.branchLabel, { color: theme.accent }]}>IF</Text>
         </View>
         <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(step.condition)}</Text>
+        <TouchableOpacity onPress={() => openConditionEditor('if')} hitSlop={8} activeOpacity={0.7}>
+          <Pencil size={13} color="#9ca3af" />
+        </TouchableOpacity>
       </View>
       {renderBranchSteps(ifSteps, 'if')}
 
@@ -2224,6 +2254,9 @@ function IfConditionBody({
               <Text style={[ifStyles.branchLabel, { color: '#374151' }]}>ELSE IF</Text>
             </View>
             <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(branch.condition)}</Text>
+            <TouchableOpacity onPress={() => openConditionEditor(branch.id)} hitSlop={8} activeOpacity={0.7}>
+              <Pencil size={13} color="#9ca3af" />
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) })}
               hitSlop={8} activeOpacity={0.7}>
@@ -2234,20 +2267,8 @@ function IfConditionBody({
         </React.Fragment>
       ))}
 
-      {/* Add Else If */}
-      <TouchableOpacity
-        style={[ifStyles.addBranchBtn, { marginTop: 8 }]}
-        onPress={() => onUpdateIfCondition({
-          ...step,
-          elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: 'ALL', items: [] }, steps: [] }]
-        })}
-        activeOpacity={0.7}>
-        <Plus size={12} color="#374151" />
-        <Text style={ifStyles.addBranchText}>Add Else If</Text>
-      </TouchableOpacity>
-
-      {/* ELSE */}
-      {elseSteps !== undefined ? (
+      {/* ELSE branch */}
+      {elseSteps !== undefined && (
         <>
           <View style={[ifStyles.branchHeader, { marginTop: 10 }]}>
             <View style={[ifStyles.branchBadge, { backgroundColor: '#f3f4f6' }]}>
@@ -2262,15 +2283,30 @@ function IfConditionBody({
           </View>
           {renderBranchSteps(elseSteps, 'else')}
         </>
-      ) : (
-        <TouchableOpacity
-          style={[ifStyles.addBranchBtn, { marginTop: 4 }]}
-          onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
-          activeOpacity={0.7}>
-          <Plus size={12} color="#374151" />
-          <Text style={ifStyles.addBranchText}>Add Else</Text>
-        </TouchableOpacity>
       )}
+
+      {/* Branch structure controls — visually separated from step content */}
+      <View style={ifStyles.branchControlRow}>
+        <TouchableOpacity
+          style={ifStyles.branchControlBtn}
+          onPress={() => onUpdateIfCondition({
+            ...step,
+            elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: 'ALL', items: [] }, steps: [] }],
+          })}
+          activeOpacity={0.7}>
+          <Plus size={11} color="#6b7280" />
+          <Text style={ifStyles.branchControlText}>ELSE IF</Text>
+        </TouchableOpacity>
+        {elseSteps === undefined && (
+          <TouchableOpacity
+            style={ifStyles.branchControlBtn}
+            onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
+            activeOpacity={0.7}>
+            <Plus size={11} color="#6b7280" />
+            <Text style={ifStyles.branchControlText}>ELSE</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -2473,6 +2509,7 @@ function StepRow({
   onPasteIfInner,
   onUpdateIfCondition,
   onItemLayout,
+  variables,
 }: {
   step: ProgramStep;
   index: number;
@@ -2503,6 +2540,7 @@ function StepRow({
   onPasteIfInner?: (branchKey: string, afterIndex?: number) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
   onItemLayout: (id: string, height: number) => void;
+  variables?: ProgramVariable[];
 }) {
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
@@ -2576,6 +2614,7 @@ function StepRow({
             onInsertIfInner={onInsertIfInner}
             onPasteIfInner={onPasteIfInner}
             onUpdateIfCondition={onUpdateIfCondition}
+            variables={variables}
           />
         )}
 
@@ -3524,6 +3563,7 @@ export default function BuilderScreen() {
                 : undefined}
                 onUpdateIfCondition={updateStep}
                 onItemLayout={handleItemLayout}
+                variables={variables}
               />
             ))}
           </View>
