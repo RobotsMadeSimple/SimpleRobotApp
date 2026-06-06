@@ -1726,17 +1726,51 @@ function StepConfigModal({
           </>
         );
 
-      case "StatusUpdate":
+      case "StatusUpdate": {
+        const hasVars = (variables ?? []).length > 0;
+        function varChips(field: 'statusMessage' | 'statusWarning' | 'statusError') {
+          if (!hasVars) return null;
+          return (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              style={{ marginTop: 5 }} contentContainerStyle={{ gap: 5 }}
+              keyboardShouldPersistTaps="always">
+              {(variables ?? []).map(v => (
+                <TouchableOpacity key={v.id} onPress={() => {
+                  const cur = (draft![field] ?? '').trimEnd();
+                  set({ [field]: (cur ? cur + ' ' : '') + '$' + v.name });
+                }} activeOpacity={0.7} style={exprStyles.chip}>
+                  <Text style={exprStyles.chipText}>${v.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          );
+        }
         return (
           <>
-            <Text style={ms.fieldLabel}>STEP MESSAGE</Text>
+            <Text style={ms.fieldLabel}>MESSAGE</Text>
             <TextInput style={ms.input} value={draft!.statusMessage ?? ""}
-              onChangeText={v => set({ statusMessage: v })}
-              placeholder="e.g. Picking part from tray…" placeholderTextColor="#c4c4c4"
-              returnKeyType="done" autoFocus />
-            <Text style={ms.hintText}>Appears as the current step description in the monitor.</Text>
+              onChangeText={v => set({ statusMessage: v || undefined })}
+              placeholder={hasVars ? "e.g. Processing item $i of $total…" : "e.g. Picking part from tray…"}
+              placeholderTextColor="#c4c4c4" returnKeyType="done" autoFocus />
+            {varChips('statusMessage')}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>WARNING  (optional)</Text>
+            <TextInput style={ms.input} value={draft!.statusWarning ?? ""}
+              onChangeText={v => set({ statusWarning: v || undefined })}
+              placeholder="Shown as a warning in the monitor" placeholderTextColor="#c4c4c4"
+              returnKeyType="done" />
+            {varChips('statusWarning')}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ERROR  (optional)</Text>
+            <TextInput style={ms.input} value={draft!.statusError ?? ""}
+              onChangeText={v => set({ statusError: v || undefined })}
+              placeholder="Shown as an error in the monitor" placeholderTextColor="#c4c4c4"
+              returnKeyType="done" />
+            {varChips('statusError')}
+            <Text style={[ms.hintText, { marginTop: 8 }]}>
+              {hasVars ? "Use $varName to embed variable values in any field." : "Appears in the monitor while this step runs."}
+            </Text>
           </>
         );
+      }
 
       case "CallRoutine":
         return (
