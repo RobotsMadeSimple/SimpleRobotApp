@@ -414,7 +414,9 @@ function newId() {
 function stepLabel(step: ProgramStep): string {
   switch (step.type) {
     case "MoveL":
-    case "MoveJ": {
+    case "MoveJ":
+    case "JumpL":
+    case "JumpJ": {
       const offsetKeys    = ["offsetX","offsetY","offsetZ","offsetRX","offsetRY","offsetRZ"];
       const toolOffKeys   = ["toolOffsetX","toolOffsetY","toolOffsetZ","toolOffsetRX","toolOffsetRY","toolOffsetRZ"];
       const overrideKeys  = ["overrideX","overrideY","overrideZ","overrideRX","overrideRY","overrideRZ"];
@@ -478,6 +480,8 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
   switch (type) {
     case "MoveL":
     case "MoveJ":        return <ArrowRight    size={size} color={color} />;
+    case "JumpL":
+    case "JumpJ":        return <ArrowRight    size={size} color={color} />;
     case "SetOutput":    return <Zap           size={size} color={color} />;
     case "Wait":         return <Clock         size={size} color={color} />;
     case "Loop":         return <RefreshCw     size={size} color={color} />;
@@ -501,6 +505,8 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
 const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: string; label: string }> = {
   MoveL:        { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Linear"  },
   MoveJ:        { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Joint"   },
+  JumpL:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Jump Linear"  },
+  JumpJ:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Jump Joint"   },
   SetOutput:    { accent: "#ea580c", iconBg: "#fed7aa", iconColor: "#ea580c", label: "Set Output"   },
   Wait:         { accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait"         },
   Loop:         { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Loop"         },
@@ -523,6 +529,14 @@ function stepDetail(step: ProgramStep, grids?: Grid[]): string | null {
     case "MoveJ": {
       const parts: string[] = [];
       parts.push(`→ ${step.pointName ?? "current pos"}`);
+      if (step.speed != null) parts.push(`${step.speed} mm/s`);
+      return parts.length ? parts.join("  ·  ") : null;
+    }
+    case "JumpL":
+    case "JumpJ": {
+      const parts: string[] = [];
+      parts.push(`→ ${step.pointName ?? "current pos"}`);
+      if (step.jumpZ != null) parts.push(`Z: ${step.jumpZ} mm`);
       if (step.speed != null) parts.push(`${step.speed} mm/s`);
       return parts.length ? parts.join("  ·  ") : null;
     }
@@ -575,6 +589,8 @@ function stepDetail(step: ProgramStep, grids?: Grid[]): string | null {
 const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "MoveL",        label: "Move Linear",   desc: "Move to a saved point in a straight line" },
   { type: "MoveJ",        label: "Move Joint",    desc: "Move to a saved point via joint interpolation" },
+  { type: "JumpL",        label: "Jump Linear",   desc: "Lift, move linearly over the target, then lower — avoids obstacles" },
+  { type: "JumpJ",        label: "Jump Joint",    desc: "Lift, move via joint interpolation over the target, then lower — avoids obstacles" },
   { type: "SetOutput",    label: "Set Output",    desc: "Turn a digital output ON or OFF" },
   { type: "Wait",         label: "Wait",          desc: "Pause execution for a set duration" },
   { type: "Loop",         label: "Loop",          desc: "Repeat a block of steps N times" },
@@ -791,7 +807,7 @@ function ConditionGroupEditor({
 
 // ── Step config modal ─────────────────────────────────────────────────────────
 
-type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride";
+type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
 
 // ── SetVariable helpers ───────────────────────────────────────────────────────
 
@@ -1280,6 +1296,37 @@ function StepConfigModal({
           </>
         );
 
+      case "jumpHeight":
+        return (
+          <>
+            <Text style={ms.hintText}>
+              The robot lifts to the Start Z, transits to the target, then lowers to End Z before descending to the final position.
+              Set only Jump Z to use the same height for both legs.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 10 }]}>JUMP Z  (mm)</Text>
+            <ExpressionInput style={ms.input} fieldKey="jumpZ"
+              value={draft!.jumpZ} expressions={draft!.expressions}
+              onChangeValue={v => set({ jumpZ: v })} onChangeExpr={setExpr} variables={variables}
+              allowUndefined placeholder="required" />
+            <View style={ms.twoCol}>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>START Z OVERRIDE  (mm)</Text>
+                <ExpressionInput style={ms.input} fieldKey="jumpZStart"
+                  value={draft!.jumpZStart} expressions={draft!.expressions}
+                  onChangeValue={v => set({ jumpZStart: v })} onChangeExpr={setExpr} variables={variables}
+                  allowUndefined placeholder="same as Jump Z" />
+              </View>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>END Z OVERRIDE  (mm)</Text>
+                <ExpressionInput style={ms.input} fieldKey="jumpZEnd"
+                  value={draft!.jumpZEnd} expressions={draft!.expressions}
+                  onChangeValue={v => set({ jumpZEnd: v })} onChangeExpr={setExpr} variables={variables}
+                  allowUndefined placeholder="same as Jump Z" />
+              </View>
+            </View>
+          </>
+        );
+
       case "posOffset":
         return (
           <>
@@ -1387,6 +1434,67 @@ function StepConfigModal({
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("speed")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Override Speed</Text>
+                <Text style={ms.subRowValue}>{draft!.speed != null ? `${draft!.speed} mm/s` : "Default"}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOffset")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Position Offset</Text>
+                <Text style={ms.subRowValue}>{hasOffset ? "Set" : "None"}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOverride")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Position Override</Text>
+                <Text style={ms.subRowValue} numberOfLines={1}>{overrideSummary}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[ms.subRow, { borderBottomWidth: 0 }]} onPress={() => setSubPage("toolOffset")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Tool Offset</Text>
+                <Text style={ms.subRowValue}>{hasToolOff ? "Set" : "None"}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+          </>
+        );
+      }
+
+      case "JumpL":
+      case "JumpJ": {
+        const pointLabel = draft!.gridPoint
+          ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
+          : (draft!.pointName ?? "Current Position");
+        const jumpHeightLabel = (() => {
+          if (draft!.jumpZStart != null || draft!.jumpZEnd != null) {
+            const s = draft!.jumpZStart != null ? `Start: ${draft!.jumpZStart} mm` : null;
+            const e = draft!.jumpZEnd   != null ? `End: ${draft!.jumpZEnd} mm`     : null;
+            return [s, e].filter(Boolean).join("  ·  ");
+          }
+          return draft!.jumpZ != null ? `${draft!.jumpZ} mm` : "Not set";
+        })();
+        return (
+          <>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Point</Text>
+                <Text style={ms.subRowValue}>{pointLabel}</Text>
+              </View>
+              <ChevronRight size={16} color="#d1d5db" />
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("jumpHeight")} activeOpacity={0.7}>
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>Jump Height</Text>
+                <Text style={ms.subRowValue}>{jumpHeightLabel}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
@@ -1837,10 +1945,11 @@ function StepConfigModal({
   const subPageTitle: Record<NonNullable<SubPage>, string> = {
     point: "Select Point", speed: "Override Speed",
     posOffset: "Position Offset", toolOffset: "Tool Offset",
-    posOverride: "Position Override",
+    posOverride: "Position Override", jumpHeight: "Jump Height",
   };
 
-  const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ";
+  const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ"
+                  || draft.type === "JumpL"    || draft.type === "JumpJ";
   const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable"
                   || draft.type === "Label"      || draft.type === "GoToLabel";
 

@@ -32,7 +32,7 @@ export type UsbRelayState = {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming';
 
 export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
 
@@ -119,6 +119,10 @@ export type ProgramStep = {
   elseSteps?: ProgramStep[];
   // SetTool
   toolName?: string;
+  // JumpL / JumpJ
+  jumpZ?: number;
+  jumpZStart?: number;
+  jumpZEnd?: number;
 };
 
 export type BuiltProgram = {
