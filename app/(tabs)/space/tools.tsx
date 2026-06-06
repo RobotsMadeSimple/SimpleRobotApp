@@ -1,5 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useRobotStatus, useTools } from "@/src/providers/RobotProvider";
+import { useRobotStatus, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Check,
@@ -79,6 +79,8 @@ function ToolFormModal({
 }) {
   const set = (k: keyof ToolDraft) => (v: string) =>
     onChangeDraft({ ...draft, [k]: v });
+  const robot   = useSelectedRobot();
+  const isAstro = robot?.robotType === 'ASTRO';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -127,8 +129,8 @@ function ToolFormModal({
                 <CoordField label="X"  value={draft.x}  onChange={set("x")}  />
                 <CoordField label="Y"  value={draft.y}  onChange={set("y")}  />
                 <CoordField label="Z"  value={draft.z}  onChange={set("z")}  />
-                <CoordField label="RX" value={draft.rx} onChange={set("rx")} />
-                <CoordField label="RY" value={draft.ry} onChange={set("ry")} />
+                {!isAstro && <CoordField label="RX" value={draft.rx} onChange={set("rx")} />}
+                {!isAstro && <CoordField label="RY" value={draft.ry} onChange={set("ry")} />}
                 <CoordField label="RZ" value={draft.rz} onChange={set("rz")} />
               </View>
 

@@ -108,8 +108,10 @@ export default function MonitorProgramScreen() {
   const builtPrograms       = useBuiltPrograms();
   const builtProgramsLoaded = useBuiltProgramsLoaded();
 
-  const robot  = useSelectedRobot();
-  const s      = robot?.status;
+  const robot   = useSelectedRobot();
+  const s       = robot?.status;
+  const isAstro = robot?.robotType === 'ASTRO';
+  const allAxes = (isAstro ? ["X", "Y", "Z", "RZ"] : ["X", "Y", "Z", "RX", "RY", "RZ"]) as string[];
   const fmt    = (v?: number) => (v ?? 0).toFixed(1);
 
   const builtProgram = builtPrograms.find((p) => p.name === programName) ?? null;
@@ -396,7 +398,7 @@ export default function MonitorProgramScreen() {
           {/* Position offset */}
           <View style={styles.posSubRow}>
             <Text style={styles.posSubLabel}>OFFSET</Text>
-            {(["X", "Y", "Z", "RX", "RY", "RZ"] as const).map((lbl) => {
+            {allAxes.map((lbl) => {
               const v = program[`currentOffset${lbl}` as keyof typeof program] as number | undefined;
               return (
                 <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
@@ -409,7 +411,7 @@ export default function MonitorProgramScreen() {
           {/* Tool offset */}
           <View style={styles.posSubRow}>
             <Text style={styles.posSubLabel}>TOOL</Text>
-            {(["X", "Y", "Z", "RX", "RY", "RZ"] as const).map((lbl) => {
+            {allAxes.map((lbl) => {
               const v = program[`currentToolOffset${lbl}` as keyof typeof program] as number | undefined;
               return (
                 <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
