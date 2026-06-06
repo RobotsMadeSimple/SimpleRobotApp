@@ -45,6 +45,7 @@ import * as ImageManipulator from "expo-image-manipulator";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  BackHandler,
   Image,
   Modal,
   PanResponder,
@@ -2894,6 +2895,15 @@ export default function BuilderScreen() {
   const [coverImage, setCoverImage]   = useState<string | null>(null);
   const [localLoading, setLocalLoading] = useState(isLocalMode && !!editName);
 
+  // Snapshot of the last-saved state used to detect unsaved changes.
+  const [savedSnapshot, setSavedSnapshot] = useState(() =>
+    JSON.stringify({ name: existing?.name ?? "", description: existing?.description ?? "", steps: existing?.steps ?? [], variables: existing?.variables ?? [] })
+  );
+  const isDirty = useMemo(
+    () => JSON.stringify({ name: programName.trim(), description, steps, variables }) !== savedSnapshot,
+    [programName, description, steps, variables, savedSnapshot]
+  );
+
   // Load local program from AsyncStorage when editing in local mode
   useEffect(() => {
     if (!isLocalMode || !editName) return;
@@ -2903,11 +2913,14 @@ export default function BuilderScreen() {
     ]).then(([programs, img]) => {
       const prog = programs.find(p => p.name === editName);
       if (prog) {
+        const hydratedSteps = rehydrateIds(prog.steps);
+        const loadedVars    = prog.variables ?? [];
         setProgramName(prog.name);
         setDescription(prog.description);
-        setSteps(rehydrateIds(prog.steps));
-        setVariables(prog.variables ?? []);
+        setSteps(hydratedSteps);
+        setVariables(loadedVars);
         setIsRoutineMode(prog.isRoutine ?? false);
+        setSavedSnapshot(JSON.stringify({ name: prog.name, description: prog.description, steps: hydratedSteps, variables: loadedVars }));
       }
       if (img) setCoverImage(img);
       setLocalLoading(false);
@@ -3369,6 +3382,7 @@ export default function BuilderScreen() {
       await robotClient.saveBuiltProgram(prog).catch(() => {});
       if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
     }
+    setSavedSnapshot(JSON.stringify({ name, description: description.trim(), steps, variables }));
     return true;
   }
 
@@ -3383,6 +3397,31 @@ export default function BuilderScreen() {
 
   async function handleSave() { if (await save()) router.back(); }
 
+  function handleBack() {
+    if (!isDirty) { router.back(); return; }
+    Alert.alert(
+      "Unsaved Changes",
+      "You have unsaved changes. Exit without saving?",
+      [
+        { text: "Save & Exit", onPress: async () => { if (await save()) router.back(); } },
+        { text: "Discard",     style: "destructive", onPress: () => router.back() },
+        { text: "Cancel",      style: "cancel" },
+      ]
+    );
+  }
+
+  // Keep a stable ref so the BackHandler effect can always call the latest version.
+  const handleBackRef = useRef(handleBack);
+  handleBackRef.current = handleBack;
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBackRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
   async function handleRun() {
     if (!(await save())) return;
     const name = programName.trim();
@@ -3395,7 +3434,7 @@ export default function BuilderScreen() {
   if (localLoading) {
     return (
       <View style={styles.container}>
-        <SubPageHeader title="Loading…" />
+        <SubPageHeader title="Loading…" onBack={handleBack} />
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <Text style={{ fontSize: 14, color: "#9ca3af" }}>Loading local program…</Text>
         </View>
@@ -3407,7 +3446,7 @@ export default function BuilderScreen() {
 
   return (
     <View style={styles.container}>
-      <SubPageHeader title={builderTitle} />
+      <SubPageHeader title={builderTitle} onBack={handleBack} />
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}

@@ -6,6 +6,7 @@ type Props = {
   title:     string;
   subtitle?: string;
   right?:    React.ReactNode;
+  onBack?:   () => void;
 };
 
 /**
@@ -13,10 +14,10 @@ type Props = {
  * (i.e. headerShown: false in the layout).  Matches the style of the IO
  * configure page's topBar.
  */
-export function SubPageHeader({ title, subtitle, right }: Props) {
+export function SubPageHeader({ title, subtitle, right, onBack }: Props) {
   return (
     <View style={styles.bar}>
-      <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
+      <Pressable style={styles.backBtn} onPress={() => onBack ? onBack() : router.back()} hitSlop={8}>
         <ArrowLeft size={20} color="#111827" />
       </Pressable>
 
