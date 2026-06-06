@@ -1735,9 +1735,6 @@ function StepConfigModal({
           severity === 'Warning' ? 'statusWarning' :
           severity === 'Error'   ? 'statusError'   : 'statusMessage';
         const msgValue = draft![msgField] ?? '';
-        const severityColor =
-          severity === 'Warning' ? '#d97706' :
-          severity === 'Error'   ? '#dc2626' : '#6b7280';
         const SEVERITIES = [
           { key: 'Info'    as const, label: 'Info'    },
           { key: 'Warning' as const, label: 'Warning' },
