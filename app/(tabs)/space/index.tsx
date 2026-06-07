@@ -1,7 +1,7 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { useGrids, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
+import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { ChevronRight, Grid3x3, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
+import { ChevronRight, Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 const MENU_ITEMS = [
@@ -37,19 +37,28 @@ const MENU_ITEMS = [
     iconColor: "#d97706",
     onPress: () => router.navigate("/space/grids"),
   },
+  {
+    label: "Stacks",
+    description: "Define 1D position arrays with optional round-robin indexing",
+    icon: Layers,
+    tileColor: "#f3e8ff",
+    iconColor: "#7c3aed",
+    onPress: () => router.navigate("/space/stacks"),
+  },
 ];
 
 const SUMMARY_ITEMS = [
   { label: "Points",  color: "#16a34a", bgColor: "#f0fdf4" },
   { label: "Tools",   color: "#2563eb", bgColor: "#eff6ff" },
-  { label: "Locals",  color: "#7c3aed", bgColor: "#f5f3ff" },
   { label: "Grids",   color: "#d97706", bgColor: "#fef3c7" },
+  { label: "Stacks",  color: "#7c3aed", bgColor: "#f3e8ff" },
 ];
 
 export default function SpacePage() {
   const status = useRobotStatus();
   const points = usePoints();
   const grids  = useGrids();
+  const stacks = useStacks();
   const tools  = useTools();
 
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
@@ -61,7 +70,7 @@ export default function SpacePage() {
     { label: "RZ", value: status.rz },
   ];
 
-  const counts = [points.length, tools.length, 0, grids.length];
+  const counts = [points.length, tools.length, grids.length, stacks.length];
 
   return (
     <View style={styles.container}>

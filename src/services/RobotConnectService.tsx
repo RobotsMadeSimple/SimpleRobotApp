@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { BuiltProgram, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
+import { BuiltProgram, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -9,6 +9,7 @@ type NanoIOListener           = (nanos: NanoState[])                     => void
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type ProgramImagesListener    = (images: Record<string, string | null>)  => void;
 type GridsListener            = (grids: Grid[])                          => void;
+type StacksListener           = (stacks: RobotStack[])                   => void;
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
@@ -33,6 +34,7 @@ export class RobotConnectService {
   private relayIOListeners:        RelayIOListener[]        = [];
   private programImagesListeners:  ProgramImagesListener[]  = [];
   private gridsListeners:          GridsListener[]           = [];
+  private stacksListeners:         StacksListener[]          = [];
   private status:       RobotStatus        = createDefaultStatus();
   private connecting:   boolean            = false;
   private points:       Point[]            = [];
@@ -42,6 +44,7 @@ export class RobotConnectService {
   private relayIO:        UsbRelayState | null          = null;
   private programImages:  Record<string, string | null> = {};
   private grids:          Grid[]                        = [];
+  private stacks:         RobotStack[]                  = [];
 
   private ws: WebSocket | null = null;
   private url?: string;
@@ -117,6 +120,7 @@ export class RobotConnectService {
       this.getTools().catch(() => {});
       this.getBuiltPrograms().catch(() => {});
       this.getGrids().catch(() => {});
+      this.getStacks().catch(() => {});
       this.getIO().catch(() => {});
       this.getRobotInfo().then((info: any) => {
         const selected = getSelectedRobot();
@@ -197,6 +201,10 @@ export class RobotConnectService {
 
       case "GetGrids":
         this.decodeGrids(data);
+        break;
+
+      case "GetStacks":
+        this.decodeStacks(data);
         break;
 
       case "GetIO":
@@ -312,6 +320,7 @@ export class RobotConnectService {
     if (update.lastToolUpdate         !== undefined && update.lastToolUpdate         !== prev.lastToolUpdate)         this.getTools().catch(() => {});
     if (update.lastBuiltProgramUpdate !== undefined && update.lastBuiltProgramUpdate !== prev.lastBuiltProgramUpdate) this.getBuiltPrograms().catch(() => {});
     if (update.lastGridUpdate         !== undefined && update.lastGridUpdate         !== prev.lastGridUpdate)         this.getGrids().catch(() => {});
+    if (update.lastStackUpdate        !== undefined && update.lastStackUpdate        !== prev.lastStackUpdate)        this.getStacks().catch(() => {});
 
     const next = { ...prev, ...update };
 
@@ -337,6 +346,7 @@ export class RobotConnectService {
       a.lastToolUpdate         === b.lastToolUpdate         &&
       a.lastBuiltProgramUpdate === b.lastBuiltProgramUpdate &&
       a.lastGridUpdate         === b.lastGridUpdate         &&
+      a.lastStackUpdate        === b.lastStackUpdate        &&
       a.joint1Angle === b.joint1Angle && a.joint2X === b.joint2X &&
       a.joint2Z     === b.joint2Z     && a.joint4Angle === b.joint4Angle &&
       a.x  === b.x  && a.y  === b.y  && a.z  === b.z  &&
@@ -447,6 +457,28 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.grids = []; this.emitGrids(); return; }
     this.grids = parsed as Grid[];
     this.emitGrids();
+  }
+
+  onStacks(cb: StacksListener) {
+    this.stacksListeners.push(cb);
+    cb(this.stacks);
+    return () => {
+      this.stacksListeners = this.stacksListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitStacks() {
+    this.stacksListeners.forEach(cb => cb(this.stacks));
+  }
+
+  private decodeStacks(data: any) {
+    if (!data.stacks) { this.stacks = []; this.emitStacks(); return; }
+    let parsed: any[];
+    try { parsed = JSON.parse(data.stacks); }
+    catch { this.stacks = []; this.emitStacks(); return; }
+    if (!Array.isArray(parsed)) { this.stacks = []; this.emitStacks(); return; }
+    this.stacks = parsed as RobotStack[];
+    this.emitStacks();
   }
 
   private decodeTools(data: any) {
@@ -746,6 +778,26 @@ export class RobotConnectService {
 
   public deleteGrid(id: string) {
     return this.sendCommand("DeleteGrid", { id });
+  }
+
+  public getStacks() {
+    return this.sendCommand("GetStacks");
+  }
+
+  public saveStack(stack: RobotStack) {
+    return this.sendCommand("SaveStack", {
+      id:            stack.id,
+      name:          stack.name,
+      basePointName: stack.basePointName,
+      offsetX:       stack.offsetX,
+      offsetY:       stack.offsetY,
+      offsetZ:       stack.offsetZ,
+      maxCount:      stack.maxCount,
+    });
+  }
+
+  public deleteStack(id: string) {
+    return this.sendCommand("DeleteStack", { id });
   }
 
   public saveProgramImage(name: string, imageBase64: string) {

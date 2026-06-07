@@ -1,8 +1,8 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
+import { BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -432,6 +432,8 @@ function stepLabel(step: ProgramStep): string {
       ].filter(Boolean).join("  ");
       const base = step.gridPoint
         ? `${step.type}  →  Grid Point`
+        : step.stackPoint
+        ? `${step.type}  →  Stack Point`
         : `${step.type}  →  ${step.pointName ?? "Current Position"}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
@@ -525,19 +527,25 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   RunHoming:    { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"       },
 };
 
-function stepDetail(step: ProgramStep, grids?: Grid[]): string | null {
+function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
       const parts: string[] = [];
-      parts.push(`→ ${step.pointName ?? "current pos"}`);
+      const target = step.gridPoint ? "grid point"
+        : step.stackPoint ? "stack point"
+        : (step.pointName ?? "current pos");
+      parts.push(`→ ${target}`);
       if (step.speed != null) parts.push(`${step.speed} mm/s`);
       return parts.length ? parts.join("  ·  ") : null;
     }
     case "JumpL":
     case "JumpJ": {
       const parts: string[] = [];
-      parts.push(`→ ${step.pointName ?? "current pos"}`);
+      const target = step.gridPoint ? "grid point"
+        : step.stackPoint ? "stack point"
+        : (step.pointName ?? "current pos");
+      parts.push(`→ ${target}`);
       if (step.jumpZ != null) parts.push(`Z: ${step.jumpZ} mm`);
       if (step.speed != null) parts.push(`${step.speed} mm/s`);
       return parts.length ? parts.join("  ·  ") : null;
@@ -1013,6 +1021,7 @@ function StepConfigModal({
 }) {
   const points        = usePoints();
   const grids         = useGrids();
+  const stacks        = useStacks();
   const tools         = useTools();
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
@@ -1023,8 +1032,9 @@ function StepConfigModal({
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
-  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint'>('savedPoint');
+  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint'>('savedPoint');
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
+  const [stackPickerOpen, setStackPickerOpen] = useState(false);
   const [ioConfig, setIoConfig]     = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
 
   useEffect(() => {
@@ -1042,7 +1052,7 @@ function StepConfigModal({
     if (step) {
       setDraft({ ...step });
       setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
-      setGridPointMode(step.gridPoint != null ? 'gridPoint' : 'savedPoint');
+      setGridPointMode(step.gridPoint != null ? 'gridPoint' : step.stackPoint != null ? 'stackPoint' : 'savedPoint');
     } else {
       setDraft(null);
       setPulseMs("");
@@ -1095,7 +1105,7 @@ function StepConfigModal({
           <>
             {/* Mode tabs */}
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-              {(['savedPoint', 'gridPoint'] as const).map(mode => (
+              {(['savedPoint', 'gridPoint', 'stackPoint'] as const).map(mode => (
                 <TouchableOpacity
                   key={mode}
                   style={[
@@ -1106,17 +1116,21 @@ function StepConfigModal({
                   onPress={() => {
                     setGridPointMode(mode);
                     if (mode === 'savedPoint') {
-                      set({ gridPoint: undefined });
-                    } else {
+                      set({ gridPoint: undefined, stackPoint: undefined });
+                    } else if (mode === 'gridPoint') {
                       if (!draft!.gridPoint) {
-                        set({ pointName: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                        set({ pointName: undefined, stackPoint: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                      }
+                    } else {
+                      if (!draft!.stackPoint) {
+                        set({ pointName: undefined, gridPoint: undefined, stackPoint: { stackId: '', index: 0 } });
                       }
                     }
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
-                    {mode === 'savedPoint' ? 'Saved Point' : 'Grid Point'}
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
+                    {mode === 'savedPoint' ? 'Point' : mode === 'gridPoint' ? 'Grid' : 'Stack'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1159,7 +1173,7 @@ function StepConfigModal({
                   );
                 })}
               </>
-            ) : (
+            ) : gridPointMode === 'gridPoint' ? (
               <>
                 {/* Grid picker button */}
                 <TouchableOpacity
@@ -1270,6 +1284,77 @@ function StepConfigModal({
                               <View style={ms.rowText}>
                                 <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{g.name}</Text>
                                 <Text style={ms.rowDesc}>Base: {g.basePointName}</Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </Pressable>
+                  </Pressable>
+                </Modal>
+              </>
+            ) : (
+              <>
+                {/* Stack picker button */}
+                <TouchableOpacity
+                  style={[ms.subRow, { marginBottom: 4 }]}
+                  onPress={() => setStackPickerOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={ms.subRowLeft}>
+                    <Text style={ms.subRowLabel}>Stack</Text>
+                    <Text style={ms.subRowValue}>
+                      {stacks.find(s => s.id === draft!.stackPoint?.stackId)?.name ?? 'Select stack…'}
+                    </Text>
+                  </View>
+                  <ChevronRight size={16} color="#d1d5db" />
+                </TouchableOpacity>
+
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INDEX</Text>
+                <ExpressionInput
+                  style={ms.input}
+                  fieldKey="stackIndex"
+                  value={draft!.stackPoint?.index}
+                  expressions={draft!.expressions}
+                  onChangeValue={v => set({ stackPoint: { ...(draft!.stackPoint ?? { stackId: '' }), index: v ?? 0 } })}
+                  onChangeExpr={setExpr}
+                  variables={variables}
+                />
+                <Text style={ms.hintText}>Wraps via modulo when the stack has a max count set.</Text>
+
+                {/* Stack picker modal */}
+                <Modal visible={stackPickerOpen} transparent animationType="fade" onRequestClose={() => setStackPickerOpen(false)}>
+                  <Pressable style={ms.overlay} onPress={() => setStackPickerOpen(false)}>
+                    <Pressable style={ms.card} onPress={() => {}}>
+                      <View style={ms.header}>
+                        <Text style={ms.title}>Select Stack</Text>
+                        <TouchableOpacity onPress={() => setStackPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
+                          <X size={18} color="#9ca3af" />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                        {stacks.length === 0 && <Text style={ms.emptyHint}>No stacks defined yet.</Text>}
+                        {stacks.map((s, i) => {
+                          const active = draft!.stackPoint?.stackId === s.id;
+                          return (
+                            <TouchableOpacity
+                              key={s.id}
+                              style={[ms.row, i < stacks.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                              onPress={() => {
+                                set({ stackPoint: { ...(draft!.stackPoint ?? { index: 0 }), stackId: s.id } });
+                                setStackPickerOpen(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                                {active && <View style={ms.radioDot} />}
+                              </View>
+                              <View style={ms.rowText}>
+                                <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{s.name}</Text>
+                                <Text style={ms.rowDesc}>
+                                  Base: {s.basePointName}
+                                  {s.maxCount != null ? `  ·  max ${s.maxCount}` : ""}
+                                </Text>
                               </View>
                             </TouchableOpacity>
                           );
@@ -1443,6 +1528,8 @@ function StepConfigModal({
       case "MoveJ": {
         const pointLabel = draft!.gridPoint
           ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
+          : draft!.stackPoint
+          ? `Stack → ${stacks.find(s => s.id === draft!.stackPoint!.stackId)?.name ?? 'Unknown'}`
           : (draft!.pointName ?? "Current Position");
         return (
           <>
@@ -1489,6 +1576,8 @@ function StepConfigModal({
       case "JumpJ": {
         const pointLabel = draft!.gridPoint
           ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
+          : draft!.stackPoint
+          ? `Stack → ${stacks.find(s => s.id === draft!.stackPoint!.stackId)?.name ?? 'Unknown'}`
           : (draft!.pointName ?? "Current Position");
         const jumpHeightLabel = (() => {
           if (draft!.jumpZStart != null || draft!.jumpZEnd != null) {
