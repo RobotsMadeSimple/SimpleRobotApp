@@ -7,8 +7,10 @@ export default function SpaceLayout() {
       <Stack.Screen name="points" options={{ headerShown: false }} />
       <Stack.Screen name="tools"  options={{ headerShown: false }} />
       <Stack.Screen name="locals" options={{ headerShown: false }} />
-      <Stack.Screen name="grids"     options={{ headerShown: false }} />
-      <Stack.Screen name="grid-edit" options={{ headerShown: false }} />
+      <Stack.Screen name="grids"      options={{ headerShown: false }} />
+      <Stack.Screen name="grid-edit"  options={{ headerShown: false }} />
+      <Stack.Screen name="stacks"     options={{ headerShown: false }} />
+      <Stack.Screen name="stack-edit" options={{ headerShown: false }} />
     </Stack>
   );
 }

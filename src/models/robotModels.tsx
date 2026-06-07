@@ -111,6 +111,7 @@ export type ProgramStep = {
   // Variable expressions — keyed by camelCase field name, override literal numeric values at execution time
   expressions?: Record<string, string>;
   gridPoint?: GridPoint;
+  stackPoint?: StackPoint;
   // Label / GoToLabel
   labelId?: string;
   labelName?: string;
@@ -217,6 +218,22 @@ export type GridPoint = {
   useGridIndex: boolean;
 };
 
+export type RobotStack = {
+  id: string;
+  name: string;
+  basePointName: string;
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  maxCount?: number;
+  lastUpdatedUnixMs: number;
+};
+
+export type StackPoint = {
+  stackId: string;
+  index?: number;
+};
+
 export type RobotStatus = {
   connected: boolean,
   moving: boolean,
@@ -279,6 +296,7 @@ export type RobotStatus = {
 
   lastBuiltProgramUpdate: number,
   lastGridUpdate: number,
+  lastStackUpdate: number,
   version: string,
   isLinux: boolean,
 }
@@ -338,6 +356,7 @@ export function createDefaultStatus(): RobotStatus {
 
     lastBuiltProgramUpdate: 0,
     lastGridUpdate: 0,
+    lastStackUpdate: 0,
     version: "0.0.0",
     isLinux: false,
   };
