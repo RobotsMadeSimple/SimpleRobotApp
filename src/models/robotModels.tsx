@@ -21,6 +21,22 @@ export type NanoState = {
 
 export type NeoPixelColor = { r: number; g: number; b: number };
 
+// ── Aux Axis ──────────────────────────────────────────────────────────────────
+
+export type AuxAxisChannelState = {
+  axisIndex: number;
+  name: string;
+  active: boolean;
+};
+
+export type AuxDeviceState = {
+  connected: boolean;
+  deviceId: string;
+  deviceName: string;
+  portName: string | null;
+  axes: AuxAxisChannelState[];
+};
+
 // ── USB Relay ─────────────────────────────────────────────────────────────────
 
 export type UsbRelayState = {
@@ -32,7 +48,7 @@ export type UsbRelayState = {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop';
 
 export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
 
@@ -126,6 +142,15 @@ export type ProgramStep = {
   jumpZ?: number;
   jumpZStart?: number;
   jumpZEnd?: number;
+  // AuxMove / AuxContinuous / AuxStop
+  auxDeviceId?: string;
+  auxAxisIndex?: number;
+  auxSteps?: number;       // signed — negative = reverse direction
+  auxVelocity?: number;    // steps/sec (negative = reverse for AuxContinuous)
+  auxAccel?: number;       // steps/sec²
+  auxDecel?: number;       // steps/sec² (AuxMove + AuxStop ramp-down)
+  auxWaitForDone?: boolean; // AuxMove: block until complete (default true)
+  auxImmediate?: boolean;   // AuxStop: hard stop when true
 };
 
 export type BuiltProgram = {

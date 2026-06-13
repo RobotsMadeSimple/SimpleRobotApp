@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { BuiltProgram, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -7,6 +7,7 @@ type ToolsListener            = (tools: Tool[])                          => void
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
 type NanoIOListener           = (nanos: NanoState[])                     => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
+type AuxAxisListener          = (aux: AuxDeviceState[])                  => void;
 type ProgramImagesListener    = (images: Record<string, string | null>)  => void;
 type GridsListener            = (grids: Grid[])                          => void;
 type StacksListener           = (stacks: RobotStack[])                   => void;
@@ -32,6 +33,7 @@ export class RobotConnectService {
   private builtProgramsListeners:  BuiltProgramsListener[]  = [];
   private nanoIOListeners:         NanoIOListener[]         = [];
   private relayIOListeners:        RelayIOListener[]        = [];
+  private auxAxisListeners:        AuxAxisListener[]        = [];
   private programImagesListeners:  ProgramImagesListener[]  = [];
   private gridsListeners:          GridsListener[]           = [];
   private stacksListeners:         StacksListener[]          = [];
@@ -42,6 +44,7 @@ export class RobotConnectService {
   private builtPrograms:  BuiltProgram[]                = [];
   private nanoIO:         NanoState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
+  private auxAxis:        AuxDeviceState[]              = [];
   private programImages:  Record<string, string | null> = {};
   private grids:          Grid[]                        = [];
   private stacks:         RobotStack[]                  = [];
@@ -122,6 +125,7 @@ export class RobotConnectService {
       this.getGrids().catch(() => {});
       this.getStacks().catch(() => {});
       this.getIO().catch(() => {});
+      this.getAuxState().catch(() => {});
       this.getRobotInfo().then((info: any) => {
         const selected = getSelectedRobot();
         if (!selected) return;
@@ -210,10 +214,25 @@ export class RobotConnectService {
       case "GetIO":
         this.decodeIO(data);
         break;
+
+      case "GetAuxState":
+        this.decodeAuxState(data);
+        break;
     }
 
     this.pendingAcks.delete(data.id);
     pending.resolve(data);
+  }
+
+  private decodeAuxState(data: any) {
+    if (!data.state) { this.auxAxis = []; this.emitAuxAxis(); return; }
+    try {
+      const parsed = JSON.parse(data.state);
+      this.auxAxis = Array.isArray(parsed) ? (parsed as AuxDeviceState[]) : [];
+    } catch {
+      this.auxAxis = [];
+    }
+    this.emitAuxAxis();
   }
 
   private decodeIO(data: any) {
@@ -435,6 +454,18 @@ export class RobotConnectService {
 
   private emitRelayIO() {
     this.relayIOListeners.forEach(cb => cb(this.relayIO));
+  }
+
+  onAuxAxis(cb: AuxAxisListener) {
+    this.auxAxisListeners.push(cb);
+    cb(this.auxAxis);
+    return () => {
+      this.auxAxisListeners = this.auxAxisListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitAuxAxis() {
+    this.auxAxisListeners.forEach(cb => cb(this.auxAxis));
   }
 
   onGrids(cb: GridsListener) {
@@ -865,9 +896,14 @@ export class RobotConnectService {
     horizontalHomingDirection: number;
     j1HomingDirection: number;
     j4HomeOffsetDeg: number;
+    m1Direction: number;
+    m2Direction: number;
+    m3Direction: number;
+    m4Direction: number;
     enableStbCard: boolean;
     enableNanoCards: boolean;
     enableRelayCard: boolean;
+    enableAuxAxis: boolean;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -884,8 +920,42 @@ export class RobotConnectService {
     enableStbCard?: boolean;
     enableNanoCards?: boolean;
     enableRelayCard?: boolean;
+    enableAuxAxis?: boolean;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
+  }
+
+  // ── Aux Axis ───────────────────────────────────────────────────────────────
+
+  public getAuxState() {
+    return this.sendCommand("GetAuxState");
+  }
+
+  public getAuxConfig() {
+    return this.sendCommand("GetAuxConfig");
+  }
+
+  public jogAux(params: {
+    deviceId?: string;
+    axis: number;
+    velocity: number;
+    accel?: number;
+    decel?: number;
+  }) {
+    return this.sendCommand("JogAux", {
+      deviceId: params.deviceId ?? "AUX_STEPPER_001",
+      axis:     params.axis,
+      velocity: params.velocity,
+      accel:    params.accel  ?? 3200,
+      decel:    params.decel  ?? 5000,
+    });
+  }
+
+  public stopAux(params?: { decel?: number; immediate?: boolean }) {
+    return this.sendCommand("StopAux", {
+      decel:     params?.decel     ?? 5000,
+      immediate: params?.immediate ?? false,
+    });
   }
 
   public setRelay(relay: number, value: boolean) {

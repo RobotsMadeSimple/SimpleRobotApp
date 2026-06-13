@@ -1,10 +1,14 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { JogButton } from "@/src/components/ui/JogButton";
 import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { NanoState, PinType } from "@/src/models/robotModels";
+import { AuxDeviceState, NanoState, PinType } from "@/src/models/robotModels";
 import {
+  ChevronLeft,
+  ChevronRight,
   CircuitBoard,
   Cpu,
+  Gauge,
   Radio,
   Settings,
   ToggleLeft,
@@ -14,7 +18,8 @@ import {
   Zap,
 } from "lucide-react-native";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -31,6 +36,7 @@ type IOConfig = {
   enableStbCard:   boolean;
   enableNanoCards: boolean;
   enableRelayCard: boolean;
+  enableAuxAxis:   boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -336,28 +342,119 @@ function UsbRelayCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Aux Axis card
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AUX_JOG_VELOCITY = 800;
+const AUX_JOG_ACCEL    = 3200;
+const AUX_JOG_DECEL    = 5000;
+
+function AuxJogButton({
+  deviceId,
+  axisIndex,
+  direction,
+}: {
+  deviceId: string;
+  axisIndex: number;
+  direction: 1 | -1;
+}) {
+  const startJog = () =>
+    robotClient.jogAux({
+      deviceId,
+      axis:     axisIndex,
+      velocity: AUX_JOG_VELOCITY * direction,
+      accel:    AUX_JOG_ACCEL,
+    });
+
+  const stopJog = () =>
+    robotClient.jogAux({ deviceId, axis: axisIndex, velocity: 0, decel: AUX_JOG_DECEL });
+
+  return (
+    <JogButton
+      label={direction === -1 ? "−" : "+"}
+      icon={
+        direction === -1
+          ? <ChevronLeft  size={26} color="#7c3aed" />
+          : <ChevronRight size={26} color="#7c3aed" />
+      }
+      iconPosition={direction === -1 ? "left" : "right"}
+      onStart={startJog}
+      onStop={stopJog}
+      size={64}
+    />
+  );
+}
+
+function AuxAxisCard({ device }: { device: AuxDeviceState }) {
+  return (
+    <View style={styles.card}>
+      <CardHeader
+        icon={<Gauge size={16} color="#7c3aed" />}
+        iconBg="#ede9fe"
+        name={device.deviceName}
+        subtitle={`${device.deviceId}${device.portName ? `  ·  ${device.portName}` : ""}`}
+        connected={device.connected}
+      />
+
+      <PinGroup label="AXES" fg="#7c3aed" bg="#ede9fe">
+        {device.axes.map((axis, i) => (
+          <View key={axis.axisIndex} style={[styles.row, i < device.axes.length - 1 && styles.rowBorder]}>
+            <View style={[styles.typeBadge, { backgroundColor: "#ede9fe" }]}>
+              <Text style={[styles.typeBadgeText, { color: "#7c3aed" }]}>{axis.axisIndex}</Text>
+            </View>
+            <View style={styles.rowInfo}>
+              <Text style={styles.rowLabel} numberOfLines={1}>{axis.name || `Axis ${axis.axisIndex}`}</Text>
+              <Text style={styles.rowSub}>Hold to jog</Text>
+            </View>
+            <View style={styles.jogRow}>
+              <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={-1} />
+              <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={1}  />
+            </View>
+          </View>
+        ))}
+        {device.axes.length === 0 && (
+          <Text style={styles.emptyCard}>No axes configured.</Text>
+        )}
+      </PinGroup>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function IoPage() {
   const nanos = useNanoIO();
-  const [ioConfig, setIoConfig] = useState<IOConfig | null>(null);
+  const [ioConfig,  setIoConfig]  = useState<IOConfig | null>(null);
+  const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
+
+  // Re-fetch config every time this tab comes into focus so changes
+  // made on the config page are reflected immediately.
+  useFocusEffect(
+    useCallback(() => {
+      robotClient.getRobotConfig()
+        .then(cfg => setIoConfig({
+          enableStbCard:   cfg.enableStbCard   ?? true,
+          enableNanoCards: cfg.enableNanoCards ?? true,
+          enableRelayCard: cfg.enableRelayCard ?? false,
+          enableAuxAxis:   cfg.enableAuxAxis   ?? false,
+        }))
+        .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false, enableAuxAxis: false }));
+    }, [])
+  );
 
   useEffect(() => {
-    robotClient.getRobotConfig()
-      .then(cfg => setIoConfig({
-        enableStbCard:   cfg.enableStbCard   ?? true,
-        enableNanoCards: cfg.enableNanoCards ?? true,
-        enableRelayCard: cfg.enableRelayCard ?? false,
-      }))
-      .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false }));
+    robotClient.getAuxState().catch(() => {});
+    return robotClient.onAuxAxis(devices => setAuxDevices(devices));
   }, []);
 
   const showStb   = ioConfig?.enableStbCard   ?? true;
   const showNanos = ioConfig?.enableNanoCards  ?? true;
   const showRelay = ioConfig?.enableRelayCard  ?? false;
+  const showAux   = ioConfig?.enableAuxAxis    ?? false;
 
-  const hasAnything = showStb || (showNanos && nanos.length > 0) || showRelay;
+  const hasAnything = showStb || (showNanos && nanos.length > 0) || showRelay || (showAux && auxDevices.length > 0);
 
   return (
     <View style={styles.container}>
@@ -367,6 +464,7 @@ export default function IoPage() {
         {showStb   && <RobotIOBoardCard />}
         {showNanos && nanos.map(nano => <NanoCard key={nano.id} nano={nano} />)}
         {showRelay && <UsbRelayCard />}
+        {showAux   && auxDevices.map(dev => <AuxAxisCard key={dev.deviceId} device={dev} />)}
 
         {!hasAnything && (
           <View style={styles.emptyState}>
@@ -503,6 +601,9 @@ const styles = StyleSheet.create({
   // ── Neopixel preview ───────────────────────────────────────────────────────
   neoDots:  { flexDirection: "row", gap: 3 },
   neoDot:   { width: 7, height: 7, borderRadius: 4, backgroundColor: "#fbbf24", opacity: 0.5 },
+
+  // ── Aux jog buttons ────────────────────────────────────────────────────────
+  jogRow: { flexDirection: "row", gap: 8 },
 
   // ── Empty states ───────────────────────────────────────────────────────────
   emptyCard: { fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 16 },
