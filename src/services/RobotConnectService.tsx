@@ -958,6 +958,19 @@ export class RobotConnectService {
     });
   }
 
+  public setAuxAxisConfig(params: {
+    deviceId: string;
+    axisIndex: number;
+    name: string;
+    stepsPerRev: number;
+    invertDirection: boolean;
+    axisType: string;
+    gearRatio: number;
+    mmPerRev: number;
+  }) {
+    return this.sendCommand("SetAuxAxisConfig", params);
+  }
+
   public setRelay(relay: number, value: boolean) {
     // Optimistic update — reflect the change immediately before the server confirms
     if (this.relayIO) {

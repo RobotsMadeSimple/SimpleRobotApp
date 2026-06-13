@@ -2,7 +2,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType } from "@/src/models/robotModels";
+import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -1069,6 +1069,7 @@ function StepConfigModal({
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
   const [stackPickerOpen, setStackPickerOpen] = useState(false);
   const [ioConfig, setIoConfig]     = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
+  const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
 
   useEffect(() => {
     if (!visible) return;
@@ -1079,6 +1080,8 @@ function StepConfigModal({
         enableRelayCard: cfg.enableRelayCard ?? false,
       }))
       .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false }));
+    robotClient.getAuxState().catch(() => {});
+    return robotClient.onAuxAxis(devices => setAuxDevices(devices));
   }, [visible]);
 
   useEffect(() => {
@@ -2092,18 +2095,40 @@ function StepConfigModal({
         );
 
       case "AuxMove": {
-        const steps = draft!.auxSteps ?? 0;
-        const dir   = steps < 0 ? -1 : 1;
+        const deviceId   = draft!.auxDeviceId ?? "AUX_STEPPER_001";
+        const axisIndex  = draft!.auxAxisIndex ?? 0;
+        const auxDevice  = auxDevices.find(d => d.deviceId === deviceId);
+        const axisCfg    = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
+        const isPhysical = !!axisCfg?.axisType;
+        const unit       = isPhysical ? auxUnitLabel(axisCfg!) : "steps";
+        // In physical mode use auxDistance; in steps mode use auxSteps
+        const rawDist    = draft!.auxDistance ?? 0;
+        const rawSteps   = draft!.auxSteps ?? 0;
+        const distVal    = isPhysical ? rawDist : rawSteps;
+        const dir        = (isPhysical ? rawDist : rawSteps) < 0 ? -1 : 1;
+
+        const axisLabel = (n: number) => {
+          const a = auxDevice?.axes.find(ax => ax.axisIndex === n);
+          return a?.name ? `${n}  ${a.name}` : String(n);
+        };
+
+        const setDir = (d: 1 | -1) => {
+          if (isPhysical) set({ auxDistance: Math.abs(rawDist || 100) * d, auxUnit: unit });
+          else            set({ auxSteps: Math.round(Math.abs(rawSteps || 1600)) * d });
+        };
+
         return (
           <>
             <Text style={ms.hintText}>
-              Move an aux stepper axis a fixed number of steps with trapezoidal acceleration.
-              Positive steps = CW (forward), negative = CCW (reverse).
+              {isPhysical
+                ? `Move an aux stepper axis a fixed distance in ${unit} with trapezoidal acceleration.`
+                : "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration."}
+              {" "}Positive = CW (forward), negative = CCW (reverse).
             </Text>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE ID</Text>
             <TextInput
               style={ms.input}
-              value={draft!.auxDeviceId ?? "AUX_STEPPER_001"}
+              value={deviceId}
               onChangeText={v => set({ auxDeviceId: v || undefined })}
               placeholder="AUX_STEPPER_001"
               placeholderTextColor="#9ca3af"
@@ -2113,11 +2138,11 @@ function StepConfigModal({
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
             <View style={ms.segRow}>
               {[0, 1, 2, 3].map(n => {
-                const active = (draft!.auxAxisIndex ?? 0) === n;
+                const active = axisIndex === n;
                 return (
-                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
                     onPress={() => set({ auxAxisIndex: n })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
+                    <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{axisLabel(n)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2128,39 +2153,48 @@ function StepConfigModal({
                 const active = dir === val;
                 return (
                   <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ auxSteps: Math.abs(steps || 1600) * val })} activeOpacity={0.8}>
+                    onPress={() => setDir(val)} activeOpacity={0.8}>
                     <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STEPS</Text>
-            <ExpressionInput style={ms.input} fieldKey="auxSteps"
-              value={Math.abs(steps) || undefined}
-              expressions={draft!.expressions}
-              onChangeValue={v => set({ auxSteps: v !== undefined ? Math.round(v) * dir : undefined })}
-              onChangeExpr={setExpr}
-              placeholder="1600"
-              variables={variables} />
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{unit.toUpperCase()}</Text>
+            {isPhysical
+              ? <ExpressionInput style={ms.input} fieldKey="auxDistance"
+                  value={Math.abs(rawDist) || undefined}
+                  expressions={draft!.expressions}
+                  onChangeValue={v => set({ auxDistance: v !== undefined ? v * dir : undefined, auxUnit: unit })}
+                  onChangeExpr={setExpr}
+                  placeholder="100"
+                  variables={variables} />
+              : <ExpressionInput style={ms.input} fieldKey="auxSteps"
+                  value={Math.abs(rawSteps) || undefined}
+                  expressions={draft!.expressions}
+                  onChangeValue={v => set({ auxSteps: v !== undefined ? Math.round(v) * dir : undefined })}
+                  onChangeExpr={setExpr}
+                  placeholder="1600"
+                  variables={variables} />
+            }
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>VELOCITY  (steps/s)</Text>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>VELOCITY  ({unit}/s)</Text>
                 <ExpressionInput style={ms.input} fieldKey="auxVelocity"
                   value={draft!.auxVelocity} expressions={draft!.expressions}
                   onChangeValue={v => set({ auxVelocity: v })} onChangeExpr={setExpr}
-                  allowUndefined placeholder="1600" variables={variables} />
+                  allowUndefined placeholder={isPhysical ? "10" : "1600"} variables={variables} />
               </View>
               <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (steps/s²)</Text>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  ({unit}/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="auxAccel"
                   value={draft!.auxAccel} expressions={draft!.expressions}
                   onChangeValue={v => set({ auxAccel: v })} onChangeExpr={setExpr}
-                  allowUndefined placeholder="3200" variables={variables} />
+                  allowUndefined placeholder={isPhysical ? "50" : "3200"} variables={variables} />
               </View>
             </View>
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (steps/s²)</Text>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  ({unit}/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="auxDecel"
                   value={draft!.auxDecel} expressions={draft!.expressions}
                   onChangeValue={v => set({ auxDecel: v })} onChangeExpr={setExpr}
@@ -2184,8 +2218,20 @@ function StepConfigModal({
       }
 
       case "AuxContinuous": {
-        const velocity  = draft!.auxVelocity ?? 800;
+        const deviceId  = draft!.auxDeviceId ?? "AUX_STEPPER_001";
+        const axisIndex = draft!.auxAxisIndex ?? 0;
+        const auxDevice = auxDevices.find(d => d.deviceId === deviceId);
+        const axisCfg   = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
+        const isPhysical = !!axisCfg?.axisType;
+        const unit      = isPhysical ? auxUnitLabel(axisCfg!) : "steps";
+        const velocity  = draft!.auxVelocity ?? (isPhysical ? 10 : 800);
         const dir       = velocity < 0 ? -1 : 1;
+
+        const axisLabel = (n: number) => {
+          const a = auxDevice?.axes.find(ax => ax.axisIndex === n);
+          return a?.name ? `${n}  ${a.name}` : String(n);
+        };
+
         return (
           <>
             <Text style={ms.hintText}>
@@ -2196,7 +2242,7 @@ function StepConfigModal({
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE ID</Text>
             <TextInput
               style={ms.input}
-              value={draft!.auxDeviceId ?? "AUX_STEPPER_001"}
+              value={deviceId}
               onChangeText={v => set({ auxDeviceId: v || undefined })}
               placeholder="AUX_STEPPER_001"
               placeholderTextColor="#9ca3af"
@@ -2206,11 +2252,11 @@ function StepConfigModal({
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
             <View style={ms.segRow}>
               {[0, 1, 2, 3].map(n => {
-                const active = (draft!.auxAxisIndex ?? 0) === n;
+                const active = axisIndex === n;
                 return (
-                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
                     onPress={() => set({ auxAxisIndex: n })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
+                    <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{axisLabel(n)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2221,25 +2267,25 @@ function StepConfigModal({
                 const active = dir === val;
                 return (
                   <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ auxVelocity: Math.abs(velocity || 800) * val })} activeOpacity={0.8}>
+                    onPress={() => set({ auxVelocity: Math.abs(velocity || (isPhysical ? 10 : 800)) * val, auxUnit: isPhysical ? unit : undefined })} activeOpacity={0.8}>
                     <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VELOCITY  (steps/s)</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VELOCITY  ({unit}/s)</Text>
             <ExpressionInput style={ms.input} fieldKey="auxVelocity"
               value={Math.abs(velocity) || undefined}
               expressions={draft!.expressions}
-              onChangeValue={v => set({ auxVelocity: v !== undefined ? v * dir : undefined })}
+              onChangeValue={v => set({ auxVelocity: v !== undefined ? v * dir : undefined, auxUnit: isPhysical ? unit : undefined })}
               onChangeExpr={setExpr}
-              placeholder="800"
+              placeholder={isPhysical ? "10" : "800"}
               variables={variables} />
-            <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (steps/s²)</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  ({unit}/s²)</Text>
             <ExpressionInput style={ms.input} fieldKey="auxAccel"
               value={draft!.auxAccel} expressions={draft!.expressions}
               onChangeValue={v => set({ auxAccel: v })} onChangeExpr={setExpr}
-              allowUndefined placeholder="3200" variables={variables} />
+              allowUndefined placeholder={isPhysical ? "50" : "3200"} variables={variables} />
           </>
         );
       }

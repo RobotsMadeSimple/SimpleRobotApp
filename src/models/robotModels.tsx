@@ -27,6 +27,12 @@ export type AuxAxisChannelState = {
   axisIndex: number;
   name: string;
   active: boolean;
+  stepsPerRev: number;
+  invertDirection: boolean;
+  // "Rotary" | "Linear" | "" (empty = unconfigured, raw steps)
+  axisType: string;
+  gearRatio: number;
+  mmPerRev: number;
 };
 
 export type AuxDeviceState = {
@@ -36,6 +42,20 @@ export type AuxDeviceState = {
   portName: string | null;
   axes: AuxAxisChannelState[];
 };
+
+/** Steps per physical unit (mm for Linear, deg for Rotary). 0 when not configured. */
+export function auxStepsPerUnit(axis: AuxAxisChannelState): number {
+  if (!axis.axisType) return 0;
+  if (axis.axisType === 'Linear')
+    return axis.mmPerRev > 0 ? (axis.stepsPerRev * axis.gearRatio) / axis.mmPerRev : 0;
+  return (axis.stepsPerRev * axis.gearRatio) / 360;
+}
+
+export function auxUnitLabel(axis: AuxAxisChannelState): string {
+  if (axis.axisType === 'Linear') return 'mm';
+  if (axis.axisType === 'Rotary') return '°';
+  return 'steps';
+}
 
 // ── USB Relay ─────────────────────────────────────────────────────────────────
 
@@ -145,10 +165,12 @@ export type ProgramStep = {
   // AuxMove / AuxContinuous / AuxStop
   auxDeviceId?: string;
   auxAxisIndex?: number;
-  auxSteps?: number;       // signed — negative = reverse direction
-  auxVelocity?: number;    // steps/sec (negative = reverse for AuxContinuous)
-  auxAccel?: number;       // steps/sec²
-  auxDecel?: number;       // steps/sec² (AuxMove + AuxStop ramp-down)
+  auxSteps?: number;        // signed — negative = reverse direction (raw steps)
+  auxDistance?: number;     // physical distance: mm (Linear) or degrees (Rotary)
+  auxUnit?: string;         // "mm" | "deg" — when set, auxDistance + physical velocity used
+  auxVelocity?: number;     // steps/sec OR physical unit/sec when auxUnit set
+  auxAccel?: number;        // steps/sec² OR physical unit/sec² when auxUnit set
+  auxDecel?: number;        // steps/sec² (AuxMove + AuxStop ramp-down)
   auxWaitForDone?: boolean; // AuxMove: block until complete (default true)
   auxImmediate?: boolean;   // AuxStop: hard stop when true
 };
