@@ -1,6 +1,7 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
+  Camera,
   Cpu,
   Gauge,
   Home,
@@ -38,6 +39,7 @@ type RobotConfig = {
   enableNanoCards: boolean;
   enableRelayCard: boolean;
   enableAuxAxis:   boolean;
+  enableCameras:   boolean;
 };
 
 type EditingField = {
@@ -143,7 +145,7 @@ export default function ConfigureRobot() {
   }
 
   async function toggleCard(
-    field: "enableStbCard" | "enableNanoCards" | "enableRelayCard" | "enableAuxAxis",
+    field: "enableStbCard" | "enableNanoCards" | "enableRelayCard" | "enableAuxAxis" | "enableCameras",
     value: boolean
   ) {
     if (!config || savingCards) return;
@@ -276,6 +278,7 @@ export default function ConfigureRobot() {
             { field: "enableNanoCards" as const, icon: <Cpu   size={16} color="#4f46e5" />, tileBg: "#eef2ff", label: "Arduino Nano Devices" },
             { field: "enableRelayCard" as const, icon: <Radio size={16} color="#0891b2" />, tileBg: "#ecfeff", label: "USB Relay Board" },
             { field: "enableAuxAxis"   as const, icon: <Gauge size={16} color="#7c3aed" />, tileBg: "#ede9fe", label: "Aux Stepper Axes" },
+            { field: "enableCameras"   as const, icon: <Camera size={16} color="#2563eb" />, tileBg: "#eff6ff", label: "USB Cameras" },
           ].map(({ field, icon, tileBg, label }, idx, arr) => (
             <View key={field} style={[styles.infoRow, idx < arr.length - 1 && styles.infoRowBorder]}>
               <View style={[styles.rowTile, { backgroundColor: tileBg }]}>{icon}</View>

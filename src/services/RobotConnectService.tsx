@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CameraState, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -8,6 +8,7 @@ type BuiltProgramsListener    = (programs: BuiltProgram[])               => void
 type NanoIOListener           = (nanos: NanoState[])                     => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type AuxAxisListener          = (aux: AuxDeviceState[])                  => void;
+type CamerasListener          = (cameras: CameraState[])                 => void;
 type ProgramImagesListener    = (images: Record<string, string | null>)  => void;
 type GridsListener            = (grids: Grid[])                          => void;
 type StacksListener           = (stacks: RobotStack[])                   => void;
@@ -34,6 +35,7 @@ export class RobotConnectService {
   private nanoIOListeners:         NanoIOListener[]         = [];
   private relayIOListeners:        RelayIOListener[]        = [];
   private auxAxisListeners:        AuxAxisListener[]        = [];
+  private camerasListeners:        CamerasListener[]        = [];
   private programImagesListeners:  ProgramImagesListener[]  = [];
   private gridsListeners:          GridsListener[]           = [];
   private stacksListeners:         StacksListener[]          = [];
@@ -45,6 +47,7 @@ export class RobotConnectService {
   private nanoIO:         NanoState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
   private auxAxis:        AuxDeviceState[]              = [];
+  private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
   private grids:          Grid[]                        = [];
   private stacks:         RobotStack[]                  = [];
@@ -218,6 +221,10 @@ export class RobotConnectService {
       case "GetAuxState":
         this.decodeAuxState(data);
         break;
+
+      case "GetCameras":
+        this.decodeCameras(data);
+        break;
     }
 
     this.pendingAcks.delete(data.id);
@@ -233,6 +240,17 @@ export class RobotConnectService {
       this.auxAxis = [];
     }
     this.emitAuxAxis();
+  }
+
+  private decodeCameras(data: any) {
+    if (!data.cameras) { this.cameras = []; this.emitCameras(); return; }
+    try {
+      const parsed = JSON.parse(data.cameras);
+      this.cameras = Array.isArray(parsed) ? (parsed as CameraState[]) : [];
+    } catch {
+      this.cameras = [];
+    }
+    this.emitCameras();
   }
 
   private decodeIO(data: any) {
@@ -466,6 +484,18 @@ export class RobotConnectService {
 
   private emitAuxAxis() {
     this.auxAxisListeners.forEach(cb => cb(this.auxAxis));
+  }
+
+  onCameras(cb: CamerasListener) {
+    this.camerasListeners.push(cb);
+    cb(this.cameras);
+    return () => {
+      this.camerasListeners = this.camerasListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitCameras() {
+    this.camerasListeners.forEach(cb => cb(this.cameras));
   }
 
   onGrids(cb: GridsListener) {
@@ -904,6 +934,7 @@ export class RobotConnectService {
     enableNanoCards: boolean;
     enableRelayCard: boolean;
     enableAuxAxis: boolean;
+    enableCameras: boolean;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -969,6 +1000,62 @@ export class RobotConnectService {
     mmPerRev: number;
   }) {
     return this.sendCommand("SetAuxAxisConfig", params);
+  }
+
+  // ── Cameras ────────────────────────────────────────────────────────────────
+
+  public getCameras() {
+    return this.sendCommand("GetCameras");
+  }
+
+  public addCamera(params: {
+    name: string;
+    deviceIndex: number;
+    enabled?: boolean;
+    width?: number;
+    height?: number;
+    targetFps?: number;
+  }) {
+    return this.sendCommand("AddCamera", {
+      name:        params.name,
+      deviceIndex: params.deviceIndex,
+      enabled:     params.enabled     ?? true,
+      width:       params.width       ?? 640,
+      height:      params.height      ?? 480,
+      targetFps:   params.targetFps   ?? 15,
+    });
+  }
+
+  public removeCamera(id: string) {
+    return this.sendCommand("RemoveCamera", { id });
+  }
+
+  public setCameraConfig(params: {
+    id: string;
+    name: string;
+    deviceIndex: number;
+    enabled: boolean;
+    width: number;
+    height: number;
+    targetFps: number;
+  }) {
+    return this.sendCommand("SetCameraConfig", params);
+  }
+
+  /** Build the HTTP base URL from the current WebSocket URL (ws:// → http://). */
+  public httpBaseUrl(): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/^ws:/, 'http:').replace(/\/control$/, '');
+  }
+
+  public cameraStreamUrl(id: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/camera/${id}/stream` : null;
+  }
+
+  public cameraSnapshotUrl(id: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/camera/${id}/snapshot` : null;
   }
 
   public setRelay(relay: number, value: boolean) {
