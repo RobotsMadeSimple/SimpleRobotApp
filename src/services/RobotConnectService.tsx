@@ -952,6 +952,7 @@ export class RobotConnectService {
     enableNanoCards?: boolean;
     enableRelayCard?: boolean;
     enableAuxAxis?: boolean;
+    enableCameras?: boolean;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
   }
