@@ -2,22 +2,26 @@ import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxAxisChannelState, AuxDeviceState, NanoState, PinType, auxUnitLabel } from "@/src/models/robotModels";
+import { AuxAxisChannelState, AuxDeviceState, CameraState, NanoState, PinType, auxUnitLabel } from "@/src/models/robotModels";
 import {
+  Camera,
   ChevronLeft,
   ChevronRight,
   CircuitBoard,
   Cpu,
   Gauge,
+  Plus,
   Radio,
   Settings,
   Settings2,
+  Trash2,
   ToggleLeft,
   ToggleRight,
   Wifi,
   WifiOff,
   Zap,
 } from "lucide-react-native";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
@@ -42,6 +46,7 @@ type IOConfig = {
   enableNanoCards: boolean;
   enableRelayCard: boolean;
   enableAuxAxis:   boolean;
+  enableCameras:   boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +143,7 @@ function CardHeader({
   subtitle,
   connected,
   onConfigure,
+  actions,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -145,6 +151,7 @@ function CardHeader({
   subtitle: string;
   connected: boolean;
   onConfigure?: () => void;
+  actions?: React.ReactNode;
 }) {
   return (
     <View style={styles.cardHeader}>
@@ -162,6 +169,7 @@ function CardHeader({
           {connected ? "Connected" : "Offline"}
         </Text>
       </View>
+      {actions}
       {onConfigure && (
         <Pressable style={styles.configBtn} onPress={onConfigure} hitSlop={6}>
           <Settings size={15} color="#6b7280" />
@@ -584,13 +592,218 @@ function AuxAxisCard({ device }: { device: AuxDeviceState }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Camera cards
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CameraConfigModal({
+  camera,
+  onClose,
+}: {
+  camera: CameraState | null; // null = add new
+  onClose: () => void;
+}) {
+  const isNew = camera === null;
+  const [name,        setName]        = useState(camera?.name ?? "Camera");
+  const [deviceIndex, setDeviceIndex] = useState(String(camera?.deviceIndex ?? 0));
+  const [width,       setWidth]       = useState(String(camera?.width  ?? 640));
+  const [height,      setHeight]      = useState(String(camera?.height ?? 480));
+  const [targetFps,   setTargetFps]   = useState(String(camera?.targetFps ?? 15));
+  const [enabled,     setEnabled]     = useState(camera?.enabled ?? true);
+  const [saving,      setSaving]      = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    if (isNew) {
+      await robotClient.addCamera({
+        name:        name.trim(),
+        deviceIndex: parseInt(deviceIndex) || 0,
+        enabled,
+        width:       parseInt(width)     || 640,
+        height:      parseInt(height)    || 480,
+        targetFps:   parseInt(targetFps) || 15,
+      });
+    } else {
+      await robotClient.setCameraConfig({
+        id:          camera!.id,
+        name:        name.trim(),
+        deviceIndex: parseInt(deviceIndex) || 0,
+        enabled,
+        width:       parseInt(width)     || 640,
+        height:      parseInt(height)    || 480,
+        targetFps:   parseInt(targetFps) || 15,
+      });
+    }
+    await robotClient.getCameras().catch(() => {});
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{isNew ? "Add Camera" : `Configure ${camera!.name}`}</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.cfgLabel}>NAME</Text>
+          <TextInput style={styles.cfgInput} value={name} onChangeText={setName}
+            placeholder="Camera" placeholderTextColor="#9ca3af" returnKeyType="done" />
+
+          <Text style={[styles.cfgLabel, { marginTop: 14 }]}>DEVICE INDEX</Text>
+          <TextInput style={styles.cfgInput} value={deviceIndex} onChangeText={setDeviceIndex}
+            placeholder="0" placeholderTextColor="#9ca3af" keyboardType="numeric" returnKeyType="done" />
+
+          <View style={ms2.twoCol}>
+            <View style={ms2.twoColItem}>
+              <Text style={[styles.cfgLabel, { marginTop: 14 }]}>WIDTH</Text>
+              <TextInput style={styles.cfgInput} value={width} onChangeText={setWidth}
+                placeholder="640" placeholderTextColor="#9ca3af" keyboardType="numeric" returnKeyType="done" />
+            </View>
+            <View style={ms2.twoColItem}>
+              <Text style={[styles.cfgLabel, { marginTop: 14 }]}>HEIGHT</Text>
+              <TextInput style={styles.cfgInput} value={height} onChangeText={setHeight}
+                placeholder="480" placeholderTextColor="#9ca3af" keyboardType="numeric" returnKeyType="done" />
+            </View>
+          </View>
+
+          <Text style={[styles.cfgLabel, { marginTop: 14 }]}>TARGET FPS</Text>
+          <TextInput style={styles.cfgInput} value={targetFps} onChangeText={setTargetFps}
+            placeholder="15" placeholderTextColor="#9ca3af" keyboardType="numeric" returnKeyType="done" />
+
+          <View style={styles.cfgSwitchRow}>
+            <Text style={styles.cfgSwitchLabel}>Enabled</Text>
+            <Switch value={enabled} onValueChange={setEnabled}
+              trackColor={{ false: "#e5e7eb", true: "#2563eb" }} />
+          </View>
+
+          <TouchableOpacity style={[styles.cfgSaveBtn, { backgroundColor: "#2563eb" }, saving && { opacity: 0.5 }]}
+            onPress={save} disabled={saving} activeOpacity={0.8}>
+            <Text style={styles.cfgSaveBtnText}>{saving ? "Saving…" : isNew ? "Add Camera" : "Save"}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Minimal two-column layout styles for the camera modal
+const ms2 = StyleSheet.create({
+  twoCol:     { flexDirection: "row", gap: 8 },
+  twoColItem: { flex: 1 },
+});
+
+function CameraFeedCard({ camera, onEdit, onDelete }: {
+  camera: CameraState;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const streamUrl = robotClient.cameraStreamUrl(camera.id);
+
+  return (
+    <View style={styles.card}>
+      <CardHeader
+        icon={<Camera size={16} color="#2563eb" />}
+        iconBg="#eff6ff"
+        name={camera.name}
+        subtitle={`Device ${camera.deviceIndex}  ·  ${camera.width}×${camera.height}  ·  ${camera.targetFps}fps`}
+        connected={camera.connected}
+        actions={
+          <View style={{ flexDirection: "row", gap: 4 }}>
+            <TouchableOpacity onPress={onEdit} style={styles.configBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Settings2 size={16} color="#6b7280" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onDelete} style={styles.configBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Trash2 size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
+        }
+      />
+      {camera.enabled && streamUrl ? (
+        <Image
+          source={{ uri: streamUrl }}
+          style={styles.cameraFeed}
+          contentFit="contain"
+          cachePolicy="none"
+        />
+      ) : (
+        <View style={styles.cameraDisabled}>
+          <Camera size={28} color="#d1d5db" />
+          <Text style={styles.cameraDisabledText}>{camera.enabled ? "Not connected" : "Disabled"}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function CameraManagerCard({ cameras, onRefresh }: {
+  cameras: CameraState[];
+  onRefresh: () => void;
+}) {
+  const [editCamera,  setEditCamera]  = useState<CameraState | null | 'new'>('new' as any);
+  const [showModal,   setShowModal]   = useState(false);
+  const [modalTarget, setModalTarget] = useState<CameraState | null>(null);
+
+  const openAdd  = () => { setModalTarget(null); setShowModal(true); };
+  const openEdit = (c: CameraState) => { setModalTarget(c); setShowModal(true); };
+  const closeModal = () => { setShowModal(false); setModalTarget(null); };
+
+  const deleteCamera = async (id: string) => {
+    await robotClient.removeCamera(id).catch(() => {});
+    onRefresh();
+  };
+
+  return (
+    <>
+      {showModal && (
+        <CameraConfigModal camera={modalTarget} onClose={closeModal} />
+      )}
+      <View style={styles.card}>
+        <CardHeader
+          icon={<Camera size={16} color="#2563eb" />}
+          iconBg="#eff6ff"
+          name="USB Cameras"
+          subtitle={`${cameras.length} camera${cameras.length !== 1 ? 's' : ''} configured`}
+          connected={cameras.some(c => c.connected)}
+          actions={
+            <TouchableOpacity onPress={openAdd} style={styles.configBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Plus size={16} color="#2563eb" />
+            </TouchableOpacity>
+          }
+        />
+        {cameras.length === 0 && (
+          <Text style={styles.emptyCard}>
+            No cameras added. Tap + to add a USB camera by device index.
+          </Text>
+        )}
+      </View>
+      {cameras.map(cam => (
+        <CameraFeedCard
+          key={cam.id}
+          camera={cam}
+          onEdit={() => openEdit(cam)}
+          onDelete={() => deleteCamera(cam.id)}
+        />
+      ))}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function IoPage() {
   const nanos = useNanoIO();
-  const [ioConfig,  setIoConfig]  = useState<IOConfig | null>(null);
-  const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
+  const [ioConfig,    setIoConfig]    = useState<IOConfig | null>(null);
+  const [auxDevices,  setAuxDevices]  = useState<AuxDeviceState[]>([]);
+  const [cameras,     setCameras]     = useState<CameraState[]>([]);
 
   // Re-fetch config every time this tab comes into focus so changes
   // made on the config page are reflected immediately.
@@ -602,8 +815,9 @@ export default function IoPage() {
           enableNanoCards: cfg.enableNanoCards ?? true,
           enableRelayCard: cfg.enableRelayCard ?? false,
           enableAuxAxis:   cfg.enableAuxAxis   ?? false,
+          enableCameras:   cfg.enableCameras   ?? false,
         }))
-        .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false, enableAuxAxis: false }));
+        .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false, enableAuxAxis: false, enableCameras: false }));
     }, [])
   );
 
@@ -612,22 +826,31 @@ export default function IoPage() {
     return robotClient.onAuxAxis(devices => setAuxDevices(devices));
   }, []);
 
-  const showStb   = ioConfig?.enableStbCard   ?? true;
-  const showNanos = ioConfig?.enableNanoCards  ?? true;
-  const showRelay = ioConfig?.enableRelayCard  ?? false;
-  const showAux   = ioConfig?.enableAuxAxis    ?? false;
+  useEffect(() => {
+    robotClient.getCameras().catch(() => {});
+    return robotClient.onCameras(cams => setCameras(cams));
+  }, []);
 
-  const hasAnything = showStb || (showNanos && nanos.length > 0) || showRelay || (showAux && auxDevices.length > 0);
+  const showStb     = ioConfig?.enableStbCard   ?? true;
+  const showNanos   = ioConfig?.enableNanoCards  ?? true;
+  const showRelay   = ioConfig?.enableRelayCard  ?? false;
+  const showAux     = ioConfig?.enableAuxAxis    ?? false;
+  const showCameras = ioConfig?.enableCameras    ?? false;
+
+  const hasAnything = showStb || (showNanos && nanos.length > 0) || showRelay
+                   || (showAux && auxDevices.length > 0)
+                   || (showCameras);
 
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        {showStb   && <RobotIOBoardCard />}
-        {showNanos && nanos.map(nano => <NanoCard key={nano.id} nano={nano} />)}
-        {showRelay && <UsbRelayCard />}
-        {showAux   && auxDevices.map(dev => <AuxAxisCard key={dev.deviceId} device={dev} />)}
+        {showStb     && <RobotIOBoardCard />}
+        {showNanos   && nanos.map(nano => <NanoCard key={nano.id} nano={nano} />)}
+        {showRelay   && <UsbRelayCard />}
+        {showAux     && auxDevices.map(dev => <AuxAxisCard key={dev.deviceId} device={dev} />)}
+        {showCameras && <CameraManagerCard cameras={cameras} onRefresh={() => robotClient.getCameras().catch(() => {})} />}
 
         {!hasAnything && (
           <View style={styles.emptyState}>
@@ -812,6 +1035,21 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingVertical: 13, alignItems: "center",
   },
   cfgSaveBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+
+  // ── Camera feed ────────────────────────────────────────────────────────────
+  cameraFeed: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    backgroundColor: "#000",
+  },
+  cameraDisabled: {
+    height: 160,
+    backgroundColor: "#f9fafb",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+  },
+  cameraDisabledText: { fontSize: 13, color: "#9ca3af" },
 
   // ── Empty states ───────────────────────────────────────────────────────────
   emptyCard: { fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 16 },

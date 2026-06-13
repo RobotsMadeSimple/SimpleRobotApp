@@ -57,6 +57,19 @@ export function auxUnitLabel(axis: AuxAxisChannelState): string {
   return 'steps';
 }
 
+// ── USB Cameras ───────────────────────────────────────────────────────────────
+
+export type CameraState = {
+  id: string;
+  name: string;
+  connected: boolean;
+  deviceIndex: number;
+  width: number;
+  height: number;
+  targetFps: number;
+  enabled: boolean;
+};
+
 // ── USB Relay ─────────────────────────────────────────────────────────────────
 
 export type UsbRelayState = {
