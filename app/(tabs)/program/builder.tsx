@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bookmark,
+  ChevronsRight,
   GitBranch,
   Camera,
   CornerUpLeft,
@@ -228,10 +229,12 @@ function ExpressionInput({
 }) {
   const currentExpr = expressions?.[fieldKey];
   const [text, setText] = useState(currentExpr ?? (value != null ? String(value) : ""));
-  const inputRef = useRef<any>(null);
+  const inputRef   = useRef<any>(null);
+  const isFocused  = useRef(false);
 
-  // Sync when draft changes externally (modal re-opens)
+  // Sync when draft changes externally (modal re-opens) — not while user is typing
   useEffect(() => {
+    if (isFocused.current) return;
     setText(currentExpr ?? (value != null ? String(value) : ""));
   }, [currentExpr, value]);
 
@@ -331,7 +334,8 @@ function ExpressionInput({
           style={{ flex: 1, fontSize: 14, color: exprActive ? "#7c3aed" : "#111827" }}
           value={text}
           onChangeText={handleChange}
-          onBlur={() => commit(text)}
+          onFocus={() => { isFocused.current = true; }}
+          onBlur={() => { isFocused.current = false; commit(text); }}
           keyboardType="default"
           placeholder={placeholder ?? (allowUndefined ? "default" : "0")}
           placeholderTextColor="#9ca3af"
@@ -477,6 +481,15 @@ function stepLabel(step: ProgramStep): string {
     }
     case "SetTool":   return step.toolName ? `Set Tool  →  ${step.toolName}` : "Set Tool  →  None";
     case "RunHoming": return "Run Homing";
+    case "AuxMove": {
+      const steps = step.auxSteps ?? 0;
+      const dir   = steps < 0 ? "◀" : "▶";
+      return `Aux Move  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${Math.abs(steps)} steps  ${dir}`;
+    }
+    case "AuxContinuous":
+      return `Aux Run  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s`;
+    case "AuxStop":
+      return "Aux Stop";
     default:              return step.type;
   }
 }
@@ -499,9 +512,12 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "Label":        return <Bookmark      size={size} color={color} />;
     case "GoToLabel":    return <CornerUpLeft  size={size} color={color} />;
     case "IfCondition":  return <GitBranch     size={size} color={color} />;
-    case "SetTool":      return <Wrench        size={size} color={color} />;
-    case "RunHoming":    return <Home          size={size} color={color} />;
-    default:             return <Cpu           size={size} color={color} />;
+    case "SetTool":        return <Wrench        size={size} color={color} />;
+    case "RunHoming":      return <Home          size={size} color={color} />;
+    case "AuxMove":        return <ChevronsRight size={size} color={color} />;
+    case "AuxContinuous":  return <Play          size={size} color={color} />;
+    case "AuxStop":        return <OctagonX      size={size} color={color} />;
+    default:               return <Cpu           size={size} color={color} />;
   }
 }
 
@@ -525,7 +541,10 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   GoToLabel:    { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Go To Label"    },
   IfCondition:  { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "If Condition"    },
   SetTool:      { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Tool"         },
-  RunHoming:    { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"       },
+  RunHoming:     { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"         },
+  AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
+  AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
+  AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
 };
 
 function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
@@ -592,6 +611,16 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return step.toolName ? `→ ${step.toolName}` : "→ None";
     case "RunHoming":
       return "Runs the full homing sequence";
+    case "AuxMove": {
+      const parts: string[] = [`Axis ${step.auxAxisIndex ?? 0}`];
+      if (step.auxVelocity != null) parts.push(`${step.auxVelocity} steps/s`);
+      if (step.auxWaitForDone === false) parts.push("no wait");
+      return parts.join("  ·  ");
+    }
+    case "AuxContinuous":
+      return `Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s  (continuous)`;
+    case "AuxStop":
+      return step.auxImmediate ? "Immediate halt" : "Controlled stop";
     default:
       return null;
   }
@@ -616,6 +645,9 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "IfCondition",  label: "If Condition",  desc: "Branch execution based on IO state, sensor values, or variable expressions" },
   { type: "SetTool",      label: "Set Tool",      desc: "Change the active tool TCP offset used for subsequent move steps" },
   { type: "RunHoming",    label: "Run Homing",    desc: "Run the full homing sequence and wait for it to complete before continuing" },
+  { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
+  { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
+  { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -2057,6 +2089,181 @@ function StepConfigModal({
             Runs the full homing sequence and waits for it to complete before continuing to the next step.
             The robot must be in a safe position before homing begins.
           </Text>
+        );
+
+      case "AuxMove": {
+        const steps = draft!.auxSteps ?? 0;
+        const dir   = steps < 0 ? -1 : 1;
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Move an aux stepper axis a fixed number of steps with trapezoidal acceleration.
+              Positive steps = CW (forward), negative = CCW (reverse).
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE ID</Text>
+            <TextInput
+              style={ms.input}
+              value={draft!.auxDeviceId ?? "AUX_STEPPER_001"}
+              onChangeText={v => set({ auxDeviceId: v || undefined })}
+              placeholder="AUX_STEPPER_001"
+              placeholderTextColor="#9ca3af"
+              autoCapitalize="none"
+              returnKeyType="done"
+            />
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
+            <View style={ms.segRow}>
+              {[0, 1, 2, 3].map(n => {
+                const active = (draft!.auxAxisIndex ?? 0) === n;
+                return (
+                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                    onPress={() => set({ auxAxisIndex: n })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
+            <View style={ms.segRow}>
+              {([{ label: "▶  CW (+)", val: 1 }, { label: "◀  CCW (−)", val: -1 }] as const).map(({ label, val }) => {
+                const active = dir === val;
+                return (
+                  <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ auxSteps: Math.abs(steps || 1600) * val })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STEPS</Text>
+            <ExpressionInput style={ms.input} fieldKey="auxSteps"
+              value={Math.abs(steps) || undefined}
+              expressions={draft!.expressions}
+              onChangeValue={v => set({ auxSteps: v !== undefined ? Math.round(v) * dir : undefined })}
+              onChangeExpr={setExpr}
+              placeholder="1600"
+              variables={variables} />
+            <View style={ms.twoCol}>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>VELOCITY  (steps/s)</Text>
+                <ExpressionInput style={ms.input} fieldKey="auxVelocity"
+                  value={draft!.auxVelocity} expressions={draft!.expressions}
+                  onChangeValue={v => set({ auxVelocity: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="1600" variables={variables} />
+              </View>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (steps/s²)</Text>
+                <ExpressionInput style={ms.input} fieldKey="auxAccel"
+                  value={draft!.auxAccel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ auxAccel: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="3200" variables={variables} />
+              </View>
+            </View>
+            <View style={ms.twoCol}>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (steps/s²)</Text>
+                <ExpressionInput style={ms.input} fieldKey="auxDecel"
+                  value={draft!.auxDecel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ auxDecel: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="same as accel" variables={variables} />
+              </View>
+            </View>
+            <View style={[ms.switchRow, { marginTop: 14 }]}>
+              <Text style={ms.switchLabel}>Wait until move completes</Text>
+              <Switch
+                value={draft!.auxWaitForDone !== false}
+                onValueChange={v => set({ auxWaitForDone: v ? undefined : false })}
+                trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+              />
+            </View>
+            <Text style={ms.hintText}>
+              When on, the program waits for the aux move to finish before the next step.
+              When off, the robot and aux axis can move simultaneously.
+            </Text>
+          </>
+        );
+      }
+
+      case "AuxContinuous": {
+        const velocity  = draft!.auxVelocity ?? 800;
+        const dir       = velocity < 0 ? -1 : 1;
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Start the aux axis running continuously at the given speed.
+              Use an AuxStop step later to stop it.
+              Positive velocity = CW (forward), negative = CCW (reverse).
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE ID</Text>
+            <TextInput
+              style={ms.input}
+              value={draft!.auxDeviceId ?? "AUX_STEPPER_001"}
+              onChangeText={v => set({ auxDeviceId: v || undefined })}
+              placeholder="AUX_STEPPER_001"
+              placeholderTextColor="#9ca3af"
+              autoCapitalize="none"
+              returnKeyType="done"
+            />
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
+            <View style={ms.segRow}>
+              {[0, 1, 2, 3].map(n => {
+                const active = (draft!.auxAxisIndex ?? 0) === n;
+                return (
+                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive]}
+                    onPress={() => set({ auxAxisIndex: n })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{n}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
+            <View style={ms.segRow}>
+              {([{ label: "▶  CW (+)", val: 1 }, { label: "◀  CCW (−)", val: -1 }] as const).map(({ label, val }) => {
+                const active = dir === val;
+                return (
+                  <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ auxVelocity: Math.abs(velocity || 800) * val })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VELOCITY  (steps/s)</Text>
+            <ExpressionInput style={ms.input} fieldKey="auxVelocity"
+              value={Math.abs(velocity) || undefined}
+              expressions={draft!.expressions}
+              onChangeValue={v => set({ auxVelocity: v !== undefined ? v * dir : undefined })}
+              onChangeExpr={setExpr}
+              placeholder="800"
+              variables={variables} />
+            <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (steps/s²)</Text>
+            <ExpressionInput style={ms.input} fieldKey="auxAccel"
+              value={draft!.auxAccel} expressions={draft!.expressions}
+              onChangeValue={v => set({ auxAccel: v })} onChangeExpr={setExpr}
+              allowUndefined placeholder="3200" variables={variables} />
+          </>
+        );
+      }
+
+      case "AuxStop":
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Stop all aux axis motion. Controlled stop ramps down gracefully; immediate halt cuts power instantly.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DECEL RATE  (steps/s²)</Text>
+            <ExpressionInput style={ms.input} fieldKey="auxDecel"
+              value={draft!.auxDecel} expressions={draft!.expressions}
+              onChangeValue={v => set({ auxDecel: v })} onChangeExpr={setExpr}
+              allowUndefined placeholder="5000" variables={variables} />
+            <View style={[ms.switchRow, { marginTop: 14 }]}>
+              <Text style={ms.switchLabel}>Immediate hard stop</Text>
+              <Switch
+                value={draft!.auxImmediate ?? false}
+                onValueChange={v => set({ auxImmediate: v || undefined })}
+                trackColor={{ false: "#e5e7eb", true: "#dc2626" }}
+              />
+            </View>
+          </>
         );
 
       case "IfCondition":
