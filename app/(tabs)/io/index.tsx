@@ -1,4 +1,6 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { WebView } from "react-native-webview";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -19,14 +21,16 @@ import {
   ToggleRight,
   Wifi,
   WifiOff,
+  X,
   Zap,
 } from "lucide-react-native";
-import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -592,6 +596,36 @@ function AuxAxisCard({ device }: { device: AuxDeviceState }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Camera feed helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Builds the WebView HTML for the camera feed.
+// zoomable=true  → enables pinch-to-zoom (fullscreen modal)
+// zoomable=false → tap sends "tap" postMessage so RN can open the modal
+function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
+  const viewport = zoomable
+    ? 'width=device-width,initial-scale=1,maximum-scale=10,user-scalable=yes'
+    : 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no';
+  const tapScript = zoomable ? '' :
+    `document.addEventListener('click',function(){try{window.ReactNativeWebView.postMessage('tap');}catch(e){}});`;
+  return `<!DOCTYPE html><html>
+<head>
+  <meta name="viewport" content="${viewport}">
+  <style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}canvas{width:100%;height:100%;object-fit:contain;display:block}</style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    var c=document.getElementById('c'),x=c.getContext('2d'),dec=false,pend=null;
+    function draw(src){dec=true;var i=new Image();i.onload=function(){if(c.width!==i.naturalWidth||c.height!==i.naturalHeight){c.width=i.naturalWidth;c.height=i.naturalHeight;}x.drawImage(i,0,0,c.width,c.height);dec=false;if(pend!==null){var n=pend;pend=null;draw(n);}};i.src=src;}
+    var ws=new WebSocket(${JSON.stringify(wsUrl)});
+    ws.onmessage=function(e){if(dec){pend=e.data;}else{draw(e.data);}};
+    ${tapScript}
+  <\/script>
+</body></html>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Camera cards
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -696,15 +730,142 @@ const ms2 = StyleSheet.create({
   twoColItem: { flex: 1 },
 });
 
+function CameraWebSocketFeed({ cameraId, onTap }: { cameraId: string; onTap?: () => void }) {
+  const [hasFrame, setHasFrame] = useState(false);
+  const canvasRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const wsUrl = robotClient.cameraWsUrl(cameraId);
+    if (!wsUrl) return;
+    let cancelled = false;
+    let decoding  = false;
+    let pending: string | null = null;
+    function decode(data: string) {
+      decoding = true;
+      const img = new (window as any).Image() as HTMLImageElement;
+      img.onload = () => {
+        if (cancelled) { decoding = false; return; }
+        const canvas = canvasRef.current;
+        if (canvas) {
+          if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+            canvas.width  = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+          }
+          canvas.getContext('2d')?.drawImage(img, 0, 0);
+          setHasFrame(true);
+        }
+        decoding = false;
+        if (pending !== null) { const next = pending; pending = null; decode(next); }
+      };
+      img.src = data;
+    }
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (e) => { if (decoding) { pending = e.data as string; } else { decode(e.data as string); } };
+    ws.onerror = () => {};
+    return () => { cancelled = true; ws.close(); };
+  }, [cameraId]);
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.cameraFeed}>
+        {/* @ts-ignore */}
+        <canvas
+          ref={canvasRef}
+          onClick={() => canvasRef.current?.requestFullscreen?.()}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', backgroundColor: '#000', cursor: 'pointer' }}
+        />
+        {!hasFrame && (
+          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#f9fafb' }]}>
+            <Camera size={28} color="#d1d5db" />
+            <Text style={styles.cameraDisabledText}>Connecting…</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  const wsUrl = robotClient.cameraWsUrl(cameraId);
+  if (!wsUrl) {
+    return (
+      <View style={styles.cameraDisabled}>
+        <Camera size={28} color="#d1d5db" />
+        <Text style={styles.cameraDisabledText}>Not connected</Text>
+      </View>
+    );
+  }
+
+  return (
+    <WebView
+      source={{ html: makeCameraHtml(wsUrl, false) }}
+      style={styles.cameraFeed}
+      scrollEnabled={false}
+      originWhitelist={['*']}
+      javaScriptEnabled
+      onMessage={(e) => { if (e.nativeEvent.data === 'tap') onTap?.(); }}
+    />
+  );
+}
+
+function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClose: () => void }) {
+  useEffect(() => {
+    ScreenOrientation.unlockAsync().catch(() => {});
+    return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {}); };
+  }, []);
+
+  const wsUrl = robotClient.cameraWsUrl(camera.id);
+  if (!wsUrl) return null;
+
+  return (
+    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <WebView
+          source={{ html: makeCameraHtml(wsUrl, true) }}
+          style={{ flex: 1 }}
+          scrollEnabled={false}
+          originWhitelist={['*']}
+          javaScriptEnabled
+        />
+        <TouchableOpacity style={styles.fullscreenClose} onPress={onClose} activeOpacity={0.8}>
+          <X size={18} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+}
+
 function CameraFeedCard({ camera, onEdit, onDelete }: {
   camera: CameraState;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const streamUrl = robotClient.cameraStreamUrl(camera.id);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const renderFeed = () => {
+    if (!camera.enabled) {
+      return (
+        <View style={styles.cameraDisabled}>
+          <Camera size={28} color="#d1d5db" />
+          <Text style={styles.cameraDisabledText}>Disabled</Text>
+        </View>
+      );
+    }
+    if (!camera.connected) {
+      return (
+        <View style={styles.cameraDisabled}>
+          <Camera size={28} color="#d1d5db" />
+          <Text style={styles.cameraDisabledText}>Offline</Text>
+        </View>
+      );
+    }
+    return <CameraWebSocketFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />;
+  };
 
   return (
     <View style={styles.card}>
+      {fullscreen && Platform.OS !== 'web' && (
+        <CameraFullscreenModal camera={camera} onClose={() => setFullscreen(false)} />
+      )}
       <CardHeader
         icon={<Camera size={16} color="#2563eb" />}
         iconBg="#eff6ff"
@@ -724,19 +885,7 @@ function CameraFeedCard({ camera, onEdit, onDelete }: {
           </View>
         }
       />
-      {camera.enabled && streamUrl ? (
-        <Image
-          source={{ uri: streamUrl }}
-          style={styles.cameraFeed}
-          contentFit="contain"
-          cachePolicy="none"
-        />
-      ) : (
-        <View style={styles.cameraDisabled}>
-          <Camera size={28} color="#d1d5db" />
-          <Text style={styles.cameraDisabledText}>{camera.enabled ? "Not connected" : "Disabled"}</Text>
-        </View>
-      )}
+      {renderFeed()}
     </View>
   );
 }
@@ -828,7 +977,10 @@ export default function IoPage() {
 
   useEffect(() => {
     robotClient.getCameras().catch(() => {});
-    return robotClient.onCameras(cams => setCameras(cams));
+    const unsub = robotClient.onCameras(cams => setCameras(cams));
+    // Poll every 3s so connection status updates (camera opens on background thread)
+    const poll = setInterval(() => robotClient.getCameras().catch(() => {}), 3000);
+    return () => { unsub(); clearInterval(poll); };
   }, []);
 
   const showStb     = ioConfig?.enableStbCard   ?? true;
@@ -1041,6 +1193,17 @@ const styles = StyleSheet.create({
     width: "100%",
     aspectRatio: 4 / 3,
     backgroundColor: "#000",
+  },
+  fullscreenClose: {
+    position: "absolute",
+    top: 48,
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   cameraDisabled: {
     height: 160,
