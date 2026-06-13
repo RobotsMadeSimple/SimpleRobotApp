@@ -2,7 +2,7 @@ import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxDeviceState, NanoState, PinType } from "@/src/models/robotModels";
+import { AuxAxisChannelState, AuxDeviceState, NanoState, PinType, auxUnitLabel } from "@/src/models/robotModels";
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,6 +11,7 @@ import {
   Gauge,
   Radio,
   Settings,
+  Settings2,
   ToggleLeft,
   ToggleRight,
   Wifi,
@@ -21,10 +22,14 @@ import { router } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
+  TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -385,9 +390,157 @@ function AuxJogButton({
   );
 }
 
+function AuxAxisConfigModal({
+  deviceId,
+  axis,
+  onClose,
+}: {
+  deviceId: string;
+  axis: AuxAxisChannelState;
+  onClose: () => void;
+}) {
+  const [name,           setName]           = useState(axis.name);
+  const [axisType,       setAxisType]       = useState(axis.axisType || "");
+  const [stepsPerRev,    setStepsPerRev]    = useState(String(axis.stepsPerRev || 1600));
+  const [gearRatio,      setGearRatio]      = useState(String(axis.gearRatio ?? 1));
+  const [mmPerRev,       setMmPerRev]       = useState(String(axis.mmPerRev ?? 0));
+  const [invertDir,      setInvertDir]      = useState(axis.invertDirection ?? false);
+  const [saving,         setSaving]         = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    await robotClient.setAuxAxisConfig({
+      deviceId,
+      axisIndex:      axis.axisIndex,
+      name:           name.trim(),
+      stepsPerRev:    parseInt(stepsPerRev)  || 1600,
+      invertDirection: invertDir,
+      axisType,
+      gearRatio:      parseFloat(gearRatio)  || 1,
+      mmPerRev:       parseFloat(mmPerRev)   || 0,
+    });
+    // Refresh state so the card reflects the new config
+    await robotClient.getAuxState().catch(() => {});
+    setSaving(false);
+    onClose();
+  };
+
+  const typeOptions: { label: string; value: string }[] = [
+    { label: "Unconfigured", value: "" },
+    { label: "Rotary (°)",   value: "Rotary" },
+    { label: "Linear (mm)",  value: "Linear" },
+  ];
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Axis {axis.axisIndex} Configuration</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.cfgLabel}>NAME</Text>
+          <TextInput
+            style={styles.cfgInput}
+            value={name}
+            onChangeText={setName}
+            placeholder={`Axis ${axis.axisIndex}`}
+            placeholderTextColor="#9ca3af"
+            returnKeyType="done"
+          />
+
+          <Text style={[styles.cfgLabel, { marginTop: 14 }]}>TYPE</Text>
+          <View style={styles.cfgSegRow}>
+            {typeOptions.map(opt => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.cfgSeg, axisType === opt.value && styles.cfgSegActive]}
+                onPress={() => setAxisType(opt.value)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.cfgSegText, axisType === opt.value && styles.cfgSegTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.cfgLabel, { marginTop: 14 }]}>STEPS PER REVOLUTION</Text>
+          <TextInput
+            style={styles.cfgInput}
+            value={stepsPerRev}
+            onChangeText={setStepsPerRev}
+            placeholder="1600"
+            placeholderTextColor="#9ca3af"
+            keyboardType="numeric"
+            returnKeyType="done"
+          />
+
+          <Text style={[styles.cfgLabel, { marginTop: 14 }]}>GEAR RATIO</Text>
+          <TextInput
+            style={styles.cfgInput}
+            value={gearRatio}
+            onChangeText={setGearRatio}
+            placeholder="1"
+            placeholderTextColor="#9ca3af"
+            keyboardType="decimal-pad"
+            returnKeyType="done"
+          />
+
+          {axisType === "Linear" && (
+            <>
+              <Text style={[styles.cfgLabel, { marginTop: 14 }]}>MM PER OUTPUT REVOLUTION</Text>
+              <TextInput
+                style={styles.cfgInput}
+                value={mmPerRev}
+                onChangeText={setMmPerRev}
+                placeholder="0"
+                placeholderTextColor="#9ca3af"
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+              />
+            </>
+          )}
+
+          <View style={styles.cfgSwitchRow}>
+            <Text style={styles.cfgSwitchLabel}>Invert direction</Text>
+            <Switch
+              value={invertDir}
+              onValueChange={setInvertDir}
+              trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.cfgSaveBtn, saving && { opacity: 0.5 }]}
+            onPress={save}
+            disabled={saving}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.cfgSaveBtnText}>{saving ? "Saving…" : "Save"}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function AuxAxisCard({ device }: { device: AuxDeviceState }) {
+  const [configAxis, setConfigAxis] = useState<AuxAxisChannelState | null>(null);
+
   return (
     <View style={styles.card}>
+      {configAxis && (
+        <AuxAxisConfigModal
+          deviceId={device.deviceId}
+          axis={configAxis}
+          onClose={() => setConfigAxis(null)}
+        />
+      )}
+
       <CardHeader
         icon={<Gauge size={16} color="#7c3aed" />}
         iconBg="#ede9fe"
@@ -397,21 +550,31 @@ function AuxAxisCard({ device }: { device: AuxDeviceState }) {
       />
 
       <PinGroup label="AXES" fg="#7c3aed" bg="#ede9fe">
-        {device.axes.map((axis, i) => (
-          <View key={axis.axisIndex} style={[styles.row, i < device.axes.length - 1 && styles.rowBorder]}>
-            <View style={[styles.typeBadge, { backgroundColor: "#ede9fe" }]}>
-              <Text style={[styles.typeBadgeText, { color: "#7c3aed" }]}>{axis.axisIndex}</Text>
+        {device.axes.map((axis, i) => {
+          const unitLabel = auxUnitLabel(axis);
+          return (
+            <View key={axis.axisIndex} style={[styles.row, i < device.axes.length - 1 && styles.rowBorder]}>
+              <View style={[styles.typeBadge, { backgroundColor: "#ede9fe" }]}>
+                <Text style={[styles.typeBadgeText, { color: "#7c3aed" }]}>{axis.axisIndex}</Text>
+              </View>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowLabel} numberOfLines={1}>{axis.name || `Axis ${axis.axisIndex}`}</Text>
+                <Text style={styles.rowSub}>{axis.axisType ? unitLabel : "Hold to jog"}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.axisConfigBtn}
+                onPress={() => setConfigAxis(axis)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Settings2 size={16} color="#9ca3af" />
+              </TouchableOpacity>
+              <View style={styles.jogRow}>
+                <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={-1} />
+                <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={1}  />
+              </View>
             </View>
-            <View style={styles.rowInfo}>
-              <Text style={styles.rowLabel} numberOfLines={1}>{axis.name || `Axis ${axis.axisIndex}`}</Text>
-              <Text style={styles.rowSub}>Hold to jog</Text>
-            </View>
-            <View style={styles.jogRow}>
-              <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={-1} />
-              <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={1}  />
-            </View>
-          </View>
-        ))}
+          );
+        })}
         {device.axes.length === 0 && (
           <Text style={styles.emptyCard}>No axes configured.</Text>
         )}
@@ -603,7 +766,52 @@ const styles = StyleSheet.create({
   neoDot:   { width: 7, height: 7, borderRadius: 4, backgroundColor: "#fbbf24", opacity: 0.5 },
 
   // ── Aux jog buttons ────────────────────────────────────────────────────────
-  jogRow: { flexDirection: "row", gap: 8 },
+  jogRow:       { flexDirection: "row", gap: 8 },
+  axisConfigBtn: { padding: 4, marginRight: 2 },
+
+  // ── Aux axis config modal ──────────────────────────────────────────────────
+  modalBackdrop: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, paddingBottom: 36,
+  },
+  modalHeader: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 16,
+  },
+  modalTitle:    { fontSize: 16, fontWeight: "700", color: "#111827" },
+  modalCloseBtn: { padding: 4 },
+  modalCloseText:{ fontSize: 18, color: "#6b7280" },
+
+  cfgLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 0.8, color: "#6b7280", marginBottom: 6 },
+  cfgInput: {
+    borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 8,
+    fontSize: 14, color: "#111827", backgroundColor: "#f9fafb",
+  },
+  cfgSegRow: { flexDirection: "row", gap: 6 },
+  cfgSeg: {
+    flex: 1, paddingVertical: 8,
+    borderRadius: 8, borderWidth: 1, borderColor: "#e5e7eb",
+    alignItems: "center", backgroundColor: "#f9fafb",
+  },
+  cfgSegActive: { backgroundColor: "#7c3aed", borderColor: "#7c3aed" },
+  cfgSegText:   { fontSize: 12, fontWeight: "600", color: "#6b7280" },
+  cfgSegTextActive: { color: "#fff" },
+  cfgSwitchRow: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginTop: 16,
+  },
+  cfgSwitchLabel: { fontSize: 14, color: "#374151" },
+  cfgSaveBtn: {
+    marginTop: 20, backgroundColor: "#7c3aed",
+    borderRadius: 10, paddingVertical: 13, alignItems: "center",
+  },
+  cfgSaveBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 
   // ── Empty states ───────────────────────────────────────────────────────────
   emptyCard: { fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 16 },
