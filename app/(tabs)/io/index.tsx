@@ -21,12 +21,12 @@ import {
   WifiOff,
   Zap,
 } from "lucide-react-native";
-import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -703,6 +703,41 @@ function CameraFeedCard({ camera, onEdit, onDelete }: {
 }) {
   const streamUrl = robotClient.cameraStreamUrl(camera.id);
 
+  const renderFeed = () => {
+    if (!camera.enabled) {
+      return (
+        <View style={styles.cameraDisabled}>
+          <Camera size={28} color="#d1d5db" />
+          <Text style={styles.cameraDisabledText}>Disabled</Text>
+        </View>
+      );
+    }
+    if (!streamUrl) {
+      return (
+        <View style={styles.cameraDisabled}>
+          <Camera size={28} color="#d1d5db" />
+          <Text style={styles.cameraDisabledText}>Not connected</Text>
+        </View>
+      );
+    }
+    if (Platform.OS === 'web') {
+      // Native <img> is required for MJPEG — expo-image doesn't handle multipart streams
+      return (
+        // @ts-ignore — web-only HTML element
+        <img
+          src={streamUrl}
+          style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'contain', backgroundColor: '#000', display: 'block' }}
+        />
+      );
+    }
+    return (
+      <View style={styles.cameraDisabled}>
+        <Camera size={28} color="#d1d5db" />
+        <Text style={styles.cameraDisabledText}>Live view available on web</Text>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.card}>
       <CardHeader
@@ -724,19 +759,7 @@ function CameraFeedCard({ camera, onEdit, onDelete }: {
           </View>
         }
       />
-      {camera.enabled && streamUrl ? (
-        <Image
-          source={{ uri: streamUrl }}
-          style={styles.cameraFeed}
-          contentFit="contain"
-          cachePolicy="none"
-        />
-      ) : (
-        <View style={styles.cameraDisabled}>
-          <Camera size={28} color="#d1d5db" />
-          <Text style={styles.cameraDisabledText}>{camera.enabled ? "Not connected" : "Disabled"}</Text>
-        </View>
-      )}
+      {renderFeed()}
     </View>
   );
 }
@@ -828,7 +851,10 @@ export default function IoPage() {
 
   useEffect(() => {
     robotClient.getCameras().catch(() => {});
-    return robotClient.onCameras(cams => setCameras(cams));
+    const unsub = robotClient.onCameras(cams => setCameras(cams));
+    // Poll every 3s so connection status updates (camera opens on background thread)
+    const poll = setInterval(() => robotClient.getCameras().catch(() => {}), 3000);
+    return () => { unsub(); clearInterval(poll); };
   }, []);
 
   const showStb     = ioConfig?.enableStbCard   ?? true;
