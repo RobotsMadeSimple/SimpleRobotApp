@@ -1049,9 +1049,9 @@ export class RobotConnectService {
     return this.url.replace(/^ws:/, 'http:').replace(/\/control$/, '');
   }
 
-  public cameraStreamUrl(id: string): string | null {
-    const base = this.httpBaseUrl();
-    return base ? `${base}/camera/${id}/stream` : null;
+  public cameraWsUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/camera/${id}/ws`;
   }
 
   public cameraSnapshotUrl(id: string): string | null {
