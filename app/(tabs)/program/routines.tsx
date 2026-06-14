@@ -18,7 +18,17 @@ export default function RoutinesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <NotConnectedOverlay />
-      <SubPageHeader title="Routines" />
+      <SubPageHeader
+        title="Routines"
+        right={
+          <TouchableOpacity
+            onPress={() => router.push("/program/builder?isRoutine=1")}
+            style={styles.addBtn}
+          >
+            <Plus size={18} color="#fff" />
+          </TouchableOpacity>
+        }
+      />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -97,6 +107,11 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
   cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
   cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+
+  addBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: "#7c3aed", justifyContent: "center", alignItems: "center",
+  },
 
   addCard: {
     flexDirection: "row",

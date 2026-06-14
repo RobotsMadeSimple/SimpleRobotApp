@@ -236,7 +236,17 @@ export default function RobotProgramsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <SubPageHeader title="Programs" />
+      <SubPageHeader
+        title="Programs"
+        right={
+          <TouchableOpacity
+            onPress={() => router.navigate("/program/builder")}
+            style={styles.addBtn}
+          >
+            <Plus size={18} color="#fff" />
+          </TouchableOpacity>
+        }
+      />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -338,6 +348,11 @@ const styles = StyleSheet.create({
   buttonsRow: { flexDirection: "row", gap: 8 },
   actionBtn:  { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+
+  addBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: "#2563eb", justifyContent: "center", alignItems: "center",
+  },
 
   addCard: {
     flexDirection: "row",

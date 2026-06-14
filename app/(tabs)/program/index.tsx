@@ -2,7 +2,7 @@ import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ChevronRight, Cpu, Repeat2 } from "lucide-react-native";
+import { ChevronRight, Cpu, Repeat2, ScanSearch } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -192,6 +192,13 @@ function NavTile({
 export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
+  const [visionCount, setVisionCount] = useState(0);
+
+  useEffect(() => {
+    robotClient.getVisionPrograms()
+      .then(({ programs }) => setVisionCount(programs.length))
+      .catch(() => {});
+  }, []);
 
   const builtNames = new Set(builtPrograms.map(p => p.name));
 
@@ -257,7 +264,7 @@ export default function ProgramScreen() {
         countLabel={robotProgramCount === 1 ? "program" : "programs"}
         color="#2563eb"
         bg="#eff6ff"
-        onPress={() => router.push("/(tabs)/program/robot-programs")}
+        onPress={() => router.navigate("/(tabs)/program/robot-programs")}
       />
 
       <NavTile
@@ -268,6 +275,16 @@ export default function ProgramScreen() {
         color="#7c3aed"
         bg="#f5f3ff"
         onPress={() => router.navigate("/program/routines")}
+      />
+
+      <NavTile
+        icon={<ScanSearch size={20} color="#0891b2" />}
+        label="Vision Programs"
+        count={visionCount}
+        countLabel={visionCount === 1 ? "program" : "programs"}
+        color="#0891b2"
+        bg="#ecfeff"
+        onPress={() => router.navigate("/(tabs)/program/vision")}
       />
     </ScrollView>
   );

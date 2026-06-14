@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CameraState, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CameraState, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -1057,6 +1057,52 @@ export class RobotConnectService {
   public cameraSnapshotUrl(id: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/camera/${id}/snapshot` : null;
+  }
+
+  // ── Vision programs ────────────────────────────────────────────────────────
+
+  public async getVisionPrograms(): Promise<{ programs: VisionProgram[]; runningIds: string[] }> {
+    const data: any = await this.sendCommand('GetVisionPrograms');
+    let programs: VisionProgram[] = [];
+    try { programs = JSON.parse(data?.programs ?? '[]'); } catch { }
+    return { programs, runningIds: data?.runningIds ?? [] };
+  }
+
+  public async saveVisionProgram(program: VisionProgram): Promise<{ id: string; lastUpdatedUnixMs: number }> {
+    return this.sendCommand('SaveVisionProgram', program) as any;
+  }
+
+  public deleteVisionProgram(id: string) {
+    return this.sendCommand('DeleteVisionProgram', { id });
+  }
+
+  public startVision(id: string) {
+    return this.sendCommand('StartVision', { id });
+  }
+
+  public stopVision(id: string) {
+    return this.sendCommand('StopVision', { id });
+  }
+
+  public async getVisionResult(id: string): Promise<VisionResult | null> {
+    const data: any = await this.sendCommand('GetVisionResult', { id });
+    if (!data?.result) return null;
+    try { return JSON.parse(data.result) as VisionResult; } catch { return null; }
+  }
+
+  public visionWsUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/vision/${id}/ws`;
+  }
+
+  public visionSnapshotUrl(id: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/vision/${id}/snapshot` : null;
+  }
+
+  public visionAnnotatedUrl(id: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/vision/${id}/annotated` : null;
   }
 
   public setRelay(relay: number, value: boolean) {
