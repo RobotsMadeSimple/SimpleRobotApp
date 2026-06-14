@@ -5,6 +5,7 @@ import {
   CameraState,
   ColorCoverageInspection,
   ColorEntry,
+  PolygonInspection,
   VisionProgram,
   VisionZone,
   VisionZoneGeometry,
@@ -12,6 +13,7 @@ import {
   defaultBlobParams,
   defaultColorEntry,
   defaultColorCoverageInspection,
+  defaultPolygonInspection,
 } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useLocalSearchParams, useNavigation } from "expo-router";
@@ -20,6 +22,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  Hexagon,
   Palette,
   Pencil,
   Plus,
@@ -30,6 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Modal,
+  PanResponder,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -242,7 +246,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 <canvas id="c"></canvas>
 <script>
 var c=document.getElementById('c'),ctx=c.getContext('2d');
-var _ws=null,_timer=null;
+var _ws=null,_timer=null,_lastUrl=null;
 
 function closeWs(){if(_ws){try{_ws.close();}catch(e){}_ws=null;}}
 function stopTimer(){if(_timer){clearInterval(_timer);_timer=null;}}
@@ -284,37 +288,276 @@ function startPoll(url,ms){
 }
 
 window.setFeed=function(url){
-  closeWs();stopTimer();
+  _lastUrl=url;closeWs();stopTimer();
   if(!url)return;
   if(url.startsWith('ws://')||url.startsWith('wss://'))startWs(url);
   else startPoll(url,150);
 };
+window.pauseFeed=function(){closeWs();stopTimer();};
+window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl);};
 <\/script>
 </body></html>`;
 
 // ── Blob params panel ──────────────────────────────────────────────────────────
 
-function ParamRow({ label, value, min, max, onChange }: {
-  label: string; value: number; min: number; max: number; onChange: (v: number) => void;
+function ParamRow({ label, value, min, max, onChange, desc }: {
+  label: string; value: number; min: number; max: number; onChange: (v: number) => void; desc?: string;
 }) {
+  const [text, setText] = useState(String(value));
+
+  // Sync only when the external value changes (e.g. modal opens with new data).
+  // While the user is typing and the field is empty, value hasn't changed so
+  // this effect is a no-op — the empty field is left alone until they type again.
+  useEffect(() => { setText(String(value)); }, [value]);
+
   return (
-    <View style={styles.paramRow}>
-      <Text style={styles.paramLabel}>{label}</Text>
-      <TextInput
-        style={styles.paramInput}
-        keyboardType="numeric"
-        value={String(value)}
-        onChangeText={t => { const n = parseFloat(t); if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n))); }}
-      />
+    <View>
+      <View style={styles.paramRow}>
+        <Text style={styles.paramLabel}>{label}</Text>
+        <TextInput
+          style={styles.paramInput}
+          keyboardType="numeric"
+          value={text}
+          onChangeText={t => {
+            setText(t);
+            const n = parseFloat(t);
+            if (!isNaN(n) && n >= min && n <= max) onChange(n);
+          }}
+        />
+      </View>
+      {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
     </View>
   );
 }
 
-function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+function ToggleRow({ label, value, onChange, desc }: {
+  label: string; value: boolean; onChange: (v: boolean) => void; desc?: string;
+}) {
   return (
-    <View style={styles.paramRow}>
-      <Text style={styles.paramLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: "#0891b2" }} />
+    <View>
+      <View style={styles.paramRow}>
+        <Text style={styles.paramLabel}>{label}</Text>
+        <Switch value={value} onValueChange={onChange} trackColor={{ true: "#0891b2" }} />
+      </View>
+      {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
+    </View>
+  );
+}
+
+function SliderParamRow({ label, value, min, max, onChange, desc }: {
+  label: string; value: number; min: number; max: number;
+  onChange: (v: number) => void; desc?: string;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+
+  const THUMB_D     = 20;
+  const ROW_H       = THUMB_D + 8;
+  const barWRef     = useRef(1);
+  const valueRef    = useRef(value);
+  const startValRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  valueRef.current    = value;
+  onChangeRef.current = onChange;
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { startValRef.current = valueRef.current; },
+    onPanResponderMove: (_, g) => {
+      const raw     = startValRef.current + (g.dx / Math.max(1, barWRef.current)) * (max - min);
+      const clamped = Math.max(min, Math.min(max, raw));
+      // Round to 3 decimal places to avoid floating-point noise
+      onChangeRef.current(Math.round(clamped * 1000) / 1000);
+    },
+    onPanResponderRelease: () => {},
+  })).current;
+
+  const frac = Math.max(0, Math.min(1, (value - min) / (max - min)));
+
+  return (
+    <View>
+      <View style={styles.paramRow}>
+        <Text style={styles.paramLabel}>{label}</Text>
+        <TextInput
+          style={styles.paramInput}
+          keyboardType="numeric"
+          value={text}
+          onChangeText={t => {
+            setText(t);
+            const n = parseFloat(t);
+            if (!isNaN(n) && n >= min && n <= max) onChange(n);
+          }}
+        />
+      </View>
+
+      <View
+        style={{ height: ROW_H, position: 'relative', marginTop: 6, marginBottom: 2 }}
+        onLayout={e => { barWRef.current = e.nativeEvent.layout.width; }}
+      >
+        {/* Track */}
+        <View style={{
+          position: 'absolute', left: 0, right: 0,
+          top: (ROW_H - 4) / 2, height: 4, borderRadius: 2,
+          backgroundColor: '#e5e7eb', overflow: 'hidden',
+        }}>
+          <View style={{ width: `${frac * 100}%`, height: '100%', borderRadius: 2, backgroundColor: '#d97706' }} />
+        </View>
+
+        {/* Thumb */}
+        <View
+          {...pan.panHandlers}
+          style={{
+            position: 'absolute',
+            left: `${frac * 100}%`,
+            top: 0,
+            width: THUMB_D, height: ROW_H,
+            marginLeft: -THUMB_D / 2,
+            justifyContent: 'center', alignItems: 'center',
+          }}
+        >
+          <View style={{
+            width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
+            backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#d97706',
+            shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, elevation: 3,
+          }} />
+        </View>
+      </View>
+
+      {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
+    </View>
+  );
+}
+
+function ThresholdRangeRow({
+  minVal, maxVal, inverted, onMinChange, onMaxChange, onInvertChange,
+}: {
+  minVal: number; maxVal: number; inverted: boolean;
+  onMinChange: (v: number) => void;
+  onMaxChange: (v: number) => void;
+  onInvertChange: (v: boolean) => void;
+}) {
+  const SEGS    = 40;
+  const BAR_H   = 20;
+  const THUMB_D = 22;
+  const ROW_H   = THUMB_D + 8;
+
+  const barWRef     = useRef(1);
+  const minRef      = useRef(minVal);
+  const maxRef      = useRef(maxVal);
+  const onMinRef    = useRef(onMinChange);
+  const onMaxRef    = useRef(onMaxChange);
+  const startMinRef = useRef(minVal);
+  const startMaxRef = useRef(maxVal);
+
+  minRef.current   = minVal;
+  maxRef.current   = maxVal;
+  onMinRef.current = onMinChange;
+  onMaxRef.current = onMaxChange;
+
+  const panMin = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { startMinRef.current = minRef.current; },
+    onPanResponderMove: (_, g) => {
+      const delta = (g.dx / Math.max(1, barWRef.current)) * 255;
+      const v = Math.round(Math.max(0, Math.min(maxRef.current, startMinRef.current + delta)));
+      onMinRef.current(v);
+    },
+    onPanResponderRelease: () => {},
+  })).current;
+
+  const panMax = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { startMaxRef.current = maxRef.current; },
+    onPanResponderMove: (_, g) => {
+      const delta = (g.dx / Math.max(1, barWRef.current)) * 255;
+      const v = Math.round(Math.max(minRef.current, Math.min(255, startMaxRef.current + delta)));
+      onMaxRef.current(v);
+    },
+    onPanResponderRelease: () => {},
+  })).current;
+
+  const minFrac = minVal / 255;
+  const maxFrac = maxVal / 255;
+
+  const thumbStyle = {
+    width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
+    backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#374151',
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 3, elevation: 4,
+  };
+
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+        <Text style={styles.paramLabel}>Threshold</Text>
+        <Text style={{ fontSize: 13, color: '#374151', fontWeight: '600' }}>{minVal}–{maxVal}</Text>
+      </View>
+
+      <View
+        style={{ height: ROW_H, position: 'relative', marginBottom: 8 }}
+        onLayout={e => { barWRef.current = e.nativeEvent.layout.width; }}
+      >
+        {/* Gradient bar — segments dim outside the selected range */}
+        <View style={{
+          position: 'absolute', left: 0, right: 0,
+          top: (ROW_H - BAR_H) / 2,
+          height: BAR_H, borderRadius: 6, overflow: 'hidden',
+          flexDirection: 'row',
+        }}>
+          {Array.from({ length: SEGS }, (_, i) => {
+            const segFrac = i / (SEGS - 1);
+            const bright  = Math.round(segFrac * 255);
+            const inRange = segFrac >= minFrac && segFrac <= maxFrac;
+            const active  = inverted ? !inRange : inRange;
+            return (
+              <View
+                key={i}
+                style={{
+                  flex: 1,
+                  backgroundColor: `rgb(${bright},${bright},${bright})`,
+                  opacity: active ? 1 : 0.18,
+                }}
+              />
+            );
+          })}
+        </View>
+
+        {/* Min thumb */}
+        <View
+          {...panMin.panHandlers}
+          style={{
+            position: 'absolute',
+            left: `${minFrac * 100}%`,
+            top: 0,
+            width: THUMB_D, height: ROW_H,
+            marginLeft: -THUMB_D / 2,
+            justifyContent: 'center', alignItems: 'center',
+          }}
+        >
+          <View style={thumbStyle} />
+        </View>
+
+        {/* Max thumb */}
+        <View
+          {...panMax.panHandlers}
+          style={{
+            position: 'absolute',
+            left: `${maxFrac * 100}%`,
+            top: 0,
+            width: THUMB_D, height: ROW_H,
+            marginLeft: -THUMB_D / 2,
+            justifyContent: 'center', alignItems: 'center',
+          }}
+        >
+          <View style={thumbStyle} />
+        </View>
+      </View>
+
+      <ToggleRow
+        label="Detect outside range"
+        value={inverted}
+        onChange={onInvertChange}
+        desc="When on, finds shapes made of pixels OUTSIDE this brightness range — useful for detecting dark shapes by selecting the bright background instead"
+      />
     </View>
   );
 }
@@ -324,25 +567,37 @@ function BlobParamsPanel({ params, onUpdate }: { params: BlobDetectionParams; on
   return (
     <View style={styles.blobPanel}>
       <Text style={styles.blobPanelTitle}>Blob Detection</Text>
-      <ParamRow label="Min Area"      value={params.minArea}      min={1}   max={999999} onChange={v => upd({ minArea: v })} />
-      <ParamRow label="Max Area"      value={params.maxArea}      min={1}   max={999999} onChange={v => upd({ maxArea: v })} />
-      <ParamRow label="Min Threshold" value={params.minThreshold} min={0}   max={255}    onChange={v => upd({ minThreshold: v })} />
-      <ParamRow label="Max Threshold" value={params.maxThreshold} min={0}   max={255}    onChange={v => upd({ maxThreshold: v })} />
-      <ToggleRow label="Filter by Color"       value={params.filterByColor}       onChange={v => upd({ filterByColor: v })} />
+      <ParamRow label="Min Area" value={params.minArea} min={1} max={999999} onChange={v => upd({ minArea: v })}
+        desc="Minimum blob size in pixels² — raise to ignore small noise" />
+      <ParamRow label="Max Area" value={params.maxArea} min={1} max={999999} onChange={v => upd({ maxArea: v })}
+        desc="Maximum blob size in pixels² — lower to exclude large regions" />
+      <ParamRow label="Min Threshold" value={params.minThreshold} min={0} max={255} onChange={v => upd({ minThreshold: v })}
+        desc="Lower grayscale level — blob detection runs at multiple steps from min to max" />
+      <ParamRow label="Max Threshold" value={params.maxThreshold} min={0} max={255} onChange={v => upd({ maxThreshold: v })}
+        desc="Upper grayscale level — more steps between min and max finds more blobs but is slower" />
+      <ToggleRow label="Filter by Color" value={params.filterByColor} onChange={v => upd({ filterByColor: v })}
+        desc="When on, only detect blobs of a specific brightness (dark or light)" />
       {params.filterByColor && (
-        <ParamRow label="Blob Color (0=dark)" value={params.blobColor} min={0} max={255} onChange={v => upd({ blobColor: v })} />
+        <ParamRow label="Blob Color" value={params.blobColor} min={0} max={255} onChange={v => upd({ blobColor: v })}
+          desc="0 = find dark blobs on a light background · 255 = find light blobs" />
       )}
-      <ToggleRow label="Filter by Circularity" value={params.filterByCircularity} onChange={v => upd({ filterByCircularity: v })} />
+      <ToggleRow label="Filter by Circularity" value={params.filterByCircularity} onChange={v => upd({ filterByCircularity: v })}
+        desc="When on, only detect blobs that are roughly circular" />
       {params.filterByCircularity && (
-        <ParamRow label="Min Circularity" value={params.minCircularity} min={0} max={1} onChange={v => upd({ minCircularity: v })} />
+        <ParamRow label="Min Circularity" value={params.minCircularity} min={0} max={1} onChange={v => upd({ minCircularity: v })}
+          desc="1.0 = perfect circle · lower values allow less round shapes (0.7 = fairly round)" />
       )}
-      <ToggleRow label="Filter by Convexity"   value={params.filterByConvexity}   onChange={v => upd({ filterByConvexity: v })} />
+      <ToggleRow label="Filter by Convexity" value={params.filterByConvexity} onChange={v => upd({ filterByConvexity: v })}
+        desc="When on, only detect blobs without large dents or concavities" />
       {params.filterByConvexity && (
-        <ParamRow label="Min Convexity" value={params.minConvexity} min={0} max={1} onChange={v => upd({ minConvexity: v })} />
+        <ParamRow label="Min Convexity" value={params.minConvexity} min={0} max={1} onChange={v => upd({ minConvexity: v })}
+          desc="Ratio of blob area to its convex hull — lower allows concave shapes like C or L" />
       )}
-      <ToggleRow label="Filter by Inertia"     value={params.filterByInertia}     onChange={v => upd({ filterByInertia: v })} />
+      <ToggleRow label="Filter by Inertia" value={params.filterByInertia} onChange={v => upd({ filterByInertia: v })}
+        desc="When on, filter blobs by how elongated they are" />
       {params.filterByInertia && (
-        <ParamRow label="Min Inertia Ratio" value={params.minInertiaRatio} min={0} max={1} onChange={v => upd({ minInertiaRatio: v })} />
+        <ParamRow label="Min Inertia Ratio" value={params.minInertiaRatio} min={0} max={1} onChange={v => upd({ minInertiaRatio: v })}
+          desc="1.0 = circle · lower values allow more elongated shapes (0.1 = rod or needle)" />
       )}
     </View>
   );
@@ -756,8 +1011,9 @@ function ZoneDrawModal({ visible, snapshotUri, zones, editingZoneId, onDone, onC
 // ── Shared inspection discriminated union ──────────────────────────────────────
 
 type InspItem =
-  | { kind: 'blob';  insp: BlobInspection }
-  | { kind: 'color'; insp: ColorCoverageInspection };
+  | { kind: 'blob';    insp: BlobInspection }
+  | { kind: 'color';   insp: ColorCoverageInspection }
+  | { kind: 'polygon'; insp: PolygonInspection };
 
 // ── Inspection type picker ─────────────────────────────────────────────────────
 
@@ -765,7 +1021,7 @@ function InspectionTypePicker({
   visible, onSelect, onClose,
 }: {
   visible: boolean;
-  onSelect: (kind: 'blob' | 'color') => void;
+  onSelect: (kind: 'blob' | 'color' | 'polygon') => void;
   onClose: () => void;
 }) {
   return (
@@ -799,6 +1055,19 @@ function InspectionTypePicker({
               <Text style={styles.sheetRowSub}>Measure pixel color percentage in a zone</Text>
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetRow}
+            onPress={() => { onSelect('polygon'); onClose(); }}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.typePickerIcon, { backgroundColor: '#fef3c7' }]}>
+              <Hexagon size={18} color="#d97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetRowName}>Polygon Detection</Text>
+              <Text style={styles.sheetRowSub}>Find N-sided shapes and measure orientation</Text>
+            </View>
+          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     </Modal>
@@ -808,19 +1077,24 @@ function InspectionTypePicker({
 // ── Inspection config modal ────────────────────────────────────────────────────
 
 function InspectionConfigModal({
-  visible, kind, initialBlob, initialColor, zones,
-  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onClose,
+  visible, kind, initialBlob, initialColor, initialPolygon, zones,
+  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onClose,
+  debugUrl, onLiveUpdate,
 }: {
   visible: boolean;
-  kind: 'blob' | 'color' | null;
+  kind: 'blob' | 'color' | 'polygon' | null;
   initialBlob: BlobInspection | null;
   initialColor: ColorCoverageInspection | null;
+  initialPolygon: PolygonInspection | null;
   zones: VisionZone[];
   snapshotUri: string | null;
   onFetchSnapshot: () => Promise<void>;
   onSaveBlob: (insp: BlobInspection) => void;
   onSaveColor: (insp: ColorCoverageInspection) => void;
+  onSavePolygon: (insp: PolygonInspection) => void;
   onClose: () => void;
+  debugUrl?: string | null;
+  onLiveUpdate?: (insp: PolygonInspection) => void;
 }) {
   const [name, setName]               = useState('');
   const [enabled, setEnabled]         = useState(true);
@@ -829,11 +1103,55 @@ function InspectionConfigModal({
   const [colors, setColors]           = useState<ColorEntry[]>([]);
   const [minCoverage, setMinCoverage] = useState<number | null>(null);
   const [maxCoverage, setMaxCoverage] = useState<number | null>(null);
+  // Polygon-specific state
+  const [polySides, setPolySides]         = useState(4);
+  const [polyMinArea, setPolyMinArea]     = useState(1000);
+  const [polyMaxArea, setPolyMaxArea]     = useState(100000);
+  const [polyEpsilon, setPolyEpsilon]     = useState(0.04);
+  const [polyMinThresh, setPolyMinThresh] = useState(50);
+  const [polyMaxThresh, setPolyMaxThresh] = useState(200);
+  const [polyInverted, setPolyInverted]   = useState(false);
+
   const [zonePickerOpen, setZonePickerOpen]   = useState(false);
   const [colorEditState, setColorEditState]   = useState<{ entry: ColorEntry } | null>(null);
+  const [debugPaused, setDebugPaused]         = useState(false);
+  const debugWebviewRef = useRef<any>(null);
+
+  // Refs so notifyLiveUpdate always sees the latest state without stale closures
+  const polyStateRef = useRef({ name, enabled, zoneId, polySides, polyMinArea, polyMaxArea, polyEpsilon, polyMinThresh, polyMaxThresh, polyInverted });
+  polyStateRef.current = { name, enabled, zoneId, polySides, polyMinArea, polyMaxArea, polyEpsilon, polyMinThresh, polyMaxThresh, polyInverted };
+  const initialPolygonRef    = useRef(initialPolygon);
+  initialPolygonRef.current  = initialPolygon;
+  const onLiveUpdateRef      = useRef(onLiveUpdate);
+  onLiveUpdateRef.current    = onLiveUpdate;
+
+  function notifyLiveUpdate(patch: Partial<PolygonInspection>) {
+    const init = initialPolygonRef.current;
+    if (!init || kind !== 'polygon') return;
+    const s = polyStateRef.current;
+    onLiveUpdateRef.current?.({
+      ...init,
+      name: s.name, enabled: s.enabled, zoneId: s.zoneId,
+      sides: s.polySides, minArea: s.polyMinArea, maxArea: s.polyMaxArea,
+      epsilon: s.polyEpsilon, minThreshold: s.polyMinThresh, maxThreshold: s.polyMaxThresh,
+      invertThreshold: s.polyInverted,
+      ...patch,
+    });
+  }
+
+  // Start / stop the debug feed when visibility, URL, or paused state changes
+  useEffect(() => {
+    if (!debugWebviewRef.current || !debugUrl) return;
+    if (visible && !debugPaused) {
+      debugWebviewRef.current.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
+    } else {
+      debugWebviewRef.current.injectJavaScript(`window.pauseFeed();true;`);
+    }
+  }, [visible, debugUrl, debugPaused]);
 
   useEffect(() => {
     if (!visible) return;
+    setDebugPaused(false);
     if (kind === 'blob' && initialBlob) {
       setName(initialBlob.name);
       setEnabled(initialBlob.enabled);
@@ -846,33 +1164,105 @@ function InspectionConfigModal({
       setColors([...initialColor.colors]);
       setMinCoverage(initialColor.minCoverage);
       setMaxCoverage(initialColor.maxCoverage);
+    } else if (kind === 'polygon' && initialPolygon) {
+      setName(initialPolygon.name);
+      setEnabled(initialPolygon.enabled);
+      setZoneId(initialPolygon.zoneId);
+      setPolySides(initialPolygon.sides);
+      setPolyMinArea(initialPolygon.minArea);
+      setPolyMaxArea(initialPolygon.maxArea);
+      setPolyEpsilon(initialPolygon.epsilon);
+      setPolyMinThresh(initialPolygon.minThreshold);
+      setPolyMaxThresh(initialPolygon.maxThreshold);
+      setPolyInverted(initialPolygon.invertThreshold ?? false);
     }
-  }, [visible, kind, initialBlob, initialColor]);
+  }, [visible, kind, initialBlob, initialColor, initialPolygon]);
 
   function handleClose() {
     if (kind === 'blob' && initialBlob) {
       onSaveBlob({ ...initialBlob, name, enabled, zoneId, blobParams });
     } else if (kind === 'color' && initialColor) {
       onSaveColor({ ...initialColor, name, enabled, zoneId, colors, minCoverage, maxCoverage });
+    } else if (kind === 'polygon' && initialPolygon) {
+      onSavePolygon({ ...initialPolygon, name, enabled, zoneId,
+        sides: polySides, minArea: polyMinArea, maxArea: polyMaxArea,
+        epsilon: polyEpsilon, minThreshold: polyMinThresh, maxThreshold: polyMaxThresh,
+        invertThreshold: polyInverted });
     }
     onClose();
   }
 
   const linkedZone = zones.find(z => z.id === zoneId);
-  const accent     = kind === 'blob' ? '#0891b2' : '#d946ef';
+  const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : '#d946ef';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.configRoot}>
         <View style={styles.configHeader}>
           <Text style={styles.configTitle}>
-            {kind === 'blob' ? 'Blob Detection' : 'Color Coverage'}
+            {kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : 'Color Coverage'}
           </Text>
           <TouchableOpacity onPress={handleClose} style={styles.configDoneBtn}>
             <Check size={15} color="#fff" />
             <Text style={styles.configDoneBtnText}>Done</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Live debug feed — polygon only, shows threshold mask + color-coded contours */}
+        {kind === 'polygon' && debugUrl && (
+          <View style={{ height: 210, backgroundColor: '#0d1117' }}>
+            <WebView
+              ref={debugWebviewRef}
+              source={{ html: FEED_HTML }}
+              style={{ flex: 1, backgroundColor: '#0d1117' }}
+              scrollEnabled={false}
+              originWhitelist={['*']}
+              javaScriptEnabled
+              onLoad={() => {
+                if (!debugPaused && debugUrl)
+                  debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
+              }}
+            />
+            {/* LIVE badge */}
+            {!debugPaused && (
+              <View style={{ position: 'absolute', top: 8, left: 8, flexDirection: 'row',
+                alignItems: 'center', gap: 4, backgroundColor: 'rgba(220,38,38,0.85)',
+                borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>LIVE</Text>
+              </View>
+            )}
+            {/* Pause / Resume */}
+            <TouchableOpacity
+              onPress={() => {
+                const next = !debugPaused;
+                setDebugPaused(next);
+                debugWebviewRef.current?.injectJavaScript(
+                  next ? `window.pauseFeed();true;` : `window.resumeFeed();true;`
+                );
+              }}
+              style={{ position: 'absolute', top: 8, right: 8,
+                backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 8,
+                paddingHorizontal: 10, paddingVertical: 5 }}
+              activeOpacity={0.75}
+            >
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                {debugPaused ? '▶ Resume' : '⏸ Pause'}
+              </Text>
+            </TouchableOpacity>
+            {/* Legend strip */}
+            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
+              flexDirection: 'row', justifyContent: 'center', gap: 14,
+              backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 5 }}>
+              {[['#4b5563','Area fail'],['#f97316','Wrong sides'],['#22c55e','Matched']].map(([color, label]) => (
+                <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: color }} />
+                  <Text style={{ color: '#d1d5db', fontSize: 10 }}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         <ScrollView
           style={{ flex: 1 }}
@@ -914,6 +1304,31 @@ function InspectionConfigModal({
           {/* Blob params */}
           {kind === 'blob' && (
             <BlobParamsPanel params={blobParams} onUpdate={setBlobParams} />
+          )}
+
+          {/* Polygon params */}
+          {kind === 'polygon' && (
+            <View style={styles.blobPanel}>
+              <Text style={styles.blobPanelTitle}>Polygon Detection</Text>
+              <ParamRow label="Sides" value={polySides} min={3} max={20}
+                onChange={v => { const n = Math.round(v); setPolySides(n); notifyLiveUpdate({ sides: n }); }}
+                desc="Number of corners the shape must have — 3=triangle, 4=rectangle, 5=pentagon, 6=hexagon" />
+              <ParamRow label="Min Area (px²)" value={polyMinArea} min={1} max={9999999}
+                onChange={v => { setPolyMinArea(v); notifyLiveUpdate({ minArea: v }); }}
+                desc="Ignore contours smaller than this — raise to filter out noise and small specks" />
+              <ParamRow label="Max Area (px²)" value={polyMaxArea} min={1} max={9999999}
+                onChange={v => { setPolyMaxArea(v); notifyLiveUpdate({ maxArea: v }); }}
+                desc="Ignore contours larger than this — lower to exclude large background regions" />
+              <SliderParamRow label="Epsilon" value={polyEpsilon} min={0.001} max={0.5}
+                onChange={v => { setPolyEpsilon(v); notifyLiveUpdate({ epsilon: v }); }}
+                desc="Approximation tolerance as a fraction of the perimeter — lower values require a more precise match (start at 0.04, loosen if shapes aren't detected)" />
+              <ThresholdRangeRow
+                minVal={polyMinThresh} maxVal={polyMaxThresh} inverted={polyInverted}
+                onMinChange={v => { setPolyMinThresh(v); notifyLiveUpdate({ minThreshold: v }); }}
+                onMaxChange={v => { setPolyMaxThresh(v); notifyLiveUpdate({ maxThreshold: v }); }}
+                onInvertChange={v => { setPolyInverted(v); notifyLiveUpdate({ invertThreshold: v }); }}
+              />
+            </View>
           )}
 
           {/* Color coverage */}
@@ -1072,6 +1487,7 @@ export default function VisionEditorScreen() {
   const [snapshotUri, setSnapshotUri]     = useState<string | null>(null);
   const [configModal, setConfigModal]     = useState<InspItem | null>(null);
   const [typePicker, setTypePicker]       = useState(false);
+  const liveUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Dirty tracking — ref so the beforeRemove listener never has stale closure values
   const isDirtyRef  = useRef(false);
@@ -1225,9 +1641,36 @@ export default function VisionEditorScreen() {
     markDirty();
   }
 
+  function updatePolygonInspection(updated: PolygonInspection) {
+    setProgram(prev => ({
+      ...prev,
+      polygonInspections: (prev.polygonInspections ?? []).map(i => i.id === updated.id ? updated : i),
+    }));
+    markDirty();
+  }
+
+  function deletePolygonInspection(id: string) {
+    setProgram(prev => ({ ...prev, polygonInspections: (prev.polygonInspections ?? []).filter(i => i.id !== id) }));
+    markDirty();
+  }
+
+  function handlePolygonLiveUpdate(insp: PolygonInspection) {
+    updatePolygonInspection(insp);
+    if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
+    liveUpdateTimerRef.current = setTimeout(() => {
+      const prog = programRef.current;
+      autoSave({
+        ...prog,
+        name: nameRef.current,
+        polygonInspections: (prog.polygonInspections ?? []).map(i => i.id === insp.id ? insp : i),
+      });
+    }, 200);
+  }
+
   const allInspections: InspItem[] = [
     ...program.inspections.map(insp => ({ kind: 'blob' as const, insp })),
     ...(program.colorInspections ?? []).map(insp => ({ kind: 'color' as const, insp })),
+    ...(program.polygonInspections ?? []).map(insp => ({ kind: 'polygon' as const, insp })),
   ];
 
   async function save() {
@@ -1380,9 +1823,9 @@ export default function VisionEditorScreen() {
         {allInspections.map((item, index) => {
           const { kind, insp } = item;
           const linkedZone = program.zones.find(z => z.id === insp.zoneId);
-          const accent     = kind === 'blob' ? '#0891b2' : '#d946ef';
-          const iconBg     = kind === 'blob' ? '#ecfeff'  : '#fdf4ff';
-          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : 'COLOR COVERAGE';
+          const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : '#d946ef';
+          const iconBg     = kind === 'blob' ? '#ecfeff'  : kind === 'polygon' ? '#fef3c7'  : '#fdf4ff';
+          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : 'COLOR COVERAGE';
           return (
             <View key={insp.id} style={[styles.inspStepCard, { borderLeftColor: accent }]}>
               <TouchableOpacity
@@ -1391,10 +1834,9 @@ export default function VisionEditorScreen() {
                 activeOpacity={0.75}
               >
                 <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
-                  {kind === 'blob'
-                    ? <ScanSearch size={18} color={accent} />
-                    : <Palette    size={18} color={accent} />
-                  }
+                  {kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
+                   kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
+                                       <Palette    size={18} color={accent} />}
                 </View>
                 <View style={styles.inspStepText}>
                   <Text style={[styles.inspStepType, { color: accent }]}>
@@ -1403,21 +1845,24 @@ export default function VisionEditorScreen() {
                   <Text style={styles.inspStepName}>{insp.name}</Text>
                   <Text style={styles.inspStepDetail}>
                     {linkedZone?.name ?? 'Full image'}
+                    {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
                   </Text>
                 </View>
                 <Switch
                   value={insp.enabled}
                   onValueChange={v => {
-                    if (kind === 'blob') updateInspection({ ...(insp as BlobInspection), enabled: v });
-                    else updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
+                    if (kind === 'blob')         updateInspection({ ...(insp as BlobInspection), enabled: v });
+                    else if (kind === 'polygon') updatePolygonInspection({ ...(insp as PolygonInspection), enabled: v });
+                    else                         updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
                   }}
                   trackColor={{ true: accent }}
                   style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
                 />
                 <TouchableOpacity
                   onPress={() => {
-                    if (kind === 'blob') deleteInspection(insp.id);
-                    else deleteColorInspection(insp.id);
+                    if (kind === 'blob')         deleteInspection(insp.id);
+                    else if (kind === 'polygon') deletePolygonInspection(insp.id);
+                    else                         deleteColorInspection(insp.id);
                   }}
                   hitSlop={8} style={styles.iconBtn}
                 >
@@ -1457,7 +1902,9 @@ export default function VisionEditorScreen() {
       <InspectionTypePicker
         visible={typePicker}
         onSelect={kind => {
-          const totalCount = program.inspections.length + (program.colorInspections ?? []).length;
+          const totalCount = program.inspections.length +
+            (program.colorInspections ?? []).length +
+            (program.polygonInspections ?? []).length;
           if (kind === 'blob') {
             const newInsp: BlobInspection = {
               id: `insp_${Date.now()}`,
@@ -1469,10 +1916,15 @@ export default function VisionEditorScreen() {
             setProgram(prev => ({ ...prev, inspections: [...prev.inspections, newInsp] }));
             setConfigModal({ kind: 'blob', insp: newInsp });
             markDirty();
-          } else {
+          } else if (kind === 'color') {
             const newInsp = defaultColorCoverageInspection(totalCount);
             setProgram(prev => ({ ...prev, colorInspections: [...(prev.colorInspections ?? []), newInsp] }));
             setConfigModal({ kind: 'color', insp: newInsp });
+            markDirty();
+          } else {
+            const newInsp = defaultPolygonInspection(totalCount);
+            setProgram(prev => ({ ...prev, polygonInspections: [...(prev.polygonInspections ?? []), newInsp] }));
+            setConfigModal({ kind: 'polygon', insp: newInsp });
             markDirty();
           }
         }}
@@ -1484,6 +1936,7 @@ export default function VisionEditorScreen() {
         kind={configModal?.kind ?? null}
         initialBlob={configModal?.kind === 'blob' ? (configModal.insp as BlobInspection) : null}
         initialColor={configModal?.kind === 'color' ? (configModal.insp as ColorCoverageInspection) : null}
+        initialPolygon={configModal?.kind === 'polygon' ? (configModal.insp as PolygonInspection) : null}
         zones={program.zones}
         snapshotUri={snapshotUri}
         onFetchSnapshot={fetchSnapshot}
@@ -1495,6 +1948,14 @@ export default function VisionEditorScreen() {
           updateColorInspection(insp);
           autoSave({ ...program, name, colorInspections: (program.colorInspections ?? []).map(i => i.id === insp.id ? insp : i) });
         }}
+        onSavePolygon={insp => {
+          updatePolygonInspection(insp);
+          autoSave({ ...program, name, polygonInspections: (program.polygonInspections ?? []).map(i => i.id === insp.id ? insp : i) });
+        }}
+        debugUrl={configModal?.kind === 'polygon' && program.id
+          ? robotClient.visionPolygonDebugUrl(program.id, configModal.insp.id)
+          : null}
+        onLiveUpdate={handlePolygonLiveUpdate}
         onClose={() => setConfigModal(null)}
       />
     </View>
@@ -1646,6 +2107,7 @@ const styles = StyleSheet.create({
   blobPanelTitle: { fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 2 },
   paramRow:   { flexDirection: "row", alignItems: "center", gap: 8 },
   paramLabel: { flex: 1, fontSize: 13, color: "#374151" },
+  paramDesc:  { fontSize: 11, color: "#9ca3af", marginTop: 2, lineHeight: 15 },
   paramInput: {
     width: 80, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8,
     paddingHorizontal: 8, paddingVertical: 4, textAlign: "right",

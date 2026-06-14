@@ -2,7 +2,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -1278,8 +1278,9 @@ function StepConfigModal({
   const [ioConfig, setIoConfig]       = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
   const [auxDevices, setAuxDevices]   = useState<AuxDeviceState[]>([]);
   const [visionPrograms, setVisionPrograms] = useState<VisionProgram[]>([]);
-  const [visionPicker, setVisionPicker] = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
-  const [colorPicker, setColorPicker]   = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
+  const [visionPicker, setVisionPicker]   = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
+  const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
+  const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
   const [statusVarPickerOpen, setStatusVarPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -2206,9 +2207,10 @@ function StepConfigModal({
         );
 
       case "RunVision": {
-        const selectedVP       = visionPrograms.find(vp => vp.id === draft!.visionProgramId);
-        const inspections      = selectedVP?.inspections ?? [];
-        const colorInspections = selectedVP?.colorInspections ?? [];
+        const selectedVP         = visionPrograms.find(vp => vp.id === draft!.visionProgramId);
+        const inspections        = selectedVP?.inspections ?? [];
+        const colorInspections   = selectedVP?.colorInspections ?? [];
+        const polygonInspections = selectedVP?.polygonInspections ?? [];
 
         function getOutput(inspId: string): VisionStepOutput | undefined {
           return (draft!.visionOutputs ?? []).find(o => o.inspectionId === inspId);
@@ -2216,6 +2218,10 @@ function StepConfigModal({
 
         function getColorOutput(inspId: string): ColorVisionStepOutput | undefined {
           return (draft!.colorOutputs ?? []).find(o => o.inspectionId === inspId);
+        }
+
+        function getPolygonOutput(inspId: string): PolygonVisionStepOutput | undefined {
+          return (draft!.polygonOutputs ?? []).find(o => o.inspectionId === inspId);
         }
 
         return (
@@ -2312,6 +2318,58 @@ function StepConfigModal({
                         accent="#16a34a"
                         placeholder="None — tap to assign"
                         onPress={() => setColorPicker({ inspId: insp.id, field: 'passedVar' })}
+                      />
+                    </View>
+                  );
+                })}
+              </>
+            )}
+
+            {polygonInspections.filter(i => i.enabled).length > 0 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>POLYGON OUTPUTS</Text>
+                {polygonInspections.filter(i => i.enabled).map(insp => {
+                  const out = getPolygonOutput(insp.id);
+                  return (
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fffbeb", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#fde68a" }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>
+                        {insp.name}  <Text style={{ fontWeight: "400", color: "#9ca3af" }}>({insp.sides}-sided)</Text>
+                      </Text>
+                      <VarSelectorButton
+                        label="FOUND"
+                        value={out?.foundVar}
+                        accent="#16a34a"
+                        placeholder="None — tap to assign"
+                        marginTop={false}
+                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'foundVar' })}
+                      />
+                      <VarSelectorButton
+                        label="COUNT"
+                        value={out?.countVar}
+                        accent="#2563eb"
+                        placeholder="None — tap to assign"
+                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'countVar' })}
+                      />
+                      <VarSelectorButton
+                        label="ANGLE (deg)"
+                        value={out?.angleVar}
+                        accent="#d97706"
+                        placeholder="None — tap to assign"
+                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'angleVar' })}
+                      />
+                      <VarSelectorButton
+                        label="CENTER X"
+                        value={out?.centerXVar}
+                        accent="#0891b2"
+                        placeholder="None — tap to assign"
+                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerXVar' })}
+                      />
+                      <VarSelectorButton
+                        label="CENTER Y"
+                        value={out?.centerYVar}
+                        accent="#0891b2"
+                        placeholder="None — tap to assign"
+                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerYVar' })}
                       />
                     </View>
                   );
@@ -2716,6 +2774,15 @@ function StepConfigModal({
     : undefined;
   const colorPickerTitle = colorPicker?.field === 'passedVar' ? 'Passed Variable' : 'Coverage Variable';
 
+  // Polygon inspection picker
+  const polygonPickerVars     = polygonPicker ? (variables ?? []).filter(v => v.points == null && v.values == null) : [];
+  const polygonPickerSelected = polygonPicker
+    ? (draft?.polygonOutputs ?? []).find(o => o.inspectionId === polygonPicker.inspId)?.[polygonPicker.field]
+    : undefined;
+  const polygonPickerTitle = polygonPicker
+    ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', angleVar: 'Angle Variable', centerXVar: 'Center X Variable', centerYVar: 'Center Y Variable' }[polygonPicker.field] ?? 'Variable')
+    : '';
+
   // Derive picker variable list from the active field
   const pickerVars = visionPicker
     ? visionPicker.field === 'pointsVar'
@@ -2844,6 +2911,25 @@ function StepConfigModal({
           ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
           : [...outputs, { inspectionId: inspId, ...patch }];
         set({ colorOutputs: next });
+      }}
+    />
+    <VarPickerModal
+      visible={polygonPicker !== null}
+      onClose={() => setPolygonPicker(null)}
+      variables={polygonPickerVars}
+      selected={polygonPickerSelected}
+      title={polygonPickerTitle}
+      showNone
+      onSelect={v => {
+        if (!polygonPicker || !draft) return;
+        const { inspId, field } = polygonPicker;
+        const outputs = draft.polygonOutputs ?? [];
+        const idx = outputs.findIndex(o => o.inspectionId === inspId);
+        const patch = { [field]: v?.name };
+        const next: PolygonVisionStepOutput[] = idx >= 0
+          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
+          : [...outputs, { inspectionId: inspId, ...patch }];
+        set({ polygonOutputs: next });
       }}
     />
     <VarPickerModal

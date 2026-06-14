@@ -122,6 +122,34 @@ export type BlobInspection = {
   blobParams: BlobDetectionParams;
 };
 
+export type PolygonInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  sides: number;
+  minArea: number;
+  maxArea: number;
+  /** ApproxPolyDP accuracy factor — fraction of perimeter (0.01–0.1) */
+  epsilon: number;
+  minThreshold: number;
+  maxThreshold: number;
+  invertThreshold?: boolean;
+};
+
+export type PolygonResult = {
+  inspectionId: string;
+  name: string;
+  count: number;
+  found: boolean;
+  /** Orientation angle in degrees from MinAreaRect of the largest matching polygon */
+  angle: number;
+  /** Normalized centroid X (0–1) of the largest matching polygon */
+  centerX: number;
+  /** Normalized centroid Y (0–1) of the largest matching polygon */
+  centerY: number;
+};
+
 export type VisionProgram = {
   id: string;
   name: string;
@@ -130,12 +158,13 @@ export type VisionProgram = {
   zones: VisionZone[];
   inspections: BlobInspection[];
   colorInspections?: ColorCoverageInspection[];
+  polygonInspections?: PolygonInspection[];
   lastUpdatedUnixMs: number;
 };
 
 export type BlobResult       = { x: number; y: number; size: number };
 export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[] };
+export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[] };
 
 export function defaultBlobParams(): BlobDetectionParams {
   return {
@@ -204,6 +233,15 @@ export type ColorVisionStepOutput = {
   passedVar?: string;
 };
 
+export type PolygonVisionStepOutput = {
+  inspectionId: string;
+  countVar?: string;
+  foundVar?: string;
+  angleVar?: string;
+  centerXVar?: string;
+  centerYVar?: string;
+};
+
 export function defaultColorEntry(): ColorEntry {
   return { id: `ce_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, r: 128, g: 128, b: 128, tolerance: 20 };
 }
@@ -217,6 +255,22 @@ export function defaultColorCoverageInspection(index: number): ColorCoverageInsp
     colors: [],
     minCoverage: 50,
     maxCoverage: null,
+  };
+}
+
+export function defaultPolygonInspection(index: number): PolygonInspection {
+  return {
+    id: `polyinsp_${Date.now()}`,
+    name: `Polygon ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    sides: 4,
+    minArea: 1000,
+    maxArea: 100000,
+    epsilon: 0.04,
+    minThreshold: 50,
+    maxThreshold: 200,
+    invertThreshold: false,
   };
 }
 
@@ -321,6 +375,7 @@ export type ProgramStep = {
   visionProgramName?: string;
   visionOutputs?: VisionStepOutput[];
   colorOutputs?: ColorVisionStepOutput[];
+  polygonOutputs?: PolygonVisionStepOutput[];
   // Variable point target for move steps (overrides pointName when set)
   varPointName?: string;
   varPointIndex?: string;

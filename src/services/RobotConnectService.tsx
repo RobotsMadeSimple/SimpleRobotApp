@@ -1100,6 +1100,11 @@ export class RobotConnectService {
     return base ? `${base}/vision/${id}/snapshot` : null;
   }
 
+  public visionPolygonDebugUrl(programId: string, inspectionId: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/vision/${programId}/debug/polygon/${inspectionId}` : null;
+  }
+
   public visionAnnotatedUrl(id: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/vision/${id}/annotated` : null;
