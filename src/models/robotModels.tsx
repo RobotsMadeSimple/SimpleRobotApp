@@ -79,9 +79,146 @@ export type UsbRelayState = {
   names: string[];           // display names, index 0 = relay 1
 };
 
+// ── Vision ────────────────────────────────────────────────────────────────────
+
+export type VisionZoneShape = 'Rectangle' | 'Circle' | 'Polygon';
+
+export type VisionZoneGeometry = {
+  shape: VisionZoneShape;
+  // Rectangle
+  x: number; y: number; width: number; height: number;
+  // Circle
+  cx: number; cy: number; radius: number;
+  // Polygon
+  points: [number, number][];
+};
+
+export type BlobDetectionParams = {
+  minArea: number;
+  maxArea: number;
+  filterByCircularity: boolean;
+  minCircularity: number;
+  filterByConvexity: boolean;
+  minConvexity: number;
+  filterByInertia: boolean;
+  minInertiaRatio: number;
+  minThreshold: number;
+  maxThreshold: number;
+  filterByColor: boolean;
+  blobColor: number; // 0=dark, 255=light
+};
+
+export type VisionZone = {
+  id: string;
+  name: string;
+  geometry: VisionZoneGeometry;
+};
+
+export type BlobInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  blobParams: BlobDetectionParams;
+};
+
+export type VisionProgram = {
+  id: string;
+  name: string;
+  description: string;
+  cameraId: string;
+  zones: VisionZone[];
+  inspections: BlobInspection[];
+  colorInspections?: ColorCoverageInspection[];
+  lastUpdatedUnixMs: number;
+};
+
+export type BlobResult       = { x: number; y: number; size: number };
+export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
+export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[] };
+
+export function defaultBlobParams(): BlobDetectionParams {
+  return {
+    minArea: 100, maxArea: 10000,
+    filterByCircularity: false, minCircularity: 0.5,
+    filterByConvexity:   false, minConvexity:   0.8,
+    filterByInertia:     false, minInertiaRatio: 0.1,
+    minThreshold: 10,   maxThreshold: 200,
+    filterByColor: false, blobColor: 0,
+  };
+}
+
+export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
+  return {
+    shape,
+    x: 0.1, y: 0.1, width: 0.8, height: 0.8,
+    cx: 0.5, cy: 0.5, radius: 0.3,
+    points: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+  };
+}
+
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'RunVision';
+
+export type Vector6Val = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
+
+export type VisionStepOutput = {
+  inspectionId: string;
+  countVar?: string;
+  pointsVar?: string;
+  detectedVar?: string;
+};
+
+export type ColorEntry = {
+  id: string;
+  r: number;
+  g: number;
+  b: number;
+  /** 0–100: per-channel ± tolerance * 2.55 in RGB space */
+  tolerance: number;
+};
+
+export type ColorCoverageInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  colors: ColorEntry[];
+  /** Minimum pixel coverage % required to pass. null = no minimum. */
+  minCoverage: number | null;
+  /** Maximum pixel coverage % allowed to pass. null = no maximum. */
+  maxCoverage: number | null;
+};
+
+export type ColorCoverageResult = {
+  inspectionId: string;
+  name: string;
+  coverage: number;
+  passed: boolean;
+};
+
+export type ColorVisionStepOutput = {
+  inspectionId: string;
+  coverageVar?: string;
+  passedVar?: string;
+};
+
+export function defaultColorEntry(): ColorEntry {
+  return { id: `ce_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, r: 128, g: 128, b: 128, tolerance: 20 };
+}
+
+export function defaultColorCoverageInspection(index: number): ColorCoverageInspection {
+  return {
+    id: `cinsp_${Date.now()}`,
+    name: `Color ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    colors: [],
+    minCoverage: 50,
+    maxCoverage: null,
+  };
+}
 
 export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
 
@@ -108,7 +245,11 @@ export type ProgramVariable = {
   name: string;
   value: number;
   values?: number[];
+  /** When set, this is a Vector6 array variable populated at runtime by RunVision steps. */
+  points?: Vector6Val[];
   description?: string;
+  /** When true, this variable is displayed as True/False (stored as 1/0). */
+  isBoolean?: boolean;
 };
 
 export type ProgramStep = {
@@ -175,6 +316,14 @@ export type ProgramStep = {
   jumpZ?: number;
   jumpZStart?: number;
   jumpZEnd?: number;
+  // RunVision
+  visionProgramId?: string;
+  visionProgramName?: string;
+  visionOutputs?: VisionStepOutput[];
+  colorOutputs?: ColorVisionStepOutput[];
+  // Variable point target for move steps (overrides pointName when set)
+  varPointName?: string;
+  varPointIndex?: string;
   // AuxMove / AuxContinuous / AuxStop
   auxDeviceId?: string;
   auxAxisIndex?: number;

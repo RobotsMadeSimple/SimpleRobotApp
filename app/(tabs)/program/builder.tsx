@@ -2,7 +2,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -40,6 +40,7 @@ import {
   Home,
   X,
   Zap,
+  ScanSearch,
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -229,6 +230,7 @@ function ExpressionInput({
 }) {
   const currentExpr = expressions?.[fieldKey];
   const [text, setText] = useState(currentExpr ?? (value != null ? String(value) : ""));
+  const [varPickerOpen, setVarPickerOpen] = useState(false);
   const inputRef   = useRef<any>(null);
   const isFocused  = useRef(false);
 
@@ -274,7 +276,9 @@ function ExpressionInput({
   }
 
   function insertVar(v: ProgramVariable) {
-    const token = v.values && v.values.length > 0 ? `$${v.name}[0]` : `$${v.name}`;
+    const token = v.points != null ? `$${v.name}[0].x`
+                : v.values && v.values.length > 0 ? `$${v.name}[0]`
+                : `$${v.name}`;
     const ref = text.trim();
     const next = ref ? `${ref} ${token}` : token;
     setText(next);
@@ -301,31 +305,6 @@ function ExpressionInput({
   const exprActive = isExpr(text);
   const hasVars    = variables && variables.length > 0;
 
-  // Extract the partial variable name being typed after the last '$' so we can
-  // rank the chips — e.g. "$cou" → query "cou" → "count" sorts above "speed"
-  const varQuery = (() => {
-    const dollarIdx = text.lastIndexOf("$");
-    if (dollarIdx === -1) return "";
-    const after = text.slice(dollarIdx + 1);
-    // Only treat as a live query while the cursor is still in the token
-    // (no whitespace / operators follow the partial name yet)
-    return /^[\w]*$/.test(after) ? after.toLowerCase() : "";
-  })();
-
-  const sortedVars = hasVars
-    ? [...variables!].sort((a, b) => {
-        const score = (name: string) => {
-          const n = name.toLowerCase();
-          if (!varQuery)              return 0;
-          if (n === varQuery)         return 3;   // exact
-          if (n.startsWith(varQuery)) return 2;   // prefix
-          if (n.includes(varQuery))   return 1;   // substring
-          return 0;
-        };
-        return score(b.name) - score(a.name);   // descending — best match first
-      })
-    : [];
-
   return (
     <View>
       <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
@@ -349,40 +328,35 @@ function ExpressionInput({
         )}
       </View>
       {hasVars && (
-        <>
-          <View style={{ flexDirection: "row", gap: 5, marginTop: 6 }}>
-            {([["×","*"],["+","+"],["-","-"],["÷","/"]] as [string,string][]).map(([label, op]) => (
-              <TouchableOpacity
-                key={op}
-                onPress={() => insertOp(op)}
-                activeOpacity={0.7}
-                style={exprStyles.opChip}
-              >
-                <Text style={exprStyles.opChipText}>{label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ marginTop: 5 }}
-            contentContainerStyle={{ gap: 5 }}
-            keyboardShouldPersistTaps="always"
+        <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
+          {([["×","*"],["+","+"],["-","-"],["÷","/"]] as [string,string][]).map(([label, op]) => (
+            <TouchableOpacity
+              key={op}
+              onPress={() => insertOp(op)}
+              activeOpacity={0.7}
+              style={exprStyles.opChip}
+            >
+              <Text style={exprStyles.opChipText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            onPress={() => setVarPickerOpen(true)}
+            activeOpacity={0.7}
+            style={[exprStyles.opChip, { backgroundColor: '#ede9fe', borderColor: '#c4b5fd' }]}
           >
-            {sortedVars.map(v => (
-              <TouchableOpacity
-                key={v.id}
-                onPress={() => insertVar(v)}
-                activeOpacity={0.7}
-                style={exprStyles.chip}
-              >
-                <Text style={exprStyles.chipText}>
-                  ${v.name}{v.values && v.values.length > 0 ? "[…]" : ""}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </>
+            <Text style={[exprStyles.opChipText, { color: '#7c3aed', fontSize: 13 }]}>$var</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {hasVars && (
+        <VarPickerModal
+          visible={varPickerOpen}
+          onClose={() => setVarPickerOpen(false)}
+          variables={variables!}
+          selected={undefined}
+          title="Insert Variable"
+          onSelect={v => { if (v) insertVar(v); }}
+        />
       )}
     </View>
   );
@@ -439,6 +413,8 @@ function stepLabel(step: ProgramStep): string {
         ? `${step.type}  →  Grid Point`
         : step.stackPoint
         ? `${step.type}  →  Stack Point`
+        : step.varPointName
+        ? `${step.type}  →  $${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : `${step.type}  →  ${step.pointName ?? "Current Position"}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
@@ -462,6 +438,7 @@ function stepLabel(step: ProgramStep): string {
     }
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
     case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
+    case "RunVision":    return step.visionProgramName ? `Vision → ${step.visionProgramName}` : "Run Vision";
     case "SetSpeedL":
     case "SetSpeedJ": {
       const label  = step.type === "SetSpeedL" ? "Set Linear Speed" : "Set Joint Speed";
@@ -505,6 +482,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "Loop":         return <RefreshCw     size={size} color={color} />;
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
     case "CallRoutine":  return <Repeat2       size={size} color={color} />;
+    case "RunVision":    return <ScanSearch    size={size} color={color} />;
     case "SetSpeedL":
     case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
     case "SetVariable":  return <Hash          size={size} color={color} />;
@@ -545,6 +523,7 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
   AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
+  RunVision:     { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
 };
 
 function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
@@ -554,6 +533,7 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       const parts: string[] = [];
       const target = step.gridPoint ? "grid point"
         : step.stackPoint ? "stack point"
+        : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : (step.pointName ?? "current pos");
       parts.push(`→ ${target}`);
       if (step.speed != null) parts.push(`${step.speed} mm/s`);
@@ -564,6 +544,7 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       const parts: string[] = [];
       const target = step.gridPoint ? "grid point"
         : step.stackPoint ? "stack point"
+        : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : (step.pointName ?? "current pos");
       parts.push(`→ ${target}`);
       if (step.jumpZ != null) parts.push(`Z: ${step.jumpZ} mm`);
@@ -584,6 +565,8 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return step.statusMessage || null;
     case "CallRoutine":
       return step.routineName ? `→ ${step.routineName}` : null;
+    case "RunVision":
+      return step.visionProgramName ? `→ ${step.visionProgramName}` : null;
     case "SetSpeedL":
     case "SetSpeedJ": {
       const lines: string[] = [];
@@ -648,6 +631,7 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
   { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
+  { type: "RunVision",     label: "Run Vision",         desc: "Trigger a vision program, wait for one inspection result, then continue" },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -743,6 +727,7 @@ function ConditionItemEditor({
   onDelete: () => void;
 }) {
   const [opOpen, setOpOpen] = React.useState(false);
+  const [leftPickerOpen, setLeftPickerOpen] = React.useState(false);
   return (
     <View style={{ marginBottom: 8, borderWidth: 1, borderColor: '#bae6fd', borderRadius: 8, padding: 8, backgroundColor: '#fff' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -774,15 +759,35 @@ function ConditionItemEditor({
         </TouchableOpacity>
       </View>
       {variables && variables.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 5 }} contentContainerStyle={{ gap: 4 }} keyboardShouldPersistTaps="always">
-          {variables.map(v => (
-            <TouchableOpacity key={v.id} onPress={() => onChange({ ...item, left: `$${v.name}` })} activeOpacity={0.7}
-              style={{ backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>${v.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <>
+          <TouchableOpacity
+            onPress={() => setLeftPickerOpen(true)}
+            activeOpacity={0.7}
+            style={{ marginTop: 5, alignSelf: 'flex-start', backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4 }}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>+ var</Text>
+          </TouchableOpacity>
+          <VarPickerModal
+            visible={leftPickerOpen}
+            onClose={() => setLeftPickerOpen(false)}
+            variables={variables}
+            selected={item.left.startsWith('$') ? item.left.slice(1) : undefined}
+            title="Left Variable"
+            onSelect={v => { if (v) onChange({ ...item, left: `$${v.name}` }); }}
+          />
+        </>
       )}
+      <View style={{ flexDirection: 'row', gap: 5, marginTop: 4 }}>
+        <Text style={{ fontSize: 10, color: '#9ca3af', alignSelf: 'center', marginRight: 2 }}>Right:</Text>
+        {(['True', 'False', '1', '0'] as const).map(val => (
+          <TouchableOpacity key={val} onPress={() => onChange({ ...item, right: val })} activeOpacity={0.7}
+            style={{ backgroundColor: val === 'True' || val === '1' ? '#f0fdf4' : '#fef2f2',
+              borderWidth: 1, borderColor: val === 'True' || val === '1' ? '#bbf7d0' : '#fecaca',
+              borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: val === 'True' || val === '1' ? '#16a34a' : '#dc2626' }}>{val}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <Modal visible={opOpen} transparent animationType="fade" onRequestClose={() => setOpOpen(false)}>
         <Pressable style={svs.modalOverlay} onPress={() => setOpOpen(false)}>
           <Pressable style={svs.modalCard} onPress={() => {}}>
@@ -847,6 +852,208 @@ function ConditionGroupEditor({
   );
 }
 
+
+// ── Variable picker modal ─────────────────────────────────────────────────────
+
+type VarKind = 'number' | 'boolean' | 'list' | 'points';
+
+function varKind(v: ProgramVariable): VarKind {
+  if (v.points != null) return 'points';
+  if (v.values != null && v.values.length > 0) return 'list';
+  if (v.isBoolean) return 'boolean';
+  return 'number';
+}
+
+const VAR_KIND_META: Record<VarKind, { label: string; color: string; bg: string; border: string }> = {
+  number:  { label: 'NUM',  color: '#7c3aed', bg: '#ede9fe', border: '#c4b5fd' },
+  boolean: { label: 'BOOL', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+  list:    { label: 'LIST', color: '#7c3aed', bg: '#ede9fe', border: '#c4b5fd' },
+  points:  { label: 'PTS',  color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
+};
+
+function VarPickerModal({
+  visible, onClose, variables, selected, onSelect, title, showNone = false,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  variables: ProgramVariable[];
+  selected: string | undefined;
+  onSelect: (variable: ProgramVariable | undefined) => void;
+  title: string;
+  showNone?: boolean;
+}) {
+  const [search,     setSearch]     = useState('');
+  const [kindFilter, setKindFilter] = useState<VarKind | 'all'>('all');
+
+  useEffect(() => {
+    if (visible) { setSearch(''); setKindFilter('all'); }
+  }, [visible]);
+
+  const kinds = useMemo(() => {
+    const seen = new Set<VarKind>();
+    variables.forEach(v => seen.add(varKind(v)));
+    return [...seen];
+  }, [variables]);
+
+  const filtered = useMemo(() =>
+    variables.filter(v => {
+      if (kindFilter !== 'all' && varKind(v) !== kindFilter) return false;
+      const q = search.trim().toLowerCase();
+      return !q || v.name.toLowerCase().includes(q);
+    }), [variables, kindFilter, search]);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ms.overlay} onPress={onClose}>
+        <Pressable style={[ms.card, { maxHeight: '80%' }]} onPress={() => {}}>
+          <View style={ms.header}>
+            <View style={{ width: 18 }} />
+            <Text style={ms.title}>{title}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color="#9ca3af" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Search input */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb',
+            borderRadius: 9, paddingHorizontal: 10, backgroundColor: '#f9fafb', marginBottom: 8 }}>
+            <TextInput
+              style={{ flex: 1, fontSize: 14, color: '#111827', paddingVertical: 9 }}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search by name…"
+              placeholderTextColor="#9ca3af"
+              autoFocus
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={8} activeOpacity={0.7}>
+                <X size={13} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Type filter chips — only shown when multiple kinds exist */}
+          {kinds.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 8 }} contentContainerStyle={{ gap: 6, paddingHorizontal: 2 }}
+              keyboardShouldPersistTaps="always"
+            >
+              {(['all', ...kinds] as const).map(k => {
+                const active = kindFilter === k;
+                const meta   = k !== 'all' ? VAR_KIND_META[k as VarKind] : null;
+                return (
+                  <TouchableOpacity key={k}
+                    style={[{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
+                      active
+                        ? meta ? { backgroundColor: meta.bg, borderColor: meta.border }
+                               : { backgroundColor: '#374151', borderColor: '#374151' }
+                        : { backgroundColor: '#f3f4f6', borderColor: '#e5e7eb' }]}
+                    onPress={() => setKindFilter(active && k !== 'all' ? 'all' : k as VarKind | 'all')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '600',
+                      color: active ? (meta ? meta.color : '#fff') : '#6b7280' }}>
+                      {k === 'all' ? 'All' : VAR_KIND_META[k as VarKind].label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          <ScrollView showsVerticalScrollIndicator={false} bounces={false} keyboardShouldPersistTaps="always">
+            {showNone && (
+              <TouchableOpacity
+                style={[ms.row, ms.rowBorder, !selected && ms.rowActive]}
+                onPress={() => { onSelect(undefined); onClose(); }}
+                activeOpacity={0.7}
+              >
+                <View style={[ms.radioRing, !selected && ms.radioRingActive]}>
+                  {!selected && <View style={ms.radioDot} />}
+                </View>
+                <View style={ms.rowText}>
+                  <Text style={[ms.rowLabel, !selected && ms.rowLabelActive]}>None</Text>
+                  <Text style={ms.rowDesc}>Clear this output</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
+            {filtered.length === 0 && (
+              <Text style={ms.emptyHint}>
+                {search.trim() ? `No variables match "${search.trim()}".` : 'No variables available.'}
+              </Text>
+            )}
+
+            {filtered.map((v, i) => {
+              const active = selected === v.name;
+              const kind   = varKind(v);
+              const meta   = VAR_KIND_META[kind];
+              return (
+                <TouchableOpacity
+                  key={v.id}
+                  style={[ms.row, i < filtered.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => { onSelect(v); onClose(); }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
+                      <View style={{ backgroundColor: meta.bg, borderRadius: 4,
+                        paddingHorizontal: 5, paddingVertical: 1,
+                        borderWidth: 1, borderColor: meta.border }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: meta.color, letterSpacing: 0.3 }}>
+                          {meta.label}
+                        </Text>
+                      </View>
+                    </View>
+                    {v.description ? <Text style={ms.rowDesc} numberOfLines={1}>{v.description}</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function VarSelectorButton({
+  label, value, accent, placeholder, onPress, marginTop = true,
+}: {
+  label: string;
+  value: string | undefined;
+  accent: string;
+  placeholder?: string;
+  onPress: () => void;
+  marginTop?: boolean;
+}) {
+  return (
+    <>
+      <Text style={[ms.fieldLabel, marginTop && { marginTop: 10 }]}>{label}</Text>
+      <TouchableOpacity
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4,
+          borderWidth: 1, borderColor: value ? accent : '#e5e7eb',
+          borderRadius: 10, backgroundColor: '#f9fafb',
+          paddingHorizontal: 12, paddingVertical: 10 }}
+        onPress={onPress}
+        activeOpacity={0.75}
+      >
+        <Text style={{ flex: 1, fontSize: 14,
+          fontWeight: value ? '700' : '400',
+          color: value ? accent : '#9ca3af' }}>
+          {value ? `$${value}` : (placeholder ?? 'None — tap to select')}
+        </Text>
+        <ChevronDown size={14} color={value ? accent : '#9ca3af'} />
+      </TouchableOpacity>
+    </>
+  );
+}
 
 // ── Step config modal ─────────────────────────────────────────────────────────
 
@@ -1065,11 +1272,15 @@ function StepConfigModal({
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
-  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint'>('savedPoint');
+  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint' | 'varPoint'>('savedPoint');
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
   const [stackPickerOpen, setStackPickerOpen] = useState(false);
-  const [ioConfig, setIoConfig]     = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
-  const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
+  const [ioConfig, setIoConfig]       = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
+  const [auxDevices, setAuxDevices]   = useState<AuxDeviceState[]>([]);
+  const [visionPrograms, setVisionPrograms] = useState<VisionProgram[]>([]);
+  const [visionPicker, setVisionPicker] = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
+  const [colorPicker, setColorPicker]   = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
+  const [statusVarPickerOpen, setStatusVarPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -1081,6 +1292,9 @@ function StepConfigModal({
       }))
       .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false }));
     robotClient.getAuxState().catch(() => {});
+    robotClient.getVisionPrograms()
+      .then(({ programs }) => setVisionPrograms(programs))
+      .catch(() => {});
     return robotClient.onAuxAxis(devices => setAuxDevices(devices));
   }, [visible]);
 
@@ -1088,7 +1302,7 @@ function StepConfigModal({
     if (step) {
       setDraft({ ...step });
       setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
-      setGridPointMode(step.gridPoint != null ? 'gridPoint' : step.stackPoint != null ? 'stackPoint' : 'savedPoint');
+      setGridPointMode(step.varPointName ? 'varPoint' : step.gridPoint != null ? 'gridPoint' : step.stackPoint != null ? 'stackPoint' : 'savedPoint');
     } else {
       setDraft(null);
       setPulseMs("");
@@ -1140,8 +1354,8 @@ function StepConfigModal({
         return (
           <>
             {/* Mode tabs */}
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-              {(['savedPoint', 'gridPoint', 'stackPoint'] as const).map(mode => (
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+              {(['savedPoint', 'gridPoint', 'stackPoint', 'varPoint'] as const).map(mode => (
                 <TouchableOpacity
                   key={mode}
                   style={[
@@ -1152,21 +1366,23 @@ function StepConfigModal({
                   onPress={() => {
                     setGridPointMode(mode);
                     if (mode === 'savedPoint') {
-                      set({ gridPoint: undefined, stackPoint: undefined });
+                      set({ gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined });
                     } else if (mode === 'gridPoint') {
                       if (!draft!.gridPoint) {
-                        set({ pointName: undefined, stackPoint: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                        set({ pointName: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                      }
+                    } else if (mode === 'stackPoint') {
+                      if (!draft!.stackPoint) {
+                        set({ pointName: undefined, gridPoint: undefined, varPointName: undefined, varPointIndex: undefined, stackPoint: { stackId: '', index: 0 } });
                       }
                     } else {
-                      if (!draft!.stackPoint) {
-                        set({ pointName: undefined, gridPoint: undefined, stackPoint: { stackId: '', index: 0 } });
-                      }
+                      set({ pointName: undefined, gridPoint: undefined, stackPoint: undefined });
                     }
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
-                    {mode === 'savedPoint' ? 'Point' : mode === 'gridPoint' ? 'Grid' : 'Stack'}
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
+                    {mode === 'savedPoint' ? 'Point' : mode === 'gridPoint' ? 'Grid' : mode === 'stackPoint' ? 'Stack' : 'Var'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1401,6 +1617,50 @@ function StepConfigModal({
                 </Modal>
               </>
             )}
+
+            {gridPointMode === 'varPoint' && (() => {
+              const ptVars = (variables ?? []).filter(v => v.points != null);
+              return (
+                <>
+                  <Text style={ms.fieldLabel}>VARIABLE</Text>
+                  {ptVars.length === 0 && (
+                    <Text style={ms.emptyHint}>No Points variables yet. Create one in the Variables section and a RunVision step will populate it at runtime.</Text>
+                  )}
+                  {ptVars.map((v, i) => {
+                    const active = draft!.varPointName === v.name;
+                    return (
+                      <TouchableOpacity
+                        key={v.id}
+                        style={[ms.row, i < ptVars.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                        onPress={() => set({ varPointName: v.name })}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                          {active && <View style={ms.radioDot} />}
+                        </View>
+                        <View style={ms.rowText}>
+                          <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
+                          {!!v.description && <Text style={ms.rowDesc}>{v.description}</Text>}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INDEX EXPRESSION</Text>
+                  <TextInput
+                    style={ms.input}
+                    value={draft!.varPointIndex ?? ""}
+                    onChangeText={v => set({ varPointIndex: v || undefined })}
+                    placeholder="0  or  $counter"
+                    placeholderTextColor="#9ca3af"
+                    autoCapitalize="none"
+                    returnKeyType="done"
+                  />
+                  <Text style={ms.hintText}>
+                    Which element from the array to move to. Use a number or a scalar variable like $counter.
+                  </Text>
+                </>
+              );
+            })()}
           </>
         );
       }
@@ -1901,18 +2161,13 @@ function StepConfigModal({
               placeholder={hasVars ? "e.g. Processing item $i of $total…" : "e.g. Picking part from tray…"}
               placeholderTextColor="#c4c4c4" returnKeyType="done" autoFocus />
             {hasVars && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}
-                style={{ marginTop: 5 }} contentContainerStyle={{ gap: 5 }}
-                keyboardShouldPersistTaps="always">
-                {(variables ?? []).map(v => (
-                  <TouchableOpacity key={v.id} onPress={() => {
-                    const cur = (draft![msgField] ?? '').trimEnd();
-                    set({ [msgField]: (cur ? cur + ' ' : '') + '$' + v.name });
-                  }} activeOpacity={0.7} style={exprStyles.chip}>
-                    <Text style={exprStyles.chipText}>${v.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <TouchableOpacity
+                onPress={() => setStatusVarPickerOpen(true)}
+                activeOpacity={0.7}
+                style={{ marginTop: 6, alignSelf: 'flex-start', backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#7c3aed' }}>+ insert variable</Text>
+              </TouchableOpacity>
             )}
             <Text style={[ms.hintText, { marginTop: 8 }]}>
               {hasVars ? "Use $varName to embed variable values." : "Appears in the monitor while this step runs."}
@@ -1949,6 +2204,123 @@ function StepConfigModal({
             })}
           </>
         );
+
+      case "RunVision": {
+        const selectedVP       = visionPrograms.find(vp => vp.id === draft!.visionProgramId);
+        const inspections      = selectedVP?.inspections ?? [];
+        const colorInspections = selectedVP?.colorInspections ?? [];
+
+        function getOutput(inspId: string): VisionStepOutput | undefined {
+          return (draft!.visionOutputs ?? []).find(o => o.inspectionId === inspId);
+        }
+
+        function getColorOutput(inspId: string): ColorVisionStepOutput | undefined {
+          return (draft!.colorOutputs ?? []).find(o => o.inspectionId === inspId);
+        }
+
+        return (
+          <>
+            <Text style={ms.fieldLabel}>VISION PROGRAM</Text>
+            <Text style={ms.hintText}>
+              Starts the selected vision program, waits for one inspection result, then continues.
+            </Text>
+            {visionPrograms.length === 0 && (
+              <Text style={ms.emptyHint}>No vision programs saved yet. Create one from the Vision Programs page.</Text>
+            )}
+            {visionPrograms.map((vp, i) => {
+              const active = draft!.visionProgramId === vp.id;
+              return (
+                <TouchableOpacity
+                  key={vp.id}
+                  style={[ms.row, i < visionPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ visionProgramId: vp.id, visionProgramName: vp.name, visionOutputs: [] })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{vp.name}</Text>
+                    {!!vp.description && <Text style={ms.rowDesc}>{vp.description}</Text>}
+                    <Text style={ms.rowDesc}>{vp.cameraId || "No camera"} · {vp.zones.length} zone{vp.zones.length !== 1 ? "s" : ""}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            {inspections.length > 0 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>OUTPUTS</Text>
+                <Text style={ms.hintText}>
+                  Map inspection results to program variables. Variables are written when the step completes.
+                </Text>
+                {inspections.filter(insp => insp.enabled).map(insp => {
+                  const out = getOutput(insp.id);
+                  return (
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#f9fafb", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#e5e7eb" }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>{insp.name}</Text>
+                      <VarSelectorButton
+                        label="DETECTED (any blobs found)"
+                        value={out?.detectedVar}
+                        accent="#16a34a"
+                        placeholder="None — tap to assign"
+                        marginTop={false}
+                        onPress={() => setVisionPicker({ inspId: insp.id, field: 'detectedVar' })}
+                      />
+                      <VarSelectorButton
+                        label="COUNT"
+                        value={out?.countVar}
+                        accent="#2563eb"
+                        placeholder="None — tap to assign"
+                        onPress={() => setVisionPicker({ inspId: insp.id, field: 'countVar' })}
+                      />
+                      <VarSelectorButton
+                        label="POINTS"
+                        value={out?.pointsVar}
+                        accent="#0891b2"
+                        placeholder="None — tap to assign"
+                        onPress={() => setVisionPicker({ inspId: insp.id, field: 'pointsVar' })}
+                      />
+                    </View>
+                  );
+                })}
+                {inspections.every(i => !i.enabled) && (
+                  <Text style={ms.emptyHint}>No enabled inspections in this program. Enable inspections in the Vision editor.</Text>
+                )}
+              </>
+            )}
+
+            {colorInspections.filter(i => i.enabled).length > 0 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>COLOR OUTPUTS</Text>
+                {colorInspections.filter(i => i.enabled).map(insp => {
+                  const out = getColorOutput(insp.id);
+                  return (
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fdf4ff", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#e9d5ff" }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>{insp.name}</Text>
+                      <VarSelectorButton
+                        label="COVERAGE %"
+                        value={out?.coverageVar}
+                        accent="#7c3aed"
+                        placeholder="None — tap to assign"
+                        marginTop={false}
+                        onPress={() => setColorPicker({ inspId: insp.id, field: 'coverageVar' })}
+                      />
+                      <VarSelectorButton
+                        label="PASSED"
+                        value={out?.passedVar}
+                        accent="#16a34a"
+                        placeholder="None — tap to assign"
+                        onPress={() => setColorPicker({ inspId: insp.id, field: 'passedVar' })}
+                      />
+                    </View>
+                  );
+                })}
+              </>
+            )}
+          </>
+        );
+      }
 
       case "SetSpeedL":
       case "SetSpeedJ": {
@@ -2335,7 +2707,30 @@ function StepConfigModal({
   const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable"
                   || draft.type === "Label"      || draft.type === "GoToLabel";
 
+  // Color inspection picker
+  const colorPickerVars = colorPicker
+    ? (variables ?? []).filter(v => v.points == null && v.values == null)
+    : [];
+  const colorPickerSelected = colorPicker
+    ? (draft?.colorOutputs ?? []).find(o => o.inspectionId === colorPicker.inspId)?.[colorPicker.field]
+    : undefined;
+  const colorPickerTitle = colorPicker?.field === 'passedVar' ? 'Passed Variable' : 'Coverage Variable';
+
+  // Derive picker variable list from the active field
+  const pickerVars = visionPicker
+    ? visionPicker.field === 'pointsVar'
+      ? (variables ?? []).filter(v => v.points != null)
+      : (variables ?? []).filter(v => v.points == null && v.values == null)
+    : [];
+  const pickerSelected = visionPicker
+    ? (draft?.visionOutputs ?? []).find(o => o.inspectionId === visionPicker.inspId)?.[visionPicker.field]
+    : undefined;
+  const pickerTitle =
+    visionPicker?.field === 'detectedVar' ? 'Detected Variable' :
+    visionPicker?.field === 'countVar'    ? 'Count Variable'    : 'Points Variable';
+
   return (
+    <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
         <Pressable style={ms.overlay} onPress={() => subPage ? setSubPage(null) : onClose()}>
           <Pressable style={ms.card} onPress={() => {}}>
@@ -2414,6 +2809,61 @@ function StepConfigModal({
           </Pressable>
         </Pressable>
     </Modal>
+    <VarPickerModal
+      visible={visionPicker !== null}
+      onClose={() => setVisionPicker(null)}
+      variables={pickerVars}
+      selected={pickerSelected}
+      title={pickerTitle}
+      showNone
+      onSelect={v => {
+        if (!visionPicker) return;
+        const { inspId, field } = visionPicker;
+        const outputs = draft!.visionOutputs ?? [];
+        const idx = outputs.findIndex(o => o.inspectionId === inspId);
+        const patch = { [field]: v?.name };
+        const next: VisionStepOutput[] = idx >= 0
+          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
+          : [...outputs, { inspectionId: inspId, ...patch }];
+        set({ visionOutputs: next });
+      }}
+    />
+    <VarPickerModal
+      visible={colorPicker !== null}
+      onClose={() => setColorPicker(null)}
+      variables={colorPickerVars}
+      selected={colorPickerSelected}
+      title={colorPickerTitle}
+      onSelect={v => {
+        if (!colorPicker || !draft) return;
+        const { inspId, field } = colorPicker;
+        const outputs = draft.colorOutputs ?? [];
+        const idx = outputs.findIndex(o => o.inspectionId === inspId);
+        const patch = { [field]: v?.name };
+        const next: ColorVisionStepOutput[] = idx >= 0
+          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
+          : [...outputs, { inspectionId: inspId, ...patch }];
+        set({ colorOutputs: next });
+      }}
+    />
+    <VarPickerModal
+      visible={statusVarPickerOpen}
+      onClose={() => setStatusVarPickerOpen(false)}
+      variables={variables ?? []}
+      selected={undefined}
+      title="Insert Variable"
+      onSelect={v => {
+        if (!v || !draft) return;
+        const severity: 'Info' | 'Warning' | 'Error' =
+          draft.statusSeverity ?? (draft.statusWarning ? 'Warning' : draft.statusError ? 'Error' : 'Info');
+        const msgField =
+          severity === 'Warning' ? 'statusWarning' :
+          severity === 'Error'   ? 'statusError'   : 'statusMessage';
+        const cur = (draft[msgField] ?? '').trimEnd();
+        set({ [msgField]: (cur ? cur + ' ' : '') + '$' + v.name });
+      }}
+    />
+    </>
   );
 }
 
@@ -3058,24 +3508,32 @@ function VariableEditModal({
   const [name,       setName]       = useState("");
   const [value,      setValue]      = useState("0");
   const [desc,       setDesc]       = useState("");
-  const [isList,     setIsList]     = useState(false);
+  const [varType,    setVarType]    = useState<'number' | 'boolean' | 'list' | 'points'>('number');
   const [listValues, setListValues] = useState<string[]>(["0"]);
 
   useEffect(() => {
     if (variable) {
       setName(variable.name);
       setDesc(variable.description ?? "");
-      const hasList = variable.values != null && variable.values.length > 0;
-      setIsList(hasList);
-      if (hasList) {
-        setListValues(variable.values!.map(String));
+      if (variable.points != null) {
+        setVarType('points');
         setValue("0");
+        setListValues(["0"]);
+      } else if (variable.values != null && variable.values.length > 0) {
+        setVarType('list');
+        setListValues(variable.values.map(String));
+        setValue("0");
+      } else if (variable.isBoolean) {
+        setVarType('boolean');
+        setValue(variable.value !== 0 ? "1" : "0");
+        setListValues(["0"]);
       } else {
+        setVarType('number');
         setValue(String(variable.value));
         setListValues(["0"]);
       }
     } else {
-      setName(""); setValue("0"); setDesc(""); setIsList(false); setListValues(["0"]);
+      setName(""); setValue("0"); setDesc(""); setVarType('number'); setListValues(["0"]);
     }
   }, [variable, visible]);
 
@@ -3096,8 +3554,12 @@ function VariableEditModal({
     setListValues(prev => prev.filter((_, i) => i !== index));
   }
 
-  const refLabel = isList
+  const refLabel = varType === 'points'
+    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0891b2", fontWeight: "600" }}>${name.trim() || "name"}[0].x</Text> in expressions. Populated at runtime by RunVision steps.</Text>
+    : varType === 'list'
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions.</Text>
+    : varType === 'boolean'
+    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
   return (
@@ -3130,25 +3592,39 @@ function VariableEditModal({
 
           {/* Type toggle */}
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>TYPE</Text>
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
+          <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
             <TouchableOpacity
-              style={[ms.typeBtn, !isList && ms.typeBtnActive]}
-              onPress={() => setIsList(false)}
+              style={[ms.typeBtn, varType === 'number' && ms.typeBtnActive]}
+              onPress={() => setVarType('number')}
               activeOpacity={0.7}
             >
-              <Text style={[ms.typeBtnText, !isList && ms.typeBtnTextActive]}>Number</Text>
+              <Text style={[ms.typeBtnText, varType === 'number' && ms.typeBtnTextActive]}>Number</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[ms.typeBtn, isList && ms.typeBtnActive]}
-              onPress={() => setIsList(true)}
+              style={[ms.typeBtn, varType === 'boolean' && { ...ms.typeBtnActive, backgroundColor: "#f0fdf4", borderColor: "#16a34a" }]}
+              onPress={() => { setVarType('boolean'); if (value !== "0" && value !== "1") setValue("0"); }}
               activeOpacity={0.7}
             >
-              <Text style={[ms.typeBtnText, isList && ms.typeBtnTextActive]}>List</Text>
+              <Text style={[ms.typeBtnText, varType === 'boolean' && { color: "#16a34a", fontWeight: "700" }]}>Boolean</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.typeBtn, varType === 'list' && ms.typeBtnActive]}
+              onPress={() => setVarType('list')}
+              activeOpacity={0.7}
+            >
+              <Text style={[ms.typeBtnText, varType === 'list' && ms.typeBtnTextActive]}>List</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.typeBtn, varType === 'points' && { ...ms.typeBtnActive, backgroundColor: "#ecfeff", borderColor: "#0891b2" }]}
+              onPress={() => setVarType('points')}
+              activeOpacity={0.7}
+            >
+              <Text style={[ms.typeBtnText, varType === 'points' && { color: "#0891b2", fontWeight: "700" }]}>Points</Text>
             </TouchableOpacity>
           </View>
           {refLabel}
 
-          {!isList ? (
+          {varType === 'number' ? (
             <>
               <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
               <TextInput
@@ -3159,7 +3635,28 @@ function VariableEditModal({
                 selectTextOnFocus
               />
             </>
-          ) : (
+          ) : varType === 'boolean' ? (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+                {([{ label: "False  (0)", v: "0" }, { label: "True  (1)", v: "1" }] as const).map(opt => (
+                  <TouchableOpacity
+                    key={opt.v}
+                    style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center",
+                      borderWidth: 1.5,
+                      borderColor: value === opt.v ? "#16a34a" : "#e5e7eb",
+                      backgroundColor: value === opt.v ? "#f0fdf4" : "#f9fafb" }]}
+                    onPress={() => setValue(opt.v)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: "700", color: value === opt.v ? "#16a34a" : "#6b7280" }}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : varType === 'list' ? (
             <>
               <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUES</Text>
               {listValues.map((v, idx) => (
@@ -3186,6 +3683,15 @@ function VariableEditModal({
                 <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600" }}>Add item</Text>
               </TouchableOpacity>
             </>
+          ) : (
+            <View style={{ backgroundColor: "#ecfeff", borderRadius: 8, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#a5f3fc" }}>
+              <Text style={{ fontSize: 13, color: "#0e7490", lineHeight: 18 }}>
+                This variable will hold an array of detected blob positions (x, y, z, rx, ry, rz). It starts empty and is populated at runtime by a <Text style={{ fontWeight: "700" }}>RunVision</Text> step.
+              </Text>
+              <Text style={{ fontSize: 12, color: "#0891b2", marginTop: 6 }}>
+                Use <Text style={{ fontWeight: "700" }}>${name.trim() || "name"}[0].x</Text> in expression fields to read blob coordinates.
+              </Text>
+            </View>
           )}
 
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DESCRIPTION  (optional)</Text>
@@ -3210,8 +3716,10 @@ function VariableEditModal({
                 onSave({
                   id: variable?.id ?? newId(),
                   name: name.trim(),
-                  value: isList ? 0 : (parseFloat(value) || 0),
-                  values: isList ? listValues.map(v => parseFloat(v) || 0) : undefined,
+                  value: (varType === 'number' || varType === 'boolean') ? (parseFloat(value) || 0) : 0,
+                  values: varType === 'list' ? listValues.map(v => parseFloat(v) || 0) : undefined,
+                  points: varType === 'points' ? (variable?.points ?? []) : undefined,
+                  isBoolean: varType === 'boolean' ? true : undefined,
                   description: desc.trim() || undefined,
                 });
                 onClose();
@@ -3609,6 +4117,8 @@ export default function BuilderScreen() {
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
       routineName: undefined,
+      visionProgramId: undefined, visionProgramName: undefined, visionOutputs: undefined,
+      varPointName: undefined, varPointIndex: undefined,
       variableName: undefined, variableExpr: undefined,
       expressions: undefined,
       labelId: type === "Label" ? newId() : undefined,
@@ -3901,9 +4411,25 @@ export default function BuilderScreen() {
                 {i > 0 && <View style={styles.varSep} />}
                 <TouchableOpacity style={styles.varRow} onPress={() => openEditVar(v)} activeOpacity={0.7}>
                   <View style={styles.varInfo}>
-                    <Text style={styles.varName}>${v.name}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={styles.varName}>${v.name}</Text>
+                      {v.points != null && (
+                        <View style={{ backgroundColor: "#ecfeff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>POINTS</Text>
+                        </View>
+                      )}
+                      {v.isBoolean && (
+                        <View style={{ backgroundColor: "#f0fdf4", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bbf7d0" }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#16a34a", letterSpacing: 0.3 }}>BOOL</Text>
+                        </View>
+                      )}
+                    </View>
                     {v.description ? (
                       <Text style={styles.varDesc}>{v.description}</Text>
+                    ) : v.points != null ? (
+                      <Text style={styles.varDesc}>Vector6[ ] — populated by RunVision</Text>
+                    ) : v.isBoolean ? (
+                      <Text style={styles.varDesc}>Boolean — initial: {v.value !== 0 ? "True" : "False"}</Text>
                     ) : (
                       <Text style={styles.varDesc}>Initial: {v.value}</Text>
                     )}
