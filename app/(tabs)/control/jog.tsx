@@ -1,6 +1,6 @@
 import JogPad from "@/src/components/ui/JogPad";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
+import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, Tabs } from "expo-router";
 import {
@@ -251,12 +251,12 @@ function TeachModal({ onClose }: { onClose: () => void }) {
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function JogScreen() {
-  const [local, setLocal]               = useState("Global");
   const [selectedSpeed, setSelectedSpeed] = useState("Slow");
   const [mode, setMode]                 = useState("XYZ");
   const [teachOpen, setTeachOpen]       = useState(false);
 
   const tools      = useTools();
+  const locals     = useLocals();
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
 
@@ -265,6 +265,13 @@ export default function JogScreen() {
   function setTool(name: string) {
     setToolLocal(name);
     robotClient.setActiveTool(name);
+  }
+
+  const local = status.activeLocal || "None";
+  const localOptions = ["None", ...locals.map(l => l.name)];
+
+  function setLocal(name: string) {
+    robotClient.setActiveLocal(name === "None" ? "" : name);
   }
 
   const s = status;
@@ -330,7 +337,7 @@ export default function JogScreen() {
             <Selector
               label="LOCAL"
               value={local}
-              options={["Global", "Local1"]}
+              options={localOptions}
               onSelect={setLocal}
               icon={<Grid2X2 size={15} color="#6b7280" />}
               viewLabel="View Locals"
