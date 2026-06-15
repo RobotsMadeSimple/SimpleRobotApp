@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { BuiltProgram, Grid, NanoState, Point, ProgramSummary, RobotStack, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, Grid, Local, NanoState, Point, ProgramSummary, RobotStack, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -29,6 +29,7 @@ const StatusContext = createContext<StatusContextType>({
 type DataContextType = {
   points:              Point[];
   tools:               Tool[];
+  locals:              Local[];
   builtPrograms:       BuiltProgram[];
   builtProgramsLoaded: boolean;
   nanoIO:              NanoState[];
@@ -40,6 +41,7 @@ type DataContextType = {
 const DataContext = createContext<DataContextType>({
   points:              [],
   tools:               [],
+  locals:              [],
   builtPrograms:       [],
   builtProgramsLoaded: false,
   nanoIO:              [],
@@ -55,6 +57,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [status,              setStatus]              = useState<RobotStatus>(createDefaultStatus());
   const [points,              setPoints]              = useState<Point[]>([]);
   const [tools,               setTools]               = useState<Tool[]>([]);
+  const [locals,              setLocals]              = useState<Local[]>([]);
   const [builtPrograms,       setBuiltPrograms]       = useState<BuiltProgram[]>([]);
   const [builtProgramsLoaded, setBuiltProgramsLoaded] = useState(false);
   const [nanoIO,              setNanoIO]              = useState<NanoState[]>([]);
@@ -68,6 +71,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     const unsubStatus        = robotClient.onStatus(setStatus);
     const unsubPoints        = robotClient.onPoints(setPoints);
     const unsubTools         = robotClient.onTools(setTools);
+    const unsubLocals        = robotClient.onLocals(setLocals);
     const unsubBuiltPrograms = robotClient.onBuiltPrograms(programs => {
       setBuiltPrograms(programs);
       setBuiltProgramsLoaded(true);
@@ -87,6 +91,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubSelected();
       unsubPoints();
       unsubTools();
+      unsubLocals();
       unsubBuiltPrograms();
       unsubNanoIO();
       unsubRelayIO();
@@ -126,13 +131,14 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const dataContextValue = useMemo<DataContextType>(() => ({
     points,
     tools,
+    locals,
     builtPrograms,
     builtProgramsLoaded,
     nanoIO,
     relayIO,
     grids,
     stacks,
-  }), [points, tools, builtPrograms, builtProgramsLoaded, nanoIO, relayIO, grids, stacks]);
+  }), [points, tools, locals, builtPrograms, builtProgramsLoaded, nanoIO, relayIO, grids, stacks]);
 
   return (
     <StatusContext.Provider value={statusContextValue}>
@@ -155,6 +161,7 @@ export function useProgramSummaries(){ return useContext(StatusContext).programS
 
 export function usePoints()              { return useContext(DataContext).points; }
 export function useTools()               { return useContext(DataContext).tools; }
+export function useLocals()              { return useContext(DataContext).locals; }
 export function useBuiltPrograms()       { return useContext(DataContext).builtPrograms; }
 export function useBuiltProgramsLoaded() { return useContext(DataContext).builtProgramsLoaded; }
 export function useNanoIO()              { return useContext(DataContext).nanoIO; }
