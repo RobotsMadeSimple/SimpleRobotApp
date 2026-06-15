@@ -1,9 +1,10 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CameraState, Grid, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CameraState, Grid, Local, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
 type ToolsListener            = (tools: Tool[])                          => void;
+type LocalsListener           = (locals: Local[])                        => void;
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
 type NanoIOListener           = (nanos: NanoState[])                     => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
@@ -31,6 +32,7 @@ export class RobotConnectService {
   private statusListeners:        StatusListener[]        = [];
   private pointsListeners:        PointsListener[]        = [];
   private toolsListeners:         ToolsListener[]         = [];
+  private localsListeners:        LocalsListener[]        = [];
   private builtProgramsListeners:  BuiltProgramsListener[]  = [];
   private nanoIOListeners:         NanoIOListener[]         = [];
   private relayIOListeners:        RelayIOListener[]        = [];
@@ -43,6 +45,7 @@ export class RobotConnectService {
   private connecting:   boolean            = false;
   private points:       Point[]            = [];
   private tools:        Tool[]             = [];
+  private locals:       Local[]            = [];
   private builtPrograms:  BuiltProgram[]                = [];
   private nanoIO:         NanoState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
@@ -202,6 +205,10 @@ export class RobotConnectService {
         this.decodeTools(data);
         break;
 
+      case "GetLocals":
+        this.decodeLocals(data);
+        break;
+
       case "GetBuiltPrograms":
         this.decodeBuiltPrograms(data);
         break;
@@ -355,6 +362,7 @@ export class RobotConnectService {
     // One-shot fetches when the controller signals a repository change
     if (update.lastPointUpdate        !== undefined && update.lastPointUpdate        !== prev.lastPointUpdate)        this.getPoints().catch(() => {});
     if (update.lastToolUpdate         !== undefined && update.lastToolUpdate         !== prev.lastToolUpdate)         this.getTools().catch(() => {});
+    if (update.lastLocalUpdate        !== undefined && update.lastLocalUpdate        !== prev.lastLocalUpdate)        this.getLocals().catch(() => {});
     if (update.lastBuiltProgramUpdate !== undefined && update.lastBuiltProgramUpdate !== prev.lastBuiltProgramUpdate) this.getBuiltPrograms().catch(() => {});
     if (update.lastGridUpdate         !== undefined && update.lastGridUpdate         !== prev.lastGridUpdate)         this.getGrids().catch(() => {});
     if (update.lastStackUpdate        !== undefined && update.lastStackUpdate        !== prev.lastStackUpdate)        this.getStacks().catch(() => {});
@@ -379,8 +387,10 @@ export class RobotConnectService {
       a.driverOk        === b.driverOk        &&
       a.homingState     === b.homingState     &&
       a.activeTool      === b.activeTool      &&
+      a.activeLocal     === b.activeLocal     &&
       a.lastPointUpdate        === b.lastPointUpdate        &&
       a.lastToolUpdate         === b.lastToolUpdate         &&
+      a.lastLocalUpdate        === b.lastLocalUpdate        &&
       a.lastBuiltProgramUpdate === b.lastBuiltProgramUpdate &&
       a.lastGridUpdate         === b.lastGridUpdate         &&
       a.lastStackUpdate        === b.lastStackUpdate        &&
@@ -424,6 +434,18 @@ export class RobotConnectService {
 
   private emitTools() {
     this.toolsListeners.forEach(cb => cb(this.tools));
+  }
+
+  onLocals(cb: LocalsListener) {
+    this.localsListeners.push(cb);
+    cb(this.locals);
+    return () => {
+      this.localsListeners = this.localsListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitLocals() {
+    this.localsListeners.forEach(cb => cb(this.locals));
   }
 
   onBuiltPrograms(cb: BuiltProgramsListener) {
@@ -564,6 +586,30 @@ export class RobotConnectService {
     }));
 
     this.emitTools();
+  }
+
+  private decodeLocals(data: any) {
+    if (!data.locals) { this.locals = []; this.emitLocals(); return; }
+
+    let parsed: any[];
+    try { parsed = JSON.parse(data.locals); }
+    catch { this.locals = []; this.emitLocals(); return; }
+
+    if (!Array.isArray(parsed)) { this.locals = []; this.emitLocals(); return; }
+
+    this.locals = parsed.map((l: any): Local => ({
+      name:              l.Name              ?? l.name              ?? "",
+      description:       l.Description       ?? l.description       ?? "",
+      lastUpdatedUnixMs: l.LastUpdatedUnixMs ?? l.lastUpdatedUnixMs ?? 0,
+      x:  l.X  ?? l.x  ?? 0,
+      y:  l.Y  ?? l.y  ?? 0,
+      z:  l.Z  ?? l.z  ?? 0,
+      rx: l.RX ?? l.rx ?? 0,
+      ry: l.RY ?? l.ry ?? 0,
+      rz: l.RZ ?? l.rz ?? 0,
+    }));
+
+    this.emitLocals();
   }
 
   // -------------------------
@@ -779,6 +825,38 @@ export class RobotConnectService {
 
   public setActiveTool(name: string) {
     return this.sendCommand("SetActiveTool", { name });
+  }
+
+  // ── Local repository ──────────────────────────────────────────────────────
+
+  public getLocals() {
+    return this.sendCommand("GetLocals");
+  }
+
+  public createLocal(local: {
+    name: string;
+    description?: string;
+    x?: number; y?: number; z?: number;
+    rx?: number; ry?: number; rz?: number;
+  }) {
+    return this.sendCommand("CreateLocal", { ...local });
+  }
+
+  public editLocal(name: string, fields: {
+    newName?: string;
+    description?: string;
+    x?: number; y?: number; z?: number;
+    rx?: number; ry?: number; rz?: number;
+  }) {
+    return this.sendCommand("EditLocal", { name, ...fields });
+  }
+
+  public deleteLocal(name: string) {
+    return this.sendCommand("DeleteLocal", { name });
+  }
+
+  public setActiveLocal(name: string) {
+    return this.sendCommand("SetActiveLocal", { name });
   }
 
   // ── Built program repository ──────────────────────────────────────────────

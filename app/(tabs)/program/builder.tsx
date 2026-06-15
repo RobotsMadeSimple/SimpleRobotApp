@@ -1,5 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { useBuiltPrograms, useConnected, useGrids, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useGrids, useLocals, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
@@ -22,6 +22,7 @@ import {
   Copy,
   Cpu,
   Gauge,
+  Grid3x3,
   GripVertical,
   Hash,
   ImagePlus,
@@ -456,8 +457,10 @@ function stepLabel(step: ProgramStep): string {
       if (g.items.length === 1) return `If  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
       return `If  ${g.combinator} of ${g.items.length} conditions`;
     }
-    case "SetTool":   return step.toolName ? `Set Tool  →  ${step.toolName}` : "Set Tool  →  None";
-    case "RunHoming": return "Run Homing";
+    case "SetTool":    return step.toolName  ? `Set Tool  →  ${step.toolName}`  : "Set Tool  →  None";
+    case "SetLocal":   return step.localName ? `Set Local  →  ${step.localName}` : "Set Local  →  None";
+    case "ClearLocal": return "Clear Local";
+    case "RunHoming":  return "Run Homing";
     case "AuxMove": {
       const steps = step.auxSteps ?? 0;
       const dir   = steps < 0 ? "◀" : "▶";
@@ -491,6 +494,8 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "GoToLabel":    return <CornerUpLeft  size={size} color={color} />;
     case "IfCondition":  return <GitBranch     size={size} color={color} />;
     case "SetTool":        return <Wrench        size={size} color={color} />;
+    case "SetLocal":
+    case "ClearLocal":     return <Grid3x3       size={size} color={color} />;
     case "RunHoming":      return <Home          size={size} color={color} />;
     case "AuxMove":        return <ChevronsRight size={size} color={color} />;
     case "AuxContinuous":  return <Play          size={size} color={color} />;
@@ -518,7 +523,9 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   Label:        { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Label"          },
   GoToLabel:    { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Go To Label"    },
   IfCondition:  { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "If Condition"    },
-  SetTool:      { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Tool"         },
+  SetTool:      { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Tool"    },
+  SetLocal:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Local"   },
+  ClearLocal:   { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Clear Local" },
   RunHoming:     { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"         },
   AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
@@ -591,7 +598,11 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return `${g.combinator} of ${g.items.length} conditions`;
     }
     case "SetTool":
-      return step.toolName ? `→ ${step.toolName}` : "→ None";
+      return step.toolName  ? `→ ${step.toolName}`  : "→ None";
+    case "SetLocal":
+      return step.localName ? `→ ${step.localName}` : "→ None";
+    case "ClearLocal":
+      return null;
     case "RunHoming":
       return "Runs the full homing sequence";
     case "AuxMove": {
@@ -627,6 +638,8 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "GoToLabel",    label: "Go To Label",        desc: "Jump to a Label anywhere in the program (forward, backward, or across scopes)" },
   { type: "IfCondition",  label: "If Condition",  desc: "Branch execution based on IO state, sensor values, or variable expressions" },
   { type: "SetTool",      label: "Set Tool",      desc: "Change the active tool TCP offset used for subsequent move steps" },
+  { type: "SetLocal",     label: "Set Local",     desc: "Activate a local coordinate frame — all subsequent moves are offset by this local" },
+  { type: "ClearLocal",   label: "Clear Local",   desc: "Deactivate the current local coordinate frame and return to world origin" },
   { type: "RunHoming",    label: "Run Homing",    desc: "Run the full homing sequence and wait for it to complete before continuing" },
   { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
@@ -1263,6 +1276,7 @@ function StepConfigModal({
   const grids         = useGrids();
   const stacks        = useStacks();
   const tools         = useTools();
+  const locals        = useLocals();
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
   const nanos         = useNanoIO();
@@ -2515,6 +2529,46 @@ function StepConfigModal({
           </>
         );
       }
+
+      case "SetLocal": {
+        const allLocals = locals ?? [];
+        return (
+          <>
+            <Text style={ms.fieldLabel}>ACTIVE LOCAL</Text>
+            <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+              Select which local coordinate frame to activate for subsequent move steps.
+            </Text>
+            {[{ name: 'none', label: 'None (clear local)' }, ...allLocals.map(l => ({ name: l.name, label: l.name }))].map((l, i, arr) => {
+              const active = (draft!.localName ?? 'none') === l.name;
+              return (
+                <TouchableOpacity
+                  key={l.name}
+                  style={[ms.row, i < arr.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ localName: l.name === 'none' ? undefined : l.name })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{l.label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            {allLocals.length === 0 && (
+              <Text style={[ms.emptyHint, { marginTop: 8 }]}>No locals defined. Add locals in the Space tab first.</Text>
+            )}
+          </>
+        );
+      }
+
+      case "ClearLocal":
+        return (
+          <Text style={ms.hintText}>
+            Clears the active local coordinate frame — subsequent move steps will target world coordinates.
+          </Text>
+        );
 
       case "RunHoming":
         return (
@@ -4212,6 +4266,7 @@ export default function BuilderScreen() {
       condition: type === "IfCondition" ? { combinator: 'ALL' as const, items: [] } : undefined,
       ifSteps:   type === "IfCondition" ? [] : undefined,
       toolName:  undefined,
+      localName: undefined,
     };
   }
 

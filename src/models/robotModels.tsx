@@ -188,7 +188,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'RunVision';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'RunVision' | 'SetLocal' | 'ClearLocal';
 
 export type Vector6Val = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
@@ -366,6 +366,8 @@ export type ProgramStep = {
   elseSteps?: ProgramStep[];
   // SetTool
   toolName?: string;
+  // SetLocal / ClearLocal — also used as per-step local override on move steps
+  localName?: string;
   // JumpL / JumpJ
   jumpZ?: number;
   jumpZStart?: number;
@@ -451,6 +453,18 @@ export type Point = {
 }
 
 export type Tool = {
+  name: string
+  description: string
+  lastUpdatedUnixMs: number
+  x: number
+  y: number
+  z: number
+  rx: number
+  ry: number
+  rz: number
+}
+
+export type Local = {
   name: string
   description: string
   lastUpdatedUnixMs: number
@@ -558,6 +572,9 @@ export type RobotStatus = {
   lastToolUpdate: number,
   activeTool: string,
 
+  lastLocalUpdate: number,
+  activeLocal: string,
+
   lastBuiltProgramUpdate: number,
   lastGridUpdate: number,
   lastStackUpdate: number,
@@ -617,6 +634,9 @@ export function createDefaultStatus(): RobotStatus {
 
     lastToolUpdate: 0,
     activeTool: "",
+
+    lastLocalUpdate: 0,
+    activeLocal: "",
 
     lastBuiltProgramUpdate: 0,
     lastGridUpdate: 0,
