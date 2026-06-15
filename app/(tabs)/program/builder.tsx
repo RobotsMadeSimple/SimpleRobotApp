@@ -2,7 +2,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms, useConnected, useGrids, useLocals, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import { ArucoVisionStepOutput, AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -1295,6 +1295,7 @@ function StepConfigModal({
   const [visionPicker, setVisionPicker]   = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
   const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
   const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
+  const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
   const [statusVarPickerOpen, setStatusVarPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -2225,6 +2226,7 @@ function StepConfigModal({
         const inspections        = selectedVP?.inspections ?? [];
         const colorInspections   = selectedVP?.colorInspections ?? [];
         const polygonInspections = selectedVP?.polygonInspections ?? [];
+        const arucoInspections   = selectedVP?.arucoInspections ?? [];
 
         function getOutput(inspId: string): VisionStepOutput | undefined {
           return (draft!.visionOutputs ?? []).find(o => o.inspectionId === inspId);
@@ -2236,6 +2238,10 @@ function StepConfigModal({
 
         function getPolygonOutput(inspId: string): PolygonVisionStepOutput | undefined {
           return (draft!.polygonOutputs ?? []).find(o => o.inspectionId === inspId);
+        }
+
+        function getArucoOutput(inspId: string): ArucoVisionStepOutput | undefined {
+          return (draft!.arucoOutputs ?? []).find(o => o.inspectionId === inspId);
         }
 
         return (
@@ -2384,6 +2390,56 @@ function StepConfigModal({
                         accent="#0891b2"
                         placeholder="None — tap to assign"
                         onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerYVar' })}
+                      />
+                    </View>
+                  );
+                })}
+              </>
+            )}
+
+            {arucoInspections.filter(i => i.enabled).length > 0 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>ARUCO OUTPUTS</Text>
+                {arucoInspections.filter(i => i.enabled).map(insp => {
+                  const out = getArucoOutput(insp.id);
+                  return (
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#f0fdf4", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#bbf7d0" }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>{insp.name}</Text>
+                      <VarSelectorButton
+                        label="FOUND"
+                        value={out?.foundVar}
+                        accent="#16a34a"
+                        placeholder="None — tap to assign"
+                        marginTop={false}
+                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'foundVar' })}
+                      />
+                      <VarSelectorButton
+                        label="COUNT"
+                        value={out?.countVar}
+                        accent="#2563eb"
+                        placeholder="None — tap to assign"
+                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'countVar' })}
+                      />
+                      <VarSelectorButton
+                        label="FIRST MARKER ID"
+                        value={out?.firstIdVar}
+                        accent="#0891b2"
+                        placeholder="None — tap to assign"
+                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstIdVar' })}
+                      />
+                      <VarSelectorButton
+                        label="FIRST CENTER X"
+                        value={out?.firstCenterXVar}
+                        accent="#0891b2"
+                        placeholder="None — tap to assign"
+                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstCenterXVar' })}
+                      />
+                      <VarSelectorButton
+                        label="FIRST CENTER Y"
+                        value={out?.firstCenterYVar}
+                        accent="#0891b2"
+                        placeholder="None — tap to assign"
+                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstCenterYVar' })}
                       />
                     </View>
                   );
@@ -2837,6 +2893,15 @@ function StepConfigModal({
     ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', angleVar: 'Angle Variable', centerXVar: 'Center X Variable', centerYVar: 'Center Y Variable' }[polygonPicker.field] ?? 'Variable')
     : '';
 
+  // ArUco inspection picker
+  const arucoPickerVars     = arucoPicker ? (variables ?? []).filter(v => v.points == null && v.values == null) : [];
+  const arucoPickerSelected = arucoPicker
+    ? (draft?.arucoOutputs ?? []).find(o => o.inspectionId === arucoPicker.inspId)?.[arucoPicker.field]
+    : undefined;
+  const arucoPickerTitle = arucoPicker
+    ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', firstIdVar: 'First Marker ID Variable', firstCenterXVar: 'First Center X Variable', firstCenterYVar: 'First Center Y Variable' }[arucoPicker.field] ?? 'Variable')
+    : '';
+
   // Derive picker variable list from the active field
   const pickerVars = visionPicker
     ? visionPicker.field === 'pointsVar'
@@ -2984,6 +3049,25 @@ function StepConfigModal({
           ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
           : [...outputs, { inspectionId: inspId, ...patch }];
         set({ polygonOutputs: next });
+      }}
+    />
+    <VarPickerModal
+      visible={arucoPicker !== null}
+      onClose={() => setArucoPicker(null)}
+      variables={arucoPickerVars}
+      selected={arucoPickerSelected}
+      title={arucoPickerTitle}
+      showNone
+      onSelect={v => {
+        if (!arucoPicker || !draft) return;
+        const { inspId, field } = arucoPicker;
+        const outputs = draft.arucoOutputs ?? [];
+        const idx = outputs.findIndex(o => o.inspectionId === inspId);
+        const patch = { [field]: v?.name };
+        const next: ArucoVisionStepOutput[] = idx >= 0
+          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
+          : [...outputs, { inspectionId: inspId, ...patch }];
+        set({ arucoOutputs: next });
       }}
     />
     <VarPickerModal

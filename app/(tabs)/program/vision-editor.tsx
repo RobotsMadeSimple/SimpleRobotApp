@@ -1,5 +1,7 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import {
+  ARUCO_DICTIONARIES,
+  ArucoInspection,
   BlobDetectionParams,
   BlobInspection,
   CameraState,
@@ -10,6 +12,7 @@ import {
   VisionZone,
   VisionZoneGeometry,
   VisionZoneShape,
+  defaultArucoInspection,
   defaultBlobParams,
   defaultColorEntry,
   defaultColorCoverageInspection,
@@ -26,6 +29,7 @@ import {
   Palette,
   Pencil,
   Plus,
+  QrCode,
   ScanSearch,
   Trash2,
 } from "lucide-react-native";
@@ -1013,7 +1017,8 @@ function ZoneDrawModal({ visible, snapshotUri, zones, editingZoneId, onDone, onC
 type InspItem =
   | { kind: 'blob';    insp: BlobInspection }
   | { kind: 'color';   insp: ColorCoverageInspection }
-  | { kind: 'polygon'; insp: PolygonInspection };
+  | { kind: 'polygon'; insp: PolygonInspection }
+  | { kind: 'aruco';   insp: ArucoInspection };
 
 // ── Inspection type picker ─────────────────────────────────────────────────────
 
@@ -1021,7 +1026,7 @@ function InspectionTypePicker({
   visible, onSelect, onClose,
 }: {
   visible: boolean;
-  onSelect: (kind: 'blob' | 'color' | 'polygon') => void;
+  onSelect: (kind: 'blob' | 'color' | 'polygon' | 'aruco') => void;
   onClose: () => void;
 }) {
   return (
@@ -1068,6 +1073,19 @@ function InspectionTypePicker({
               <Text style={styles.sheetRowSub}>Find N-sided shapes and measure orientation</Text>
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetRow}
+            onPress={() => { onSelect('aruco'); onClose(); }}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.typePickerIcon, { backgroundColor: '#f0fdf4' }]}>
+              <QrCode size={18} color="#16a34a" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetRowName}>ArUco Marker</Text>
+              <Text style={styles.sheetRowSub}>Detect ArUco fiducial markers and read their IDs</Text>
+            </View>
+          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     </Modal>
@@ -1076,22 +1094,53 @@ function InspectionTypePicker({
 
 // ── Inspection config modal ────────────────────────────────────────────────────
 
+function DictionaryPickerModal({ visible, selected, onSelect, onClose }: {
+  visible: boolean; selected: number;
+  onSelect: (id: number) => void; onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
+        <View style={[styles.sheet, { maxHeight: '80%' }]}>
+          <Text style={styles.sheetTitle}>ArUco Dictionary</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {ARUCO_DICTIONARIES.map(d => (
+              <TouchableOpacity
+                key={d.id}
+                style={[styles.sheetRow, d.id === selected && styles.sheetRowActive]}
+                onPress={() => { onSelect(d.id); onClose(); }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetRowName}>{d.label}</Text>
+                </View>
+                {d.id === selected && <Check size={16} color="#0891b2" />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
 function InspectionConfigModal({
-  visible, kind, initialBlob, initialColor, initialPolygon, zones,
-  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onClose,
+  visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, zones,
+  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onClose,
   debugUrl, onLiveUpdate,
 }: {
   visible: boolean;
-  kind: 'blob' | 'color' | 'polygon' | null;
+  kind: 'blob' | 'color' | 'polygon' | 'aruco' | null;
   initialBlob: BlobInspection | null;
   initialColor: ColorCoverageInspection | null;
   initialPolygon: PolygonInspection | null;
+  initialAruco: ArucoInspection | null;
   zones: VisionZone[];
   snapshotUri: string | null;
   onFetchSnapshot: () => Promise<void>;
   onSaveBlob: (insp: BlobInspection) => void;
   onSaveColor: (insp: ColorCoverageInspection) => void;
   onSavePolygon: (insp: PolygonInspection) => void;
+  onSaveAruco: (insp: ArucoInspection) => void;
   onClose: () => void;
   debugUrl?: string | null;
   onLiveUpdate?: (insp: PolygonInspection) => void;
@@ -1111,6 +1160,12 @@ function InspectionConfigModal({
   const [polyMinThresh, setPolyMinThresh] = useState(50);
   const [polyMaxThresh, setPolyMaxThresh] = useState(200);
   const [polyInverted, setPolyInverted]   = useState(false);
+
+  // ArUco-specific state
+  const [arucoDictId,      setArucoDictId]      = useState(1);
+  const [arucoMinArea,     setArucoMinArea]     = useState(100);
+  const [arucoMaxArea,     setArucoMaxArea]     = useState(100000);
+  const [dictPickerOpen,   setDictPickerOpen]   = useState(false);
 
   const [zonePickerOpen, setZonePickerOpen]   = useState(false);
   const [colorEditState, setColorEditState]   = useState<{ entry: ColorEntry } | null>(null);
@@ -1175,8 +1230,15 @@ function InspectionConfigModal({
       setPolyMinThresh(initialPolygon.minThreshold);
       setPolyMaxThresh(initialPolygon.maxThreshold);
       setPolyInverted(initialPolygon.invertThreshold ?? false);
+    } else if (kind === 'aruco' && initialAruco) {
+      setName(initialAruco.name);
+      setEnabled(initialAruco.enabled);
+      setZoneId(initialAruco.zoneId);
+      setArucoDictId(initialAruco.dictionaryId);
+      setArucoMinArea(initialAruco.minMarkerArea);
+      setArucoMaxArea(initialAruco.maxMarkerArea);
     }
-  }, [visible, kind, initialBlob, initialColor, initialPolygon]);
+  }, [visible, kind, initialBlob, initialColor, initialPolygon, initialAruco]);
 
   function handleClose() {
     if (kind === 'blob' && initialBlob) {
@@ -1188,19 +1250,22 @@ function InspectionConfigModal({
         sides: polySides, minArea: polyMinArea, maxArea: polyMaxArea,
         epsilon: polyEpsilon, minThreshold: polyMinThresh, maxThreshold: polyMaxThresh,
         invertThreshold: polyInverted });
+    } else if (kind === 'aruco' && initialAruco) {
+      onSaveAruco({ ...initialAruco, name, enabled, zoneId,
+        dictionaryId: arucoDictId, minMarkerArea: arucoMinArea, maxMarkerArea: arucoMaxArea });
     }
     onClose();
   }
 
   const linkedZone = zones.find(z => z.id === zoneId);
-  const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : '#d946ef';
+  const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : '#d946ef';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.configRoot}>
         <View style={styles.configHeader}>
           <Text style={styles.configTitle}>
-            {kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : 'Color Coverage'}
+            {kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : 'Color Coverage'}
           </Text>
           <TouchableOpacity onPress={handleClose} style={styles.configDoneBtn}>
             <Check size={15} color="#fff" />
@@ -1331,6 +1396,36 @@ function InspectionConfigModal({
             </View>
           )}
 
+          {/* ArUco params */}
+          {kind === 'aruco' && (
+            <View style={styles.blobPanel}>
+              <Text style={styles.blobPanelTitle}>ArUco Detection</Text>
+
+              <TouchableOpacity
+                style={[styles.configCard, { marginBottom: 8 }]}
+                onPress={() => setDictPickerOpen(true)}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.paramLabel}>Dictionary</Text>
+                <Text style={{ flex: 1, fontSize: 13, color: '#111827' }}>
+                  {ARUCO_DICTIONARIES.find(d => d.id === arucoDictId)?.label ?? String(arucoDictId)}
+                </Text>
+                <ChevronDown size={14} color="#9ca3af" />
+              </TouchableOpacity>
+              <Text style={styles.paramDesc}>
+                Must match the dictionary used to generate the printed markers.
+                4×4 (100) is the most common choice for small deployments.
+              </Text>
+
+              <ParamRow label="Min Area (px²)" value={arucoMinArea} min={1} max={9999999}
+                onChange={setArucoMinArea}
+                desc="Reject markers whose bounding box area is below this — filters out noise and tiny false detections" />
+              <ParamRow label="Max Area (px²)" value={arucoMaxArea} min={1} max={9999999}
+                onChange={setArucoMaxArea}
+                desc="Reject markers larger than this — useful when the camera sees both large background patterns and small markers" />
+            </View>
+          )}
+
           {/* Color coverage */}
           {kind === 'color' && (
             <>
@@ -1446,6 +1541,13 @@ function InspectionConfigModal({
         selected={zoneId}
         onSelect={id => setZoneId(id)}
         onClose={() => setZonePickerOpen(false)}
+      />
+
+      <DictionaryPickerModal
+        visible={dictPickerOpen}
+        selected={arucoDictId}
+        onSelect={setArucoDictId}
+        onClose={() => setDictPickerOpen(false)}
       />
 
       <ColorEditModal
@@ -1613,7 +1715,10 @@ export default function VisionEditorScreen() {
     setProgram(prev => ({
       ...prev,
       zones: prev.zones.filter(z => z.id !== id),
-      inspections: prev.inspections.map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      inspections:        prev.inspections.map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      colorInspections:   (prev.colorInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      polygonInspections: (prev.polygonInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      arucoInspections:   (prev.arucoInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
     }));
     markDirty();
   }
@@ -1654,6 +1759,19 @@ export default function VisionEditorScreen() {
     markDirty();
   }
 
+  function updateArucoInspection(updated: ArucoInspection) {
+    setProgram(prev => ({
+      ...prev,
+      arucoInspections: (prev.arucoInspections ?? []).map(i => i.id === updated.id ? updated : i),
+    }));
+    markDirty();
+  }
+
+  function deleteArucoInspection(id: string) {
+    setProgram(prev => ({ ...prev, arucoInspections: (prev.arucoInspections ?? []).filter(i => i.id !== id) }));
+    markDirty();
+  }
+
   function handlePolygonLiveUpdate(insp: PolygonInspection) {
     updatePolygonInspection(insp);
     if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
@@ -1671,6 +1789,7 @@ export default function VisionEditorScreen() {
     ...program.inspections.map(insp => ({ kind: 'blob' as const, insp })),
     ...(program.colorInspections ?? []).map(insp => ({ kind: 'color' as const, insp })),
     ...(program.polygonInspections ?? []).map(insp => ({ kind: 'polygon' as const, insp })),
+    ...(program.arucoInspections ?? []).map(insp => ({ kind: 'aruco' as const, insp })),
   ];
 
   async function save() {
@@ -1823,9 +1942,9 @@ export default function VisionEditorScreen() {
         {allInspections.map((item, index) => {
           const { kind, insp } = item;
           const linkedZone = program.zones.find(z => z.id === insp.zoneId);
-          const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : '#d946ef';
-          const iconBg     = kind === 'blob' ? '#ecfeff'  : kind === 'polygon' ? '#fef3c7'  : '#fdf4ff';
-          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : 'COLOR COVERAGE';
+          const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : '#d946ef';
+          const iconBg     = kind === 'blob' ? '#ecfeff'  : kind === 'polygon' ? '#fef3c7'  : kind === 'aruco' ? '#f0fdf4'  : '#fdf4ff';
+          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : 'COLOR COVERAGE';
           return (
             <View key={insp.id} style={[styles.inspStepCard, { borderLeftColor: accent }]}>
               <TouchableOpacity
@@ -1836,6 +1955,7 @@ export default function VisionEditorScreen() {
                 <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
                   {kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
                    kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
+                   kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
                                        <Palette    size={18} color={accent} />}
                 </View>
                 <View style={styles.inspStepText}>
@@ -1846,6 +1966,7 @@ export default function VisionEditorScreen() {
                   <Text style={styles.inspStepDetail}>
                     {linkedZone?.name ?? 'Full image'}
                     {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
+                    {kind === 'aruco'   ? ` · dict ${(insp as ArucoInspection).dictionaryId}` : ''}
                   </Text>
                 </View>
                 <Switch
@@ -1853,6 +1974,7 @@ export default function VisionEditorScreen() {
                   onValueChange={v => {
                     if (kind === 'blob')         updateInspection({ ...(insp as BlobInspection), enabled: v });
                     else if (kind === 'polygon') updatePolygonInspection({ ...(insp as PolygonInspection), enabled: v });
+                    else if (kind === 'aruco')   updateArucoInspection({ ...(insp as ArucoInspection), enabled: v });
                     else                         updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
                   }}
                   trackColor={{ true: accent }}
@@ -1862,6 +1984,7 @@ export default function VisionEditorScreen() {
                   onPress={() => {
                     if (kind === 'blob')         deleteInspection(insp.id);
                     else if (kind === 'polygon') deletePolygonInspection(insp.id);
+                    else if (kind === 'aruco')   deleteArucoInspection(insp.id);
                     else                         deleteColorInspection(insp.id);
                   }}
                   hitSlop={8} style={styles.iconBtn}
@@ -1904,7 +2027,8 @@ export default function VisionEditorScreen() {
         onSelect={kind => {
           const totalCount = program.inspections.length +
             (program.colorInspections ?? []).length +
-            (program.polygonInspections ?? []).length;
+            (program.polygonInspections ?? []).length +
+            (program.arucoInspections ?? []).length;
           if (kind === 'blob') {
             const newInsp: BlobInspection = {
               id: `insp_${Date.now()}`,
@@ -1920,6 +2044,11 @@ export default function VisionEditorScreen() {
             const newInsp = defaultColorCoverageInspection(totalCount);
             setProgram(prev => ({ ...prev, colorInspections: [...(prev.colorInspections ?? []), newInsp] }));
             setConfigModal({ kind: 'color', insp: newInsp });
+            markDirty();
+          } else if (kind === 'aruco') {
+            const newInsp = defaultArucoInspection(totalCount);
+            setProgram(prev => ({ ...prev, arucoInspections: [...(prev.arucoInspections ?? []), newInsp] }));
+            setConfigModal({ kind: 'aruco', insp: newInsp });
             markDirty();
           } else {
             const newInsp = defaultPolygonInspection(totalCount);
@@ -1937,6 +2066,7 @@ export default function VisionEditorScreen() {
         initialBlob={configModal?.kind === 'blob' ? (configModal.insp as BlobInspection) : null}
         initialColor={configModal?.kind === 'color' ? (configModal.insp as ColorCoverageInspection) : null}
         initialPolygon={configModal?.kind === 'polygon' ? (configModal.insp as PolygonInspection) : null}
+        initialAruco={configModal?.kind === 'aruco' ? (configModal.insp as ArucoInspection) : null}
         zones={program.zones}
         snapshotUri={snapshotUri}
         onFetchSnapshot={fetchSnapshot}
@@ -1951,6 +2081,10 @@ export default function VisionEditorScreen() {
         onSavePolygon={insp => {
           updatePolygonInspection(insp);
           autoSave({ ...program, name, polygonInspections: (program.polygonInspections ?? []).map(i => i.id === insp.id ? insp : i) });
+        }}
+        onSaveAruco={insp => {
+          updateArucoInspection(insp);
+          autoSave({ ...program, name, arucoInspections: (program.arucoInspections ?? []).map(i => i.id === insp.id ? insp : i) });
         }}
         debugUrl={configModal?.kind === 'polygon' && program.id
           ? robotClient.visionPolygonDebugUrl(program.id, configModal.insp.id)
