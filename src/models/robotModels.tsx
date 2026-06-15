@@ -159,6 +159,7 @@ export type VisionProgram = {
   inspections: BlobInspection[];
   colorInspections?: ColorCoverageInspection[];
   polygonInspections?: PolygonInspection[];
+  arucoInspections?: ArucoInspection[];
   lastUpdatedUnixMs: number;
 };
 
@@ -242,6 +243,26 @@ export type PolygonVisionStepOutput = {
   centerYVar?: string;
 };
 
+export type ArucoInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  /** OpenCV predefined dictionary ID (1 = 4x4_100 default) */
+  dictionaryId: number;
+  minMarkerArea: number;
+  maxMarkerArea: number;
+};
+
+export type ArucoVisionStepOutput = {
+  inspectionId: string;
+  countVar?: string;
+  foundVar?: string;
+  firstIdVar?: string;
+  firstCenterXVar?: string;
+  firstCenterYVar?: string;
+};
+
 export function defaultColorEntry(): ColorEntry {
   return { id: `ce_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, r: 128, g: 128, b: 128, tolerance: 20 };
 }
@@ -255,6 +276,38 @@ export function defaultColorCoverageInspection(index: number): ColorCoverageInsp
     colors: [],
     minCoverage: 50,
     maxCoverage: null,
+  };
+}
+
+export const ARUCO_DICTIONARIES: { id: number; label: string }[] = [
+  { id: 0,  label: '4×4  (50 IDs)'   },
+  { id: 1,  label: '4×4  (100 IDs)'  },
+  { id: 2,  label: '4×4  (250 IDs)'  },
+  { id: 3,  label: '4×4  (1000 IDs)' },
+  { id: 4,  label: '5×5  (50 IDs)'   },
+  { id: 5,  label: '5×5  (100 IDs)'  },
+  { id: 6,  label: '5×5  (250 IDs)'  },
+  { id: 7,  label: '5×5  (1000 IDs)' },
+  { id: 8,  label: '6×6  (50 IDs)'   },
+  { id: 9,  label: '6×6  (100 IDs)'  },
+  { id: 10, label: '6×6  (250 IDs)'  },
+  { id: 11, label: '6×6  (1000 IDs)' },
+  { id: 12, label: '7×7  (50 IDs)'   },
+  { id: 13, label: '7×7  (100 IDs)'  },
+  { id: 14, label: '7×7  (250 IDs)'  },
+  { id: 15, label: '7×7  (1000 IDs)' },
+  { id: 16, label: 'ArUco Original'  },
+];
+
+export function defaultArucoInspection(index: number): ArucoInspection {
+  return {
+    id: `arucoinsp_${Date.now()}`,
+    name: `ArUco ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    dictionaryId: 1,
+    minMarkerArea: 100,
+    maxMarkerArea: 100000,
   };
 }
 
@@ -378,6 +431,7 @@ export type ProgramStep = {
   visionOutputs?: VisionStepOutput[];
   colorOutputs?: ColorVisionStepOutput[];
   polygonOutputs?: PolygonVisionStepOutput[];
+  arucoOutputs?: ArucoVisionStepOutput[];
   // Variable point target for move steps (overrides pointName when set)
   varPointName?: string;
   varPointIndex?: string;

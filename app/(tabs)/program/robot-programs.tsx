@@ -1,171 +1,92 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useConnected, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { BuiltProgram, ProgramSummary } from "@/src/models/robotModels";
+import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import { Box, Cpu, Plus, Trash2 } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
-  Animated,
   Image,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-// ── Status theming ─────────────────────────────────────────────────────────────
 
-type StatusTheme = { bg: string; text: string; bar: string; dot: string };
+// ── Program Row ────────────────────────────────────────────────────────────────
 
-const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
-  Ready:     { bg: "#f3f4f6", text: "#6b7280", bar: "#9ca3af", dot: "#9ca3af" },
-  Starting:  { bg: "#eff6ff", text: "#2563eb", bar: "#3b82f6", dot: "#3b82f6" },
-  Running:   { bg: "#f0fdf4", text: "#16a34a", bar: "#22c55e", dot: "#22c55e" },
-  Finishing: { bg: "#f0fdf4", text: "#16a34a", bar: "#22c55e", dot: "#22c55e" },
-  Stopping:  { bg: "#fff7ed", text: "#ea580c", bar: "#f97316", dot: "#f97316" },
-  Stopped:   { bg: "#f3f4f6", text: "#6b7280", bar: "#9ca3af", dot: "#9ca3af" },
-  Complete:  { bg: "#dcfce7", text: "#15803d", bar: "#22c55e", dot: "#22c55e" },
-  Error:     { bg: "#fef2f2", text: "#dc2626", bar: "#ef4444", dot: "#ef4444" },
-};
-
-type ActionBtn = { label: string; bg: string; onPress: () => void };
-
-function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
-  const { name, status } = p;
-  switch (status) {
-    case "Ready":
-      return [{ label: "Start", bg: "#16a34a", onPress: () => robotClient.startProgram(name) }];
-    case "Starting":
-    case "Running":
-    case "Finishing":
-      return [{ label: "Stop", bg: "#dc2626", onPress: () => robotClient.stopProgram(name) }];
-    case "Stopped":
-      return [
-        { label: "Continue", bg: "#2563eb", onPress: () => robotClient.startProgram(name) },
-        { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
-      ];
-    case "Complete":
-      return [
-        {
-          label: "Run Again",
-          bg: "#16a34a",
-          onPress: () => {
-            robotClient.resetProgram(name);
-            if (isBuilt) robotClient.executeBuiltProgram(name).catch(() => {});
-            else robotClient.startProgram(name);
-          },
-        },
-        { label: "Exit", bg: "#374151", onPress: () => robotClient.abortProgram(name) },
-      ];
-    case "Error":
-      return [{ label: "Exit", bg: "#dc2626", onPress: () => robotClient.abortProgram(name) }];
-    case "Stopping":
-    default:
-      return [];
-  }
-}
-
-// ── Program Card ───────────────────────────────────────────────────────────────
-
-function ProgramCard({
-  p,
+function ProgramRow({
+  name,
+  description,
+  stepCount,
   image,
   isBuilt,
-  anotherBuiltRunning,
+  onPress,
+  onDelete,
 }: {
-  p: ProgramSummary;
+  name: string;
+  description: string;
+  stepCount: number | null;
   image: string | null;
-  isBuilt?: boolean;
-  anotherBuiltRunning?: boolean;
+  isBuilt: boolean;
+  onPress: () => void;
+  onDelete?: () => void;
 }) {
-  const theme = STATUS_THEME[p.status] ?? STATUS_THEME.Ready;
-  const pct = p.maxStepCount > 0 ? Math.round((p.currentStepNumber / p.maxStepCount) * 100) : 0;
-  const buttons = getButtons(p, isBuilt ?? false);
-
-  const progressAnim = useRef(new Animated.Value(pct)).current;
-  useEffect(() => { progressAnim.setValue(pct); }, [pct]);
-
-  const alert = p.errorDescription || p.warningDescription;
-  const statusLabel = alert ? `${p.status}  ·  ${alert}` : p.status;
-
-  return (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`)}
-      style={styles.card}
-    >
-      <View style={[styles.statusBar, { backgroundColor: theme.bg }]}>
-        <View style={[styles.statusDot, { backgroundColor: theme.dot }]} />
-        <Text style={[styles.statusText, { color: theme.text }]} numberOfLines={1} ellipsizeMode="tail">
-          {statusLabel}
-        </Text>
-        {isBuilt && (
-          <View style={styles.builtBadge}>
-            <Cpu size={10} color="#2563eb" />
-            <Text style={styles.builtBadgeText}>BUILT</Text>
-          </View>
+  const cardContent = (
+    <>
+      <View style={styles.cardThumb}>
+        {image ? (
+          <Image
+            source={{ uri: `data:image/png;base64,${image}` }}
+            style={styles.thumbImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <Box size={22} color="#9ca3af" />
         )}
       </View>
 
       <View style={styles.cardBody}>
-        <View style={styles.headerRow}>
-          <View style={styles.imageWrap}>
-            {image ? (
-              <Image source={{ uri: `data:image/png;base64,${image}` }} style={styles.image} resizeMode="cover" />
-            ) : (
-              <View style={styles.imageFallback}><Box size={28} color="#9ca3af" /></View>
-            )}
-          </View>
-          <View style={styles.infoCol}>
-            <Text style={styles.programName} numberOfLines={1}>{p.name}</Text>
-            <Text style={styles.programDesc} numberOfLines={2}>{p.description || "No description"}</Text>
-          </View>
+        <View style={styles.nameRow}>
+          <Text style={styles.cardName} numberOfLines={1}>{name}</Text>
+          {isBuilt && (
+            <View style={styles.builtBadge}>
+              <Cpu size={10} color="#2563eb" />
+              <Text style={styles.builtBadgeText}>BUILT</Text>
+            </View>
+          )}
         </View>
-
-        <View style={styles.stepRow}>
-          <Text style={styles.stepLabel}>STEP</Text>
-          <Text style={styles.stepText} numberOfLines={2} ellipsizeMode="tail">
-            {p.currentStepDescription || "—"}
-          </Text>
-        </View>
-
-        <View style={styles.progressRow}>
-          <View style={styles.progressTrack}>
-            <Animated.View
-              style={[
-                styles.progressFill,
-                {
-                  width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ["0%", "100%"], extrapolate: "clamp" }),
-                  backgroundColor: theme.bar,
-                },
-              ]}
-            />
-          </View>
-          <Text style={styles.percentText}>{pct}%</Text>
-        </View>
-
-        {buttons.length > 0 && (
-          <View style={styles.buttonsRow}>
-            {buttons.map((btn) => {
-              const isStartAction = btn.label === "Start" || btn.label === "Continue" || btn.label === "Run Again";
-              const blocked = !!(isBuilt && anotherBuiltRunning && isStartAction);
-              return (
-                <TouchableOpacity
-                  key={btn.label}
-                  style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
-                  onPress={(e) => { e.stopPropagation?.(); if (!blocked) btn.onPress(); }}
-                  disabled={blocked}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.actionBtnText}>{blocked ? "Another Program Running" : btn.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        {!!description && (
+          <Text style={styles.cardDesc} numberOfLines={2}>{description}</Text>
+        )}
+        {stepCount !== null && (
+          <Text style={styles.cardMeta}>{stepCount} step{stepCount !== 1 ? "s" : ""}</Text>
         )}
       </View>
+
+      {onDelete && (
+        <TouchableOpacity onPress={onDelete} style={styles.deleteBtn} hitSlop={8}>
+          <Trash2 size={16} color="#ef4444" />
+        </TouchableOpacity>
+      )}
+    </>
+  );
+
+  if (Platform.OS === 'web') {
+    return (
+      <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} onPress={onPress}>
+        {cardContent}
+      </Pressable>
+    );
+  }
+
+  return (
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
+      {cardContent}
     </TouchableOpacity>
   );
 }
@@ -194,7 +115,6 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
 export default function RobotProgramsScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
-  const connected        = useConnected();
   const [images, setImages] = useState<Record<string, string | null>>({});
 
   useEffect(() => robotClient.onProgramImages(setImages), []);
@@ -203,25 +123,13 @@ export default function RobotProgramsScreen() {
 
   const builtCards = builtPrograms
     .filter(bp => !bp.isRoutine)
-    .map(bp => {
-      const live = programSummaries.find(p => p.name === bp.name);
-      return { summary: live ?? syntheticSummary(bp), bp, isBuilt: true as const };
-    });
+    .map(bp => ({ summary: live(bp, programSummaries) ?? syntheticSummary(bp), bp, isBuilt: true as const }));
 
   const externalCards = programSummaries
     .filter(p => !builtNames.has(p.name))
     .map(p => ({ summary: p, isBuilt: false as const }));
 
   const allCards = [...builtCards, ...externalCards];
-
-  const isActiveStatus = (s: ProgramStatus) =>
-    s === "Running" || s === "Starting" || s === "Finishing";
-
-  function anotherBuiltRunning(forName: string) {
-    return programSummaries.some(
-      p => p.name !== forName && builtNames.has(p.name) && isActiveStatus(p.status)
-    );
-  }
 
   function handleDelete(name: string) {
     Alert.alert("Delete Program", `Delete "${name}" from the robot? This cannot be undone.`, [
@@ -255,21 +163,22 @@ export default function RobotProgramsScreen() {
         {allCards.length === 0 ? (
           <View style={styles.empty}>
             <Box size={44} color="#d1d5db" />
-            <Text style={styles.emptyTitle}>{connected ? "No Programs" : "Not Connected"}</Text>
+            <Text style={styles.emptyTitle}>No Programs</Text>
             <Text style={styles.emptySubtitle}>
-              {connected
-                ? "Create a program below to get started."
-                : "Connect to a robot to see its programs."}
+              Create a program below to get started.
             </Text>
           </View>
         ) : (
           allCards.map(c => (
-            <ProgramCard
+            <ProgramRow
               key={c.summary.name}
-              p={c.summary}
+              name={c.summary.name}
+              description={c.summary.description}
+              stepCount={c.isBuilt ? c.bp.steps.length : null}
               image={images[c.summary.name] ?? null}
               isBuilt={c.isBuilt}
-              anotherBuiltRunning={c.isBuilt ? anotherBuiltRunning(c.summary.name) : false}
+              onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(c.summary.name)}`)}
+              onDelete={c.isBuilt ? () => handleDelete(c.summary.name) : undefined}
             />
           ))
         )}
@@ -287,6 +196,10 @@ export default function RobotProgramsScreen() {
   );
 }
 
+function live(bp: BuiltProgram, summaries: ProgramSummary[]) {
+  return summaries.find(p => p.name === bp.name) ?? null;
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -295,65 +208,53 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    overflow: "hidden",
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    gap: 12,
     shadowColor: "#000",
     shadowOpacity: 0.07,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  statusBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    gap: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+  cardPressed: {
+    opacity: 0.75,
   },
-  statusDot:  { width: 7, height: 7, borderRadius: 4 },
-  statusText: { flex: 1, fontSize: 12, fontWeight: "600", letterSpacing: 0.4 },
+  cardThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  thumbImage: { width: 48, height: 48 },
+  cardBody: { flex: 1, gap: 2 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  cardName: { fontSize: 15, fontWeight: "700", color: "#111827", flexShrink: 1 },
+  cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
+  cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+
   builtBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     backgroundColor: "#eff6ff",
     borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
   builtBadgeText: { fontSize: 10, fontWeight: "700", color: "#2563eb", letterSpacing: 0.4 },
-  cardBody:   { padding: 14, gap: 12 },
-  headerRow:  { flexDirection: "row", gap: 12, alignItems: "center" },
-  imageWrap:  { width: 72, height: 72, borderRadius: 10, overflow: "hidden" },
-  image:      { width: 72, height: 72 },
-  imageFallback: {
-    width: 72, height: 72, borderRadius: 10,
-    backgroundColor: "#f3f4f6", justifyContent: "center", alignItems: "center",
-  },
-  infoCol:     { flex: 1, gap: 4, justifyContent: "center" },
-  programName: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  programDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
 
-  stepRow:   { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  stepLabel: { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.6, paddingTop: 2 },
-  stepText:  { flex: 1, fontSize: 13, color: "#374151", lineHeight: 18 },
-
-  progressRow:   { flexDirection: "row", alignItems: "center", gap: 10 },
-  progressTrack: { flex: 1, height: 6, backgroundColor: "#e5e7eb", borderRadius: 3, overflow: "hidden" },
-  progressFill:  { height: 6, borderRadius: 3 },
-  percentText:   { width: 38, textAlign: "right", fontSize: 12, fontWeight: "600", color: "#6b7280" },
-
-  buttonsRow: { flexDirection: "row", gap: 8 },
-  actionBtn:  { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  deleteBtn: { padding: 4 },
 
   addBtn: {
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: "#2563eb", justifyContent: "center", alignItems: "center",
   },
-
   addCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -370,8 +271,8 @@ const styles = StyleSheet.create({
   empty: {
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 40,
-    paddingBottom: 16,
+    paddingTop: 60,
+    paddingBottom: 24,
     gap: 12,
   },
   emptyTitle:    { fontSize: 18, fontWeight: "700", color: "#374151" },
