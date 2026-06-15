@@ -35,6 +35,7 @@ import {
   Radio,
   RefreshCw,
   Repeat2,
+  Search,
   Trash2,
   Upload,
   Wrench,
@@ -675,6 +676,20 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "RunVision",     label: "Run Vision",         desc: "Trigger a vision program, wait for one inspection result, then continue" },
 ];
 
+const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
+
+const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
+  { label: "Motion",       color: "#2563eb", types: ["MoveL", "MoveJ", "JumpL", "JumpJ"] },
+  { label: "Flow",         color: "#0891b2", types: ["Loop", "IfCondition", "PauseProgram", "Label", "GoToLabel"] },
+  { label: "I/O",          color: "#ea580c", types: ["SetOutput"] },
+  { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ"] },
+  { label: "Variables",    color: "#7c3aed", types: ["SetVariable"] },
+  { label: "Vision",       color: "#0891b2", types: ["RunVision"] },
+  { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop"] },
+  { label: "Tool & Frame", color: "#7c3aed", types: ["SetTool", "SetLocal", "ClearLocal"] },
+  { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
+];
+
 // ── Insert target — tracks where the next step should be placed ───────────────
 
 type InsertTarget =
@@ -705,6 +720,38 @@ function StepTypePicker({
   onPick: (type: StepType) => void;
   onClose: () => void;
 }) {
+  const [search, setSearch] = useState('');
+
+  useEffect(() => { if (visible) setSearch(''); }, [visible]);
+
+  const q = search.trim().toLowerCase();
+  const searchResults = q
+    ? STEP_TYPES.filter(s =>
+        s.label.toLowerCase().includes(q) || s.desc.toLowerCase().includes(q)
+      )
+    : null;
+
+  function renderRow(s: typeof STEP_TYPES[0], i: number, arr: typeof STEP_TYPES) {
+    const theme = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
+    return (
+      <TouchableOpacity
+        key={s.type}
+        style={[ms.row, i < arr.length - 1 && ms.rowBorder]}
+        onPress={() => { onPick(s.type); onClose(); }}
+        activeOpacity={0.7}
+      >
+        <View style={[ms.iconTile, { backgroundColor: theme.iconBg }]}>
+          <StepIcon type={s.type} size={18} color={theme.iconColor} />
+        </View>
+        <View style={ms.rowText}>
+          <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
+          <Text style={ms.rowDesc}>{s.desc}</Text>
+        </View>
+        <ChevronRight size={16} color="#d1d5db" />
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={ms.overlay} onPress={onClose}>
@@ -715,27 +762,51 @@ function StepTypePicker({
               <X size={18} color="#9ca3af" />
             </TouchableOpacity>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={{ paddingBottom: 20 }}>
-            {STEP_TYPES.map((s, i) => {
-              const theme = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
-              return (
-                <TouchableOpacity
-                  key={s.type}
-                  style={[ms.row, i < STEP_TYPES.length - 1 && ms.rowBorder]}
-                  onPress={() => { onPick(s.type); onClose(); }}
-                  activeOpacity={0.7}
-                >
-                  <View style={[ms.iconTile, { backgroundColor: theme.iconBg }]}>
-                    <StepIcon type={s.type} size={18} color={theme.iconColor} />
+
+          {/* Search bar */}
+          <View style={ptStyles.searchBar}>
+            <Search size={14} color="#9ca3af" />
+            <TextInput
+              style={ptStyles.searchInput}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search steps…"
+              placeholderTextColor="#9ca3af"
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={8} activeOpacity={0.7}>
+                <X size={13} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            contentContainerStyle={{ paddingBottom: 20 }}
+            keyboardShouldPersistTaps="always"
+          >
+            {searchResults ? (
+              searchResults.length === 0
+                ? <Text style={ms.emptyHint}>No steps match "{q}".</Text>
+                : searchResults.map((s, i) => renderRow(s, i, searchResults))
+            ) : (
+              STEP_CATEGORIES.map(cat => {
+                const items = cat.types.map(t => STEP_TYPE_MAP[t]).filter(Boolean);
+                return (
+                  <View key={cat.label}>
+                    <View style={ptStyles.catHeader}>
+                      <Text style={[ptStyles.catLabel, { color: cat.color }]}>
+                        {cat.label.toUpperCase()}
+                      </Text>
+                    </View>
+                    {items.map((s, i) => renderRow(s, i, items))}
                   </View>
-                  <View style={ms.rowText}>
-                    <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
-                    <Text style={ms.rowDesc}>{s.desc}</Text>
-                  </View>
-                  <ChevronRight size={16} color="#d1d5db" />
-                </TouchableOpacity>
-              );
-            })}
+                );
+              })
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>
@@ -743,12 +814,45 @@ function StepTypePicker({
   );
 }
 
+const ptStyles = StyleSheet.create({
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    backgroundColor: '#f9fafb',
+    marginBottom: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#111827',
+    paddingVertical: 9,
+  },
+  catHeader: {
+    paddingTop: 14,
+    paddingBottom: 6,
+    paddingHorizontal: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e7eb',
+    marginBottom: 2,
+  },
+  catLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+});
+
 // ── Condition editor ─────────────────────────────────────────────────────────
 
 const COND_OPS: ConditionOp[] = ['==', '!=', '>', '>=', '<', '<='];
 
 function conditionSummary(group: ConditionGroup | undefined): string {
-  if (!group || group.items.length === 0) return '(no conditions)';
+  if (!group || !group.items || group.items.length === 0) return '(no conditions)';
   if (group.items.length === 1) {
     const it = group.items[0];
     return `${it.left || '?'} ${it.operator} ${it.right || '?'}`;
@@ -3122,12 +3226,26 @@ function StepConfigModal({
 // ── IfCondition expanded body ─────────────────────────────────────────────────
 
 const ifStyles = StyleSheet.create({
-  branchHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingVertical: 5,
+  branchCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  branchCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  branchCardHeaderTap: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  branchCardBody: {
+    padding: 10,
   },
   branchBadge: {
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5,
   },
   branchLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
   condSummary: { flex: 1, fontSize: 12, color: '#6b7280' },
@@ -3288,57 +3406,73 @@ function IfConditionBody({
       </Modal>
 
       {/* IF branch */}
-      <View style={ifStyles.branchHeader}>
-        <View style={[ifStyles.branchBadge, { backgroundColor: theme.iconBg }]}>
-          <Text style={[ifStyles.branchLabel, { color: theme.accent }]}>IF</Text>
-        </View>
-        <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(step.condition)}</Text>
-        <TouchableOpacity onPress={() => openConditionEditor('if')} hitSlop={8} activeOpacity={0.7}>
-          <Pencil size={13} color="#9ca3af" />
+      <View style={[ifStyles.branchCard, { borderColor: '#bae6fd', backgroundColor: '#f0f9ff' }]}>
+        <TouchableOpacity
+          style={[ifStyles.branchCardHeader, { backgroundColor: '#e0f2fe' }]}
+          onPress={() => openConditionEditor('if')} activeOpacity={0.7}>
+          <View style={[ifStyles.branchBadge, { backgroundColor: '#0891b2' }]}>
+            <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>IF</Text>
+          </View>
+          <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(step.condition)}</Text>
+          <Pencil size={13} color="#c4b5fd" />
         </TouchableOpacity>
+        <View style={ifStyles.branchCardBody}>
+          {renderBranchSteps(ifSteps, 'if')}
+        </View>
       </View>
-      {renderBranchSteps(ifSteps, 'if')}
 
       {/* ELSE IF branches */}
       {elseIfBranches.map(branch => (
         <React.Fragment key={branch.id}>
-          <View style={[ifStyles.branchHeader, { marginTop: 10 }]}>
-            <View style={[ifStyles.branchBadge, { backgroundColor: '#f3f4f6' }]}>
-              <Text style={[ifStyles.branchLabel, { color: '#374151' }]}>ELSE IF</Text>
+          <View style={[ifStyles.branchCard, { borderColor: '#ddd6fe', backgroundColor: '#faf5ff', marginTop: 8 }]}>
+            <View style={[ifStyles.branchCardHeader, { backgroundColor: '#ede9fe' }]}>
+              <TouchableOpacity style={ifStyles.branchCardHeaderTap} onPress={() => openConditionEditor(branch.id)} activeOpacity={0.7}>
+                <View style={[ifStyles.branchBadge, { backgroundColor: '#7c3aed' }]}>
+                  <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>ELSE IF</Text>
+                </View>
+                <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(branch.condition)}</Text>
+                <Pencil size={13} color="#c4b5fd" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => Alert.alert("Delete Branch", "Remove this ELSE IF branch and its steps?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) }) },
+                ])}
+                hitSlop={8} activeOpacity={0.7}>
+                <X size={13} color="#9ca3af" />
+              </TouchableOpacity>
             </View>
-            <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(branch.condition)}</Text>
-            <TouchableOpacity onPress={() => openConditionEditor(branch.id)} hitSlop={8} activeOpacity={0.7}>
-              <Pencil size={13} color="#9ca3af" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) })}
-              hitSlop={8} activeOpacity={0.7}>
-              <X size={13} color="#9ca3af" />
-            </TouchableOpacity>
+            <View style={ifStyles.branchCardBody}>
+              {renderBranchSteps(branch.steps ?? [], branch.id)}
+            </View>
           </View>
-          {renderBranchSteps(branch.steps, branch.id)}
         </React.Fragment>
       ))}
 
       {/* ELSE branch */}
       {elseSteps !== undefined && (
-        <>
-          <View style={[ifStyles.branchHeader, { marginTop: 10 }]}>
-            <View style={[ifStyles.branchBadge, { backgroundColor: '#f3f4f6' }]}>
-              <Text style={[ifStyles.branchLabel, { color: '#374151' }]}>ELSE</Text>
+        <View style={[ifStyles.branchCard, { borderColor: '#d1d5db', backgroundColor: '#f9fafb', marginTop: 8 }]}>
+          <View style={[ifStyles.branchCardHeader, { backgroundColor: '#f3f4f6' }]}>
+            <View style={[ifStyles.branchBadge, { backgroundColor: '#6b7280' }]}>
+              <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>ELSE</Text>
             </View>
             <View style={{ flex: 1 }} />
             <TouchableOpacity
-              onPress={() => onUpdateIfCondition({ ...step, elseSteps: undefined })}
+              onPress={() => Alert.alert("Delete Branch", "Remove the ELSE branch and its steps?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
+              ])}
               hitSlop={8} activeOpacity={0.7}>
               <X size={13} color="#9ca3af" />
             </TouchableOpacity>
           </View>
-          {renderBranchSteps(elseSteps, 'else')}
-        </>
+          <View style={ifStyles.branchCardBody}>
+            {renderBranchSteps(elseSteps ?? [], 'else')}
+          </View>
+        </View>
       )}
 
-      {/* Branch structure controls — visually separated from step content */}
+      {/* Branch structure controls */}
       <View style={ifStyles.branchControlRow}>
         <TouchableOpacity
           style={ifStyles.branchControlBtn}

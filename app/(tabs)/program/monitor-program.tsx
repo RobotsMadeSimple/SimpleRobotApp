@@ -462,6 +462,43 @@ export default function MonitorProgramScreen() {
               {program.currentStepDescription || "—"}
             </Text>
           </View>
+
+          {/* ── Action buttons ── */}
+          {showActions && (
+            <View style={styles.inlineActions}>
+              {isRunnable ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? "#9ca3af" : "#16a34a" }]}
+                  onPress={() => { if (!anotherBuiltRunning) robotClient.executeBuiltProgram(programName).catch(() => {}); }}
+                  disabled={anotherBuiltRunning}
+                  activeOpacity={0.8}
+                >
+                  <Play size={15} color="#fff" />
+                  <Text style={styles.actionBtnText}>
+                    {anotherBuiltRunning ? "Another Program Running" : "Run Program"}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                buttons.map((btn) => {
+                  const isStartAction = isBuilt && (btn.label === "Continue" || btn.label === "Run Again");
+                  const blocked = isStartAction && anotherBuiltRunning;
+                  return (
+                    <TouchableOpacity
+                      key={btn.label}
+                      style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
+                      onPress={blocked ? undefined : btn.onPress}
+                      disabled={blocked}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.actionBtnText}>
+                        {blocked ? "Another Program Running" : btn.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          )}
         </View>
 
         {/* ── Position ── */}
@@ -539,46 +576,6 @@ export default function MonitorProgramScreen() {
             })}
           </View>
         </View>
-
-        {/* ── Action buttons ── */}
-        {showActions && (
-          <>
-            <View style={styles.sectionDivider} />
-            <View style={styles.actionsSection}>
-              {isRunnable ? (
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? "#9ca3af" : "#16a34a" }]}
-                  onPress={() => { if (!anotherBuiltRunning) robotClient.executeBuiltProgram(programName).catch(() => {}); }}
-                  disabled={anotherBuiltRunning}
-                  activeOpacity={0.8}
-                >
-                  <Play size={15} color="#fff" />
-                  <Text style={styles.actionBtnText}>
-                    {anotherBuiltRunning ? "Another Program Running" : "Run Program"}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                buttons.map((btn) => {
-                  const isStartAction = isBuilt && (btn.label === "Continue" || btn.label === "Run Again");
-                  const blocked = isStartAction && anotherBuiltRunning;
-                  return (
-                    <TouchableOpacity
-                      key={btn.label}
-                      style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
-                      onPress={blocked ? undefined : btn.onPress}
-                      disabled={blocked}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.actionBtnText}>
-                        {blocked ? "Another Program Running" : btn.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </View>
-          </>
-        )}
 
         {/* ── Program management (built only) ── */}
         {isBuilt && (
@@ -786,11 +783,6 @@ const styles = StyleSheet.create({
     fontSize: 10, fontWeight: "700", color: "#9ca3af",
     letterSpacing: 1, textTransform: "uppercase",
   },
-  sectionDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#e5e7eb",
-    marginHorizontal: 20,
-  },
 
   // ── Gap band (gray strip between major sections) ───────────────────────────
   gapBand: { height: 10, backgroundColor: "#f3f4f6" },
@@ -820,10 +812,8 @@ const styles = StyleSheet.create({
   stepDescText:        { fontSize: 14, color: "#1f2937", lineHeight: 20 },
   stepDescPlaceholder: { color: "#d1d5db" },
 
-  // ── Actions section ────────────────────────────────────────────────────────
-  actionsSection: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 20, paddingVertical: 14,
+  // ── Inline actions (inside progress section) ──────────────────────────────
+  inlineActions: {
     flexDirection: "row", gap: 10,
   },
   actionBtn: {
