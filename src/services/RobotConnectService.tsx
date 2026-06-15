@@ -127,6 +127,7 @@ export class RobotConnectService {
       // regardless of whether lastXxxUpdate timestamps have changed.
       this.getPoints().catch(() => {});
       this.getTools().catch(() => {});
+      this.getLocals().catch(() => {});
       this.getBuiltPrograms().catch(() => {});
       this.getGrids().catch(() => {});
       this.getStacks().catch(() => {});
