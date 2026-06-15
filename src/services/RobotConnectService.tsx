@@ -1189,6 +1189,11 @@ export class RobotConnectService {
     return base ? `${base}/vision/${id}/annotated` : null;
   }
 
+  public programVisionSnapshotUrl(visionProgramId: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/program-vision-snapshot/${visionProgramId}` : null;
+  }
+
   public setRelay(relay: number, value: boolean) {
     // Optimistic update — reflect the change immediately before the server confirms
     if (this.relayIO) {

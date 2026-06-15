@@ -533,33 +533,61 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   RunVision:     { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
 };
 
+function fmtMoveModifiers(step: ProgramStep): string[] {
+  const axes = ['X','Y','Z','RX','RY','RZ'] as const;
+  function fmt(prefix: string, fieldPrefix: string): string | null {
+    const hits = axes
+      .map(ax => {
+        const key = `${fieldPrefix}${ax}`;
+        const val = step.expressions?.[key] ?? (step as any)[key];
+        return val != null ? `${ax}=${val}` : null;
+      })
+      .filter(Boolean) as string[];
+    return hits.length ? `${prefix}(${hits.join(' ')})` : null;
+  }
+  return [
+    fmt('ToolOffset', 'toolOffset'),
+    fmt('Offset',     'offset'),
+    fmt('Override',   'override'),
+  ].filter(Boolean) as string[];
+}
+
 function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
-      const parts: string[] = [];
       const target = step.gridPoint ? "grid point"
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : (step.pointName ?? "current pos");
-      parts.push(`→ ${target}`);
-      if (step.speed != null) parts.push(`${step.speed} mm/s`);
-      return parts.length ? parts.join("  ·  ") : null;
+      const lines = [`→ ${target}`];
+      if (step.speed != null) lines.push(`${step.speed} mm/s`);
+      lines.push(...fmtMoveModifiers(step));
+      return lines.join('\n');
     }
     case "JumpL":
     case "JumpJ": {
-      const parts: string[] = [];
       const target = step.gridPoint ? "grid point"
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : (step.pointName ?? "current pos");
-      parts.push(`→ ${target}`);
-      if (step.jumpZ != null) parts.push(`Z: ${step.jumpZ} mm`);
-      if (step.speed != null) parts.push(`${step.speed} mm/s`);
-      return parts.length ? parts.join("  ·  ") : null;
+      const lines = [`→ ${target}`];
+      if (step.jumpZ != null) lines.push(`Z: ${step.jumpZ} mm`);
+      if (step.speed != null) lines.push(`${step.speed} mm/s`);
+      lines.push(...fmtMoveModifiers(step));
+      return lines.join('\n');
     }
-    case "SetOutput":
-      return `Output ${step.outputNumber ?? 1}  →  ${step.outputValue ? "ON" : "OFF"}`;
+    case "SetOutput": {
+      const card  = step.outputCard ?? "stb";
+      const num   = step.outputNumber ?? 1;
+      const val   = step.outputValue ? "ON" : "OFF";
+      const label = card === "relay" ? `Relay ${num}  →  ${val}`
+                  : card === "nano"  ? `Nano · Pin ${num}  →  ${val}`
+                  :                    `STB · Output ${num}  →  ${val}`;
+      const lines = [label];
+      if (step.pulseMs && step.pulseMs > 0) lines.push(`Pulse  ${step.pulseMs} ms`);
+      return lines.join('\n');
+    }
     case "Wait": {
       const waitExpr = step.expressions?.waitMs;
       return waitExpr ?? `${step.waitMs ?? 0} ms`;
@@ -1561,7 +1589,7 @@ function StepConfigModal({
                   </Pressable>
                 </Modal>
               </>
-            ) : (
+            ) : gridPointMode === 'stackPoint' ? (
               <>
                 {/* Stack picker button */}
                 <TouchableOpacity
@@ -1632,51 +1660,51 @@ function StepConfigModal({
                   </Pressable>
                 </Modal>
               </>
+            ) : (
+              (() => {
+                const ptVars = (variables ?? []).filter(v => v.points != null);
+                return (
+                  <>
+                    <Text style={ms.fieldLabel}>VARIABLE</Text>
+                    {ptVars.length === 0 && (
+                      <Text style={ms.emptyHint}>No Points variables yet. Create one in the Variables section and a RunVision step will populate it at runtime.</Text>
+                    )}
+                    {ptVars.map((v, i) => {
+                      const active = draft!.varPointName === v.name;
+                      return (
+                        <TouchableOpacity
+                          key={v.id}
+                          style={[ms.row, i < ptVars.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                          onPress={() => set({ varPointName: v.name })}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                            {active && <View style={ms.radioDot} />}
+                          </View>
+                          <View style={ms.rowText}>
+                            <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
+                            {!!v.description && <Text style={ms.rowDesc}>{v.description}</Text>}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                    <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INDEX EXPRESSION</Text>
+                    <TextInput
+                      style={ms.input}
+                      value={draft!.varPointIndex ?? ""}
+                      onChangeText={v => set({ varPointIndex: v || undefined })}
+                      placeholder="0  or  $counter"
+                      placeholderTextColor="#9ca3af"
+                      autoCapitalize="none"
+                      returnKeyType="done"
+                    />
+                    <Text style={ms.hintText}>
+                      Which element from the array to move to. Use a number or a scalar variable like $counter.
+                    </Text>
+                  </>
+                );
+              })()
             )}
-
-            {gridPointMode === 'varPoint' && (() => {
-              const ptVars = (variables ?? []).filter(v => v.points != null);
-              return (
-                <>
-                  <Text style={ms.fieldLabel}>VARIABLE</Text>
-                  {ptVars.length === 0 && (
-                    <Text style={ms.emptyHint}>No Points variables yet. Create one in the Variables section and a RunVision step will populate it at runtime.</Text>
-                  )}
-                  {ptVars.map((v, i) => {
-                    const active = draft!.varPointName === v.name;
-                    return (
-                      <TouchableOpacity
-                        key={v.id}
-                        style={[ms.row, i < ptVars.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                        onPress={() => set({ varPointName: v.name })}
-                        activeOpacity={0.7}
-                      >
-                        <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                          {active && <View style={ms.radioDot} />}
-                        </View>
-                        <View style={ms.rowText}>
-                          <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
-                          {!!v.description && <Text style={ms.rowDesc}>{v.description}</Text>}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INDEX EXPRESSION</Text>
-                  <TextInput
-                    style={ms.input}
-                    value={draft!.varPointIndex ?? ""}
-                    onChangeText={v => set({ varPointIndex: v || undefined })}
-                    placeholder="0  or  $counter"
-                    placeholderTextColor="#9ca3af"
-                    autoCapitalize="none"
-                    returnKeyType="done"
-                  />
-                  <Text style={ms.hintText}>
-                    Which element from the array to move to. Use a number or a scalar variable like $counter.
-                  </Text>
-                </>
-              );
-            })()}
           </>
         );
       }
@@ -3446,10 +3474,14 @@ function LoopInnerRow({
   onDragEnd: (id: string, loopId?: string) => void;
   onItemLayout: (id: string, height: number) => void;
 }) {
-  const theme      = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
-  const detail     = stepDetail(step);
-  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
-                  || step.type === "Label"      || step.type === "GoToLabel";
+  const theme        = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  const detail       = stepDetail(step);
+  const detailLines  = detail ? detail.split('\n') : [];
+  const isSetSpeed   = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
+                    || step.type === "Label"      || step.type === "GoToLabel";
+  const isMoveStep   = step.type === "MoveL"  || step.type === "MoveJ"
+                    || step.type === "JumpL"  || step.type === "JumpJ"
+                    || step.type === "SetOutput";
 
   return (
     <View
@@ -3481,13 +3513,16 @@ function LoopInnerRow({
           </Text>
           {(!isSetSpeed || !!step.name) && (
             <Text style={styles.stepCardName} numberOfLines={1}>
-              {step.name || (detail ?? step.type)}
+              {step.name || (isMoveStep ? (detailLines[0] ?? step.type) : (detail ?? step.type))}
             </Text>
           )}
-          {isSetSpeed && detail && detail.split("\n").map((line, i) => (
+          {isSetSpeed && detailLines.map((line, i) => (
             <Text key={i} style={styles.stepCardDetail}>{line}</Text>
           ))}
-          {!isSetSpeed && !!step.name && detail && (
+          {isMoveStep && (step.name ? detailLines : detailLines.slice(1)).map((line, i) => (
+            <Text key={i} style={styles.stepCardDetail} numberOfLines={1}>{line}</Text>
+          ))}
+          {!isSetSpeed && !isMoveStep && !!step.name && detail && (
             <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
           )}
         </View>
@@ -3569,12 +3604,16 @@ function StepRow({
 }) {
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
-  const isSetSpeed = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
-                  || step.type === "Label"      || step.type === "GoToLabel";
-  const innerSteps = step.loopSteps ?? [];
-  const isExpanded = (isLoop || isIfCondition) && !collapsed;
-  const theme  = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
-  const detail = stepDetail(step);
+  const isSetSpeed    = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
+                     || step.type === "Label"      || step.type === "GoToLabel";
+  const isMoveStep    = step.type === "MoveL"  || step.type === "MoveJ"
+                     || step.type === "JumpL"  || step.type === "JumpJ"
+                     || step.type === "SetOutput";
+  const innerSteps    = step.loopSteps ?? [];
+  const isExpanded    = (isLoop || isIfCondition) && !collapsed;
+  const theme         = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  const detail        = stepDetail(step);
+  const detailLines   = detail ? detail.split('\n') : [];
 
   return (
     <View
@@ -3601,13 +3640,16 @@ function StepRow({
             </Text>
             {(!isSetSpeed || !!step.name) && (
               <Text style={styles.stepCardName} numberOfLines={1}>
-                {step.name || (detail ?? step.type)}
+                {step.name || (isMoveStep ? (detailLines[0] ?? step.type) : (detail ?? step.type))}
               </Text>
             )}
-            {isSetSpeed && detail && detail.split("\n").map((line, i) => (
+            {isSetSpeed && detailLines.map((line, i) => (
               <Text key={i} style={styles.stepCardDetail}>{line}</Text>
             ))}
-            {!isSetSpeed && !!step.name && detail && (
+            {isMoveStep && (step.name ? detailLines : detailLines.slice(1)).map((line, i) => (
+              <Text key={i} style={styles.stepCardDetail} numberOfLines={1}>{line}</Text>
+            ))}
+            {!isSetSpeed && !isMoveStep && !!step.name && detail && (
               <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
             )}
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (

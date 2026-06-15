@@ -2,7 +2,7 @@ import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ChevronRight, Cpu, Repeat2, ScanSearch } from "lucide-react-native";
+import { AlertTriangle, ChevronRight, Cpu, Repeat2, ScanSearch, XCircle } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -81,76 +81,100 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
   const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => { progressAnim.setValue(pct); }, [pct]);
 
-  const alert = p.errorDescription || p.warningDescription;
-  const statusLabel = alert ? `${p.status}  ·  ${alert}` : p.status;
+  const hasAlert = !!(p.errorDescription || p.warningDescription);
+  const isError  = !!p.errorDescription;
+  const alertColor        = isError ? '#dc2626' : '#d97706';
+  const alertText         = p.errorDescription || p.warningDescription || '';
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`)}
-      style={styles.runningCard}
-    >
-      <View style={[styles.statusBar, { backgroundColor: theme.bg }]}>
-        <View style={[styles.statusDot, { backgroundColor: theme.dot }]} />
-        <Text style={[styles.statusText, { color: theme.text }]} numberOfLines={1}>
-          {statusLabel}
-        </Text>
-        {isBuilt && (
-          <View style={styles.builtBadge}>
-            <Cpu size={10} color="#2563eb" />
-            <Text style={styles.builtBadgeText}>BUILT</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.runningCardBody}>
-        <View style={styles.runningNameRow}>
-          <Text style={styles.runningName} numberOfLines={1}>{p.name}</Text>
+    <View style={styles.runningCardWrapper}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`)}
+        style={styles.runningCard}
+      >
+        {/* Status bar — shows run state only */}
+        <View style={[styles.statusBar, { backgroundColor: hasAlert ? alertColor : theme.bg }]}>
+          <View style={[styles.statusDot, { backgroundColor: hasAlert ? '#fff' : theme.dot }]} />
+          <Text style={[styles.statusText, { color: hasAlert ? '#fff' : theme.text }]} numberOfLines={1}>
+            {p.status}
+          </Text>
+          {isBuilt && (
+            <View style={[styles.builtBadge, hasAlert && styles.builtBadgeAlert]}>
+              <Cpu size={10} color={hasAlert ? '#fff' : '#2563eb'} />
+              <Text style={[styles.builtBadgeText, hasAlert && { color: '#fff' }]}>BUILT</Text>
+            </View>
+          )}
         </View>
 
-        {!!p.currentStepDescription && (
-          <View style={styles.stepRow}>
-            <Text style={styles.stepLabel}>STEP</Text>
-            <Text style={styles.stepText} numberOfLines={2}>{p.currentStepDescription}</Text>
+        {/* Alert strip — separate row below status bar, always fully visible */}
+        {hasAlert && (
+          <View style={[styles.alertStripe, { backgroundColor: alertColor }]}>
+            {isError
+              ? <XCircle size={13} color="#fff" />
+              : <AlertTriangle size={13} color="#fff" />
+            }
+            <Text style={styles.alertStripeText} numberOfLines={2}>{alertText}</Text>
           </View>
         )}
 
-        <View style={styles.progressRow}>
-          <View style={styles.progressTrack}>
-            <Animated.View
-              style={[
-                styles.progressFill,
-                {
-                  width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ["0%", "100%"], extrapolate: "clamp" }),
-                  backgroundColor: theme.bar,
-                },
-              ]}
-            />
+        <View style={styles.runningCardBody}>
+          <View style={styles.runningNameRow}>
+            <Text style={styles.runningName} numberOfLines={1}>{p.name}</Text>
           </View>
-          <Text style={styles.percentText}>{pct}%</Text>
+
+          {!!p.currentStepDescription && (
+            <View style={styles.stepRow}>
+              <Text style={styles.stepLabel}>STEP</Text>
+              <Text style={styles.stepText} numberOfLines={2}>{p.currentStepDescription}</Text>
+            </View>
+          )}
+
+          <View style={styles.progressRow}>
+            <View style={styles.progressTrack}>
+              <Animated.View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ["0%", "100%"], extrapolate: "clamp" }),
+                    backgroundColor: theme.bar,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.percentText}>{pct}%</Text>
+          </View>
+
+          {buttons.length > 0 && (
+            <View style={styles.buttonsRow}>
+              {buttons.map((btn) => {
+                const isStartAction = btn.label === "Start" || btn.label === "Continue" || btn.label === "Run Again";
+                const blocked = !!(isBuilt && anotherBuiltRunning && isStartAction);
+                return (
+                  <TouchableOpacity
+                    key={btn.label}
+                    style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
+                    onPress={(e) => { e.stopPropagation?.(); if (!blocked) btn.onPress(); }}
+                    disabled={blocked}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.actionBtnText}>{blocked ? "Another Program Running" : btn.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </View>
+      </TouchableOpacity>
 
-        {buttons.length > 0 && (
-          <View style={styles.buttonsRow}>
-            {buttons.map((btn) => {
-              const isStartAction = btn.label === "Start" || btn.label === "Continue" || btn.label === "Run Again";
-              const blocked = !!(isBuilt && anotherBuiltRunning && isStartAction);
-              return (
-                <TouchableOpacity
-                  key={btn.label}
-                  style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
-                  onPress={(e) => { e.stopPropagation?.(); if (!blocked) btn.onPress(); }}
-                  disabled={blocked}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.actionBtnText}>{blocked ? "Another Program Running" : btn.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
+      {/* Alert border overlay */}
+      {hasAlert && (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, styles.runningCardAlertBorder, { borderColor: alertColor }]}
+        />
+      )}
+    </View>
   );
 }
 
@@ -317,15 +341,22 @@ const styles = StyleSheet.create({
   },
 
   // Running program card
-  runningCard: {
-    backgroundColor: "#fff",
+  runningCardWrapper: {
     borderRadius: 16,
-    overflow: "hidden",
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
+  },
+  runningCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  runningCardAlertBorder: {
+    borderWidth: 2.5,
+    borderRadius: 16,
   },
   statusBar: {
     flexDirection: "row",
@@ -347,7 +378,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
+  builtBadgeAlert: { backgroundColor: "rgba(255,255,255,0.2)" },
   builtBadgeText: { fontSize: 10, fontWeight: "700", color: "#2563eb", letterSpacing: 0.4 },
+  alertStripe: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 7, gap: 7,
+  },
+  alertStripeText: { flex: 1, fontSize: 12, fontWeight: "600", color: "#fff", lineHeight: 17 },
 
   runningCardBody: { padding: 14, gap: 10 },
   runningNameRow:  { flexDirection: "row", alignItems: "center" },

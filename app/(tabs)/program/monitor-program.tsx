@@ -4,7 +4,7 @@ import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useSelec
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, Tabs, useLocalSearchParams } from "expo-router";
-import { AlertTriangle, Box, Cpu, Edit2, Play, Trash2, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Camera, Cpu, Edit2, Play, Trash2, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -99,6 +99,45 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
   };
 }
 
+// ── Marquee text (auto-scrolling for long alert messages) ────────────────────
+
+function MarqueeText({ text, style }: { text: string; style?: object }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const [textWidth, setTextWidth]           = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    anim.stopAnimation();
+    if (textWidth <= containerWidth || containerWidth === 0) {
+      anim.setValue(0);
+      return;
+    }
+    const distance = textWidth - containerWidth + 24;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(1200),
+        Animated.timing(anim, { toValue: -distance, duration: distance * 20, useNativeDriver: true }),
+        Animated.delay(400),
+        Animated.timing(anim, { toValue: 0, duration: 250, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [textWidth, containerWidth]);
+
+  return (
+    <View style={{ flex: 1, overflow: 'hidden' }} onLayout={e => setContainerWidth(e.nativeEvent.layout.width)}>
+      <Animated.Text
+        style={[style, { transform: [{ translateX: anim }] }]}
+        onLayout={e => setTextWidth(e.nativeEvent.layout.width)}
+        numberOfLines={1}
+      >
+        {text}
+      </Animated.Text>
+    </View>
+  );
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function MonitorProgramScreen() {
@@ -180,6 +219,79 @@ export default function MonitorProgramScreen() {
   );
 
 
+  // ── Vision snapshot polling ────────────────────────────────────────────────
+  const [visionSnapshots, setVisionSnapshots] = useState<Record<string, string | null>>({});
+
+  const visionSteps: { id: string; name: string }[] = [];
+  if (builtProgram) {
+    const seen = new Set<string>();
+    for (const step of builtProgram.steps) {
+      if (step.type === 'RunVision' && step.visionProgramId && !seen.has(step.visionProgramId)) {
+        seen.add(step.visionProgramId);
+        visionSteps.push({ id: step.visionProgramId, name: step.visionProgramName ?? step.visionProgramId });
+      }
+    }
+  }
+  const visionStepsRef = useRef<{ id: string; name: string }[]>(visionSteps);
+  visionStepsRef.current = visionSteps;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!programName) return;
+      let cancelled = false;
+
+      const fetchSnapshots = async () => {
+        if (cancelled) return;
+        for (const { id } of visionStepsRef.current) {
+          const url = robotClient.programVisionSnapshotUrl(id);
+          if (!url) continue;
+          try {
+            const res = await fetch(url);
+            if (!res.ok) continue;
+            const buffer = await res.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+            const dataUri = `data:image/jpeg;base64,${btoa(binary)}`;
+            if (!cancelled) setVisionSnapshots(prev => ({ ...prev, [id]: dataUri }));
+          } catch {}
+        }
+      };
+
+      fetchSnapshots();
+      const interval = setInterval(fetchSnapshots, 1500);
+      return () => {
+        cancelled = true;
+        clearInterval(interval);
+      };
+    }, [programName])
+  );
+
+  // ── Persistent alert banner ────────────────────────────────────────────────
+  const [pinnedError,   setPinnedError]   = useState('');
+  const [pinnedWarning, setPinnedWarning] = useState('');
+  const prevStatusRef = useRef<string | null>(null);
+
+  // Latch error/warning the moment the server reports one
+  useEffect(() => {
+    if (program?.errorDescription) setPinnedError(program.errorDescription);
+  }, [program?.errorDescription]);
+
+  useEffect(() => {
+    if (program?.warningDescription) setPinnedWarning(program.warningDescription);
+  }, [program?.warningDescription]);
+
+  // Auto-clear when the program is reset/re-started
+  useEffect(() => {
+    const curr = program?.status ?? null;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = curr;
+    if (curr === 'Starting' || (curr === 'Ready' && prev !== null && prev !== 'Ready')) {
+      setPinnedError('');
+      setPinnedWarning('');
+    }
+  }, [program?.status]);
+
   // ── Loading / not-found states ─────────────────────────────────────────────
 
   if (!program && !builtProgramsLoaded) {
@@ -240,6 +352,12 @@ export default function MonitorProgramScreen() {
     progressAnim.setValue(pct);
   }, [pct]);
 
+  // Alert banner derived values
+  const hasAlert   = !!(pinnedError || pinnedWarning);
+  const isError    = !!pinnedError;
+  const alertColor = isError ? '#dc2626' : '#d97706';
+  const alertLight = isError ? '#fef2f2' : '#fffbeb';
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -247,10 +365,28 @@ export default function MonitorProgramScreen() {
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
       <SubPageHeader title={programName} />
 
+      {/* ── Persistent alert banner (fixed, always visible, no animation) ── */}
+      {hasAlert && (
+        <View style={[styles.alertBanner, { backgroundColor: alertColor }]}>
+          {isError
+            ? <XCircle size={16} color="#fff" />
+            : <AlertTriangle size={16} color="#fff" />
+          }
+          <MarqueeText text={pinnedError || pinnedWarning} style={styles.alertBannerText} />
+          <TouchableOpacity
+            onPress={() => { setPinnedError(''); setPinnedWarning(''); }}
+            style={styles.alertDismiss}
+            activeOpacity={0.7}
+          >
+            <XCircle size={20} color="rgba(255,255,255,0.75)" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Hero: full-width status banner ── */}
-        <View style={[styles.hero, { backgroundColor: theme.bg }]}>
+        <View style={[styles.hero, { backgroundColor: hasAlert ? alertLight : theme.bg }]}>
           {/* Status + built chip */}
           <View style={styles.heroTopRow}>
             <View style={[styles.statusBadge, { borderColor: theme.bar + "55" }]}>
@@ -290,24 +426,6 @@ export default function MonitorProgramScreen() {
             </View>
           </View>
         </View>
-
-        {/* ── Alerts (inline, no card) ── */}
-        {(!!program.errorDescription || !!program.warningDescription) && (
-          <View style={styles.alertsSection}>
-            {!!program.errorDescription && (
-              <View style={styles.alertRow}>
-                <XCircle size={14} color="#dc2626" />
-                <Text style={styles.errorText} numberOfLines={2}>{program.errorDescription}</Text>
-              </View>
-            )}
-            {!!program.warningDescription && (
-              <View style={styles.alertRow}>
-                <AlertTriangle size={14} color="#ea580c" />
-                <Text style={styles.warnText} numberOfLines={2}>{program.warningDescription}</Text>
-              </View>
-            )}
-          </View>
-        )}
 
         {/* ── Progress section ── */}
         <View style={styles.section}>
@@ -511,6 +629,41 @@ export default function MonitorProgramScreen() {
           </>
         )}
 
+        {/* ── Vision Snapshots ── */}
+        {visionSteps.length > 0 && (
+          <>
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <View style={styles.snapshotHeader}>
+                <Camera size={12} color="#9ca3af" />
+                <Text style={styles.sectionLabel}>VISION SNAPSHOTS</Text>
+              </View>
+              {visionSteps.map(({ id, name }) => {
+                const dataUri = visionSnapshots[id];
+                return (
+                  <View key={id} style={styles.snapshotItem}>
+                    <Text style={styles.snapshotName}>{name}</Text>
+                    {dataUri ? (
+                      <Image
+                        source={{ uri: dataUri }}
+                        style={styles.snapshotImage}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <View style={styles.snapshotPlaceholder}>
+                        <Camera size={24} color="#d1d5db" />
+                        <Text style={styles.snapshotPlaceholderText}>
+                          {isActivelyRunning ? 'Waiting for vision step…' : 'No snapshot yet'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
+
         {/* ── Logs ── */}
         <View style={styles.gapBand} />
         <View style={styles.logsSection}>
@@ -609,18 +762,19 @@ const styles = StyleSheet.create({
   heroName:  { fontSize: 20, fontWeight: "700", color: "#111827", lineHeight: 26 },
   heroDesc:  { fontSize: 13, color: "#6b7280", lineHeight: 18 },
 
-  // ── Alerts section ─────────────────────────────────────────────────────────
-  alertsSection: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 20, paddingVertical: 14,
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
+  // ── Persistent alert banner ────────────────────────────────────────────────
+  alertBanner: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 14, paddingVertical: 12,
+    gap: 10,
   },
-  alertRow:  { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  errorText: { flex: 1, fontSize: 13, color: "#dc2626", lineHeight: 18 },
-  warnText:  { flex: 1, fontSize: 13, color: "#ea580c", lineHeight: 18 },
+  alertBannerText: {
+    flex: 1, fontSize: 13, fontWeight: "700", color: "#fff",
+    lineHeight: 18,
+  },
+  alertDismiss: {
+    paddingLeft: 4, flexShrink: 0,
+  },
 
   // ── Generic section (white bg) ─────────────────────────────────────────────
   section: {
@@ -731,6 +885,18 @@ const styles = StyleSheet.create({
   },
   posSubPlaceholder: { color: "#d1d5db" },
   posSubDot: { fontSize: 10, color: "#d1d5db" },
+
+  // ── Vision Snapshots ───────────────────────────────────────────────────────
+  snapshotHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  snapshotItem: { gap: 8 },
+  snapshotName: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  snapshotImage: { width: '100%', height: 200, borderRadius: 8, backgroundColor: '#000' },
+  snapshotPlaceholder: {
+    height: 120, borderRadius: 8,
+    backgroundColor: '#f9fafb', borderWidth: 1, borderColor: '#e5e7eb',
+    alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  snapshotPlaceholderText: { fontSize: 12, color: '#9ca3af' },
 
   // ── Logs ───────────────────────────────────────────────────────────────────
   logsSection: {
