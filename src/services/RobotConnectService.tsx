@@ -194,6 +194,12 @@ export class RobotConnectService {
         if (!Array.isArray(data.programs)) {
           data.programs = [];
         }
+        if (typeof data.backgroundPrograms === "string") {
+          try { data.backgroundPrograms = JSON.parse(data.backgroundPrograms); } catch { data.backgroundPrograms = []; }
+        }
+        if (!Array.isArray(data.backgroundPrograms)) {
+          data.backgroundPrograms = [];
+        }
         this.emitStatus(data);
         break;
       
@@ -409,7 +415,9 @@ export class RobotConnectService {
       a.input3 === b.input3 && a.input4 === b.input4 &&
       a.output1 === b.output1 && a.output2 === b.output2 &&
       a.output3 === b.output3 && a.output4 === b.output4 &&
-      JSON.stringify(a.programs) === JSON.stringify(b.programs)
+      JSON.stringify(a.programs) === JSON.stringify(b.programs) &&
+      JSON.stringify(a.backgroundPrograms) === JSON.stringify(b.backgroundPrograms) &&
+      a.speedOverridePercent === b.speedOverridePercent
     );
   }
 
@@ -796,6 +804,10 @@ export class RobotConnectService {
     return this.sendCommand('AbortProgram', { programName });
   }
 
+  public setSpeedOverride(percent: number) {
+    return this.sendCommand('SetSpeedOverride', { percent });
+  }
+
   // ── Tool repository ───────────────────────────────────────────────────────
 
   public getTools() {
@@ -881,11 +893,13 @@ export class RobotConnectService {
 
   public saveBuiltProgram(program: BuiltProgram) {
     return this.sendCommand("SaveBuiltProgram", {
-      name:        program.name,
-      description: program.description,
-      steps:       program.steps,
-      variables:   program.variables,
-      isRoutine:   program.isRoutine ?? false,
+      name:                program.name,
+      description:         program.description,
+      steps:               program.steps,
+      variables:           program.variables,
+      isRoutine:           program.isRoutine           ?? false,
+      isBackground:        program.isBackground        ?? false,
+      killBackgroundOnStop: program.killBackgroundOnStop ?? true,
     });
   }
 
@@ -951,6 +965,19 @@ export class RobotConnectService {
 
   public stopBuiltProgram(name: string) {
     return this.sendCommand("StopBuiltProgram", { name });
+  }
+
+  public startBackgroundProgram(name: string) {
+    return this.sendCommand("StartBackgroundProgram", { name });
+  }
+
+  public stopBackgroundProgram(name: string) {
+    return this.sendCommand("StopBackgroundProgram", { name });
+  }
+
+  public async getProgramVariables(name: string): Promise<{ name: string; value: number; isBoolean: boolean }[]> {
+    const data = await this.sendCommand("GetProgramVariables", { name }) as any;
+    try { return Array.isArray(data?.variables) ? data.variables : []; } catch { return []; }
   }
 
   // ── STB4100 (Robot IO Board) ───────────────────────────────────────────────
