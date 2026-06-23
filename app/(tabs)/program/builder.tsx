@@ -2,7 +2,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms, useConnected, useGrids, useLocals, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { ArucoVisionStepOutput, AuxDeviceState, AuxAxisChannelState, BuiltProgram, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import { ArucoVisionStepOutput, AuxDeviceState, AuxAxisChannelState, BuiltProgram, CameraState, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
@@ -25,7 +25,10 @@ import {
   Grid3x3,
   GripVertical,
   Hash,
+  Hourglass,
   ImagePlus,
+  Layers,
+  Timer,
   MessageSquare,
   OctagonX,
   PauseCircle,
@@ -36,6 +39,8 @@ import {
   RefreshCw,
   Repeat2,
   Search,
+  SlidersHorizontal,
+  Square,
   Trash2,
   Upload,
   Wrench,
@@ -430,10 +435,25 @@ function stepLabel(step: ProgramStep): string {
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
     case "Wait": {
+      if (step.waitMode === 'condition') {
+        const g = step.waitCondition;
+        const condStr = g && (g.items ?? []).length > 0
+          ? ((g.items ?? []).length === 1 ? `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}` : `${g.combinator} of ${(g.items ?? []).length} conds`)
+          : "condition";
+        return step.waitTimeoutMs ? `Wait  ${condStr}  (${step.waitTimeoutMs} ms max)` : `Wait  ${condStr}`;
+      }
       const waitExpr = step.expressions?.waitMs;
       return `Wait  ${waitExpr ?? `${step.waitMs ?? 0} ms`}`;
     }
     case "Loop": {
+      if (step.loopMode === 'forEach')
+        return `For Each  $${step.forEachVariableName ?? "?"}`;
+      if (step.loopMode === 'while') {
+        const g = step.loopWhileCondition;
+        if (!g || (g.items ?? []).length === 0) return "While  (no condition)";
+        if ((g.items ?? []).length === 1) return `While  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
+        return `While  ${g.combinator} of ${(g.items ?? []).length} conditions`;
+      }
       const loopExpr = step.expressions?.loopCount;
       const loopVal  = loopExpr ? loopExpr : (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1));
       return `Loop  ×${loopVal}`;
@@ -441,6 +461,7 @@ function stepLabel(step: ProgramStep): string {
     case "StatusUpdate": return step.statusMessage ? `"${step.statusMessage}"` : "Status update";
     case "CallRoutine":  return step.routineName ? `Routine → ${step.routineName}` : "Call Routine";
     case "RunVision":    return step.visionProgramName ? `Vision → ${step.visionProgramName}` : "Run Vision";
+    case "SaveImage":    return step.saveImagePath ? `Save Image  →  ${step.saveImagePath}` : "Save Image";
     case "SetSpeedL":
     case "SetSpeedJ": {
       const label  = step.type === "SetSpeedL" ? "Set Linear Speed" : "Set Joint Speed";
@@ -454,9 +475,9 @@ function stepLabel(step: ProgramStep): string {
     case "PauseProgram":  return "Pause Program";
     case "IfCondition": {
       const g = step.condition;
-      if (!g || g.items.length === 0) return "If (no conditions)";
-      if (g.items.length === 1) return `If  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
-      return `If  ${g.combinator} of ${g.items.length} conditions`;
+      if (!g || (g.items ?? []).length === 0) return "If (no conditions)";
+      if ((g.items ?? []).length === 1) return `If  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
+      return `If  ${g.combinator} of ${(g.items ?? []).length} conditions`;
     }
     case "SetTool":    return step.toolName  ? `Set Tool  →  ${step.toolName}`  : "Set Tool  →  None";
     case "SetLocal":   return step.localName ? `Set Local  →  ${step.localName}` : "Set Local  →  None";
@@ -471,6 +492,16 @@ function stepLabel(step: ProgramStep): string {
       return `Aux Run  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s`;
     case "AuxStop":
       return "Aux Stop";
+    case "StartBackground":
+      return step.backgroundProgramName ? `Start Background  →  ${step.backgroundProgramName}` : "Start Background";
+    case "StopBackground":
+      return step.backgroundProgramName ? `Stop Background  →  ${step.backgroundProgramName}` : "Stop Background";
+    case "WaitForBackground":
+      return step.backgroundProgramName ? `Wait for  →  ${step.backgroundProgramName}` : "Wait for Background";
+    case "StopwatchControl":
+      return step.stopwatchVariableName
+        ? `${step.stopwatchAction ?? "?"} $${step.stopwatchVariableName}`
+        : `Stopwatch ${step.stopwatchAction ?? "?"}`;
     default:              return step.type;
   }
 }
@@ -487,6 +518,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
     case "CallRoutine":  return <Repeat2       size={size} color={color} />;
     case "RunVision":    return <ScanSearch    size={size} color={color} />;
+    case "SaveImage":    return <ImagePlus    size={size} color={color} />;
     case "SetSpeedL":
     case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
     case "SetVariable":  return <Hash          size={size} color={color} />;
@@ -498,9 +530,13 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "SetLocal":
     case "ClearLocal":     return <Grid3x3       size={size} color={color} />;
     case "RunHoming":      return <Home          size={size} color={color} />;
-    case "AuxMove":        return <ChevronsRight size={size} color={color} />;
-    case "AuxContinuous":  return <Play          size={size} color={color} />;
-    case "AuxStop":        return <OctagonX      size={size} color={color} />;
+    case "AuxMove":            return <ChevronsRight size={size} color={color} />;
+    case "AuxContinuous":      return <Play          size={size} color={color} />;
+    case "AuxStop":            return <OctagonX      size={size} color={color} />;
+    case "StartBackground":    return <Layers        size={size} color={color} />;
+    case "StopBackground":     return <Square        size={size} color={color} />;
+    case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
+    case "StopwatchControl":   return <Timer         size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
 }
@@ -531,7 +567,12 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
   AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
-  RunVision:     { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
+  RunVision:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
+  SaveImage:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Save Image"          },
+  StartBackground:  { accent: "#16a34a", iconBg: "#dcfce7", iconColor: "#16a34a", label: "Start Background"   },
+  StopBackground:   { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Stop Background"    },
+  WaitForBackground:{ accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait for Background"},
+  StopwatchControl: { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Stopwatch"          },
 };
 
 function fmtMoveModifiers(step: ProgramStep): string[] {
@@ -590,12 +631,31 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return lines.join('\n');
     }
     case "Wait": {
+      if (step.waitMode === 'condition') {
+        const parts: string[] = [];
+        if (step.waitTimeoutMs) parts.push(`max ${step.waitTimeoutMs} ms`);
+        if (step.waitTimeoutVariableName) parts.push(`timeout → $${step.waitTimeoutVariableName}`);
+        return parts.join("  ·  ") || "Wait for condition";
+      }
       const waitExpr = step.expressions?.waitMs;
       return waitExpr ?? `${step.waitMs ?? 0} ms`;
     }
     case "Loop": {
+      if (step.loopMode === 'forEach') {
+        const parts: string[] = [`$${step.forEachVariableName ?? "?"}`];
+        if (step.forEachValueVariableName) parts.push(`value → $${step.forEachValueVariableName}`);
+        if (step.forEachIndexVariableName) parts.push(`index → $${step.forEachIndexVariableName}`);
+        return parts.join("  ·  ");
+      }
+      if (step.loopMode === 'while') {
+        const g = step.loopWhileCondition;
+        if (!g || (g.items ?? []).length === 0) return "Exits when condition is false";
+        if ((g.items ?? []).length === 1) return `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
+        return `${g.combinator} of ${(g.items ?? []).length} conditions`;
+      }
       const loopExpr = step.expressions?.loopCount;
-      return `×${loopExpr ?? (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1))}`;
+      const countStr = `×${loopExpr ?? (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1))}`;
+      return step.forEachIndexVariableName ? `${countStr}  ·  index → $${step.forEachIndexVariableName}` : countStr;
     }
     case "StatusUpdate":
       return step.statusMessage || null;
@@ -603,6 +663,8 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return step.routineName ? `→ ${step.routineName}` : null;
     case "RunVision":
       return step.visionProgramName ? `→ ${step.visionProgramName}` : null;
+    case "SaveImage":
+      return step.saveImagePath ? step.saveImagePath : null;
     case "SetSpeedL":
     case "SetSpeedJ": {
       const lines: string[] = [];
@@ -622,9 +684,9 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return step.labelName ? `↩ ${step.labelName}` : null;
     case "IfCondition": {
       const g = step.condition;
-      if (!g || g.items.length === 0) return "(no conditions)";
-      if (g.items.length === 1) return `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
-      return `${g.combinator} of ${g.items.length} conditions`;
+      if (!g || (g.items ?? []).length === 0) return "(no conditions)";
+      if ((g.items ?? []).length === 1) return `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
+      return `${g.combinator} of ${(g.items ?? []).length} conditions`;
     }
     case "SetTool":
       return step.toolName  ? `→ ${step.toolName}`  : "→ None";
@@ -644,6 +706,14 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return `Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s  (continuous)`;
     case "AuxStop":
       return step.auxImmediate ? "Immediate halt" : "Controlled stop";
+    case "StartBackground":
+      return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
+    case "StopBackground":
+      return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
+    case "WaitForBackground":
+      return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
+    case "StopwatchControl":
+      return step.stopwatchVariableName ? `$${step.stopwatchVariableName}` : null;
     default:
       return null;
   }
@@ -673,10 +743,20 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
   { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
-  { type: "RunVision",     label: "Run Vision",         desc: "Trigger a vision program, wait for one inspection result, then continue" },
+  { type: "RunVision",        label: "Run Vision",            desc: "Trigger a vision program, wait for one inspection result, then continue" },
+  { type: "StartBackground",  label: "Start Background",      desc: "Start a background program running in parallel with this one" },
+  { type: "StopBackground",   label: "Stop Background",       desc: "Stop a named background program" },
+  { type: "WaitForBackground",label: "Wait for Background",   desc: "Block until a named background program finishes" },
+  { type: "StopwatchControl", label: "Stopwatch",             desc: "Start, stop, or reset a stopwatch variable — value holds elapsed milliseconds" },
+  { type: "SaveImage",        label: "Save Image",             desc: "Capture a camera snapshot and save to a file path — supports $variable interpolation including $time_ms" },
 ];
 
 const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
+
+const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
+  "MoveL", "MoveJ", "JumpL", "JumpJ",
+  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
+]);
 
 const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
   { label: "Motion",       color: "#2563eb", types: ["MoveL", "MoveJ", "JumpL", "JumpJ"] },
@@ -684,30 +764,80 @@ const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
   { label: "I/O",          color: "#ea580c", types: ["SetOutput"] },
   { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ"] },
   { label: "Variables",    color: "#7c3aed", types: ["SetVariable"] },
-  { label: "Vision",       color: "#0891b2", types: ["RunVision"] },
+  { label: "Vision",       color: "#0891b2", types: ["RunVision", "SaveImage"] },
   { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop"] },
   { label: "Tool & Frame", color: "#7c3aed", types: ["SetTool", "SetLocal", "ClearLocal"] },
   { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
+  { label: "Background",   color: "#16a34a", types: ["StartBackground", "StopBackground", "WaitForBackground"] },
+  { label: "Timing",       color: "#0891b2", types: ["StopwatchControl"] },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
 
 type InsertTarget =
   | { mode: "append" }
-  | { mode: "insert";      afterIndex: number }
-  | { mode: "appendLoop";  loopId: string }
-  | { mode: "insertLoop";  loopId: string; afterIndex: number }
-  | { mode: "appendIf";    stepId: string; branchKey: string }
-  | { mode: "insertIf";    stepId: string; branchKey: string; afterIndex: number };
+  | { mode: "insert"; afterIndex: number };
 
 // ── Drag info ─────────────────────────────────────────────────────────────────
 
 type DragInfo = {
   id: string;
-  loopId?: string; // set if dragging an inner loop step
   fromIndex: number;
   toIndex: number;
 };
+
+// ── Scope navigation ──────────────────────────────────────────────────────────
+
+type ScopeFrame = {
+  kind: 'loop' | 'ifTrue' | 'elseIf' | 'else';
+  stepId: string;
+  label: string;
+  branchId?: string;
+};
+
+function getStepsAtScope(rootSteps: ProgramStep[], stack: ScopeFrame[]): ProgramStep[] {
+  let current = rootSteps;
+  for (const frame of stack) {
+    const parent = current.find(s => s.id === frame.stepId);
+    if (!parent) break;
+    switch (frame.kind) {
+      case 'loop':   current = parent.loopSteps ?? []; break;
+      case 'ifTrue': current = parent.ifSteps ?? []; break;
+      case 'else':   current = parent.elseSteps ?? []; break;
+      case 'elseIf': current = parent.elseIfBranches?.find(b => b.id === frame.branchId)?.steps ?? []; break;
+    }
+  }
+  return current;
+}
+
+function setStepsAtScope(
+  rootSteps: ProgramStep[],
+  stack: ScopeFrame[],
+  newSteps: ProgramStep[]
+): ProgramStep[] {
+  if (stack.length === 0) return newSteps;
+  const [head, ...tail] = stack;
+  return rootSteps.map(s => {
+    if (s.id !== head.stepId) return s;
+    switch (head.kind) {
+      case 'loop':
+        return { ...s, loopSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.loopSteps ?? [], tail, newSteps) };
+      case 'ifTrue':
+        return { ...s, ifSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.ifSteps ?? [], tail, newSteps) };
+      case 'else':
+        return { ...s, elseSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.elseSteps ?? [], tail, newSteps) };
+      case 'elseIf':
+        return {
+          ...s,
+          elseIfBranches: (s.elseIfBranches ?? []).map(b =>
+            b.id === head.branchId
+              ? { ...b, steps: tail.length === 0 ? newSteps : setStepsAtScope(b.steps, tail, newSteps) }
+              : b
+          ),
+        };
+    }
+  });
+}
 
 // ── Step type picker modal ────────────────────────────────────────────────────
 
@@ -715,10 +845,12 @@ function StepTypePicker({
   visible,
   onPick,
   onClose,
+  isBackgroundMode = false,
 }: {
   visible: boolean;
   onPick: (type: StepType) => void;
   onClose: () => void;
+  isBackgroundMode?: boolean;
 }) {
   const [search, setSearch] = useState('');
 
@@ -732,22 +864,23 @@ function StepTypePicker({
     : null;
 
   function renderRow(s: typeof STEP_TYPES[0], i: number, arr: typeof STEP_TYPES) {
-    const theme = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
+    const theme      = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
+    const restricted = isBackgroundMode && BACKGROUND_RESTRICTED.has(s.type);
     return (
       <TouchableOpacity
         key={s.type}
-        style={[ms.row, i < arr.length - 1 && ms.rowBorder]}
-        onPress={() => { onPick(s.type); onClose(); }}
-        activeOpacity={0.7}
+        style={[ms.row, i < arr.length - 1 && ms.rowBorder, restricted && { opacity: 0.35 }]}
+        onPress={() => { if (!restricted) { onPick(s.type); onClose(); } }}
+        activeOpacity={restricted ? 1 : 0.7}
       >
         <View style={[ms.iconTile, { backgroundColor: theme.iconBg }]}>
           <StepIcon type={s.type} size={18} color={theme.iconColor} />
         </View>
         <View style={ms.rowText}>
           <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
-          <Text style={ms.rowDesc}>{s.desc}</Text>
+          <Text style={ms.rowDesc}>{restricted ? "Not allowed in background programs" : s.desc}</Text>
         </View>
-        <ChevronRight size={16} color="#d1d5db" />
+        {restricted ? <OctagonX size={14} color="#dc2626" /> : <ChevronRight size={16} color="#d1d5db" />}
       </TouchableOpacity>
     );
   }
@@ -850,6 +983,14 @@ const ptStyles = StyleSheet.create({
 // ── Condition editor ─────────────────────────────────────────────────────────
 
 const COND_OPS: ConditionOp[] = ['==', '!=', '>', '>=', '<', '<='];
+const COND_OP_LABELS: Record<ConditionOp, string> = {
+  '==': 'equals',
+  '!=': 'not equals',
+  '>':  'greater than',
+  '>=': 'greater than or equal',
+  '<':  'less than',
+  '<=': 'less than or equal',
+};
 
 function conditionSummary(group: ConditionGroup | undefined): string {
   if (!group || !group.items || group.items.length === 0) return '(no conditions)';
@@ -873,66 +1014,106 @@ function ConditionItemEditor({
 }) {
   const [opOpen, setOpOpen] = React.useState(false);
   const [leftPickerOpen, setLeftPickerOpen] = React.useState(false);
+  const [rightPickerOpen, setRightPickerOpen] = React.useState(false);
+  const rightRef = useRef<any>(null);
+  const hasVars = !!(variables && variables.length > 0);
+
+  function insertRightToken(token: string) {
+    const cur = (item.right ?? '').trimEnd();
+    const next = cur ? `${cur} ${token} ` : `${token} `;
+    onChange({ ...item, right: next });
+    rightRef.current?.focus();
+  }
+
+  const rightIsExpr = /[$+\-*\/()]/.test(item.right ?? '');
+
   return (
-    <View style={{ marginBottom: 8, borderWidth: 1, borderColor: '#bae6fd', borderRadius: 8, padding: 8, backgroundColor: '#fff' }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+    <View style={{ marginBottom: 10, borderWidth: 1, borderColor: '#e0f2fe', borderRadius: 10, padding: 10, backgroundColor: '#fff' }}>
+      {/* Delete button */}
+      <TouchableOpacity onPress={onDelete} hitSlop={8} activeOpacity={0.7} style={{ alignSelf: 'flex-end', marginBottom: 6 }}>
+        <X size={14} color="#9ca3af" />
+      </TouchableOpacity>
+
+      {/* Left */}
+      <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b7280', letterSpacing: 0.4, marginBottom: 4 }}>LEFT</Text>
+      <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
         <TextInput
-          style={{ flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 7, fontSize: 13, color: '#7c3aed', minWidth: 0 }}
-          value={item.left}
+          style={{ flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: '#7c3aed' }}
+          value={item.left ?? ''}
           onChangeText={v => onChange({ ...item, left: v })}
           placeholder="$var or $stb.in1"
           placeholderTextColor="#c4b5fd"
           autoCapitalize="none"
         />
-        <TouchableOpacity
-          style={{ paddingHorizontal: 8, paddingVertical: 7, borderWidth: 1, borderColor: '#0891b2', borderRadius: 7, backgroundColor: '#e0f2fe', minWidth: 40, alignItems: 'center' }}
-          onPress={() => setOpOpen(true)}
-          activeOpacity={0.7}
-        >
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#0891b2' }}>{item.operator}</Text>
-        </TouchableOpacity>
-        <TextInput
-          style={{ flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 7, fontSize: 13, color: '#111827', minWidth: 0 }}
-          value={item.right}
-          onChangeText={v => onChange({ ...item, right: v })}
-          placeholder="value"
-          placeholderTextColor="#9ca3af"
-          autoCapitalize="none"
-        />
-        <TouchableOpacity onPress={onDelete} hitSlop={8} activeOpacity={0.7}>
-          <X size={14} color="#9ca3af" />
-        </TouchableOpacity>
-      </View>
-      {variables && variables.length > 0 && (
-        <>
+        {hasVars && (
           <TouchableOpacity
             onPress={() => setLeftPickerOpen(true)}
             activeOpacity={0.7}
-            style={{ marginTop: 5, alignSelf: 'flex-start', backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4 }}
+            style={{ backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 8, paddingHorizontal: 10, justifyContent: 'center' }}
           >
-            <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>+ var</Text>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>var</Text>
           </TouchableOpacity>
-          <VarPickerModal
-            visible={leftPickerOpen}
-            onClose={() => setLeftPickerOpen(false)}
-            variables={variables}
-            selected={item.left.startsWith('$') ? item.left.slice(1) : undefined}
-            title="Left Variable"
-            onSelect={v => { if (v) onChange({ ...item, left: `$${v.name}` }); }}
-          />
-        </>
-      )}
-      <View style={{ flexDirection: 'row', gap: 5, marginTop: 4 }}>
-        <Text style={{ fontSize: 10, color: '#9ca3af', alignSelf: 'center', marginRight: 2 }}>Right:</Text>
-        {(['True', 'False', '1', '0'] as const).map(val => (
-          <TouchableOpacity key={val} onPress={() => onChange({ ...item, right: val })} activeOpacity={0.7}
-            style={{ backgroundColor: val === 'True' || val === '1' ? '#f0fdf4' : '#fef2f2',
-              borderWidth: 1, borderColor: val === 'True' || val === '1' ? '#bbf7d0' : '#fecaca',
-              borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 }}>
-            <Text style={{ fontSize: 11, fontWeight: '700', color: val === 'True' || val === '1' ? '#16a34a' : '#dc2626' }}>{val}</Text>
+        )}
+      </View>
+
+      {/* Operator — full-width select button */}
+      <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b7280', letterSpacing: 0.4, marginBottom: 4 }}>OPERATOR</Text>
+      <TouchableOpacity
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#e0f2fe', borderWidth: 1.5, borderColor: '#bae6fd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 12 }}
+        onPress={() => setOpOpen(true)}
+        activeOpacity={0.75}
+      >
+        <Text style={{ fontSize: 14, fontWeight: '700', color: '#0891b2', flex: 1 }}>{item.operator}</Text>
+        <Text style={{ fontSize: 12, color: '#67e8f9', flex: 2 }}>{COND_OP_LABELS[item.operator as ConditionOp] ?? ''}</Text>
+        <ChevronDown size={14} color="#0891b2" />
+      </TouchableOpacity>
+
+      {/* Right */}
+      <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b7280', letterSpacing: 0.4, marginBottom: 4 }}>RIGHT</Text>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <TextInput
+          ref={rightRef}
+          style={{ flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: rightIsExpr ? '#7c3aed' : '#111827' }}
+          value={item.right ?? ''}
+          onChangeText={v => onChange({ ...item, right: v })}
+          placeholder="value or expression"
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="none"
+        />
+        {hasVars && (
+          <TouchableOpacity
+            onPress={() => setRightPickerOpen(true)}
+            activeOpacity={0.7}
+            style={{ backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 8, paddingHorizontal: 10, justifyContent: 'center' }}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>var</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+        {([['×', '*'], ['+', '+'], ['−', '-'], ['÷', '/']] as [string, string][]).map(([label, op]) => (
+          <TouchableOpacity key={op} onPress={() => insertRightToken(op)} activeOpacity={0.7} style={exprStyles.opChip}>
+            <Text style={exprStyles.opChipText}>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
+
+      <VarPickerModal
+        visible={leftPickerOpen}
+        onClose={() => setLeftPickerOpen(false)}
+        variables={variables ?? []}
+        selected={(item.left ?? '').startsWith('$') ? item.left.slice(1) : undefined}
+        title="Left Variable"
+        onSelect={v => { if (v) onChange({ ...item, left: `$${v.name}` }); }}
+      />
+      <VarPickerModal
+        visible={rightPickerOpen}
+        onClose={() => setRightPickerOpen(false)}
+        variables={variables ?? []}
+        selected={(item.right ?? '').startsWith('$') ? item.right.slice(1) : undefined}
+        title="Right Variable"
+        onSelect={v => { if (v) insertRightToken(`$${v.name}`); }}
+      />
       <Modal visible={opOpen} transparent animationType="fade" onRequestClose={() => setOpOpen(false)}>
         <Pressable style={svs.modalOverlay} onPress={() => setOpOpen(false)}>
           <Pressable style={svs.modalCard} onPress={() => {}}>
@@ -940,8 +1121,13 @@ function ConditionItemEditor({
             {COND_OPS.map((op, i) => (
               <TouchableOpacity key={op}
                 style={[svs.optionRow, i < COND_OPS.length - 1 && svs.optionRowBorder, op === item.operator && svs.optionRowActive]}
-                onPress={() => { onChange({ ...item, operator: op }); setOpOpen(false); }} activeOpacity={0.7}>
-                <Text style={[svs.optionText, op === item.operator && svs.optionTextActive]}>{op}</Text>
+                onPress={() => { onChange({ ...item, operator: op }); setOpOpen(false); }}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: op === item.operator ? '#0891b2' : '#374151', width: 28 }}>{op}</Text>
+                  <Text style={{ fontSize: 13, color: '#6b7280' }}>{COND_OP_LABELS[op]}</Text>
+                </View>
                 {op === item.operator && <Check size={15} color="#0891b2" />}
               </TouchableOpacity>
             ))}
@@ -963,8 +1149,8 @@ function ConditionGroupEditor({
 }) {
   const accent = '#0891b2';
   return (
-    <View style={{ marginTop: 8, padding: 12, borderWidth: 1, borderColor: '#e0f2fe', borderRadius: 10, backgroundColor: '#f0f9ff' }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+    <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
         <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b7280', marginRight: 4 }}>MATCH</Text>
         {(['ALL', 'ANY'] as const).map(opt => (
           <TouchableOpacity key={opt}
@@ -978,20 +1164,20 @@ function ConditionGroupEditor({
           {group.combinator === 'ALL' ? 'conditions must be true' : 'one must be true'}
         </Text>
       </View>
-      {group.items.length === 0 && (
-        <Text style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8, fontStyle: 'italic' }}>No conditions — branch always runs.</Text>
+      {(group.items ?? []).length === 0 && (
+        <Text style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10, fontStyle: 'italic' }}>No conditions — branch always runs.</Text>
       )}
-      {group.items.map((item, i) => (
+      {(group.items ?? []).map((item, i) => (
         <ConditionItemEditor key={item.id} item={item} variables={variables}
-          onChange={updated => onChange({ ...group, items: group.items.map((ci, j) => j === i ? updated : ci) })}
-          onDelete={() => onChange({ ...group, items: group.items.filter((_, j) => j !== i) })} />
+          onChange={updated => onChange({ ...group, items: (group.items ?? []).map((ci, j) => j === i ? updated : ci) })}
+          onDelete={() => onChange({ ...group, items: (group.items ?? []).filter((_, j) => j !== i) })} />
       ))}
       <TouchableOpacity
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 6 }}
-        onPress={() => onChange({ ...group, items: [...group.items, { id: newId(), left: '', operator: '==' as ConditionOp, right: '1' }] })}
+        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1.5, borderColor: '#bae6fd', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, backgroundColor: '#f0f9ff' }}
+        onPress={() => onChange({ ...group, items: [...(group.items ?? []), { id: newId(), left: '', operator: '==' as ConditionOp, right: '' }] })}
         activeOpacity={0.7}>
-        <Plus size={12} color={accent} />
-        <Text style={{ fontSize: 12, fontWeight: '600', color: accent }}>Add Condition</Text>
+        <Plus size={14} color={accent} />
+        <Text style={{ fontSize: 13, fontWeight: '600', color: accent }}>Add Condition</Text>
       </TouchableOpacity>
     </View>
   );
@@ -1387,6 +1573,107 @@ function SetVariableFields({
   );
 }
 
+// ── SaveImageFields ───────────────────────────────────────────────────────────
+
+function SaveImageFields({
+  draft,
+  variables,
+  cameras,
+  set,
+}: {
+  draft: ProgramStep;
+  variables: ProgramVariable[] | undefined;
+  cameras: CameraState[];
+  set: (p: Partial<ProgramStep>) => void;
+}) {
+  const [varPickerOpen, setVarPickerOpen] = useState(false);
+  const accent = "#0891b2";
+
+  function insertPathToken(token: string) {
+    const cur = draft.saveImagePath ?? '';
+    set({ saveImagePath: cur ? `${cur}${token}` : token });
+  }
+
+  return (
+    <>
+      <Text style={ms.hintText}>
+        Save a camera snapshot to a file.{'\n'}
+        Use <Text style={{ fontWeight: '700', color: '#374151' }}>$variable</Text> in the path.{' '}
+        <Text style={{ fontWeight: '700', color: '#7c3aed' }}>$time_ms</Text> always holds the current Unix timestamp in ms — great for unique filenames.
+      </Text>
+
+      <Text style={[ms.fieldLabel, { marginTop: 14 }]}>CAMERA</Text>
+      {cameras.length === 0 ? (
+        <Text style={ms.emptyHint}>No cameras configured. Add cameras in the Camera settings.</Text>
+      ) : (
+        cameras.map((cam, i) => {
+          const active = draft.saveImageCameraId === cam.id;
+          return (
+            <TouchableOpacity
+              key={cam.id}
+              style={[ms.row, i < cameras.length - 1 && ms.rowBorder, active && ms.rowActive]}
+              onPress={() => set({ saveImageCameraId: cam.id })}
+              activeOpacity={0.7}
+            >
+              <Camera size={14} color={active ? accent : '#6b7280'} />
+              <Text style={[ms.rowLabel, { flex: 1 }, active && { color: accent }]}>{cam.name}</Text>
+              {active && <Check size={14} color={accent} />}
+            </TouchableOpacity>
+          );
+        })
+      )}
+
+      <Text style={[ms.fieldLabel, { marginTop: 14 }]}>SAVE PATH</Text>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <TextInput
+          value={draft.saveImagePath ?? ''}
+          onChangeText={v => set({ saveImagePath: v })}
+          placeholder="captures/$time_ms.jpg"
+          placeholderTextColor="#9ca3af"
+          style={[ms.input, { flex: 1, color: '#0891b2' }]}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {(variables ?? []).length > 0 && (
+          <TouchableOpacity
+            style={{ backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#7dd3fc', borderRadius: 9, paddingHorizontal: 10, justifyContent: 'center', marginTop: 6 }}
+            onPress={() => setVarPickerOpen(true)}
+            activeOpacity={0.75}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0891b2' }}>$var</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Text style={{ fontSize: 11, color: '#9ca3af' }}>Quick insert:</Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#ede9fe', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: '#c4b5fd' }}
+          onPress={() => insertPathToken('$time_ms')}
+          activeOpacity={0.7}
+        >
+          <Text style={{ fontSize: 12, color: '#7c3aed', fontWeight: '600' }}>$time_ms</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={[ms.hintText, { marginTop: 4 }]}>
+        Relative paths are from the app directory. Folders are created automatically.
+      </Text>
+
+      <VarPickerModal
+        visible={varPickerOpen}
+        onClose={() => setVarPickerOpen(false)}
+        variables={variables ?? []}
+        selected={undefined}
+        title="Insert Variable"
+        onSelect={v => {
+          if (v) insertPathToken(`$${v.name}`);
+          setVarPickerOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
 function StepConfigModal({
   visible,
   step,
@@ -1422,13 +1709,18 @@ function StepConfigModal({
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
   const [stackPickerOpen, setStackPickerOpen] = useState(false);
   const [ioConfig, setIoConfig]       = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
-  const [auxDevices, setAuxDevices]   = useState<AuxDeviceState[]>([]);
+  const [auxDevices, setAuxDevices]       = useState<AuxDeviceState[]>([]);
   const [visionPrograms, setVisionPrograms] = useState<VisionProgram[]>([]);
+  const [cameraDevices, setCameraDevices]   = useState<CameraState[]>([]);
   const [visionPicker, setVisionPicker]   = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
   const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
   const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
   const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
   const [statusVarPickerOpen, setStatusVarPickerOpen] = useState(false);
+  const [waitTimeoutVarPicker,  setWaitTimeoutVarPicker]  = useState(false);
+  const [loopIndexVarPicker,    setLoopIndexVarPicker]    = useState(false);
+  const [forEachSourcePicker,   setForEachSourcePicker]   = useState(false);
+  const [forEachValuePicker,    setForEachValuePicker]    = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -1443,7 +1735,9 @@ function StepConfigModal({
     robotClient.getVisionPrograms()
       .then(({ programs }) => setVisionPrograms(programs))
       .catch(() => {});
-    return robotClient.onAuxAxis(devices => setAuxDevices(devices));
+    const unsubAux     = robotClient.onAuxAxis(devices => setAuxDevices(devices));
+    const unsubCameras = robotClient.onCameras(cams => setCameraDevices(cams));
+    return () => { unsubAux(); unsubCameras(); };
   }, [visible]);
 
   useEffect(() => {
@@ -2238,28 +2532,240 @@ function StepConfigModal({
         );
       }
 
-      case "Wait":
+      case "Wait": {
+        const waitMode  = draft!.waitMode ?? 'duration';
+        const waitCond  = draft!.waitCondition ?? { combinator: 'ALL' as const, items: [] };
+        const scalarVars = (variables ?? []).filter(v => !v.values && !v.points && !v.isStopwatch);
         return (
           <>
-            <Text style={ms.fieldLabel}>DURATION  (ms)</Text>
-            <ExpressionInput style={ms.input} fieldKey="waitMs"
-              value={draft!.waitMs} expressions={draft!.expressions}
-              onChangeValue={v => set({ waitMs: v !== undefined ? Math.round(v) : undefined })}
-              onChangeExpr={setExpr} variables={variables} autoFocus />
-          </>
-        );
+            <Text style={ms.fieldLabel}>MODE</Text>
+            <View style={ms.segRow}>
+              {(['duration', 'condition'] as const).map(m => (
+                <TouchableOpacity key={m} style={[ms.seg, waitMode === m && ms.segActive, { flex: 1 }]}
+                  onPress={() => set({ waitMode: m })} activeOpacity={0.8}>
+                  <Text style={[ms.segText, waitMode === m && ms.segTextActive]}>{m === 'duration' ? 'Duration' : 'Condition'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-      case "Loop":
-        return (
-          <>
-            <Text style={ms.fieldLabel}>REPEAT COUNT  (0 = infinite)</Text>
-            <ExpressionInput style={ms.input} fieldKey="loopCount"
-              value={draft!.loopCount ?? 1} expressions={draft!.expressions}
-              onChangeValue={v => set({ loopCount: v !== undefined ? Math.round(v) : 1 })}
-              onChangeExpr={setExpr} variables={variables} autoFocus />
-            <Text style={ms.hintText}>Add steps inside this loop from the builder after saving.</Text>
+            {waitMode === 'duration' ? (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DURATION  (ms)</Text>
+                <ExpressionInput style={ms.input} fieldKey="waitMs"
+                  value={draft!.waitMs} expressions={draft!.expressions}
+                  onChangeValue={v => set({ waitMs: v !== undefined ? Math.round(v) : undefined })}
+                  onChangeExpr={setExpr} variables={variables} autoFocus />
+              </>
+            ) : (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>WAIT UNTIL</Text>
+                <ConditionGroupEditor
+                  group={waitCond}
+                  onChange={g => set({ waitCondition: g })}
+                  variables={variables}
+                />
+                <Text style={[ms.fieldLabel, { marginTop: 14 }]}>MAX TIMEOUT  (ms, 0 = no limit)</Text>
+                <TextInput
+                  style={ms.input}
+                  value={draft!.waitTimeoutMs != null ? String(draft!.waitTimeoutMs) : ""}
+                  onChangeText={t => set({ waitTimeoutMs: t ? (parseInt(t) || undefined) : undefined })}
+                  keyboardType="numeric" placeholder="0" placeholderTextColor="#c4c4c4"
+                  returnKeyType="done" selectTextOnFocus
+                />
+                {scalarVars.length > 0 && (
+                  <>
+                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>TIMEOUT FLAG VARIABLE  (optional)</Text>
+                    <Text style={ms.hintText}>Set to 1 if timed out, 0 if condition was met. Leave blank to ignore.</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <TouchableOpacity
+                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                        onPress={() => setWaitTimeoutVarPicker(true)} activeOpacity={0.7}>
+                        <Text style={{ color: draft!.waitTimeoutVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                          {draft!.waitTimeoutVariableName ?? "none"}
+                        </Text>
+                      </TouchableOpacity>
+                      {draft!.waitTimeoutVariableName && (
+                        <TouchableOpacity onPress={() => set({ waitTimeoutVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                          <X size={14} color="#9ca3af" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <VarPickerModal
+                      visible={waitTimeoutVarPicker}
+                      onClose={() => setWaitTimeoutVarPicker(false)}
+                      variables={scalarVars}
+                      selected={draft!.waitTimeoutVariableName}
+                      onSelect={v => { set({ waitTimeoutVariableName: v?.name }); setWaitTimeoutVarPicker(false); }}
+                      title="Timeout Flag Variable"
+                      showNone
+                    />
+                  </>
+                )}
+              </>
+            )}
           </>
         );
+      }
+
+      case "Loop": {
+        const loopMode = draft!.loopMode ?? 'count';
+        const listPointVars  = (variables ?? []).filter(v => v.values || v.points);
+        const scalarVarsLoop = (variables ?? []).filter(v => !v.values && !v.points && !v.isStopwatch);
+        const whileCond = draft!.loopWhileCondition ?? { combinator: 'ALL' as const, items: [] };
+        return (
+          <>
+            <Text style={ms.fieldLabel}>MODE</Text>
+            <View style={ms.segRow}>
+              {(['count', 'forEach', 'while'] as const).map(m => (
+                <TouchableOpacity key={m} style={[ms.seg, loopMode === m && ms.segActive, { flex: 1 }]}
+                  onPress={() => set({ loopMode: m })} activeOpacity={0.8}>
+                  <Text style={[ms.segText, loopMode === m && ms.segTextActive]}>
+                    {m === 'count' ? 'Count' : m === 'forEach' ? 'For Each' : 'While'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {loopMode === 'count' ? (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>REPEAT COUNT  (0 = infinite)</Text>
+                <ExpressionInput style={ms.input} fieldKey="loopCount"
+                  value={draft!.loopCount ?? 1} expressions={draft!.expressions}
+                  onChangeValue={v => set({ loopCount: v !== undefined ? Math.round(v) : 1 })}
+                  onChangeExpr={setExpr} variables={variables} autoFocus />
+                {scalarVarsLoop.length > 0 && (
+                  <>
+                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
+                    <Text style={ms.hintText}>Set to the current iteration number (0-based).</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <TouchableOpacity
+                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                        onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
+                        <Text style={{ color: draft!.forEachIndexVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                          {draft!.forEachIndexVariableName ?? "none"}
+                        </Text>
+                      </TouchableOpacity>
+                      {draft!.forEachIndexVariableName && (
+                        <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                          <X size={14} color="#9ca3af" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <VarPickerModal
+                      visible={loopIndexVarPicker}
+                      onClose={() => setLoopIndexVarPicker(false)}
+                      variables={scalarVarsLoop}
+                      selected={draft!.forEachIndexVariableName}
+                      onSelect={v => { set({ forEachIndexVariableName: v?.name }); setLoopIndexVarPicker(false); }}
+                      title="Index Variable"
+                      showNone
+                    />
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ITERATE OVER</Text>
+                {listPointVars.length === 0
+                  ? <Text style={ms.emptyHint}>No list or points variables defined yet.</Text>
+                  : (
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <TouchableOpacity
+                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                        onPress={() => setForEachSourcePicker(true)} activeOpacity={0.7}>
+                        <Text style={{ color: draft!.forEachVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                          {draft!.forEachVariableName ?? "select list or points variable"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )
+                }
+                <VarPickerModal
+                  visible={forEachSourcePicker}
+                  onClose={() => setForEachSourcePicker(false)}
+                  variables={listPointVars}
+                  selected={draft!.forEachVariableName}
+                  onSelect={v => { set({ forEachVariableName: v?.name }); setForEachSourcePicker(false); }}
+                  title="Source Variable"
+                />
+
+                {scalarVarsLoop.length > 0 && (
+                  <>
+                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>VALUE VARIABLE  (optional)</Text>
+                    <Text style={ms.hintText}>Receives the current element (list) or index (points) each iteration.</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <TouchableOpacity
+                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                        onPress={() => setForEachValuePicker(true)} activeOpacity={0.7}>
+                        <Text style={{ color: draft!.forEachValueVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                          {draft!.forEachValueVariableName ?? "none"}
+                        </Text>
+                      </TouchableOpacity>
+                      {draft!.forEachValueVariableName && (
+                        <TouchableOpacity onPress={() => set({ forEachValueVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                          <X size={14} color="#9ca3af" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <VarPickerModal
+                      visible={forEachValuePicker}
+                      onClose={() => setForEachValuePicker(false)}
+                      variables={scalarVarsLoop}
+                      selected={draft!.forEachValueVariableName}
+                      onSelect={v => { set({ forEachValueVariableName: v?.name }); setForEachValuePicker(false); }}
+                      title="Value Variable"
+                      showNone
+                    />
+
+                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
+                    <Text style={ms.hintText}>Receives the current iteration index (0-based).</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <TouchableOpacity
+                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                        onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
+                        <Text style={{ color: draft!.forEachIndexVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                          {draft!.forEachIndexVariableName ?? "none"}
+                        </Text>
+                      </TouchableOpacity>
+                      {draft!.forEachIndexVariableName && (
+                        <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                          <X size={14} color="#9ca3af" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <VarPickerModal
+                      visible={loopIndexVarPicker}
+                      onClose={() => setLoopIndexVarPicker(false)}
+                      variables={scalarVarsLoop}
+                      selected={draft!.forEachIndexVariableName}
+                      onSelect={v => { set({ forEachIndexVariableName: v?.name }); setLoopIndexVarPicker(false); }}
+                      title="Index Variable"
+                      showNone
+                    />
+                  </>
+                )}
+              </>
+            )}
+            {loopMode === 'while' && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>REPEAT WHILE</Text>
+                <Text style={ms.hintText}>Loop body runs as long as condition is true. Exits when condition becomes false.</Text>
+                <ConditionGroupEditor
+                  group={whileCond}
+                  onChange={g => set({ loopWhileCondition: g })}
+                  variables={variables}
+                />
+              </>
+            )}
+            <Text style={[ms.hintText, { marginTop: 10 }]}>Add steps inside this loop from the builder after saving.</Text>
+          </>
+        );
+      }
 
       case "StatusUpdate": {
         const hasVars = (variables ?? []).length > 0;
@@ -2991,6 +3497,118 @@ function StepConfigModal({
           </Text>
         );
 
+      case "StartBackground":
+      case "StopBackground":
+      case "WaitForBackground": {
+        const bgPrograms = allPrograms.filter(p => p.isBackground && !p.isRoutine);
+        const label = draft!.type === "StartBackground" ? "BACKGROUND PROGRAM TO START"
+          : draft!.type === "StopBackground" ? "BACKGROUND PROGRAM TO STOP"
+          : "BACKGROUND PROGRAM TO WAIT FOR";
+        const hint = draft!.type === "StartBackground"
+          ? "Starts the selected background program in parallel. No-op if it is already running."
+          : draft!.type === "StopBackground"
+          ? "Stops the selected background program. No-op if it is not running."
+          : "Blocks this program until the selected background program finishes. Continues immediately if it is not running.";
+        return (
+          <>
+            <Text style={ms.hintText}>{hint}</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{label}</Text>
+            {bgPrograms.length === 0 ? (
+              <Text style={[ms.emptyHint, { marginTop: 4 }]}>
+                No background programs found. Mark a program as "Background" in its settings.
+              </Text>
+            ) : (
+              bgPrograms.map((p, i) => {
+                const active = draft!.backgroundProgramName === p.name;
+                return (
+                  <TouchableOpacity
+                    key={p.name}
+                    style={[ms.row, i < bgPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                    onPress={() => set({ backgroundProgramName: p.name })}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                      {active && <View style={ms.radioDot} />}
+                    </View>
+                    <View style={ms.rowText}>
+                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
+                      {p.description ? <Text style={ms.rowDesc}>{p.description}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </>
+        );
+      }
+
+      case "StopwatchControl": {
+        const swVars = (variables ?? []).filter(v => v.isStopwatch);
+        const swActions = ["Start", "Stop", "Reset"] as const;
+        return (
+          <>
+            <Text style={ms.hintText}>Control a stopwatch variable. The value holds elapsed milliseconds and can be read in expressions.</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ACTION</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+              {swActions.map(a => {
+                const active = draft!.stopwatchAction === a;
+                const color  = a === "Start" ? "#16a34a" : a === "Stop" ? "#dc2626" : "#d97706";
+                const bg     = a === "Start" ? "#f0fdf4" : a === "Stop" ? "#fef2f2" : "#fffbeb";
+                const border = a === "Start" ? "#bbf7d0" : a === "Stop" ? "#fecaca" : "#fde68a";
+                return (
+                  <TouchableOpacity
+                    key={a}
+                    style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center", borderWidth: 1.5,
+                      borderColor: active ? color : "#e5e7eb",
+                      backgroundColor: active ? bg : "#f9fafb" }]}
+                    onPress={() => set({ stopwatchAction: a })}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: "700", color: active ? color : "#6b7280" }}>{a}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>STOPWATCH VARIABLE</Text>
+            {swVars.length === 0 ? (
+              <Text style={[ms.emptyHint, { marginTop: 4 }]}>
+                No stopwatch variables defined. Add a variable of type Stopwatch in the Variables section.
+              </Text>
+            ) : (
+              swVars.map((v, i) => {
+                const active = draft!.stopwatchVariableName === v.name;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[ms.row, i < swVars.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                    onPress={() => set({ stopwatchVariableName: v.name })}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                      {active && <View style={ms.radioDot} />}
+                    </View>
+                    <View style={ms.rowText}>
+                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
+                      {v.description ? <Text style={ms.rowDesc}>{v.description}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </>
+        );
+      }
+
+      case "SaveImage":
+        return (
+          <SaveImageFields
+            draft={draft!}
+            variables={variables}
+            cameras={cameraDevices}
+            set={set}
+          />
+        );
+
       default:
         return null;
     }
@@ -3265,39 +3883,28 @@ const ifStyles = StyleSheet.create({
 
 function IfConditionBody({
   step,
-  isDragging,
-  onEditInner,
-  onCopyInner,
-  onDeleteInner,
-  onInsertIfInner,
-  onPasteIfInner,
+  onEnterScope,
   onUpdateIfCondition,
   variables,
 }: {
   step: ProgramStep;
-  isDragging: boolean;
-  onEditInner: (inner: ProgramStep) => void;
-  onCopyInner: (inner: ProgramStep) => void;
-  onDeleteInner: (id: string) => void;
-  onInsertIfInner: (branchKey: string, afterIndex?: number) => void;
-  onPasteIfInner?: (branchKey: string, afterIndex?: number) => void;
+  onEnterScope: (frame: ScopeFrame) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
   variables?: ProgramVariable[];
 }) {
-  const theme = STEP_THEME['IfCondition'] ?? STEP_THEME['MoveL'];
+  const theme          = STEP_THEME['IfCondition'] ?? STEP_THEME['MoveL'];
   const ifSteps        = step.ifSteps        ?? [];
   const elseIfBranches = step.elseIfBranches ?? [];
-  const elseSteps      = step.elseSteps;
+  const elseSteps      = step.elseSteps === null ? [] : step.elseSteps;
 
-  const [editingKey, setEditingKey]           = useState<null | 'if' | string>(null);
-  const [draftCondition, setDraftCondition]   = useState<ConditionGroup | null>(null);
+  const [editingKey, setEditingKey]         = useState<null | 'if' | string>(null);
+  const [draftCondition, setDraftCondition] = useState<ConditionGroup | null>(null);
 
   function openConditionEditor(key: 'if' | string) {
-    const cond =
-      key === 'if'
-        ? (step.condition ?? { combinator: 'ALL' as const, items: [] })
-        : (elseIfBranches.find(b => b.id === key)?.condition ?? { combinator: 'ALL' as const, items: [] });
-    setDraftCondition({ ...cond, items: [...cond.items] });
+    const cond = key === 'if'
+      ? (step.condition ?? { combinator: 'ALL' as const, items: [] })
+      : (elseIfBranches.find(b => b.id === key)?.condition ?? { combinator: 'ALL' as const, items: [] });
+    setDraftCondition({ ...cond, items: [...(cond.items ?? [])] });
     setEditingKey(key);
   }
 
@@ -3317,65 +3924,11 @@ function IfConditionBody({
     setDraftCondition(null);
   }
 
-  function renderBranchSteps(steps: ProgramStep[], branchKey: string) {
-    return (
-      <>
-        {steps.length === 0 && (
-          <Text style={[styles.loopEmptyText, { color: '#9ca3af' }]}>No steps in this branch</Text>
-        )}
-        {steps.length > 0 && (
-          <InsertDivider inner
-            onPress={() => onInsertIfInner(branchKey, -1)}
-            onPaste={onPasteIfInner ? () => onPasteIfInner!(branchKey, -1) : undefined}
-            disabled={isDragging}
-          />
-        )}
-        {steps.map((inner, j) => (
-          <React.Fragment key={inner.id}>
-            <LoopInnerRow
-              step={inner} index={j} loopId={step.id}
-              isBeingDragged={false} isDropAbove={false} isDropBelow={false}
-              onEdit={() => onEditInner(inner)}
-              onCopy={() => onCopyInner(inner)}
-              onDelete={() => onDeleteInner(inner.id)}
-              onDragStart={() => {}} onDragMove={() => {}} onDragEnd={() => {}}
-              onItemLayout={() => {}}
-            />
-            {j < steps.length - 1 && (
-              <InsertDivider inner
-                onPress={() => onInsertIfInner(branchKey, j)}
-                onPaste={onPasteIfInner ? () => onPasteIfInner!(branchKey, j) : undefined}
-                disabled={isDragging}
-              />
-            )}
-          </React.Fragment>
-        ))}
-        <View style={styles.loopAddRow}>
-          <TouchableOpacity
-            style={[styles.loopAddBtn, { borderColor: theme.accent + '60' }]}
-            onPress={() => onInsertIfInner(branchKey)} activeOpacity={0.7}>
-            <Plus size={13} color={theme.iconColor} />
-            <Text style={[styles.loopAddText, { color: theme.iconColor }]}>Add Step</Text>
-          </TouchableOpacity>
-          {onPasteIfInner && (
-            <TouchableOpacity
-              style={[styles.loopAddBtn, { borderColor: '#ddd6fe' }]}
-              onPress={() => onPasteIfInner!(branchKey)} activeOpacity={0.7}>
-              <ClipboardPaste size={13} color="#7c3aed" />
-              <Text style={[styles.loopAddText, { color: '#7c3aed' }]}>Paste</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </>
-    );
-  }
-
   return (
     <View style={[styles.loopCardBody, { borderTopColor: theme.accent + '40' }]}>
 
       {/* Condition editing modal */}
-      <Modal visible={editingKey !== null} transparent animationType="fade"
-        onRequestClose={() => setEditingKey(null)}>
+      <Modal visible={editingKey !== null} transparent animationType="fade" onRequestClose={() => setEditingKey(null)}>
         <Pressable style={ms.overlay} onPress={() => setEditingKey(null)}>
           <Pressable style={ms.card} onPress={() => {}}>
             <View style={ms.header}>
@@ -3388,11 +3941,7 @@ function IfConditionBody({
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingBottom: 8 }}>
               {draftCondition && (
-                <ConditionGroupEditor
-                  group={draftCondition}
-                  onChange={setDraftCondition}
-                  variables={variables}
-                />
+                <ConditionGroupEditor group={draftCondition} onChange={setDraftCondition} variables={variables} />
               )}
             </ScrollView>
             <View style={ms.actions}>
@@ -3405,26 +3954,34 @@ function IfConditionBody({
         </Pressable>
       </Modal>
 
-      {/* IF branch */}
-      <View style={[ifStyles.branchCard, { borderColor: '#bae6fd', backgroundColor: '#f0f9ff' }]}>
-        <TouchableOpacity
-          style={[ifStyles.branchCardHeader, { backgroundColor: '#e0f2fe' }]}
-          onPress={() => openConditionEditor('if')} activeOpacity={0.7}>
-          <View style={[ifStyles.branchBadge, { backgroundColor: '#0891b2' }]}>
-            <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>IF</Text>
-          </View>
-          <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(step.condition)}</Text>
-          <Pencil size={13} color="#c4b5fd" />
-        </TouchableOpacity>
-        <View style={ifStyles.branchCardBody}>
-          {renderBranchSteps(ifSteps, 'if')}
+      <View style={{ gap: 6, padding: 10 }}>
+        {/* IF branch */}
+        <View style={[ifStyles.branchCard, { borderColor: '#bae6fd', backgroundColor: '#f0f9ff' }]}>
+          <TouchableOpacity
+            style={[ifStyles.branchCardHeader, { backgroundColor: '#e0f2fe' }]}
+            onPress={() => openConditionEditor('if')} activeOpacity={0.7}>
+            <View style={[ifStyles.branchBadge, { backgroundColor: '#0891b2' }]}>
+              <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>IF</Text>
+            </View>
+            <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(step.condition)}</Text>
+            <Pencil size={13} color="#c4b5fd" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 8 }}
+            onPress={() => onEnterScope({ kind: 'ifTrue', stepId: step.id, label: 'IF' })}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 12, color: "#64748b" }}>{ifSteps.length} step{ifSteps.length !== 1 ? "s" : ""}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: "#0891b2" }}>Enter</Text>
+              <ArrowRight size={13} color="#0891b2" />
+            </View>
+          </TouchableOpacity>
         </View>
-      </View>
 
-      {/* ELSE IF branches */}
-      {elseIfBranches.map(branch => (
-        <React.Fragment key={branch.id}>
-          <View style={[ifStyles.branchCard, { borderColor: '#ddd6fe', backgroundColor: '#faf5ff', marginTop: 8 }]}>
+        {/* ELSE IF branches */}
+        {elseIfBranches.map((branch, idx) => (
+          <View key={branch.id} style={[ifStyles.branchCard, { borderColor: '#ddd6fe', backgroundColor: '#faf5ff' }]}>
             <View style={[ifStyles.branchCardHeader, { backgroundColor: '#ede9fe' }]}>
               <TouchableOpacity style={ifStyles.branchCardHeaderTap} onPress={() => openConditionEditor(branch.id)} activeOpacity={0.7}>
                 <View style={[ifStyles.branchBadge, { backgroundColor: '#7c3aed' }]}>
@@ -3442,57 +3999,73 @@ function IfConditionBody({
                 <X size={13} color="#9ca3af" />
               </TouchableOpacity>
             </View>
-            <View style={ifStyles.branchCardBody}>
-              {renderBranchSteps(branch.steps ?? [], branch.id)}
-            </View>
-          </View>
-        </React.Fragment>
-      ))}
-
-      {/* ELSE branch */}
-      {elseSteps !== undefined && (
-        <View style={[ifStyles.branchCard, { borderColor: '#d1d5db', backgroundColor: '#f9fafb', marginTop: 8 }]}>
-          <View style={[ifStyles.branchCardHeader, { backgroundColor: '#f3f4f6' }]}>
-            <View style={[ifStyles.branchBadge, { backgroundColor: '#6b7280' }]}>
-              <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>ELSE</Text>
-            </View>
-            <View style={{ flex: 1 }} />
             <TouchableOpacity
-              onPress={() => Alert.alert("Delete Branch", "Remove the ELSE branch and its steps?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
-              ])}
-              hitSlop={8} activeOpacity={0.7}>
-              <X size={13} color="#9ca3af" />
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 8 }}
+              onPress={() => onEnterScope({ kind: 'elseIf', stepId: step.id, label: `ELSE IF ${idx + 1}`, branchId: branch.id })}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 12, color: "#64748b" }}>{(branch.steps ?? []).length} step{(branch.steps ?? []).length !== 1 ? "s" : ""}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: "#7c3aed" }}>Enter</Text>
+                <ArrowRight size={13} color="#7c3aed" />
+              </View>
             </TouchableOpacity>
           </View>
-          <View style={ifStyles.branchCardBody}>
-            {renderBranchSteps(elseSteps ?? [], 'else')}
-          </View>
-        </View>
-      )}
+        ))}
 
-      {/* Branch structure controls */}
-      <View style={ifStyles.branchControlRow}>
-        <TouchableOpacity
-          style={ifStyles.branchControlBtn}
-          onPress={() => onUpdateIfCondition({
-            ...step,
-            elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: 'ALL', items: [] }, steps: [] }],
-          })}
-          activeOpacity={0.7}>
-          <Plus size={11} color="#6b7280" />
-          <Text style={ifStyles.branchControlText}>ELSE IF</Text>
-        </TouchableOpacity>
-        {elseSteps === undefined && (
+        {/* ELSE branch */}
+        {elseSteps !== undefined && (
+          <View style={[ifStyles.branchCard, { borderColor: '#d1d5db', backgroundColor: '#f9fafb' }]}>
+            <View style={[ifStyles.branchCardHeader, { backgroundColor: '#f3f4f6' }]}>
+              <View style={[ifStyles.branchBadge, { backgroundColor: '#6b7280' }]}>
+                <Text style={[ifStyles.branchLabel, { color: '#fff' }]}>ELSE</Text>
+              </View>
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity
+                onPress={() => Alert.alert("Delete Branch", "Remove the ELSE branch and its steps?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
+                ])}
+                hitSlop={8} activeOpacity={0.7}>
+                <X size={13} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 8 }}
+              onPress={() => onEnterScope({ kind: 'else', stepId: step.id, label: 'ELSE' })}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 12, color: "#64748b" }}>{(elseSteps ?? []).length} step{(elseSteps ?? []).length !== 1 ? "s" : ""}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: "#6b7280" }}>Enter</Text>
+                <ArrowRight size={13} color="#6b7280" />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Branch controls */}
+        <View style={ifStyles.branchControlRow}>
           <TouchableOpacity
             style={ifStyles.branchControlBtn}
-            onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
+            onPress={() => onUpdateIfCondition({
+              ...step,
+              elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: 'ALL', items: [] }, steps: [] }],
+            })}
             activeOpacity={0.7}>
             <Plus size={11} color="#6b7280" />
-            <Text style={ifStyles.branchControlText}>ELSE</Text>
+            <Text style={ifStyles.branchControlText}>ELSE IF</Text>
           </TouchableOpacity>
-        )}
+          {elseSteps === undefined && (
+            <TouchableOpacity
+              style={ifStyles.branchControlBtn}
+              onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
+              activeOpacity={0.7}>
+              <Plus size={11} color="#6b7280" />
+              <Text style={ifStyles.branchControlText}>ELSE</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -3536,25 +4109,20 @@ function InsertDivider({
 
 function DragHandle({
   stepId,
-  loopId,
   onStart,
   onMove,
   onEnd,
 }: {
   stepId: string;
-  loopId?: string;
-  onStart: (id: string, loopId?: string) => void;
-  onMove: (id: string, dy: number, absY: number, loopId?: string) => void;
-  onEnd: (id: string, loopId?: string) => void;
+  onStart: (id: string) => void;
+  onMove: (id: string, dy: number, absY: number) => void;
+  onEnd: (id: string) => void;
 }) {
-  // Keep latest callbacks in refs so the PanResponder (created once) always calls current versions
-  const sidRef  = useRef(stepId);
-  const lidRef  = useRef(loopId);
+  const sidRef   = useRef(stepId);
   const startRef = useRef(onStart);
   const moveRef  = useRef(onMove);
   const endRef   = useRef(onEnd);
-  sidRef.current  = stepId;
-  lidRef.current  = loopId;
+  sidRef.current   = stepId;
   startRef.current = onStart;
   moveRef.current  = onMove;
   endRef.current   = onEnd;
@@ -3563,110 +4131,16 @@ function DragHandle({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder:  () => true,
-      onPanResponderGrant:     ()       => startRef.current(sidRef.current, lidRef.current),
-      onPanResponderMove:      (_, gs)  => moveRef.current(sidRef.current, gs.dy, gs.moveY, lidRef.current),
-      onPanResponderRelease:   ()       => endRef.current(sidRef.current, lidRef.current),
-      onPanResponderTerminate: ()       => endRef.current(sidRef.current, lidRef.current),
+      onPanResponderGrant:     ()       => startRef.current(sidRef.current),
+      onPanResponderMove:      (_, gs)  => moveRef.current(sidRef.current, gs.dy, gs.moveY),
+      onPanResponderRelease:   ()       => endRef.current(sidRef.current),
+      onPanResponderTerminate: ()       => endRef.current(sidRef.current),
     })
   ).current;
 
   return (
     <View {...responder.panHandlers} style={styles.dragHandle} hitSlop={6}>
       <GripVertical size={16} color="#d1d5db" />
-    </View>
-  );
-}
-
-// ── Loop inner card ────────────────────────────────────────────────────────────
-
-function LoopInnerRow({
-  step,
-  index,
-  loopId,
-  isBeingDragged,
-  isDropAbove,
-  isDropBelow,
-  onEdit,
-  onCopy,
-  onDelete,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
-  onItemLayout,
-}: {
-  step: ProgramStep;
-  index: number;
-  loopId: string;
-  isBeingDragged: boolean;
-  isDropAbove: boolean;
-  isDropBelow: boolean;
-  onEdit: () => void;
-  onCopy: () => void;
-  onDelete: () => void;
-  onDragStart: (id: string, loopId?: string) => void;
-  onDragMove: (id: string, dy: number, absY: number, loopId?: string) => void;
-  onDragEnd: (id: string, loopId?: string) => void;
-  onItemLayout: (id: string, height: number) => void;
-}) {
-  const theme        = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
-  const detail       = stepDetail(step);
-  const detailLines  = detail ? detail.split('\n') : [];
-  const isSetSpeed   = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
-                    || step.type === "Label"      || step.type === "GoToLabel";
-  const isMoveStep   = step.type === "MoveL"  || step.type === "MoveJ"
-                    || step.type === "JumpL"  || step.type === "JumpJ"
-                    || step.type === "SetOutput";
-
-  return (
-    <View
-      onLayout={e => onItemLayout(step.id, e.nativeEvent.layout.height)}
-      style={[
-        isBeingDragged && styles.draggingItem,
-        isDropAbove    && styles.dropTargetItemTop,
-        isDropBelow    && styles.dropTargetItemBottom,
-      ]}
-    >
-      <TouchableOpacity
-        style={[styles.innerCard, { borderLeftColor: theme.accent }]}
-        onPress={onEdit}
-        activeOpacity={0.75}
-      >
-        <DragHandle
-          stepId={step.id}
-          loopId={loopId}
-          onStart={onDragStart}
-          onMove={onDragMove}
-          onEnd={onDragEnd}
-        />
-        <View style={[styles.stepCardIcon, styles.stepCardIconSmall, { backgroundColor: theme.iconBg }]}>
-          <StepIcon type={step.type} size={15} color={theme.iconColor} />
-        </View>
-        <View style={styles.stepCardText}>
-          <Text style={[styles.stepCardType, { color: theme.accent }]}>
-            {index + 1} · {theme.label.toUpperCase()}
-          </Text>
-          {(!isSetSpeed || !!step.name) && (
-            <Text style={styles.stepCardName} numberOfLines={1}>
-              {step.name || (isMoveStep ? (detailLines[0] ?? step.type) : (detail ?? step.type))}
-            </Text>
-          )}
-          {isSetSpeed && detailLines.map((line, i) => (
-            <Text key={i} style={styles.stepCardDetail}>{line}</Text>
-          ))}
-          {isMoveStep && (step.name ? detailLines : detailLines.slice(1)).map((line, i) => (
-            <Text key={i} style={styles.stepCardDetail} numberOfLines={1}>{line}</Text>
-          ))}
-          {!isSetSpeed && !isMoveStep && !!step.name && detail && (
-            <Text style={styles.stepCardDetail} numberOfLines={1}>{detail}</Text>
-          )}
-        </View>
-        <TouchableOpacity onPress={onCopy}   hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
-          <Copy   size={14} color="#9ca3af" />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onDelete} hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
-          <Trash2 size={14} color="#ef4444" />
-        </TouchableOpacity>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -3681,9 +4155,6 @@ function StepRow({
   isDropAbove,
   isDropBelow,
   isDragging,
-  collapsed,
-  innerDrag,
-  onToggleCollapse,
   onEdit,
   onCopy,
   onDelete,
@@ -3692,15 +4163,7 @@ function StepRow({
   onDragEnd,
   onInsertAfter,
   onPasteAfter,
-  onInsertInner,
-  onPasteInner,
-  onEditInner,
-  onCopyInner,
-  onDeleteInner,
-  onInsertAfterInner,
-  onPasteAfterInner,
-  onInsertIfInner,
-  onPasteIfInner,
+  onEnterScope,
   onUpdateIfCondition,
   onItemLayout,
   variables,
@@ -3712,26 +4175,15 @@ function StepRow({
   isDropAbove: boolean;
   isDropBelow: boolean;
   isDragging: boolean;
-  collapsed: boolean;
-  innerDrag: DragInfo | null;
-  onToggleCollapse: () => void;
   onEdit: () => void;
   onCopy: () => void;
   onDelete: () => void;
-  onDragStart: (id: string, loopId?: string) => void;
-  onDragMove: (id: string, dy: number, absY: number, loopId?: string) => void;
-  onDragEnd: (id: string, loopId?: string) => void;
+  onDragStart: (id: string) => void;
+  onDragMove: (id: string, dy: number, absY: number) => void;
+  onDragEnd: (id: string) => void;
   onInsertAfter: () => void;
   onPasteAfter?: () => void;
-  onInsertInner: () => void;
-  onPasteInner?: () => void;
-  onEditInner: (inner: ProgramStep) => void;
-  onCopyInner: (inner: ProgramStep) => void;
-  onDeleteInner: (id: string) => void;
-  onInsertAfterInner: (afterIndex: number) => void;
-  onPasteAfterInner?: (afterIndex: number) => void;
-  onInsertIfInner: (branchKey: string, afterIndex?: number) => void;
-  onPasteIfInner?: (branchKey: string, afterIndex?: number) => void;
+  onEnterScope: (frame: ScopeFrame) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
   onItemLayout: (id: string, height: number) => void;
   variables?: ProgramVariable[];
@@ -3744,7 +4196,6 @@ function StepRow({
                      || step.type === "JumpL"  || step.type === "JumpJ"
                      || step.type === "SetOutput";
   const innerSteps    = step.loopSteps ?? [];
-  const isExpanded    = (isLoop || isIfCondition) && !collapsed;
   const theme         = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
   const detail        = stepDetail(step);
   const detailLines   = detail ? detail.split('\n') : [];
@@ -3791,11 +4242,6 @@ function StepRow({
             )}
           </View>
 
-          {(isLoop || isIfCondition) && (
-            <TouchableOpacity onPress={onToggleCollapse} hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
-              {collapsed ? <ChevronDown size={16} color="#9ca3af" /> : <ChevronUp size={16} color="#9ca3af" />}
-            </TouchableOpacity>
-          )}
           <TouchableOpacity onPress={onCopy}   hitSlop={8} style={styles.cardAction} activeOpacity={0.7}>
             <Copy   size={15} color="#9ca3af" />
           </TouchableOpacity>
@@ -3804,87 +4250,37 @@ function StepRow({
           </TouchableOpacity>
         </TouchableOpacity>
 
-        {/* If Condition body */}
-        {isIfCondition && isExpanded && (
+        {/* If Condition body — branch navigation */}
+        {isIfCondition && (
           <IfConditionBody
             step={step}
-            isDragging={isDragging}
-            onEditInner={onEditInner}
-            onCopyInner={onCopyInner}
-            onDeleteInner={onDeleteInner}
-            onInsertIfInner={onInsertIfInner}
-            onPasteIfInner={onPasteIfInner}
+            onEnterScope={onEnterScope}
             onUpdateIfCondition={onUpdateIfCondition}
             variables={variables}
           />
         )}
 
-        {/* Loop body — inner step cards */}
-        {isLoop && isExpanded && (
+        {/* Loop body — Enter navigation */}
+        {isLoop && (
           <View style={[styles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
-            {innerSteps.length === 0 && (
-              <Text style={styles.loopEmptyText}>No steps inside this loop</Text>
-            )}
-            {innerSteps.length > 0 && (
-              <InsertDivider inner
-                onPress={() => onInsertAfterInner(-1)}
-                onPaste={onPasteAfterInner ? () => onPasteAfterInner(-1) : undefined}
-                disabled={isDragging || !!innerDrag}
-              />
-            )}
-            {innerSteps.map((inner, j) => (
-              <React.Fragment key={inner.id}>
-                <LoopInnerRow
-                  step={inner}
-                  index={j}
-                  loopId={step.id}
-                  isBeingDragged={innerDrag?.id === inner.id}
-                  isDropAbove={!!(innerDrag && innerDrag.id !== inner.id && innerDrag.toIndex < innerDrag.fromIndex && innerDrag.toIndex === j)}
-                  isDropBelow={!!(innerDrag && innerDrag.id !== inner.id && innerDrag.toIndex > innerDrag.fromIndex && innerDrag.toIndex === j)}
-                  onEdit={() => onEditInner(inner)}
-                  onCopy={() => onCopyInner(inner)}
-                  onDelete={() => onDeleteInner(inner.id)}
-                  onDragStart={onDragStart}
-                  onDragMove={onDragMove}
-                  onDragEnd={onDragEnd}
-                  onItemLayout={onItemLayout}
-                />
-                {j < innerSteps.length - 1 && (
-                  <InsertDivider
-                    inner
-                    onPress={() => onInsertAfterInner(j)}
-                    onPaste={onPasteAfterInner ? () => onPasteAfterInner(j) : undefined}
-                    disabled={isDragging || !!innerDrag}
-                  />
-                )}
-              </React.Fragment>
-            ))}
-
-            <View style={styles.loopAddRow}>
-              <TouchableOpacity
-                style={[styles.loopAddBtn, { borderColor: theme.accent + "60" }]}
-                onPress={onInsertInner}
-                activeOpacity={0.7}
-              >
-                <Plus size={13} color={theme.iconColor} />
-                <Text style={[styles.loopAddText, { color: theme.iconColor }]}>Add Step</Text>
-              </TouchableOpacity>
-              {onPasteInner && (
-                <TouchableOpacity
-                  style={[styles.loopAddBtn, { borderColor: "#ddd6fe" }]}
-                  onPress={onPasteInner}
-                  activeOpacity={0.7}
-                >
-                  <ClipboardPaste size={13} color="#7c3aed" />
-                  <Text style={[styles.loopAddText, { color: "#7c3aed" }]}>Paste</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
+              onPress={() => onEnterScope({ kind: 'loop', stepId: step.id, label: stepLabel(step) })}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 12, color: "#64748b" }}>
+                {innerSteps.length} step{innerSteps.length !== 1 ? "s" : ""} inside
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Enter</Text>
+                <ArrowRight size={13} color={theme.iconColor} />
+              </View>
+            </TouchableOpacity>
           </View>
         )}
       </View>
 
-      {/* Insert divider between top-level steps */}
+      {/* Insert divider between steps */}
       {!isLast && (
         <InsertDivider onPress={onInsertAfter} onPaste={onPasteAfter} disabled={isDragging} />
       )}
@@ -3908,13 +4304,20 @@ function VariableEditModal({
   const [name,       setName]       = useState("");
   const [value,      setValue]      = useState("0");
   const [desc,       setDesc]       = useState("");
-  const [varType,    setVarType]    = useState<'number' | 'boolean' | 'list' | 'points'>('number');
+  const [varType,    setVarType]    = useState<'number' | 'boolean' | 'list' | 'points' | 'stopwatch'>('number');
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [listValues, setListValues] = useState<string[]>(["0"]);
+  const [isGlobal,          setIsGlobal]          = useState(false);
+  const [displayOnMonitor,  setDisplayOnMonitor]  = useState(false);
+  const [isPersistent,      setIsPersistent]      = useState(false);
 
   useEffect(() => {
     if (variable) {
       setName(variable.name);
       setDesc(variable.description ?? "");
+      setIsGlobal(variable.isGlobal ?? false);
+      setDisplayOnMonitor(variable.displayOnMonitor ?? false);
+      setIsPersistent(variable.isPersistent ?? false);
       if (variable.points != null) {
         setVarType('points');
         setValue("0");
@@ -3927,13 +4330,17 @@ function VariableEditModal({
         setVarType('boolean');
         setValue(variable.value !== 0 ? "1" : "0");
         setListValues(["0"]);
+      } else if (variable.isStopwatch) {
+        setVarType('stopwatch');
+        setValue("0");
+        setListValues(["0"]);
       } else {
         setVarType('number');
         setValue(String(variable.value));
         setListValues(["0"]);
       }
     } else {
-      setName(""); setValue("0"); setDesc(""); setVarType('number'); setListValues(["0"]);
+      setName(""); setValue("0"); setDesc(""); setVarType('number'); setListValues(["0"]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
     }
   }, [variable, visible]);
 
@@ -3960,6 +4367,8 @@ function VariableEditModal({
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions.</Text>
     : varType === 'boolean'
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
+    : varType === 'stopwatch'
+    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0891b2", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. Value is elapsed milliseconds.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
   return (
@@ -3990,38 +4399,67 @@ function VariableEditModal({
             <Text style={ms.fieldError}>Use letters, digits, and _ only. Must start with a letter.</Text>
           )}
 
-          {/* Type toggle */}
+          {/* Type dropdown */}
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>TYPE</Text>
-          <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-            <TouchableOpacity
-              style={[ms.typeBtn, varType === 'number' && ms.typeBtnActive]}
-              onPress={() => setVarType('number')}
-              activeOpacity={0.7}
-            >
-              <Text style={[ms.typeBtnText, varType === 'number' && ms.typeBtnTextActive]}>Number</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[ms.typeBtn, varType === 'boolean' && { ...ms.typeBtnActive, backgroundColor: "#f0fdf4", borderColor: "#16a34a" }]}
-              onPress={() => { setVarType('boolean'); if (value !== "0" && value !== "1") setValue("0"); }}
-              activeOpacity={0.7}
-            >
-              <Text style={[ms.typeBtnText, varType === 'boolean' && { color: "#16a34a", fontWeight: "700" }]}>Boolean</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[ms.typeBtn, varType === 'list' && ms.typeBtnActive]}
-              onPress={() => setVarType('list')}
-              activeOpacity={0.7}
-            >
-              <Text style={[ms.typeBtnText, varType === 'list' && ms.typeBtnTextActive]}>List</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[ms.typeBtn, varType === 'points' && { ...ms.typeBtnActive, backgroundColor: "#ecfeff", borderColor: "#0891b2" }]}
-              onPress={() => setVarType('points')}
-              activeOpacity={0.7}
-            >
-              <Text style={[ms.typeBtnText, varType === 'points' && { color: "#0891b2", fontWeight: "700" }]}>Points</Text>
-            </TouchableOpacity>
-          </View>
+          {(() => {
+            const TYPE_OPTIONS: { key: typeof varType; label: string; color: string; bg: string; border: string }[] = [
+              { key: 'number',    label: 'Number',    color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd' },
+              { key: 'boolean',   label: 'Boolean',   color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+              { key: 'list',      label: 'List',      color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd' },
+              { key: 'points',    label: 'Points',    color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
+              { key: 'stopwatch', label: 'Stopwatch', color: '#0891b2', bg: '#e0f2fe', border: '#7dd3fc' },
+            ];
+            const selected = TYPE_OPTIONS.find(o => o.key === varType)!;
+            return (
+              <View style={{ marginBottom: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setTypePickerOpen(v => !v)}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                    borderWidth: 1, borderColor: selected.border, borderRadius: 10,
+                    backgroundColor: selected.bg, paddingHorizontal: 14, paddingVertical: 11,
+                  }}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: selected.color }}>{selected.label}</Text>
+                  <ChevronDown size={16} color={selected.color} style={{ transform: [{ rotate: typePickerOpen ? '180deg' : '0deg' }] }} />
+                </TouchableOpacity>
+
+                {typePickerOpen && (
+                  <View style={{
+                    borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 10,
+                    backgroundColor: "#fff", marginTop: 4,
+                    shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 8, elevation: 4,
+                    overflow: "hidden",
+                  }}>
+                    {TYPE_OPTIONS.map((opt, i) => (
+                      <TouchableOpacity
+                        key={opt.key}
+                        onPress={() => {
+                          if (opt.key === 'boolean' && value !== "0" && value !== "1") setValue("0");
+                          setVarType(opt.key);
+                          setTypePickerOpen(false);
+                        }}
+                        activeOpacity={0.7}
+                        style={[
+                          { flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                            paddingHorizontal: 14, paddingVertical: 12 },
+                          i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6" },
+                          varType === opt.key && { backgroundColor: opt.bg },
+                        ]}
+                      >
+                        <Text style={{ fontSize: 14, fontWeight: varType === opt.key ? "700" : "500",
+                          color: varType === opt.key ? opt.color : "#374151" }}>
+                          {opt.label}
+                        </Text>
+                        {varType === opt.key && <Check size={15} color={opt.color} />}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })()}
           {refLabel}
 
           {varType === 'number' ? (
@@ -4083,6 +4521,15 @@ function VariableEditModal({
                 <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600" }}>Add item</Text>
               </TouchableOpacity>
             </>
+          ) : varType === 'stopwatch' ? (
+            <View style={{ backgroundColor: "#e0f2fe", borderRadius: 8, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#7dd3fc" }}>
+              <Text style={{ fontSize: 13, color: "#0369a1", lineHeight: 18 }}>
+                This variable holds elapsed milliseconds. Use <Text style={{ fontWeight: "700" }}>StopwatchControl</Text> steps to Start, Stop, and Reset it.
+              </Text>
+              <Text style={{ fontSize: 12, color: "#0891b2", marginTop: 6 }}>
+                Use <Text style={{ fontWeight: "700" }}>${name.trim() || "name"}</Text> in expressions to read the elapsed time in ms.
+              </Text>
+            </View>
           ) : (
             <View style={{ backgroundColor: "#ecfeff", borderRadius: 8, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#a5f3fc" }}>
               <Text style={{ fontSize: 13, color: "#0e7490", lineHeight: 18 }}>
@@ -4104,6 +4551,50 @@ function VariableEditModal({
             returnKeyType="done"
           />
 
+          {(varType === 'number' || varType === 'boolean' || varType === 'stopwatch') && (
+            <>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Show on Monitor</Text>
+                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                    Display the live value on the program detail page while running.
+                  </Text>
+                </View>
+                <Switch
+                  value={displayOnMonitor}
+                  onValueChange={setDisplayOnMonitor}
+                  trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                />
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Global Variable</Text>
+                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                    Shared across all programs running at the same time. First program to start sets the initial value.
+                  </Text>
+                </View>
+                <Switch
+                  value={isGlobal}
+                  onValueChange={setIsGlobal}
+                  trackColor={{ false: "#e5e7eb", true: "#16a34a" }}
+                />
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Persistent</Text>
+                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                    Value is saved to disk when the program finishes and restored on the next run.
+                  </Text>
+                </View>
+                <Switch
+                  value={isPersistent}
+                  onValueChange={setIsPersistent}
+                  trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+                />
+              </View>
+            </>
+          )}
+
           </ScrollView>
           <View style={[ms.actions, { marginTop: 16 }]}>
             <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
@@ -4116,10 +4607,14 @@ function VariableEditModal({
                 onSave({
                   id: variable?.id ?? newId(),
                   name: name.trim(),
-                  value: (varType === 'number' || varType === 'boolean') ? (parseFloat(value) || 0) : 0,
+                  value: (varType === 'number' || varType === 'boolean' || varType === 'stopwatch') ? (parseFloat(value) || 0) : 0,
                   values: varType === 'list' ? listValues.map(v => parseFloat(v) || 0) : undefined,
                   points: varType === 'points' ? (variable?.points ?? []) : undefined,
-                  isBoolean: varType === 'boolean' ? true : undefined,
+                  isBoolean:   varType === 'boolean'   ? true : undefined,
+                  isStopwatch: varType === 'stopwatch' ? true : undefined,
+                  isGlobal:        (varType === 'number' || varType === 'boolean' || varType === 'stopwatch') ? (isGlobal        || undefined) : undefined,
+                  displayOnMonitor:(varType === 'number' || varType === 'boolean' || varType === 'stopwatch') ? (displayOnMonitor || undefined) : undefined,
+                  isPersistent:    (varType === 'number' || varType === 'boolean') ? (isPersistent || undefined) : undefined,
                   description: desc.trim() || undefined,
                 });
                 onClose();
@@ -4152,6 +4647,14 @@ export default function BuilderScreen() {
   const [isRoutineMode, setIsRoutineMode] = useState(
     () => isRoutineParam === "1" || (!isLocalMode && builtPrograms.find(p => p.name === editName)?.isRoutine === true)
   );
+  const [isBackgroundMode,   setIsBackgroundMode]   = useState(
+    () => !isLocalMode && builtPrograms.find(p => p.name === editName)?.isBackground === true
+  );
+  const [killBackgroundOnStop, setKillBackgroundOnStop] = useState(
+    () => !isLocalMode ? (builtPrograms.find(p => p.name === editName)?.killBackgroundOnStop ?? true) : true
+  );
+
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
   const [programName, setProgramName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -4185,6 +4688,8 @@ export default function BuilderScreen() {
         setSteps(hydratedSteps);
         setVariables(loadedVars);
         setIsRoutineMode(prog.isRoutine ?? false);
+        setIsBackgroundMode(prog.isBackground ?? false);
+        setKillBackgroundOnStop(prog.killBackgroundOnStop ?? true);
         setSavedSnapshot(JSON.stringify({ name: prog.name, description: prog.description, steps: hydratedSteps, variables: loadedVars }));
       }
       if (img) setCoverImage(img);
@@ -4218,6 +4723,8 @@ export default function BuilderScreen() {
       setDescription(existing.description);
       setSteps(rehydrateIds(existing.steps));
       setVariables(existing.variables ?? []);
+      setIsBackgroundMode(existing.isBackground ?? false);
+      setKillBackgroundOnStop(existing.killBackgroundOnStop ?? true);
     }
   }, [existing?.name]);
 
@@ -4299,45 +4806,18 @@ export default function BuilderScreen() {
     if (!clipboard) return;
     const step = cloneStepWithNewIds(clipboard);
     setSteps(prev => {
-      const arr = [...prev];
-      switch (target.mode) {
-        case "append":
-          return [...arr, step];
-        case "insert":
-          arr.splice(target.afterIndex + 1, 0, step);
-          return arr;
-        case "appendLoop":
-          return arr.map(s =>
-            s.id === target.loopId
-              ? { ...s, loopSteps: [...(s.loopSteps ?? []), step] }
-              : s
-          );
-        case "insertLoop":
-          return arr.map(s => {
-            if (s.id !== target.loopId) return s;
-            const inner = [...(s.loopSteps ?? [])];
-            inner.splice(target.afterIndex + 1, 0, step);
-            return { ...s, loopSteps: inner };
-          });
-        case "appendIf":
-          return applyToIfBranch(arr, target.stepId, target.branchKey, s => [...s, step]);
-        case "insertIf":
-          return applyToIfBranch(arr, target.stepId, target.branchKey, s => {
-            const inner = [...s];
-            inner.splice(target.afterIndex + 1, 0, step);
-            return inner;
-          });
+      const scoped = getStepsAtScope(prev, scopeStackRef.current);
+      let newScoped: ProgramStep[];
+      if (target.mode === "append") {
+        newScoped = [...scoped, step];
+      } else {
+        const arr = [...scoped];
+        arr.splice(target.afterIndex + 1, 0, step);
+        newScoped = arr;
       }
+      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
     });
-    if (target.mode === "appendLoop" || target.mode === "insertLoop") {
-      // Ensure the loop is expanded when a step is pasted inside it
-      setCollapsedLoops(prev => { const next = new Set(prev); next.delete(target.loopId); return next; });
-    }
   }
-
-  // Sync steps to a ref so drag callbacks always see the latest array
-  const stepsRef = useRef(steps);
-  useEffect(() => { stepsRef.current = steps; }, [steps]);
 
   // ── Variable editor state ─────────────────────────────────────────────────
 
@@ -4365,38 +4845,37 @@ export default function BuilderScreen() {
   const [configOpen, setConfigOpen]         = useState(false);
   const [editingStep, setEditingStep]       = useState<ProgramStep | null>(null);
 
-  // Derive the step list scope and index for the currently-editing step (for Label/GoToLabel pickers)
-  const editingScope = useMemo<ProgramStep[]>(() => {
-    if (!editingStep) return steps;
-    if (steps.some(s => s.id === editingStep.id)) return steps;
-    for (const s of steps) {
-      if (s.loopSteps?.some(ls => ls.id === editingStep.id)) return s.loopSteps!;
-      if (s.ifSteps?.some(ls => ls.id === editingStep.id)) return s.ifSteps!;
-      if (s.elseSteps?.some(ls => ls.id === editingStep.id)) return s.elseSteps!;
-      for (const b of s.elseIfBranches ?? []) {
-        if (b.steps.some(ls => ls.id === editingStep.id)) return b.steps;
-      }
-    }
-    return steps;
-  }, [editingStep, steps]);
+  // ── Scope navigation ──────────────────────────────────────────────────────
 
+  const [scopeStack, setScopeStack] = useState<ScopeFrame[]>([]);
+  const scopeStackRef = useRef<ScopeFrame[]>([]);
+  useEffect(() => { scopeStackRef.current = scopeStack; }, [scopeStack]);
+
+  const currentSteps = useMemo(() => getStepsAtScope(steps, scopeStack), [steps, scopeStack]);
+
+  // Mirror currentSteps in a ref so drag callbacks always see the latest scoped array
+  const currentStepsRef = useRef(currentSteps);
+  useEffect(() => { currentStepsRef.current = currentSteps; }, [currentSteps]);
+
+  function pushScope(frame: ScopeFrame) {
+    scrollYRef.current = 0;
+    setScopeStack(prev => [...prev, frame]);
+  }
+
+  function popScope() {
+    scrollYRef.current = 0;
+    setScopeStack(prev => prev.slice(0, -1));
+  }
+
+  // For Label/GoToLabel pickers — the editing step is always in currentSteps
+  const editingScope = currentSteps;
   const editingStepIndex = useMemo(() => {
     if (!editingStep) return -1;
-    return editingScope.findIndex(s => s.id === editingStep.id);
-  }, [editingStep, editingScope]);
-  const [insertTarget, setInsertTarget]     = useState<InsertTarget>({ mode: "append" });
-  // Ref mirrors state so addStep always reads the latest value regardless of closure age
-  const insertTargetRef = useRef<InsertTarget>({ mode: "append" });
+    return currentSteps.findIndex(s => s.id === editingStep.id);
+  }, [editingStep, currentSteps]);
 
-  // Loop collapse — keys in set are COLLAPSED; by default everything is expanded
-  const [collapsedLoops, setCollapsedLoops] = useState<Set<string>>(new Set());
-  function toggleLoop(id: string) {
-    setCollapsedLoops(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
+  const [insertTarget, setInsertTarget]   = useState<InsertTarget>({ mode: "append" });
+  const insertTargetRef = useRef<InsertTarget>({ mode: "append" });
 
   // ── Drag state ────────────────────────────────────────────────────────────
 
@@ -4405,6 +4884,7 @@ export default function BuilderScreen() {
 
   // Auto-scroll while dragging
   const scrollViewRef      = useRef<ScrollView>(null);
+  const scopeScrollViewRef = useRef<ScrollView>(null);
   const scrollYRef         = useRef(0);
   const autoScrollTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -4412,7 +4892,8 @@ export default function BuilderScreen() {
     if (autoScrollTimer.current) return;
     autoScrollTimer.current = setInterval(() => {
       scrollYRef.current = Math.max(0, scrollYRef.current + dir * 8);
-      scrollViewRef.current?.scrollTo({ y: scrollYRef.current, animated: false });
+      const ref = scopeStackRef.current.length > 0 ? scopeScrollViewRef : scrollViewRef;
+      ref.current?.scrollTo({ y: scrollYRef.current, animated: false });
     }, 16);
   }
 
@@ -4449,30 +4930,18 @@ export default function BuilderScreen() {
     return target;
   }
 
-  function handleDragStart(stepId: string, loopId?: string) {
-    if (loopId) {
-      const loop = stepsRef.current.find(s => s.id === loopId);
-      const idx  = loop?.loopSteps?.findIndex(s => s.id === stepId) ?? -1;
-      const info: DragInfo = { id: stepId, loopId, fromIndex: idx, toIndex: idx };
-      dragRef.current = info;
-      setDrag(info);
-    } else {
-      const idx  = stepsRef.current.findIndex(s => s.id === stepId);
-      const info: DragInfo = { id: stepId, fromIndex: idx, toIndex: idx };
-      dragRef.current = info;
-      setDrag(info);
-    }
+  function handleDragStart(stepId: string) {
+    const idx  = currentStepsRef.current.findIndex(s => s.id === stepId);
+    const info: DragInfo = { id: stepId, fromIndex: idx, toIndex: idx };
+    dragRef.current = info;
+    setDrag(info);
   }
 
-  function handleDragMove(stepId: string, dy: number, absY: number, loopId?: string) {
+  function handleDragMove(stepId: string, dy: number, absY: number) {
     const d = dragRef.current;
     if (!d || d.id !== stepId) return;
 
-    const arr = loopId
-      ? (stepsRef.current.find(s => s.id === loopId)?.loopSteps ?? [])
-      : stepsRef.current;
-
-    const newTo = calcDropIndex(d.fromIndex, dy, arr);
+    const newTo = calcDropIndex(d.fromIndex, dy, currentStepsRef.current);
     if (newTo !== d.toIndex) {
       const updated = { ...d, toIndex: newTo };
       dragRef.current = updated;
@@ -4486,15 +4955,11 @@ export default function BuilderScreen() {
     else stopAutoScroll();
   }
 
-  function handleDragEnd(stepId: string, loopId?: string) {
+  function handleDragEnd(stepId: string) {
     stopAutoScroll();
     const d = dragRef.current;
     if (d && d.id === stepId && d.toIndex !== d.fromIndex) {
-      if (loopId) {
-        moveLoopStepTo(loopId, d.fromIndex, d.toIndex);
-      } else {
-        moveStepTo(d.fromIndex, d.toIndex);
-      }
+      moveScopedStepTo(d.fromIndex, d.toIndex);
     }
     dragRef.current = null;
     setDrag(null);
@@ -4527,65 +4992,33 @@ export default function BuilderScreen() {
       ifSteps:   type === "IfCondition" ? [] : undefined,
       toolName:  undefined,
       localName: undefined,
+      saveImagePath: undefined,
+      saveImageCameraId: undefined,
     };
   }
 
   function openTypePicker(target: InsertTarget) {
-    insertTargetRef.current = target; // sync update so addStep always sees latest
+    insertTargetRef.current = target;
     setInsertTarget(target);
     setTypePickerOpen(true);
   }
 
-  function applyToIfBranch(arr: ProgramStep[], stepId: string, branchKey: string, fn: (s: ProgramStep[]) => ProgramStep[]): ProgramStep[] {
-    return arr.map(s => {
-      if (s.id !== stepId) return s;
-      if (branchKey === 'if')   return { ...s, ifSteps:   fn(s.ifSteps   ?? []) };
-      if (branchKey === 'else') return { ...s, elseSteps: fn(s.elseSteps ?? []) };
-      return { ...s, elseIfBranches: (s.elseIfBranches ?? []).map(b =>
-        b.id === branchKey ? { ...b, steps: fn(b.steps) } : b) };
-    });
-  }
-
   function addStep(type: StepType) {
-    const target = insertTargetRef.current; // read from ref, never stale
+    const target = insertTargetRef.current;
     const step = defaultStep(type);
 
     setSteps(prev => {
-      const arr = [...prev];
-      switch (target.mode) {
-        case "append":
-          return [...arr, step];
-        case "insert":
-          arr.splice(target.afterIndex + 1, 0, step);
-          return arr;
-        case "appendLoop":
-          return arr.map(s =>
-            s.id === target.loopId
-              ? { ...s, loopSteps: [...(s.loopSteps ?? []), step] }
-              : s
-          );
-        case "insertLoop":
-          return arr.map(s => {
-            if (s.id !== target.loopId) return s;
-            const inner = [...(s.loopSteps ?? [])];
-            inner.splice(target.afterIndex + 1, 0, step);
-            return { ...s, loopSteps: inner };
-          });
-        case "appendIf":
-          return applyToIfBranch(arr, target.stepId, target.branchKey, s => [...s, step]);
-        case "insertIf":
-          return applyToIfBranch(arr, target.stepId, target.branchKey, s => {
-            const inner = [...s];
-            inner.splice(target.afterIndex + 1, 0, step);
-            return inner;
-          });
+      const scoped = getStepsAtScope(prev, scopeStackRef.current);
+      let newScoped: ProgramStep[];
+      if (target.mode === "append") {
+        newScoped = [...scoped, step];
+      } else {
+        const arr = [...scoped];
+        arr.splice(target.afterIndex + 1, 0, step);
+        newScoped = arr;
       }
+      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
     });
-
-    // If adding to a loop, make sure it's expanded
-    if (target.mode === "appendLoop" || target.mode === "insertLoop") {
-      setCollapsedLoops(prev => { const next = new Set(prev); next.delete(target.loopId); return next; });
-    }
 
     setEditingStep(step);
     setConfigOpen(true);
@@ -4593,57 +5026,27 @@ export default function BuilderScreen() {
 
   function updateStep(updated: ProgramStep) {
     setSteps(prev => {
-      if (prev.some(s => s.id === updated.id))
-        return prev.map(s => s.id === updated.id ? updated : s);
-      return prev.map(s => {
-        if (s.loopSteps?.some(ls => ls.id === updated.id))
-          return { ...s, loopSteps: s.loopSteps!.map(ls => ls.id === updated.id ? updated : ls) };
-        if (s.ifSteps?.some(ls => ls.id === updated.id))
-          return { ...s, ifSteps: s.ifSteps!.map(ls => ls.id === updated.id ? updated : ls) };
-        if (s.elseSteps?.some(ls => ls.id === updated.id))
-          return { ...s, elseSteps: s.elseSteps!.map(ls => ls.id === updated.id ? updated : ls) };
-        const updatedElseIf = s.elseIfBranches?.map(b =>
-          b.steps.some(ls => ls.id === updated.id)
-            ? { ...b, steps: b.steps.map(ls => ls.id === updated.id ? updated : ls) }
-            : b
-        );
-        if (updatedElseIf && updatedElseIf !== s.elseIfBranches)
-          return { ...s, elseIfBranches: updatedElseIf };
-        return s;
-      });
+      const scoped    = getStepsAtScope(prev, scopeStackRef.current);
+      const newScoped = scoped.map(s => s.id === updated.id ? updated : s);
+      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
     });
   }
 
   function deleteStep(id: string) {
     setSteps(prev => {
-      if (prev.some(s => s.id === id)) return prev.filter(s => s.id !== id);
-      return prev.map(s => ({
-        ...s,
-        loopSteps:      s.loopSteps?.filter(ls => ls.id !== id),
-        ifSteps:        s.ifSteps?.filter(ls => ls.id !== id),
-        elseSteps:      s.elseSteps?.filter(ls => ls.id !== id),
-        elseIfBranches: s.elseIfBranches?.map(b => ({ ...b, steps: b.steps.filter(ls => ls.id !== id) })),
-      }));
+      const scoped    = getStepsAtScope(prev, scopeStackRef.current);
+      const newScoped = scoped.filter(s => s.id !== id);
+      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
     });
   }
 
-  function moveStepTo(from: number, to: number) {
+  function moveScopedStepTo(from: number, to: number) {
     setSteps(prev => {
-      const arr = [...prev];
-      const [removed] = arr.splice(from, 1);
-      arr.splice(to, 0, removed);
-      return arr;
+      const scoped = [...getStepsAtScope(prev, scopeStackRef.current)];
+      const [removed] = scoped.splice(from, 1);
+      scoped.splice(to, 0, removed);
+      return setStepsAtScope(prev, scopeStackRef.current, scoped);
     });
-  }
-
-  function moveLoopStepTo(loopId: string, from: number, to: number) {
-    setSteps(prev => prev.map(s => {
-      if (s.id !== loopId || !s.loopSteps) return s;
-      const arr = [...s.loopSteps];
-      const [removed] = arr.splice(from, 1);
-      arr.splice(to, 0, removed);
-      return { ...s, loopSteps: arr };
-    }));
   }
 
   // ── Save / Run ────────────────────────────────────────────────────────────
@@ -4656,6 +5059,8 @@ export default function BuilderScreen() {
       variables: variables.length > 0 ? variables : undefined,
       lastUpdatedUnixMs: Date.now(),
       isRoutine: isRoutineMode,
+      isBackground: isBackgroundMode || undefined,
+      killBackgroundOnStop: (!isRoutineMode && !isBackgroundMode) ? (killBackgroundOnStop || undefined) : undefined,
     };
   }
 
@@ -4690,6 +5095,7 @@ export default function BuilderScreen() {
   async function handleSave() { if (await save()) router.back(); }
 
   function handleBack() {
+    if (scopeStackRef.current.length > 0) { popScope(); return; }
     if (!isDirty) { router.back(); return; }
     Alert.alert(
       "Unsaved Changes",
@@ -4734,11 +5140,118 @@ export default function BuilderScreen() {
     );
   }
 
-  const builderTitle = `${isRoutineMode ? "Routine" : "Program"} Builder${isLocalMode ? " · Local" : ""}`;
+  const builderTitle = scopeStack.length > 0
+    ? scopeStack[scopeStack.length - 1].label
+    : `${isRoutineMode ? "Routine" : isBackgroundMode ? "Background" : "Program"} Builder${isLocalMode ? " · Local" : ""}`;
 
   return (
     <View style={styles.container}>
       <SubPageHeader title={builderTitle} onBack={handleBack} />
+      {scopeStack.length > 0 ? (
+        <>
+          {/* Breadcrumb */}
+          {scopeStack.length > 0 && (
+            <View style={styles.scopeBreadcrumb}>
+              <TouchableOpacity onPress={() => setScopeStack([])} hitSlop={8} activeOpacity={0.7}>
+                <Text style={styles.scopeBreadcrumbRoot}>Program</Text>
+              </TouchableOpacity>
+              {scopeStack.slice(0, -1).map((frame, fi) => (
+                <React.Fragment key={fi}>
+                  <ChevronRight size={12} color="#9ca3af" />
+                  <TouchableOpacity onPress={() => setScopeStack(prev => prev.slice(0, fi + 1))} hitSlop={8} activeOpacity={0.7}>
+                    <Text style={styles.scopeBreadcrumbItem}>{frame.label}</Text>
+                  </TouchableOpacity>
+                </React.Fragment>
+              ))}
+              <ChevronRight size={12} color="#9ca3af" />
+              <Text style={styles.scopeBreadcrumbCurrent}>{scopeStack[scopeStack.length - 1].label}</Text>
+            </View>
+          )}
+
+          <ScrollView
+            ref={scopeScrollViewRef}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={drag === null}
+            onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+            scrollEventThrottle={16}
+          >
+            {currentSteps.length === 0 ? (
+              <View style={styles.emptySteps}>
+                <Cpu size={32} color="#d1d5db" />
+                <Text style={styles.emptyStepsText}>No steps in this scope</Text>
+              </View>
+            ) : (
+              <View style={styles.stepsList}>
+                <InsertDivider
+                  onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
+                  onPaste={clipboard ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
+                  disabled={!!drag}
+                />
+                {currentSteps.map((step, i) => (
+                  <StepRow
+                    key={step.id}
+                    step={step}
+                    index={i}
+                    isLast={i === currentSteps.length - 1}
+                    isBeingDragged={drag?.id === step.id}
+                    isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
+                    isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
+                    isDragging={!!drag}
+                    onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
+                    onCopy={() => setClipboard(step)}
+                    onDelete={() => Alert.alert("Delete Step", "Remove this step?", [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
+                    ])}
+                    onDragStart={handleDragStart}
+                    onDragMove={handleDragMove}
+                    onDragEnd={handleDragEnd}
+                    onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
+                    onPasteAfter={clipboard ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
+                    onEnterScope={pushScope}
+                    onUpdateIfCondition={updateStep}
+                    onItemLayout={handleItemLayout}
+                    variables={variables}
+                  />
+                ))}
+              </View>
+            )}
+
+            <View style={styles.addRow}>
+              <TouchableOpacity
+                style={styles.addCard}
+                onPress={() => openTypePicker({ mode: "append" })}
+                activeOpacity={0.7}
+              >
+                <Plus size={16} color="#2563eb" />
+                <Text style={styles.addCardText}>Add Step</Text>
+              </TouchableOpacity>
+              {clipboard && (
+                <TouchableOpacity
+                  style={styles.pasteCard}
+                  onPress={() => pasteStep({ mode: "append" })}
+                  activeOpacity={0.7}
+                >
+                  <ClipboardPaste size={16} color="#7c3aed" />
+                  <Text style={styles.pasteCardText}>Paste</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </ScrollView>
+
+          {isLocalMode && connected && (
+            <View style={styles.bottomBar}>
+              <TouchableOpacity style={styles.uploadBtn} onPress={saveToRobot} activeOpacity={0.8}>
+                <Upload size={15} color="#16a34a" />
+                <Text style={styles.uploadBtnText}>Save to Robot</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
+      ) : (
+        <>
       <ScrollView
         ref={scrollViewRef}
         contentContainerStyle={styles.content}
@@ -4754,7 +5267,7 @@ export default function BuilderScreen() {
             style={styles.nameInput}
             value={programName}
             onChangeText={setProgramName}
-            placeholder={isRoutineMode ? "Routine name…" : "Program name…"}
+            placeholder={isRoutineMode ? "Routine name…" : isBackgroundMode ? "Background program name…" : "Program name…"}
             placeholderTextColor="#9ca3af"
             returnKeyType="next"
           />
@@ -4769,34 +5282,75 @@ export default function BuilderScreen() {
           />
           <View style={styles.metaSep} />
 
-          {/* Cover image row — hidden for routines */}
-          {!isRoutineMode && <View style={styles.imageRow}>
-            {/* Preview */}
-            <View style={styles.imagePreviewWrap}>
-              {coverImage ? (
-                <Image
-                  source={{ uri: `data:image/jpeg;base64,${coverImage}` }}
-                  style={styles.imagePreview}
-                />
-              ) : (
-                <View style={styles.imagePreviewPlaceholder}>
-                  <ImagePlus size={22} color="#d1d5db" />
+          {/* Cover image row — hidden for routines and background programs */}
+          {!isRoutineMode && !isBackgroundMode && (
+            <>
+              <View style={styles.imageRow}>
+                <View style={styles.imagePreviewWrap}>
+                  {coverImage ? (
+                    <Image
+                      source={{ uri: `data:image/jpeg;base64,${coverImage}` }}
+                      style={styles.imagePreview}
+                    />
+                  ) : (
+                    <View style={styles.imagePreviewPlaceholder}>
+                      <ImagePlus size={22} color="#d1d5db" />
+                    </View>
+                  )}
                 </View>
+                <View style={styles.imageActions}>
+                  <TouchableOpacity style={styles.imageBtn} onPress={pickFromCamera} activeOpacity={0.75}>
+                    <Camera size={15} color="#2563eb" />
+                    <Text style={styles.imageBtnText}>Camera</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.imageBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
+                    <ImagePlus size={15} color="#2563eb" />
+                    <Text style={styles.imageBtnText}>Photo Library</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {!isLocalMode && (
+                <>
+                  <View style={styles.metaSep} />
+                  <TouchableOpacity
+                    style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+                    onPress={() => setSettingsModalOpen(true)}
+                    activeOpacity={0.7}
+                  >
+                    <SlidersHorizontal size={16} color="#6b7280" />
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
+                    {isBackgroundMode && (
+                      <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
+                      </View>
+                    )}
+                    <ChevronRight size={15} color="#9ca3af" />
+                  </TouchableOpacity>
+                </>
               )}
-            </View>
+            </>
+          )}
 
-            {/* Picker buttons */}
-            <View style={styles.imageActions}>
-              <TouchableOpacity style={styles.imageBtn} onPress={pickFromCamera} activeOpacity={0.75}>
-                <Camera size={15} color="#2563eb" />
-                <Text style={styles.imageBtnText}>Camera</Text>
+          {/* Settings button for routines/background programs (no image row) */}
+          {!isLocalMode && (isRoutineMode || isBackgroundMode) && (
+            <>
+              <View style={styles.metaSep} />
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+                onPress={() => setSettingsModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <SlidersHorizontal size={16} color="#6b7280" />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
+                {isBackgroundMode && (
+                  <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
+                  </View>
+                )}
+                <ChevronRight size={15} color="#9ca3af" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.imageBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
-                <ImagePlus size={15} color="#2563eb" />
-                <Text style={styles.imageBtnText}>Photo Library</Text>
-              </TouchableOpacity>
-            </View>
-          </View>}
+            </>
+          )}
         </View>
 
         {/* Variables */}
@@ -4824,6 +5378,26 @@ export default function BuilderScreen() {
                           <Text style={{ fontSize: 9, fontWeight: "700", color: "#16a34a", letterSpacing: 0.3 }}>BOOL</Text>
                         </View>
                       )}
+                      {v.isGlobal && (
+                        <View style={{ backgroundColor: "#fffbeb", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#fde68a" }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#b45309", letterSpacing: 0.3 }}>GLOBAL</Text>
+                        </View>
+                      )}
+                      {v.displayOnMonitor && (
+                        <View style={{ backgroundColor: "#eff6ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bfdbfe" }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#2563eb", letterSpacing: 0.3 }}>MONITOR</Text>
+                        </View>
+                      )}
+                      {v.isStopwatch && (
+                        <View style={{ backgroundColor: "#e0f2fe", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#7dd3fc" }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>STOPWATCH</Text>
+                        </View>
+                      )}
+                      {v.isPersistent && (
+                        <View style={{ backgroundColor: "#f5f3ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#ddd6fe" }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#7c3aed", letterSpacing: 0.3 }}>PERSIST</Text>
+                        </View>
+                      )}
                     </View>
                     {v.description ? (
                       <Text style={styles.varDesc}>{v.description}</Text>
@@ -4831,6 +5405,8 @@ export default function BuilderScreen() {
                       <Text style={styles.varDesc}>Vector6[ ] — populated by RunVision</Text>
                     ) : v.isBoolean ? (
                       <Text style={styles.varDesc}>Boolean — initial: {v.value !== 0 ? "True" : "False"}</Text>
+                    ) : v.isStopwatch ? (
+                      <Text style={styles.varDesc}>Stopwatch — elapsed ms</Text>
                     ) : (
                       <Text style={styles.varDesc}>Initial: {v.value}</Text>
                     )}
@@ -4857,7 +5433,7 @@ export default function BuilderScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Steps */}
+        {/* Steps (root level) */}
         <Text style={styles.sectionLabel}>STEPS</Text>
 
         {steps.length === 0 ? (
@@ -4878,13 +5454,10 @@ export default function BuilderScreen() {
                 step={step}
                 index={i}
                 isLast={i === steps.length - 1}
-                isBeingDragged={drag?.id === step.id && !drag.loopId}
-                isDropAbove={!!(drag && !drag.loopId && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
-                isDropBelow={!!(drag && !drag.loopId && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
-                isDragging={!!(drag && !drag.loopId)}
-                collapsed={collapsedLoops.has(step.id)}
-                innerDrag={drag?.loopId === step.id ? drag : null}
-                onToggleCollapse={() => toggleLoop(step.id)}
+                isBeingDragged={drag?.id === step.id}
+                isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
+                isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
+                isDragging={!!drag}
                 onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
                 onCopy={() => setClipboard(step)}
                 onDelete={() => Alert.alert("Delete Step", "Remove this step?", [
@@ -4896,26 +5469,7 @@ export default function BuilderScreen() {
                 onDragEnd={handleDragEnd}
                 onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
                 onPasteAfter={clipboard ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
-                onInsertInner={() => openTypePicker({ mode: "appendLoop", loopId: step.id })}
-                onPasteInner={clipboard ? () => pasteStep({ mode: "appendLoop", loopId: step.id }) : undefined}
-                onEditInner={inner => { setEditingStep(inner); setConfigOpen(true); }}
-                onCopyInner={inner => setClipboard(inner)}
-                onDeleteInner={id => Alert.alert("Delete Step", "Remove this inner step?", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Delete", style: "destructive", onPress: () => deleteStep(id) },
-                ])}
-                onInsertAfterInner={j => openTypePicker({ mode: "insertLoop", loopId: step.id, afterIndex: j })}
-                onPasteAfterInner={clipboard ? j => pasteStep({ mode: "insertLoop", loopId: step.id, afterIndex: j }) : undefined}
-                onInsertIfInner={(branchKey, afterIndex) =>
-                  afterIndex !== undefined
-                    ? openTypePicker({ mode: "insertIf", stepId: step.id, branchKey, afterIndex })
-                    : openTypePicker({ mode: "appendIf", stepId: step.id, branchKey })
-                }
-                onPasteIfInner={clipboard ? (branchKey, afterIndex) =>
-                  afterIndex !== undefined
-                    ? pasteStep({ mode: "insertIf", stepId: step.id, branchKey, afterIndex })
-                    : pasteStep({ mode: "appendIf", stepId: step.id, branchKey })
-                : undefined}
+                onEnterScope={pushScope}
                 onUpdateIfCondition={updateStep}
                 onItemLayout={handleItemLayout}
                 variables={variables}
@@ -4960,12 +5514,14 @@ export default function BuilderScreen() {
           <Text style={styles.saveBtnText}>Save</Text>
         </TouchableOpacity>
       </View>
-
+        </>
+      )}
 
       <StepTypePicker
         visible={typePickerOpen}
         onPick={addStep}
         onClose={() => setTypePickerOpen(false)}
+        isBackgroundMode={isBackgroundMode}
       />
       <StepConfigModal
         visible={configOpen}
@@ -4982,6 +5538,62 @@ export default function BuilderScreen() {
         onSave={saveVar}
         onClose={() => setVarModalOpen(false)}
       />
+
+      {/* Program Settings modal */}
+      <Modal visible={settingsModalOpen} transparent animationType="fade" onRequestClose={() => setSettingsModalOpen(false)}>
+        <Pressable style={ms.overlay} onPress={() => setSettingsModalOpen(false)}>
+          <Pressable style={[ms.card, { maxHeight: "70%" }]} onPress={() => {}}>
+            <View style={ms.header}>
+              <View style={{ width: 18 }} />
+              <Text style={ms.title}>Program Settings</Text>
+              <TouchableOpacity onPress={() => setSettingsModalOpen(false)} hitSlop={12} activeOpacity={0.7}>
+                <X size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Background program */}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#f3f4f6" }}>
+                <View style={{ flex: 1, marginRight: 16 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Background Program</Text>
+                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                    Runs in parallel — cannot move the robot or change tools/speed
+                  </Text>
+                </View>
+                <Switch
+                  value={isBackgroundMode}
+                  onValueChange={v => { setIsBackgroundMode(v); if (v) setIsRoutineMode(false); }}
+                  trackColor={{ false: "#e5e7eb", true: "#16a34a" }}
+                />
+              </View>
+
+              {/* Stop backgrounds on finish — only for non-background, non-routine programs */}
+              {!isRoutineMode && !isBackgroundMode && (
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14 }}>
+                  <View style={{ flex: 1, marginRight: 16 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Stop Backgrounds on Finish</Text>
+                    <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                      Kill all running background programs when this program ends
+                    </Text>
+                  </View>
+                  <Switch
+                    value={killBackgroundOnStop}
+                    onValueChange={setKillBackgroundOnStop}
+                    trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                  />
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={[ms.actions, { marginTop: 8 }]}>
+              <TouchableOpacity style={ms.saveBtn} onPress={() => setSettingsModalOpen(false)} activeOpacity={0.7}>
+                <Check size={15} color="white" />
+                <Text style={ms.saveText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -5194,6 +5806,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14, paddingHorizontal: 18, backgroundColor: "transparent",
   },
   pasteCardText: { fontSize: 14, fontWeight: "600", color: "#7c3aed" },
+
+  // ── Scope overlay breadcrumb ───────────────────────────────────────────────
+
+  scopeBreadcrumb: {
+    flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4,
+    paddingHorizontal: 16, paddingVertical: 8,
+    backgroundColor: "#fff",
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb",
+  },
+  scopeBreadcrumbRoot: { fontSize: 12, fontWeight: "600", color: "#2563eb" },
+  scopeBreadcrumbItem: { fontSize: 12, fontWeight: "600", color: "#374151" },
+  scopeBreadcrumbCurrent: { fontSize: 12, fontWeight: "700", color: "#111827" },
 
   bottomBar: {
     flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16,

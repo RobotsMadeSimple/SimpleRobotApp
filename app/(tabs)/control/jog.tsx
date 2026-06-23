@@ -16,10 +16,11 @@ import {
   Wrench,
   X,
 } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Modal,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,

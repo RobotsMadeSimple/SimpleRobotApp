@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { BuiltProgram, Grid, Local, NanoState, Point, ProgramSummary, RobotStack, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, CameraState, Grid, Local, NanoState, Point, ProgramSummary, RobotStack, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -36,6 +36,7 @@ type DataContextType = {
   relayIO:             UsbRelayState | null;
   grids:               Grid[];
   stacks:              RobotStack[];
+  cameras:             CameraState[];
 };
 
 const DataContext = createContext<DataContextType>({
@@ -48,6 +49,7 @@ const DataContext = createContext<DataContextType>({
   relayIO:             null,
   grids:               [],
   stacks:              [],
+  cameras:             [],
 });
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [relayIO,             setRelayIO]             = useState<UsbRelayState | null>(null);
   const [grids,               setGrids]               = useState<Grid[]>([]);
   const [stacks,              setStacks]              = useState<RobotStack[]>([]);
+  const [cameras,             setCameras]             = useState<CameraState[]>([]);
   const [selectedRobotInfo,   setSelectedRobotInfo]   = useState<RobotInfo | null>(null);
 
   useEffect(() => {
@@ -80,6 +83,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     const unsubRelayIO  = robotClient.onRelayIO(setRelayIO);
     const unsubGrids    = robotClient.onGrids(setGrids);
     const unsubStacks   = robotClient.onStacks(setStacks);
+    const unsubCameras  = robotClient.onCameras(setCameras);
     const unsubSelected = subscribeRobot(robot => setSelectedRobotInfo(robot));
 
     robotDiscovery.start();
@@ -97,6 +101,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubRelayIO();
       unsubGrids();
       unsubStacks();
+      unsubCameras();
       robotDiscovery.stop();
       robotClient.disconnect();
     };
@@ -138,7 +143,8 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     relayIO,
     grids,
     stacks,
-  }), [points, tools, locals, builtPrograms, builtProgramsLoaded, nanoIO, relayIO, grids, stacks]);
+    cameras,
+  }), [points, tools, locals, builtPrograms, builtProgramsLoaded, nanoIO, relayIO, grids, stacks, cameras]);
 
   return (
     <StatusContext.Provider value={statusContextValue}>
@@ -168,3 +174,4 @@ export function useNanoIO()              { return useContext(DataContext).nanoIO
 export function useRelayIO()             { return useContext(DataContext).relayIO; }
 export function useGrids()               { return useContext(DataContext).grids; }
 export function useStacks()              { return useContext(DataContext).stacks; }
+export function useCameras()             { return useContext(DataContext).cameras; }

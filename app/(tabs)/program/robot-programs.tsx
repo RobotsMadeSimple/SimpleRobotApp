@@ -1,9 +1,9 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Cpu, Plus, Trash2 } from "lucide-react-native";
+import { Box, Cpu, Layers, Play, Plus, Square, Trash2 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -25,16 +25,24 @@ function ProgramRow({
   stepCount,
   image,
   isBuilt,
+  isBackground,
+  isRunning,
   onPress,
   onDelete,
+  onStartBackground,
+  onStopBackground,
 }: {
   name: string;
   description: string;
   stepCount: number | null;
   image: string | null;
   isBuilt: boolean;
+  isBackground?: boolean;
+  isRunning?: boolean;
   onPress: () => void;
   onDelete?: () => void;
+  onStartBackground?: () => void;
+  onStopBackground?: () => void;
 }) {
   const cardContent = (
     <>
@@ -53,10 +61,20 @@ function ProgramRow({
       <View style={styles.cardBody}>
         <View style={styles.nameRow}>
           <Text style={styles.cardName} numberOfLines={1}>{name}</Text>
-          {isBuilt && (
+          {isBackground ? (
+            <View style={[styles.builtBadge, styles.backgroundBadge]}>
+              <Layers size={10} color="#16a34a" />
+              <Text style={[styles.builtBadgeText, { color: "#16a34a" }]}>BACKGROUND</Text>
+            </View>
+          ) : isBuilt ? (
             <View style={styles.builtBadge}>
               <Cpu size={10} color="#2563eb" />
               <Text style={styles.builtBadgeText}>BUILT</Text>
+            </View>
+          ) : null}
+          {isBackground && isRunning && (
+            <View style={[styles.builtBadge, { backgroundColor: "#f0fdf4", borderWidth: 1, borderColor: "#bbf7d0" }]}>
+              <Text style={[styles.builtBadgeText, { color: "#16a34a" }]}>RUNNING</Text>
             </View>
           )}
         </View>
@@ -68,7 +86,20 @@ function ProgramRow({
         )}
       </View>
 
-      {onDelete && (
+      {isBackground && (
+        <TouchableOpacity
+          onPress={isRunning ? onStopBackground : onStartBackground}
+          style={[styles.bgActionBtn, isRunning ? styles.bgStopBtn : styles.bgPlayBtn]}
+          hitSlop={8}
+        >
+          {isRunning
+            ? <Square size={14} color="#dc2626" fill="#dc2626" />
+            : <Play   size={14} color="#16a34a" fill="#16a34a" />
+          }
+        </TouchableOpacity>
+      )}
+
+      {onDelete && !isBackground && (
         <TouchableOpacity onPress={onDelete} style={styles.deleteBtn} hitSlop={8}>
           <Trash2 size={16} color="#ef4444" />
         </TouchableOpacity>
@@ -103,6 +134,7 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
     maxStepCount: bp.steps.length,
     errorDescription: "",
     warningDescription: "",
+    currentPointName: "",
     start: false,
     stop: false,
     reset: false,
@@ -115,24 +147,42 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
 export default function RobotProgramsScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
+  const robotStatus      = useRobotStatus();
   const [images, setImages] = useState<Record<string, string | null>>({});
 
   useEffect(() => robotClient.onProgramImages(setImages), []);
 
   const builtNames = new Set(builtPrograms.map(p => p.name));
+  const runningBackgroundNames = new Set(
+    (robotStatus.backgroundPrograms ?? []).map(b => b.name)
+  );
 
-  const builtCards = builtPrograms
-    .filter(bp => !bp.isRoutine)
+  // Separate background programs from regular ones
+  const backgroundPrograms = builtPrograms.filter(bp => bp.isBackground);
+  const regularPrograms    = builtPrograms.filter(bp => !bp.isRoutine && !bp.isBackground);
+
+  const regularCards = regularPrograms
     .map(bp => ({ summary: live(bp, programSummaries) ?? syntheticSummary(bp), bp, isBuilt: true as const }));
 
   const externalCards = programSummaries
     .filter(p => !builtNames.has(p.name))
     .map(p => ({ summary: p, isBuilt: false as const }));
 
-  const allCards = [...builtCards, ...externalCards];
+  const allRegularCards = [...regularCards, ...externalCards];
 
   function handleDelete(name: string) {
     Alert.alert("Delete Program", `Delete "${name}" from the robot? This cannot be undone.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}),
+      },
+    ]);
+  }
+
+  function handleDeleteBackground(name: string) {
+    Alert.alert("Delete Background Program", `Delete "${name}" from the robot? This cannot be undone.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -160,7 +210,7 @@ export default function RobotProgramsScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {allCards.length === 0 ? (
+        {allRegularCards.length === 0 && backgroundPrograms.length === 0 ? (
           <View style={styles.empty}>
             <Box size={44} color="#d1d5db" />
             <Text style={styles.emptyTitle}>No Programs</Text>
@@ -169,7 +219,7 @@ export default function RobotProgramsScreen() {
             </Text>
           </View>
         ) : (
-          allCards.map(c => (
+          allRegularCards.map(c => (
             <ProgramRow
               key={c.summary.name}
               name={c.summary.name}
@@ -181,6 +231,31 @@ export default function RobotProgramsScreen() {
               onDelete={c.isBuilt ? () => handleDelete(c.summary.name) : undefined}
             />
           ))
+        )}
+
+        {backgroundPrograms.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>BACKGROUND PROGRAMS</Text>
+            {backgroundPrograms.map(bp => {
+              const running = runningBackgroundNames.has(bp.name);
+              return (
+                <ProgramRow
+                  key={bp.name}
+                  name={bp.name}
+                  description={bp.description}
+                  stepCount={bp.steps.length}
+                  image={images[bp.name] ?? null}
+                  isBuilt
+                  isBackground
+                  isRunning={running}
+                  onPress={() => router.navigate(`/(tabs)/program/builder?name=${encodeURIComponent(bp.name)}`)}
+                  onDelete={() => handleDeleteBackground(bp.name)}
+                  onStartBackground={() => robotClient.startBackgroundProgram(bp.name).catch(() => {})}
+                  onStopBackground={() => robotClient.stopBackgroundProgram(bp.name).catch(() => {})}
+                />
+              );
+            })}
+          </>
         )}
 
         <TouchableOpacity
@@ -205,6 +280,15 @@ function live(bp: BuiltProgram, summaries: ProgramSummary[]) {
 const styles = StyleSheet.create({
   scroll:  { flex: 1, backgroundColor: "#f3f4f6" },
   content: { padding: 16, paddingBottom: 32, gap: 12 },
+
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#9ca3af",
+    letterSpacing: 0.8,
+    marginTop: 4,
+    marginBottom: -4,
+  },
 
   card: {
     backgroundColor: "#fff",
@@ -233,7 +317,7 @@ const styles = StyleSheet.create({
   },
   thumbImage: { width: 48, height: 48 },
   cardBody: { flex: 1, gap: 2 },
-  nameRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 7, flexWrap: "wrap" },
   cardName: { fontSize: 15, fontWeight: "700", color: "#111827", flexShrink: 1 },
   cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
   cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
@@ -247,7 +331,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
+  backgroundBadge: {
+    backgroundColor: "#f0fdf4",
+  },
   builtBadgeText: { fontSize: 10, fontWeight: "700", color: "#2563eb", letterSpacing: 0.4 },
+
+  bgActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bgPlayBtn: { backgroundColor: "#dcfce7" },
+  bgStopBtn: { backgroundColor: "#fee2e2" },
 
   deleteBtn: { padding: 4 },
 

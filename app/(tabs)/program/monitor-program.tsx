@@ -1,16 +1,17 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { BuiltProgram, ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { BuiltProgram, ProgramStatus, ProgramSummary, ProgramVariableSnapshot } from "@/src/models/robotModels";
+import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, Tabs, useLocalSearchParams } from "expo-router";
-import { AlertTriangle, Box, Camera, Cpu, Edit2, Play, Trash2, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Camera, Cpu, Edit2, Gauge, Layers, Play, Trash2, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Image,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -92,6 +93,7 @@ function syntheticSummary(bp: BuiltProgram): ProgramSummary {
     maxStepCount: bp.steps.length,
     errorDescription: "",
     warningDescription: "",
+    currentPointName: "",
     start: false,
     stop: false,
     reset: false,
@@ -138,6 +140,76 @@ function MarqueeText({ text, style }: { text: string; style?: object }) {
   );
 }
 
+// ── Speed override card ───────────────────────────────────────────────────────
+
+function SpeedOverrideCard({ overridePercent }: { overridePercent: number }) {
+  const THUMB_D    = 22;
+  const MIN        = 5;
+  const MAX        = 200;
+  const barWRef    = useRef(1);
+  const startRef   = useRef(overridePercent);
+  const currentRef = useRef(overridePercent);
+  currentRef.current = overridePercent;
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { startRef.current = currentRef.current; },
+    onPanResponderMove: (_, g) => {
+      const raw     = startRef.current + (g.dx / Math.max(1, barWRef.current)) * (MAX - MIN);
+      const clamped = Math.max(MIN, Math.min(MAX, Math.round(raw)));
+      robotClient.setSpeedOverride(clamped);
+    },
+    onPanResponderRelease: () => {},
+  })).current;
+
+  const frac  = Math.max(0, Math.min(1, (overridePercent - MIN) / (MAX - MIN)));
+  const color = overridePercent > 100 ? "#dc2626" : overridePercent < 50 ? "#d97706" : "#2563eb";
+
+  return (
+    <View style={styles.section}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Gauge size={16} color={color} />
+        <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Speed Override</Text>
+        <Text style={{ fontSize: 18, fontWeight: "700", color }}>{Math.round(overridePercent)}%</Text>
+      </View>
+
+      <View style={{ height: THUMB_D + 8, justifyContent: "center" }}
+        onLayout={e => { barWRef.current = e.nativeEvent.layout.width; }}
+        {...pan.panHandlers}
+      >
+        <View style={{ height: 6, backgroundColor: "#e5e7eb", borderRadius: 3, overflow: "hidden" }}>
+          <View style={{ width: `${frac * 100}%`, height: "100%", backgroundColor: color, borderRadius: 3 }} />
+        </View>
+        <View style={{
+          position: "absolute",
+          left: `${frac * 100}%`,
+          marginLeft: -THUMB_D / 2,
+          width: THUMB_D, height: THUMB_D,
+          borderRadius: THUMB_D / 2,
+          backgroundColor: "#fff",
+          borderWidth: 2, borderColor: color,
+          shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 3, elevation: 3,
+        }} />
+      </View>
+
+      <View style={{ flexDirection: "row", gap: 6 }}>
+        {[25, 50, 75, 100, 150, 200].map(p => (
+          <TouchableOpacity key={p} onPress={() => robotClient.setSpeedOverride(p)} activeOpacity={0.7}
+            style={{ flex: 1, alignItems: "center", paddingVertical: 5, borderRadius: 8,
+              backgroundColor: Math.round(overridePercent) === p ? color : "#f3f4f6",
+              borderWidth: 1, borderColor: Math.round(overridePercent) === p ? color : "#e5e7eb" }}>
+            <Text style={{ fontSize: 11, fontWeight: "700",
+              color: Math.round(overridePercent) === p ? "#fff" : "#6b7280" }}>{p}%</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={{ fontSize: 11, color: "#9ca3af" }}>
+        Scales all explicitly-set program speeds. Jog speeds are not affected.
+      </Text>
+    </View>
+  );
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function MonitorProgramScreen() {
@@ -146,6 +218,7 @@ export default function MonitorProgramScreen() {
   const programSummaries    = useProgramSummaries();
   const builtPrograms       = useBuiltPrograms();
   const builtProgramsLoaded = useBuiltProgramsLoaded();
+  const robotStatus         = useRobotStatus();
 
   const robot   = useSelectedRobot();
   const s       = robot?.status;
@@ -265,6 +338,27 @@ export default function MonitorProgramScreen() {
         clearInterval(interval);
       };
     }, [programName])
+  );
+
+  // ── Variable snapshots ────────────────────────────────────────────────────
+  const [varSnapshots, setVarSnapshots] = useState<ProgramVariableSnapshot[]>([]);
+  const hasMonitoredVars = (builtProgram?.variables ?? []).some(v => v.displayOnMonitor && v.points == null && v.values == null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!programName || !hasMonitoredVars) return;
+      let cancelled = false;
+
+      const fetch = () => {
+        robotClient.getProgramVariables(programName)
+          .then(vars => { if (!cancelled) setVarSnapshots(vars); })
+          .catch(() => {});
+      };
+
+      fetch();
+      const interval = setInterval(fetch, 300);
+      return () => { cancelled = true; clearInterval(interval); };
+    }, [programName, hasMonitoredVars])
   );
 
   // ── Persistent alert banner ────────────────────────────────────────────────
@@ -501,6 +595,34 @@ export default function MonitorProgramScreen() {
           )}
         </View>
 
+        {/* ── Variables ── */}
+        {varSnapshots.length > 0 && (
+          <>
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>VARIABLES</Text>
+              <View style={styles.varGrid}>
+                {varSnapshots.map(v => {
+                  const display = v.isBoolean
+                    ? (v.value !== 0 ? "True" : "False")
+                    : Number.isInteger(v.value) ? String(v.value) : v.value.toFixed(4).replace(/\.?0+$/, '');
+                  return (
+                    <View key={v.name} style={styles.varCell}>
+                      <Text style={styles.varCellName} numberOfLines={1}>${v.name}</Text>
+                      <Text style={[styles.varCellValue, v.isBoolean && { color: v.value !== 0 ? "#16a34a" : "#dc2626" }]}
+                        numberOfLines={1}>{display}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          </>
+        )}
+
+        {/* ── Speed Override ── */}
+        <View style={styles.gapBand} />
+        <SpeedOverrideCard overridePercent={s?.speedOverridePercent ?? 100} />
+
         {/* ── Position ── */}
         <View style={styles.gapBand} />
         <View style={styles.section}>
@@ -622,6 +744,30 @@ export default function MonitorProgramScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          </>
+        )}
+
+        {/* ── Background Programs ── */}
+        {(robotStatus.backgroundPrograms ?? []).length > 0 && (
+          <>
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <Layers size={12} color="#16a34a" />
+                <Text style={[styles.sectionLabel, { color: "#16a34a" }]}>BACKGROUND PROGRAMS</Text>
+              </View>
+              {(robotStatus.backgroundPrograms ?? []).map(bg => (
+                <View key={bg.name} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb" }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>{bg.name}</Text>
+                    {!!bg.currentStep && (
+                      <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 1 }} numberOfLines={1}>{bg.currentStep}</Text>
+                    )}
+                  </View>
+                </View>
+              ))}
             </View>
           </>
         )}
@@ -821,6 +967,20 @@ const styles = StyleSheet.create({
     borderRadius: 11, alignItems: "center", justifyContent: "center", gap: 6,
   },
   actionBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+
+  // ── Variables ─────────────────────────────────────────────────────────────
+  varGrid: {
+    flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6,
+  },
+  varCell: {
+    minWidth: 120, flex: 1,
+    backgroundColor: "#f9fafb", borderRadius: 10,
+    borderWidth: 1, borderColor: "#e5e7eb",
+    paddingHorizontal: 12, paddingVertical: 10,
+    gap: 3,
+  },
+  varCellName:  { fontSize: 11, fontWeight: "600", color: "#6b7280" },
+  varCellValue: { fontSize: 18, fontWeight: "700", color: "#111827" },
 
   // ── Management (edit / delete) ─────────────────────────────────────────────
   managementRow: { flexDirection: "row", gap: 10 },

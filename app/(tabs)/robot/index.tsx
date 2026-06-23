@@ -2,9 +2,10 @@ import { RobotCard } from "@/src/components/ui/RobotCards";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, router } from "expo-router";
-import { Wifi, WifiOff } from "lucide-react-native";
-import { useState } from "react";
+import { ArrowRight, Clock, Wifi, WifiOff } from "lucide-react-native";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -16,21 +17,31 @@ import {
   View,
 } from "react-native";
 
+const LAST_IP_KEY = "lastManualIp";
+
 export default function Robot() {
   const robots        = useRobots();
   const selectedRobot = useSelectedRobot();
   const [manualIp, setManualIp] = useState("");
+  const [lastIp,   setLastIp]   = useState<string | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(LAST_IP_KEY).then(v => { if (v) setLastIp(v); }).catch(() => {});
+  }, []);
 
   if (selectedRobot) {
     return <Redirect href="/robot/connected-robot" />;
   }
 
-  function connectManual() {
-    if (!manualIp.trim()) return;
+  function connectTo(ip: string) {
+    const trimmed = ip.trim();
+    if (!trimmed) return;
+    AsyncStorage.setItem(LAST_IP_KEY, trimmed).catch(() => {});
+    setLastIp(trimmed);
     const robot = {
       robotName:       "Manual",
       robotType:       "",
-      ipAddress:       manualIp.trim(),
+      ipAddress:       trimmed,
       port:            9000,
       serialNumber:    "",
       controlEndpoint: "control",
@@ -38,6 +49,10 @@ export default function Robot() {
     setSelectedRobot(robot);
     robotClient.connectTo(robot);
     router.replace(`/robot/connected-robot`);
+  }
+
+  function connectManual() {
+    connectTo(manualIp);
   }
 
   return (
@@ -70,6 +85,17 @@ export default function Robot() {
               <Text style={styles.connectBtnText}>Connect</Text>
             </TouchableOpacity>
           </View>
+
+          {lastIp && (
+            <>
+              <View style={styles.lastIpDivider} />
+              <TouchableOpacity style={styles.lastIpRow} onPress={() => connectTo(lastIp)} activeOpacity={0.7}>
+                <Clock size={13} color="#9ca3af" />
+                <Text style={styles.lastIpText} numberOfLines={1}>{lastIp}</Text>
+                <ArrowRight size={13} color="#2563eb" />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
 
@@ -151,6 +177,25 @@ const styles = StyleSheet.create({
   connectBtn:         { backgroundColor: "#2563eb", paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9 },
   connectBtnDisabled: { backgroundColor: "#93c5fd" },
   connectBtnText:     { color: "#ffffff", fontWeight: "600", fontSize: 14 },
+  lastIpDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#e5e7eb",
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  lastIpRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+  },
+  lastIpText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "500",
+  },
   list:               { paddingHorizontal: 16, paddingTop: 8 },
   emptyState: {
     alignItems: "center",

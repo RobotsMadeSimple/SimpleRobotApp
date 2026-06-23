@@ -189,7 +189,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'RunVision' | 'SetLocal' | 'ClearLocal';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage';
 
 export type Vector6Val = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
@@ -357,6 +357,20 @@ export type ProgramVariable = {
   description?: string;
   /** When true, this variable is displayed as True/False (stored as 1/0). */
   isBoolean?: boolean;
+  /** When true, this scalar variable is shared across all concurrently running programs (global variable store). */
+  isGlobal?: boolean;
+  /** When true, the current runtime value is shown on the monitor page while the program runs. */
+  displayOnMonitor?: boolean;
+  /** When true, this variable is a stopwatch — its value holds elapsed milliseconds, updated every tick at runtime. */
+  isStopwatch?: boolean;
+  /** When true, the runtime value is saved to disk when the program finishes and restored on the next run. */
+  isPersistent?: boolean;
+};
+
+export type ProgramVariableSnapshot = {
+  name: string;
+  value: number;
+  isBoolean: boolean;
 };
 
 export type ProgramStep = {
@@ -435,6 +449,25 @@ export type ProgramStep = {
   // Variable point target for move steps (overrides pointName when set)
   varPointName?: string;
   varPointIndex?: string;
+  // StartBackground / StopBackground / WaitForBackground
+  backgroundProgramName?: string;
+  // StopwatchControl
+  stopwatchAction?: 'Start' | 'Stop' | 'Reset';
+  stopwatchVariableName?: string;
+  // SaveImage
+  saveImagePath?: string;
+  saveImageCameraId?: string;
+  // Wait condition mode
+  waitMode?: 'duration' | 'condition';
+  waitCondition?: ConditionGroup;
+  waitTimeoutMs?: number;
+  waitTimeoutVariableName?: string;
+  // Loop forEach / while mode
+  loopMode?: 'count' | 'forEach' | 'while';
+  forEachVariableName?: string;
+  forEachValueVariableName?: string;
+  forEachIndexVariableName?: string;
+  loopWhileCondition?: ConditionGroup;
   // AuxMove / AuxContinuous / AuxStop
   auxDeviceId?: string;
   auxAxisIndex?: number;
@@ -455,6 +488,14 @@ export type BuiltProgram = {
   variables?: ProgramVariable[];
   lastUpdatedUnixMs: number;
   isRoutine?: boolean;
+  isBackground?: boolean;
+  /** When true, all running background programs are stopped when this program finishes. */
+  killBackgroundOnStop?: boolean;
+};
+
+export type BackgroundProgramStatus = {
+  name: string;
+  currentStep: string;
 };
 
 // ── Program cycle ─────────────────────────────────────────────────────────────
@@ -634,6 +675,8 @@ export type RobotStatus = {
   lastStackUpdate: number,
   version: string,
   isLinux: boolean,
+  backgroundPrograms: BackgroundProgramStatus[],
+  speedOverridePercent: number,
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -697,5 +740,7 @@ export function createDefaultStatus(): RobotStatus {
     lastStackUpdate: 0,
     version: "0.0.0",
     isLinux: false,
+    backgroundPrograms: [],
+    speedOverridePercent: 100,
   };
 }
