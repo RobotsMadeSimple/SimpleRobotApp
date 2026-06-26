@@ -481,11 +481,33 @@ function AuxAxisConfigModal({
           </View>
 
           <Text style={[styles.cfgLabel, { marginTop: 14 }]}>STEPS PER REVOLUTION</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {([
+              { label: "Full",  steps: 200  },
+              { label: "1/2",   steps: 400  },
+              { label: "1/4",   steps: 800  },
+              { label: "1/8",   steps: 1600 },
+              { label: "1/16",  steps: 3200 },
+            ] as const).map(({ label, steps }) => {
+              const active = stepsPerRev === String(steps);
+              return (
+                <TouchableOpacity
+                  key={steps}
+                  style={[styles.cfgSeg, active && styles.cfgSegActive, { flex: 0, paddingHorizontal: 12 }]}
+                  onPress={() => setStepsPerRev(String(steps))}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.cfgSegText, active && styles.cfgSegTextActive]}>{label}</Text>
+                  <Text style={[{ fontSize: 10, color: active ? "#e9d5ff" : "#9ca3af" }]}>{steps}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <TextInput
             style={styles.cfgInput}
             value={stepsPerRev}
             onChangeText={setStepsPerRev}
-            placeholder="1600"
+            placeholder="Custom"
             placeholderTextColor="#9ca3af"
             keyboardType="numeric"
             returnKeyType="done"
@@ -543,6 +565,10 @@ function AuxAxisConfigModal({
 function AuxAxisCard({ device }: { device: AuxDeviceState }) {
   const [configAxis, setConfigAxis] = useState<AuxAxisChannelState | null>(null);
 
+  const toggleMotors = (value: boolean) => {
+    robotClient.enableAux(device.deviceId, value);
+  };
+
   return (
     <View style={styles.card}>
       {configAxis && (
@@ -560,6 +586,23 @@ function AuxAxisCard({ device }: { device: AuxDeviceState }) {
         subtitle={`${device.deviceId}${device.portName ? `  ·  ${device.portName}` : ""}`}
         connected={device.connected}
       />
+
+      <View style={[styles.row, styles.rowBorder]}>
+        <View style={[styles.typeBadge, { backgroundColor: "#ede9fe" }]}>
+          <Zap size={12} color="#7c3aed" />
+        </View>
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowLabel}>Motor Drivers</Text>
+          <Text style={styles.rowSub}>{device.motorEnabled ? "Enabled" : "Disabled"}</Text>
+        </View>
+        <Switch
+          value={device.motorEnabled ?? true}
+          onValueChange={toggleMotors}
+          disabled={!device.connected}
+          trackColor={{ false: "#e5e7eb", true: "#c4b5fd" }}
+          thumbColor={device.motorEnabled ? "#7c3aed" : "#9ca3af"}
+        />
+      </View>
 
       <PinGroup label="AXES" fg="#7c3aed" bg="#ede9fe">
         {device.axes.map((axis, i) => {

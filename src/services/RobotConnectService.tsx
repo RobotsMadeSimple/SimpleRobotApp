@@ -893,6 +893,7 @@ export class RobotConnectService {
 
   public saveBuiltProgram(program: BuiltProgram) {
     return this.sendCommand("SaveBuiltProgram", {
+      id:                  program.id ?? '',
       name:                program.name,
       description:         program.description,
       steps:               program.steps,
@@ -1109,6 +1110,10 @@ export class RobotConnectService {
     return this.sendCommand("SetAuxAxisConfig", params);
   }
 
+  public enableAux(deviceId: string, enable: boolean) {
+    return this.sendCommand("EnableAux", { deviceId, enable });
+  }
+
   // ── Cameras ────────────────────────────────────────────────────────────────
 
   public getCameras() {
@@ -1209,6 +1214,11 @@ export class RobotConnectService {
   public visionPolygonDebugUrl(programId: string, inspectionId: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/vision/${programId}/debug/polygon/${inspectionId}` : null;
+  }
+
+  public visionLineDebugUrl(programId: string, inspectionId: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/vision/${programId}/debug/line/${inspectionId}` : null;
   }
 
   public visionAnnotatedUrl(id: string): string | null {

@@ -3,7 +3,7 @@ import { useBuiltPrograms, useConnected, useGrids, useLocals, useNanoIO, usePoin
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { ArucoVisionStepOutput, AuxDeviceState, AuxAxisChannelState, BuiltProgram, CameraState, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
   ArrowRight,
@@ -37,6 +37,8 @@ import {
   Plus,
   Radio,
   RefreshCw,
+  RotateCw,
+  RotateCcw,
   Repeat2,
   Search,
   SlidersHorizontal,
@@ -484,14 +486,24 @@ function stepLabel(step: ProgramStep): string {
     case "ClearLocal": return "Clear Local";
     case "RunHoming":  return "Run Homing";
     case "AuxMove": {
-      const steps = step.auxSteps ?? 0;
-      const dir   = steps < 0 ? "◀" : "▶";
-      return `Aux Move  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${Math.abs(steps)} steps  ${dir}`;
+      const axis = step.auxAxisIndex ?? 0;
+      const isAbs = step.auxAbsolute;
+      if (step.auxUnit && step.auxDistance != null) {
+        const val = isAbs ? `→ ${step.auxDistance}` : (step.auxDistance >= 0 ? `+${step.auxDistance}` : `${step.auxDistance}`);
+        return `Aux Move  ·  Axis ${axis}  ·  ${val} ${step.auxUnit}`;
+      }
+      if (step.auxSteps != null) {
+        const val = isAbs ? `→ ${step.auxSteps}` : (step.auxSteps >= 0 ? `+${step.auxSteps}` : `${step.auxSteps}`);
+        return `Aux Move  ·  Axis ${axis}  ·  ${val} steps`;
+      }
+      return `Aux Move  ·  Axis ${axis}`;
     }
     case "AuxContinuous":
       return `Aux Run  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s`;
     case "AuxStop":
       return "Aux Stop";
+    case "AuxEnable":
+      return `Aux Motors ${step.auxEnable === false ? "OFF" : "ON"}`;
     case "StartBackground":
       return step.backgroundProgramName ? `Start Background  →  ${step.backgroundProgramName}` : "Start Background";
     case "StopBackground":
@@ -533,6 +545,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "AuxMove":            return <ChevronsRight size={size} color={color} />;
     case "AuxContinuous":      return <Play          size={size} color={color} />;
     case "AuxStop":            return <OctagonX      size={size} color={color} />;
+    case "AuxEnable":          return <Zap           size={size} color={color} />;
     case "StartBackground":    return <Layers        size={size} color={color} />;
     case "StopBackground":     return <Square        size={size} color={color} />;
     case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
@@ -567,6 +580,7 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
   AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
+  AuxEnable:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Motor Enable"   },
   RunVision:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
   SaveImage:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Save Image"          },
   StartBackground:  { accent: "#16a34a", iconBg: "#dcfce7", iconColor: "#16a34a", label: "Start Background"   },
@@ -697,8 +711,9 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
     case "RunHoming":
       return "Runs the full homing sequence";
     case "AuxMove": {
-      const parts: string[] = [`Axis ${step.auxAxisIndex ?? 0}`];
-      if (step.auxVelocity != null) parts.push(`${step.auxVelocity} steps/s`);
+      const unit  = step.auxUnit ?? "steps";
+      const parts: string[] = [step.auxAbsolute ? "absolute" : "relative"];
+      if (step.auxVelocity != null) parts.push(`${step.auxVelocity} ${unit}/s`);
       if (step.auxWaitForDone === false) parts.push("no wait");
       return parts.join("  ·  ");
     }
@@ -706,6 +721,8 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return `Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s  (continuous)`;
     case "AuxStop":
       return step.auxImmediate ? "Immediate halt" : "Controlled stop";
+    case "AuxEnable":
+      return step.auxEnable === false ? "Disable motor drivers" : "Enable motor drivers";
     case "StartBackground":
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
     case "StopBackground":
@@ -743,6 +760,7 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
   { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
+  { type: "AuxEnable",     label: "Aux Motor Enable",   desc: "Enable or disable the stepper motor drivers on an aux IO card" },
   { type: "RunVision",        label: "Run Vision",            desc: "Trigger a vision program, wait for one inspection result, then continue" },
   { type: "StartBackground",  label: "Start Background",      desc: "Start a background program running in parallel with this one" },
   { type: "StopBackground",   label: "Stop Background",       desc: "Stop a named background program" },
@@ -765,7 +783,7 @@ const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
   { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ"] },
   { label: "Variables",    color: "#7c3aed", types: ["SetVariable"] },
   { label: "Vision",       color: "#0891b2", types: ["RunVision", "SaveImage"] },
-  { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop"] },
+  { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"] },
   { label: "Tool & Frame", color: "#7c3aed", types: ["SetTool", "SetLocal", "ClearLocal"] },
   { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
   { label: "Background",   color: "#16a34a", types: ["StartBackground", "StopBackground", "WaitForBackground"] },
@@ -982,7 +1000,7 @@ const ptStyles = StyleSheet.create({
 
 // ── Condition editor ─────────────────────────────────────────────────────────
 
-const COND_OPS: ConditionOp[] = ['==', '!=', '>', '>=', '<', '<='];
+const COND_OPS: ConditionOp[] = ['==', '!=', '>', '>=', '<', '<=', 'contains', 'startsWith', 'endsWith'];
 const COND_OP_LABELS: Record<ConditionOp, string> = {
   '==': 'equals',
   '!=': 'not equals',
@@ -990,6 +1008,9 @@ const COND_OP_LABELS: Record<ConditionOp, string> = {
   '>=': 'greater than or equal',
   '<':  'less than',
   '<=': 'less than or equal',
+  'contains':   'contains  (string)',
+  'startsWith': 'starts with  (string)',
+  'endsWith':   'ends with  (string)',
 };
 
 function conditionSummary(group: ConditionGroup | undefined): string {
@@ -1004,11 +1025,13 @@ function conditionSummary(group: ConditionGroup | undefined): string {
 function ConditionItemEditor({
   item,
   variables,
+  contextVariables,
   onChange,
   onDelete,
 }: {
   item: ConditionItem;
   variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
   onChange: (updated: ConditionItem) => void;
   onDelete: () => void;
 }) {
@@ -1102,6 +1125,8 @@ function ConditionItemEditor({
         visible={leftPickerOpen}
         onClose={() => setLeftPickerOpen(false)}
         variables={variables ?? []}
+        contextVariables={contextVariables}
+        contextLabel="Caller Variables"
         selected={(item.left ?? '').startsWith('$') ? item.left.slice(1) : undefined}
         title="Left Variable"
         onSelect={v => { if (v) onChange({ ...item, left: `$${v.name}` }); }}
@@ -1110,6 +1135,8 @@ function ConditionItemEditor({
         visible={rightPickerOpen}
         onClose={() => setRightPickerOpen(false)}
         variables={variables ?? []}
+        contextVariables={contextVariables}
+        contextLabel="Caller Variables"
         selected={(item.right ?? '').startsWith('$') ? item.right.slice(1) : undefined}
         title="Right Variable"
         onSelect={v => { if (v) insertRightToken(`$${v.name}`); }}
@@ -1125,8 +1152,8 @@ function ConditionItemEditor({
                 activeOpacity={0.7}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: op === item.operator ? '#0891b2' : '#374151', width: 28 }}>{op}</Text>
-                  <Text style={{ fontSize: 13, color: '#6b7280' }}>{COND_OP_LABELS[op]}</Text>
+                  <Text style={{ fontSize: op.length > 3 ? 12 : 16, fontWeight: '700', color: op === item.operator ? '#0891b2' : '#374151', minWidth: 28 }}>{op}</Text>
+                  <Text style={{ fontSize: 13, color: '#6b7280', flex: 1 }}>{COND_OP_LABELS[op]}</Text>
                 </View>
                 {op === item.operator && <Check size={15} color="#0891b2" />}
               </TouchableOpacity>
@@ -1142,10 +1169,12 @@ function ConditionGroupEditor({
   group,
   onChange,
   variables,
+  contextVariables,
 }: {
   group: ConditionGroup;
   onChange: (updated: ConditionGroup) => void;
   variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
 }) {
   const accent = '#0891b2';
   return (
@@ -1168,7 +1197,7 @@ function ConditionGroupEditor({
         <Text style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10, fontStyle: 'italic' }}>No conditions — branch always runs.</Text>
       )}
       {(group.items ?? []).map((item, i) => (
-        <ConditionItemEditor key={item.id} item={item} variables={variables}
+        <ConditionItemEditor key={item.id} item={item} variables={variables} contextVariables={contextVariables}
           onChange={updated => onChange({ ...group, items: (group.items ?? []).map((ci, j) => j === i ? updated : ci) })}
           onDelete={() => onChange({ ...group, items: (group.items ?? []).filter((_, j) => j !== i) })} />
       ))}
@@ -1186,12 +1215,13 @@ function ConditionGroupEditor({
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
-type VarKind = 'number' | 'boolean' | 'list' | 'points';
+type VarKind = 'number' | 'boolean' | 'list' | 'points' | 'string';
 
 function varKind(v: ProgramVariable): VarKind {
   if (v.points != null) return 'points';
   if (v.values != null && v.values.length > 0) return 'list';
   if (v.isBoolean) return 'boolean';
+  if (v.isString) return 'string';
   return 'number';
 }
 
@@ -1200,10 +1230,12 @@ const VAR_KIND_META: Record<VarKind, { label: string; color: string; bg: string;
   boolean: { label: 'BOOL', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
   list:    { label: 'LIST', color: '#7c3aed', bg: '#ede9fe', border: '#c4b5fd' },
   points:  { label: 'PTS',  color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
+  string:  { label: 'STR',  color: '#ea580c', bg: '#fff7ed', border: '#fed7aa' },
 };
 
 function VarPickerModal({
   visible, onClose, variables, selected, onSelect, title, showNone = false,
+  contextVariables, contextLabel,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -1212,6 +1244,8 @@ function VarPickerModal({
   onSelect: (variable: ProgramVariable | undefined) => void;
   title: string;
   showNone?: boolean;
+  contextVariables?: ProgramVariable[];
+  contextLabel?: string;
 }) {
   const [search,     setSearch]     = useState('');
   const [kindFilter, setKindFilter] = useState<VarKind | 'all'>('all');
@@ -1222,9 +1256,9 @@ function VarPickerModal({
 
   const kinds = useMemo(() => {
     const seen = new Set<VarKind>();
-    variables.forEach(v => seen.add(varKind(v)));
+    [...variables, ...(contextVariables ?? [])].forEach(v => seen.add(varKind(v)));
     return [...seen];
-  }, [variables]);
+  }, [variables, contextVariables]);
 
   const filtered = useMemo(() =>
     variables.filter(v => {
@@ -1232,6 +1266,13 @@ function VarPickerModal({
       const q = search.trim().toLowerCase();
       return !q || v.name.toLowerCase().includes(q);
     }), [variables, kindFilter, search]);
+
+  const filteredContext = useMemo(() =>
+    (contextVariables ?? []).filter(v => {
+      if (kindFilter !== 'all' && varKind(v) !== kindFilter) return false;
+      const q = search.trim().toLowerCase();
+      return !q || v.name.toLowerCase().includes(q);
+    }), [contextVariables, kindFilter, search]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -1347,6 +1388,46 @@ function VarPickerModal({
                 </TouchableOpacity>
               );
             })}
+
+            {filteredContext.length > 0 && (
+              <>
+                <View style={{ paddingHorizontal: 4, paddingTop: 10, paddingBottom: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb', marginTop: filtered.length > 0 ? 6 : 0 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#9ca3af', letterSpacing: 0.5 }}>
+                    FROM {(contextLabel ?? 'CALLER PROGRAM').toUpperCase()}
+                  </Text>
+                </View>
+                {filteredContext.map((v, i) => {
+                  const active = selected === v.name;
+                  const kind   = varKind(v);
+                  const meta   = VAR_KIND_META[kind];
+                  return (
+                    <TouchableOpacity
+                      key={v.id}
+                      style={[ms.row, i < filteredContext.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                      onPress={() => { onSelect(v); onClose(); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                        {active && <View style={ms.radioDot} />}
+                      </View>
+                      <View style={ms.rowText}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                          <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
+                          <View style={{ backgroundColor: meta.bg, borderRadius: 4,
+                            paddingHorizontal: 5, paddingVertical: 1,
+                            borderWidth: 1, borderColor: meta.border }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: meta.color, letterSpacing: 0.3 }}>
+                              {meta.label}
+                            </Text>
+                          </View>
+                        </View>
+                        {v.description ? <Text style={ms.rowDesc} numberOfLines={1}>{v.description}</Text> : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>
@@ -1457,27 +1538,37 @@ function SvDropdownModal({
 function SetVariableFields({
   draft,
   variables,
+  contextVariables,
   set,
 }: {
   draft: ProgramStep;
   variables: ProgramVariable[] | undefined;
+  contextVariables?: ProgramVariable[];
   set: (p: Partial<ProgramStep>) => void;
 }) {
   const varList = (variables ?? []).map(v => v.name);
+  const contextVarList = (contextVariables ?? []).map(v => v.name);
   const initial = useMemo(() => parseVarExpr(draft.variableName, draft.variableExpr), []);
   const [op, setOp]           = useState<SetVarOp>(initial.op);
   const [rawVal, setRawVal]   = useState(initial.val);
   const [varDropOpen, setVarDropOpen] = useState(false);
   const [opDropOpen,  setOpDropOpen]  = useState(false);
+  const [strVarPickerOpen, setStrVarPickerOpen] = useState(false);
+
+  const selectedVar = [...(variables ?? []), ...(contextVariables ?? [])].find(v => v.name === draft.variableName);
+  const isStringVar = selectedVar?.isString === true;
 
   function apply(varName: string | undefined, operator: SetVarOp, value: string) {
     if (!varName) return;
-    set({ variableName: varName, variableExpr: buildVarExpr(varName, operator, value) });
+    const effectiveOp: SetVarOp = isStringVar ? "=" : operator;
+    set({ variableName: varName, variableExpr: buildVarExpr(varName, effectiveOp, value) });
   }
 
   function selectVar(name: string) {
     setVarDropOpen(false);
-    set({ variableName: name, variableExpr: buildVarExpr(name, op, rawVal) });
+    const isStr = [...(variables ?? []), ...(contextVariables ?? [])].find(v => v.name === name)?.isString === true;
+    const effectiveOp: SetVarOp = isStr ? "=" : op;
+    set({ variableName: name, variableExpr: buildVarExpr(name, effectiveOp, rawVal) });
   }
 
   function selectOp(next: SetVarOp) {
@@ -1488,10 +1579,17 @@ function SetVariableFields({
 
   function changeVal(val: string) {
     setRawVal(val);
-    apply(draft.variableName, op, val);
+    apply(draft.variableName, isStringVar ? "=" : op, val);
   }
 
-  if (varList.length === 0) {
+  function insertStrToken(token: string) {
+    const cur = rawVal.trimEnd();
+    const next = cur ? `${cur}$${token}` : `$${token}`;
+    setRawVal(next);
+    apply(draft.variableName, "=", next);
+  }
+
+  if (varList.length === 0 && contextVarList.length === 0) {
     return (
       <Text style={ms.emptyHint}>
         No variables defined. Add variables in the Variables section of the builder.
@@ -1500,7 +1598,7 @@ function SetVariableFields({
   }
 
   const preview = draft.variableName && rawVal
-    ? `$${draft.variableName} = ${buildVarExpr(draft.variableName, op, rawVal) ?? "?"}`
+    ? `$${draft.variableName} = ${buildVarExpr(draft.variableName, isStringVar ? "=" : op, rawVal) ?? "?"}`
     : null;
 
   return (
@@ -1514,25 +1612,61 @@ function SetVariableFields({
         <ChevronDown size={14} color="#7c3aed" />
       </TouchableOpacity>
 
-      {/* Row 2 — Operator */}
-      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OPERATION</Text>
-      <TouchableOpacity style={svs.selectBtn} onPress={() => setOpDropOpen(true)} activeOpacity={0.75}>
-        <Text style={svs.selectBtnText}>{op}</Text>
-        <Text style={svs.selectBtnSub} numberOfLines={1}>{OP_LABELS[op]}</Text>
-        <ChevronDown size={14} color="#7c3aed" />
-      </TouchableOpacity>
+      {/* Row 2 — Operator (hidden for string vars — strings only support assign) */}
+      {!isStringVar && (
+        <>
+          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OPERATION</Text>
+          <TouchableOpacity style={svs.selectBtn} onPress={() => setOpDropOpen(true)} activeOpacity={0.75}>
+            <Text style={svs.selectBtnText}>{op}</Text>
+            <Text style={svs.selectBtnSub} numberOfLines={1}>{OP_LABELS[op]}</Text>
+            <ChevronDown size={14} color="#7c3aed" />
+          </TouchableOpacity>
+        </>
+      )}
 
       {/* Row 3 — Value */}
-      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (number or expression)</Text>
-      <TextInput
-        style={[ms.input, { color: "#7c3aed" }]}
-        value={rawVal}
-        onChangeText={changeVal}
-        placeholder="e.g.  1  or  $speed * 2"
-        placeholderTextColor="#c4b5fd"
-        returnKeyType="done"
-        autoFocus={!!draft.variableName}
-      />
+      {isStringVar ? (
+        <>
+          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STRING VALUE</Text>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <TextInput
+              style={[ms.input, { flex: 1, color: "#ea580c" }]}
+              value={rawVal}
+              onChangeText={changeVal}
+              placeholder="e.g.  Part A  or  Part $partId"
+              placeholderTextColor="#fba67a"
+              returnKeyType="done"
+              autoCapitalize="none"
+              autoFocus={!!draft.variableName}
+            />
+            {(variables ?? []).filter(v => !v.isString && !v.points && !v.values).length > 0 && (
+              <TouchableOpacity
+                style={{ backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#fed7aa', borderRadius: 9, paddingHorizontal: 10, justifyContent: 'center', marginTop: 6 }}
+                onPress={() => setStrVarPickerOpen(true)}
+                activeOpacity={0.75}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#ea580c' }}>$var</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <Text style={[ms.hintText, { marginTop: 2 }]}>
+            Embed variables with <Text style={{ fontWeight: '700', color: '#ea580c' }}>$varName</Text> — replaced at runtime.
+          </Text>
+        </>
+      ) : (
+        <>
+          <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (number or expression)</Text>
+          <TextInput
+            style={[ms.input, { color: "#7c3aed" }]}
+            value={rawVal}
+            onChangeText={changeVal}
+            placeholder="e.g.  1  or  $speed * 2"
+            placeholderTextColor="#c4b5fd"
+            returnKeyType="done"
+            autoFocus={!!draft.variableName}
+          />
+        </>
+      )}
 
       {/* Live preview */}
       {preview && <Text style={svs.preview}>{preview}</Text>}
@@ -1550,25 +1684,59 @@ function SetVariableFields({
             {name === draft.variableName && <Check size={15} color="#7c3aed" />}
           </TouchableOpacity>
         ))}
+        {contextVarList.length > 0 && (
+          <>
+            <View style={{ paddingHorizontal: 4, paddingTop: 10, paddingBottom: 4,
+              borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb',
+              marginTop: varList.length > 0 ? 4 : 0 }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#9ca3af', letterSpacing: 0.5 }}>CALLER VARIABLES</Text>
+            </View>
+            {contextVarList.map((name, i) => (
+              <TouchableOpacity
+                key={`ctx_${name}`}
+                style={[svs.optionRow, i < contextVarList.length - 1 && svs.optionRowBorder, name === draft.variableName && svs.optionRowActive]}
+                onPress={() => selectVar(name)}
+                activeOpacity={0.7}
+              >
+                <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
+                {name === draft.variableName && <Check size={15} color="#7c3aed" />}
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
       </SvDropdownModal>
 
-      {/* Operator picker modal */}
-      <SvDropdownModal visible={opDropOpen} onClose={() => setOpDropOpen(false)} title="Select Operation">
-        {SET_VAR_OPS.map((o, i) => (
-          <TouchableOpacity
-            key={o}
-            style={[svs.optionRow, i < SET_VAR_OPS.length - 1 && svs.optionRowBorder, o === op && svs.optionRowActive]}
-            onPress={() => selectOp(o)}
-            activeOpacity={0.7}
-          >
-            <View style={svs.opOptionLeft}>
-              <Text style={[svs.opOptionSymbol, o === op && svs.optionTextActive]}>{o}</Text>
-              <Text style={svs.opOptionDesc}>{OP_LABELS[o]}</Text>
-            </View>
-            {o === op && <Check size={15} color="#7c3aed" />}
-          </TouchableOpacity>
-        ))}
-      </SvDropdownModal>
+      {/* Operator picker modal (numeric vars only) */}
+      {!isStringVar && (
+        <SvDropdownModal visible={opDropOpen} onClose={() => setOpDropOpen(false)} title="Select Operation">
+          {SET_VAR_OPS.map((o, i) => (
+            <TouchableOpacity
+              key={o}
+              style={[svs.optionRow, i < SET_VAR_OPS.length - 1 && svs.optionRowBorder, o === op && svs.optionRowActive]}
+              onPress={() => selectOp(o)}
+              activeOpacity={0.7}
+            >
+              <View style={svs.opOptionLeft}>
+                <Text style={[svs.opOptionSymbol, o === op && svs.optionTextActive]}>{o}</Text>
+                <Text style={svs.opOptionDesc}>{OP_LABELS[o]}</Text>
+              </View>
+              {o === op && <Check size={15} color="#7c3aed" />}
+            </TouchableOpacity>
+          ))}
+        </SvDropdownModal>
+      )}
+
+      {/* String var token picker — inserts $varName into string value */}
+      <VarPickerModal
+        visible={strVarPickerOpen}
+        onClose={() => setStrVarPickerOpen(false)}
+        variables={(variables ?? []).filter(v => !v.points && !v.values)}
+        contextVariables={(contextVariables ?? []).filter(v => !v.points && !v.values)}
+        contextLabel="Caller Variables"
+        selected={undefined}
+        title="Insert Variable"
+        onSelect={v => { if (v) insertStrToken(v.name); setStrVarPickerOpen(false); }}
+      />
     </>
   );
 }
@@ -1678,18 +1846,22 @@ function StepConfigModal({
   visible,
   step,
   variables,
+  contextVariables,
   scopeSteps,
   stepIndex,
   onSave,
   onClose,
+  onEnterRoutine,
 }: {
   visible: boolean;
   step: ProgramStep | null;
   variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
   scopeSteps?: ProgramStep[];
   stepIndex?: number;
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
+  onEnterRoutine?: (routineName: string) => void;
 }) {
   const points        = usePoints();
   const grids         = useGrids();
@@ -2563,6 +2735,7 @@ function StepConfigModal({
                   group={waitCond}
                   onChange={g => set({ waitCondition: g })}
                   variables={variables}
+                  contextVariables={contextVariables}
                 />
                 <Text style={[ms.fieldLabel, { marginTop: 14 }]}>MAX TIMEOUT  (ms, 0 = no limit)</Text>
                 <TextInput
@@ -2759,6 +2932,7 @@ function StepConfigModal({
                   group={whileCond}
                   onChange={g => set({ loopWhileCondition: g })}
                   variables={variables}
+                  contextVariables={contextVariables}
                 />
               </>
             )}
@@ -3121,7 +3295,7 @@ function StepConfigModal({
       }
 
       case "SetVariable":
-        return <SetVariableFields draft={draft!} variables={variables} set={set} />;
+        return <SetVariableFields draft={draft!} variables={variables} contextVariables={contextVariables} set={set} />;
 
       case "Label": {
         const otherLabels = (scopeSteps ?? [])
@@ -3273,95 +3447,100 @@ function StepConfigModal({
         );
 
       case "AuxMove": {
-        const deviceId   = draft!.auxDeviceId ?? "AUX_STEPPER_001";
-        const axisIndex  = draft!.auxAxisIndex ?? 0;
-        const auxDevice  = auxDevices.find(d => d.deviceId === deviceId);
-        const axisCfg    = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
-        const isPhysical = !!axisCfg?.axisType;
-        const unit       = isPhysical ? auxUnitLabel(axisCfg!) : "steps";
-        // In physical mode use auxDistance; in steps mode use auxSteps
-        const rawDist    = draft!.auxDistance ?? 0;
-        const rawSteps   = draft!.auxSteps ?? 0;
-        const distVal    = isPhysical ? rawDist : rawSteps;
-        const dir        = (isPhysical ? rawDist : rawSteps) < 0 ? -1 : 1;
+        const deviceId    = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
+        const axisIndex   = draft!.auxAxisIndex ?? 0;
+        const isAbsolute  = draft!.auxAbsolute ?? false;
+        const auxDevice   = auxDevices.find(d => d.deviceId === deviceId);
+        const axisCfg     = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
+        const isPhysical  = !!axisCfg?.axisType;
+        const unit        = isPhysical ? auxUnitLabel(axisCfg!) : "steps";
+        const displayAxes = auxDevice?.axes.length ? auxDevice.axes : [0,1,2,3].map(n => ({ axisIndex: n, name: "" }));
 
-        const axisLabel = (n: number) => {
-          const a = auxDevice?.axes.find(ax => ax.axisIndex === n);
-          return a?.name ? `${n}  ${a.name}` : String(n);
-        };
-
-        const setDir = (d: 1 | -1) => {
-          if (isPhysical) set({ auxDistance: Math.abs(rawDist || 100) * d, auxUnit: unit });
-          else            set({ auxSteps: Math.round(Math.abs(rawSteps || 1600)) * d });
-        };
+        const valueLabel = isAbsolute
+          ? `TARGET POSITION  (${unit})`
+          : `OFFSET  (${unit})`;
+        const valueHint = isAbsolute
+          ? `Moves to this absolute position from the axis zero point. Positive = CW, negative = CCW.`
+          : `Moves this distance relative to the current position. Positive = CW, negative = CCW.`;
 
         return (
           <>
-            <Text style={ms.hintText}>
-              {isPhysical
-                ? `Move an aux stepper axis a fixed distance in ${unit} with trapezoidal acceleration.`
-                : "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration."}
-              {" "}Positive = CW (forward), negative = CCW (reverse).
-            </Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE ID</Text>
-            <TextInput
-              style={ms.input}
-              value={deviceId}
-              onChangeText={v => set({ auxDeviceId: v || undefined })}
-              placeholder="AUX_STEPPER_001"
-              placeholderTextColor="#9ca3af"
-              autoCapitalize="none"
-              returnKeyType="done"
-            />
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 0 }]}>DEVICE</Text>
+            {auxDevices.length === 0 ? (
+              <Text style={[ms.emptyHint, { marginTop: 4 }]}>No aux devices connected.</Text>
+            ) : auxDevices.map((d, i) => {
+              const active = deviceId === d.deviceId;
+              return (
+                <TouchableOpacity key={d.deviceId}
+                  style={[ms.row, i < auxDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ auxDeviceId: d.deviceId })} activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]} numberOfLines={1}>
+                      {d.deviceName || d.deviceId}
+                    </Text>
+                    {d.deviceName && d.deviceName !== d.deviceId
+                      ? <Text style={ms.rowDesc}>{d.deviceId}</Text>
+                      : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MOTOR</Text>
+            {displayAxes.map((a, i) => {
+              const active = axisIndex === a.axisIndex;
+              const label  = a.name ? `${a.name}` : `Axis ${a.axisIndex}`;
+              return (
+                <TouchableOpacity key={a.axisIndex}
+                  style={[ms.row, i < displayAxes.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ auxAxisIndex: a.axisIndex })} activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MODE</Text>
             <View style={ms.segRow}>
-              {[0, 1, 2, 3].map(n => {
-                const active = axisIndex === n;
+              {([{ label: "Relative offset", val: false }, { label: "Absolute position", val: true }] as const).map(({ label, val }) => {
+                const active = isAbsolute === val;
                 return (
-                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ auxAxisIndex: n })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{axisLabel(n)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
-            <View style={ms.segRow}>
-              {([{ label: "▶  CW (+)", val: 1 }, { label: "◀  CCW (−)", val: -1 }] as const).map(({ label, val }) => {
-                const active = dir === val;
-                return (
-                  <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => setDir(val)} activeOpacity={0.8}>
+                  <TouchableOpacity key={label} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ auxAbsolute: val || undefined })} activeOpacity={0.8}>
                     <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{unit.toUpperCase()}</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{valueLabel}</Text>
             {isPhysical
               ? <ExpressionInput style={ms.input} fieldKey="auxDistance"
-                  value={Math.abs(rawDist) || undefined}
+                  value={draft!.auxDistance}
                   expressions={draft!.expressions}
-                  onChangeValue={v => set({ auxDistance: v !== undefined ? v * dir : undefined, auxUnit: unit })}
+                  onChangeValue={v => set({ auxDistance: v, auxUnit: unit })}
                   onChangeExpr={setExpr}
-                  placeholder="100"
+                  placeholder={isAbsolute ? "0" : "100"}
                   variables={variables} />
               : <ExpressionInput style={ms.input} fieldKey="auxSteps"
-                  value={Math.abs(rawSteps) || undefined}
+                  value={draft!.auxSteps}
                   expressions={draft!.expressions}
-                  onChangeValue={v => set({ auxSteps: v !== undefined ? Math.round(v) * dir : undefined })}
+                  onChangeValue={v => set({ auxSteps: v !== undefined ? Math.round(v) : undefined })}
                   onChangeExpr={setExpr}
-                  placeholder="1600"
+                  placeholder={isAbsolute ? "0" : "1600"}
                   variables={variables} />
             }
+            <Text style={ms.hintText}>{valueHint}</Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VELOCITY  ({unit}/s)</Text>
+            <ExpressionInput style={ms.input} fieldKey="auxVelocity"
+              value={draft!.auxVelocity} expressions={draft!.expressions}
+              onChangeValue={v => set({ auxVelocity: v })} onChangeExpr={setExpr}
+              allowUndefined placeholder={isPhysical ? "10" : "1600"} variables={variables} />
             <View style={ms.twoCol}>
-              <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>VELOCITY  ({unit}/s)</Text>
-                <ExpressionInput style={ms.input} fieldKey="auxVelocity"
-                  value={draft!.auxVelocity} expressions={draft!.expressions}
-                  onChangeValue={v => set({ auxVelocity: v })} onChangeExpr={setExpr}
-                  allowUndefined placeholder={isPhysical ? "10" : "1600"} variables={variables} />
-              </View>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  ({unit}/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="auxAccel"
@@ -3369,8 +3548,6 @@ function StepConfigModal({
                   onChangeValue={v => set({ auxAccel: v })} onChangeExpr={setExpr}
                   allowUndefined placeholder={isPhysical ? "50" : "3200"} variables={variables} />
               </View>
-            </View>
-            <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  ({unit}/s²)</Text>
                 <ExpressionInput style={ms.input} fieldKey="auxDecel"
@@ -3396,57 +3573,74 @@ function StepConfigModal({
       }
 
       case "AuxContinuous": {
-        const deviceId  = draft!.auxDeviceId ?? "AUX_STEPPER_001";
-        const axisIndex = draft!.auxAxisIndex ?? 0;
-        const auxDevice = auxDevices.find(d => d.deviceId === deviceId);
-        const axisCfg   = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
+        const deviceId   = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
+        const axisIndex  = draft!.auxAxisIndex ?? 0;
+        const auxDevice  = auxDevices.find(d => d.deviceId === deviceId);
+        const axisCfg    = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
         const isPhysical = !!axisCfg?.axisType;
-        const unit      = isPhysical ? auxUnitLabel(axisCfg!) : "steps";
-        const velocity  = draft!.auxVelocity ?? (isPhysical ? 10 : 800);
-        const dir       = velocity < 0 ? -1 : 1;
-
-        const axisLabel = (n: number) => {
-          const a = auxDevice?.axes.find(ax => ax.axisIndex === n);
-          return a?.name ? `${n}  ${a.name}` : String(n);
-        };
+        const unit       = isPhysical ? auxUnitLabel(axisCfg!) : "steps";
+        const velocity   = draft!.auxVelocity ?? (isPhysical ? 10 : 800);
+        const dir        = velocity < 0 ? -1 : 1;
+        const displayAxes = auxDevice?.axes.length ? auxDevice.axes : [0,1,2,3].map(n => ({ axisIndex: n, name: "" }));
 
         return (
           <>
             <Text style={ms.hintText}>
-              Start the aux axis running continuously at the given speed.
-              Use an AuxStop step later to stop it.
-              Positive velocity = CW (forward), negative = CCW (reverse).
+              Start the aux axis running continuously at the given speed. Use an AuxStop step to stop it.
+              CW = positive direction, CCW = negative.
             </Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE ID</Text>
-            <TextInput
-              style={ms.input}
-              value={deviceId}
-              onChangeText={v => set({ auxDeviceId: v || undefined })}
-              placeholder="AUX_STEPPER_001"
-              placeholderTextColor="#9ca3af"
-              autoCapitalize="none"
-              returnKeyType="done"
-            />
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
-            <View style={ms.segRow}>
-              {[0, 1, 2, 3].map(n => {
-                const active = axisIndex === n;
-                return (
-                  <TouchableOpacity key={n} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ auxAxisIndex: n })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{axisLabel(n)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE</Text>
+            {auxDevices.length === 0 ? (
+              <Text style={[ms.emptyHint, { marginTop: 4 }]}>No aux devices connected.</Text>
+            ) : auxDevices.map((d, i) => {
+              const active = deviceId === d.deviceId;
+              return (
+                <TouchableOpacity key={d.deviceId}
+                  style={[ms.row, i < auxDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ auxDeviceId: d.deviceId })} activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]} numberOfLines={1}>
+                      {d.deviceName || d.deviceId}
+                    </Text>
+                    {d.deviceName && d.deviceName !== d.deviceId
+                      ? <Text style={ms.rowDesc}>{d.deviceId}</Text>
+                      : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MOTOR</Text>
+            {displayAxes.map((a, i) => {
+              const active = axisIndex === a.axisIndex;
+              const label  = a.name ? `${a.name}` : `Axis ${a.axisIndex}`;
+              return (
+                <TouchableOpacity key={a.axisIndex}
+                  style={[ms.row, i < displayAxes.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ auxAxisIndex: a.axisIndex })} activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
             <View style={ms.segRow}>
-              {([{ label: "▶  CW (+)", val: 1 }, { label: "◀  CCW (−)", val: -1 }] as const).map(({ label, val }) => {
+              {([{ Icon: RotateCw, label: "CW", val: 1 }, { Icon: RotateCcw, label: "CCW", val: -1 }] as const).map(({ Icon, label, val }) => {
                 const active = dir === val;
                 return (
                   <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ auxVelocity: Math.abs(velocity || (isPhysical ? 10 : 800)) * val, auxUnit: isPhysical ? unit : undefined })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                    onPress={() => set({ auxVelocity: Math.abs(velocity || (isPhysical ? 10 : 800)) * val, auxUnit: isPhysical ? unit : undefined })}
+                    activeOpacity={0.8}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                      <Icon size={15} color={active ? "#7c3aed" : "#6b7280"} />
+                      <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -3468,17 +3662,86 @@ function StepConfigModal({
         );
       }
 
-      case "AuxStop":
+      case "AuxStop": {
+        const stopAll     = !draft!.auxDeviceId;
+        const deviceId    = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
+        const axisIndex   = draft!.auxAxisIndex ?? 0;
+        const auxDevice   = auxDevices.find(d => d.deviceId === deviceId);
+        const displayAxes = auxDevice?.axes.length ? auxDevice.axes : [0,1,2,3].map(n => ({ axisIndex: n, name: "" }));
+
         return (
           <>
             <Text style={ms.hintText}>
-              Stop all aux axis motion. Controlled stop ramps down gracefully; immediate halt cuts power instantly.
+              Stop aux axis motion. Controlled stop ramps down gracefully; immediate halt cuts power instantly.
             </Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DECEL RATE  (steps/s²)</Text>
-            <ExpressionInput style={ms.input} fieldKey="auxDecel"
-              value={draft!.auxDecel} expressions={draft!.expressions}
-              onChangeValue={v => set({ auxDecel: v })} onChangeExpr={setExpr}
-              allowUndefined placeholder="5000" variables={variables} />
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>TARGET</Text>
+            <View style={ms.segRow}>
+              {([{ label: "All axes", val: true }, { label: "Specific axis", val: false }] as const).map(({ label, val }) => {
+                const active = stopAll === val;
+                return (
+                  <TouchableOpacity key={label} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => {
+                      if (val) set({ auxDeviceId: undefined, auxAxisIndex: undefined });
+                      else     set({ auxDeviceId: auxDevices[0]?.deviceId ?? deviceId, auxAxisIndex: 0 });
+                    }} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {!stopAll && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE</Text>
+                {auxDevices.length === 0 ? (
+                  <Text style={[ms.emptyHint, { marginTop: 4 }]}>No aux devices connected.</Text>
+                ) : auxDevices.map((d, i) => {
+                  const active = deviceId === d.deviceId;
+                  return (
+                    <TouchableOpacity key={d.deviceId}
+                      style={[ms.row, i < auxDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                      onPress={() => set({ auxDeviceId: d.deviceId })} activeOpacity={0.7}>
+                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                        {active && <View style={ms.radioDot} />}
+                      </View>
+                      <View style={ms.rowText}>
+                        <Text style={[ms.rowLabel, active && ms.rowLabelActive]} numberOfLines={1}>
+                          {d.deviceName || d.deviceId}
+                        </Text>
+                        {d.deviceName && d.deviceName !== d.deviceId
+                          ? <Text style={ms.rowDesc}>{d.deviceId}</Text>
+                          : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MOTOR</Text>
+                {displayAxes.map((a, i) => {
+                  const active = axisIndex === a.axisIndex;
+                  const label  = a.name ? `${a.name}` : `Axis ${a.axisIndex}`;
+                  return (
+                    <TouchableOpacity key={a.axisIndex}
+                      style={[ms.row, i < displayAxes.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                      onPress={() => set({ auxAxisIndex: a.axisIndex })} activeOpacity={0.7}>
+                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                        {active && <View style={ms.radioDot} />}
+                      </View>
+                      <View style={ms.rowText}>
+                        <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{label}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+            {!draft!.auxImmediate && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DECEL RATE  (steps/s²)</Text>
+                <ExpressionInput style={ms.input} fieldKey="auxDecel"
+                  value={draft!.auxDecel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ auxDecel: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="5000" variables={variables} />
+              </>
+            )}
             <View style={[ms.switchRow, { marginTop: 14 }]}>
               <Text style={ms.switchLabel}>Immediate hard stop</Text>
               <Switch
@@ -3489,6 +3752,59 @@ function StepConfigModal({
             </View>
           </>
         );
+      }
+
+      case "AuxEnable": {
+        const deviceId  = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
+        const motorOn   = draft!.auxEnable !== false;
+
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Enable or disable the stepper motor drivers on an aux IO card. Disabling cuts power to all motors on the device.
+            </Text>
+
+            {auxDevices.length > 1 && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DEVICE</Text>
+                {auxDevices.map((d, i) => {
+                  const active = deviceId === d.deviceId;
+                  return (
+                    <TouchableOpacity key={d.deviceId}
+                      style={[ms.row, i < auxDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                      onPress={() => set({ auxDeviceId: d.deviceId })} activeOpacity={0.7}>
+                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                        {active && <View style={ms.radioDot} />}
+                      </View>
+                      <View style={ms.rowText}>
+                        <Text style={[ms.rowLabel, active && ms.rowLabelActive]} numberOfLines={1}>
+                          {d.deviceName || d.deviceId}
+                        </Text>
+                        {d.deviceName && d.deviceName !== d.deviceId
+                          ? <Text style={ms.rowDesc}>{d.deviceId}</Text>
+                          : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MOTOR STATE</Text>
+            <View style={ms.segRow}>
+              {([{ label: "Enable", val: true }, { label: "Disable", val: false }] as const).map(({ label, val }) => {
+                const active = motorOn === val;
+                return (
+                  <TouchableOpacity key={label} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ auxEnable: val })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        );
+      }
 
       case "IfCondition":
         return (
@@ -3519,12 +3835,14 @@ function StepConfigModal({
               </Text>
             ) : (
               bgPrograms.map((p, i) => {
-                const active = draft!.backgroundProgramName === p.name;
+                const active = p.id && draft!.backgroundProgramId
+                  ? draft!.backgroundProgramId === p.id
+                  : draft!.backgroundProgramName === p.name;
                 return (
                   <TouchableOpacity
-                    key={p.name}
+                    key={p.id ?? p.name}
                     style={[ms.row, i < bgPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                    onPress={() => set({ backgroundProgramName: p.name })}
+                    onPress={() => set({ backgroundProgramName: p.name, backgroundProgramId: p.id })}
                     activeOpacity={0.7}
                   >
                     <View style={[ms.radioRing, active && ms.radioRingActive]}>
@@ -3886,11 +4204,13 @@ function IfConditionBody({
   onEnterScope,
   onUpdateIfCondition,
   variables,
+  contextVariables,
 }: {
   step: ProgramStep;
   onEnterScope: (frame: ScopeFrame) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
   variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
 }) {
   const theme          = STEP_THEME['IfCondition'] ?? STEP_THEME['MoveL'];
   const ifSteps        = step.ifSteps        ?? [];
@@ -3941,7 +4261,7 @@ function IfConditionBody({
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingBottom: 8 }}>
               {draftCondition && (
-                <ConditionGroupEditor group={draftCondition} onChange={setDraftCondition} variables={variables} />
+                <ConditionGroupEditor group={draftCondition} onChange={setDraftCondition} variables={variables} contextVariables={contextVariables} />
               )}
             </ScrollView>
             <View style={ms.actions}>
@@ -4167,6 +4487,8 @@ function StepRow({
   onUpdateIfCondition,
   onItemLayout,
   variables,
+  contextVariables,
+  onEnterRoutine,
 }: {
   step: ProgramStep;
   index: number;
@@ -4187,6 +4509,8 @@ function StepRow({
   onUpdateIfCondition: (updated: ProgramStep) => void;
   onItemLayout: (id: string, height: number) => void;
   variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
+  onEnterRoutine?: (routineName: string) => void;
 }) {
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
@@ -4257,7 +4581,25 @@ function StepRow({
             onEnterScope={onEnterScope}
             onUpdateIfCondition={onUpdateIfCondition}
             variables={variables}
+            contextVariables={contextVariables}
           />
+        )}
+
+        {/* CallRoutine body — Enter navigation */}
+        {step.type === 'CallRoutine' && step.routineName && onEnterRoutine && (
+          <View style={[styles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
+              onPress={() => onEnterRoutine(step.routineName!)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 12, color: "#64748b" }}>{step.routineName}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Enter</Text>
+                <ArrowRight size={13} color={theme.iconColor} />
+              </View>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Loop body — Enter navigation */}
@@ -4303,8 +4645,9 @@ function VariableEditModal({
 }) {
   const [name,       setName]       = useState("");
   const [value,      setValue]      = useState("0");
+  const [stringVal,  setStringVal]  = useState("");
   const [desc,       setDesc]       = useState("");
-  const [varType,    setVarType]    = useState<'number' | 'boolean' | 'list' | 'points' | 'stopwatch'>('number');
+  const [varType,    setVarType]    = useState<'number' | 'boolean' | 'list' | 'points' | 'stopwatch' | 'string'>('number');
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [listValues, setListValues] = useState<string[]>(["0"]);
   const [isGlobal,          setIsGlobal]          = useState(false);
@@ -4320,27 +4663,29 @@ function VariableEditModal({
       setIsPersistent(variable.isPersistent ?? false);
       if (variable.points != null) {
         setVarType('points');
-        setValue("0");
-        setListValues(["0"]);
+        setValue("0"); setStringVal(""); setListValues(["0"]);
       } else if (variable.values != null && variable.values.length > 0) {
         setVarType('list');
         setListValues(variable.values.map(String));
-        setValue("0");
+        setValue("0"); setStringVal("");
       } else if (variable.isBoolean) {
         setVarType('boolean');
         setValue(variable.value !== 0 ? "1" : "0");
-        setListValues(["0"]);
+        setStringVal(""); setListValues(["0"]);
       } else if (variable.isStopwatch) {
         setVarType('stopwatch');
-        setValue("0");
-        setListValues(["0"]);
+        setValue("0"); setStringVal(""); setListValues(["0"]);
+      } else if (variable.isString) {
+        setVarType('string');
+        setStringVal(variable.stringValue ?? "");
+        setValue("0"); setListValues(["0"]);
       } else {
         setVarType('number');
         setValue(String(variable.value));
-        setListValues(["0"]);
+        setStringVal(""); setListValues(["0"]);
       }
     } else {
-      setName(""); setValue("0"); setDesc(""); setVarType('number'); setListValues(["0"]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
+      setName(""); setValue("0"); setStringVal(""); setDesc(""); setVarType('number'); setListValues(["0"]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
     }
   }, [variable, visible]);
 
@@ -4369,6 +4714,8 @@ function VariableEditModal({
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
     : varType === 'stopwatch'
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0891b2", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. Value is elapsed milliseconds.</Text>
+    : varType === 'string'
+    ? <Text style={ms.hintText}>Use <Text style={{ color: "#ea580c", fontWeight: "600" }}>${name.trim() || "name"}</Text> in StatusUpdate messages or string expressions. Supports <Text style={{ fontWeight: "600" }}>$otherVar</Text> interpolation in values.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
   return (
@@ -4405,6 +4752,7 @@ function VariableEditModal({
             const TYPE_OPTIONS: { key: typeof varType; label: string; color: string; bg: string; border: string }[] = [
               { key: 'number',    label: 'Number',    color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd' },
               { key: 'boolean',   label: 'Boolean',   color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+              { key: 'string',    label: 'String',    color: '#ea580c', bg: '#fff7ed', border: '#fed7aa' },
               { key: 'list',      label: 'List',      color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd' },
               { key: 'points',    label: 'Points',    color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
               { key: 'stopwatch', label: 'Stopwatch', color: '#0891b2', bg: '#e0f2fe', border: '#7dd3fc' },
@@ -4437,7 +4785,7 @@ function VariableEditModal({
                         key={opt.key}
                         onPress={() => {
                           if (opt.key === 'boolean' && value !== "0" && value !== "1") setValue("0");
-                          setVarType(opt.key);
+                          setVarType(opt.key as typeof varType);
                           setTypePickerOpen(false);
                         }}
                         activeOpacity={0.7}
@@ -4530,6 +4878,21 @@ function VariableEditModal({
                 Use <Text style={{ fontWeight: "700" }}>${name.trim() || "name"}</Text> in expressions to read the elapsed time in ms.
               </Text>
             </View>
+          ) : varType === 'string' ? (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
+              <TextInput
+                style={ms.input}
+                value={stringVal}
+                onChangeText={setStringVal}
+                placeholder="e.g.  Part A  or  Hello $partId"
+                placeholderTextColor="#fba67a"
+                autoCapitalize="none"
+              />
+              <Text style={[ms.hintText, { marginTop: 2 }]}>
+                Use <Text style={{ fontWeight: "700", color: "#ea580c" }}>$varName</Text> inside the value to embed other variable values at runtime.
+              </Text>
+            </>
           ) : (
             <View style={{ backgroundColor: "#ecfeff", borderRadius: 8, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#a5f3fc" }}>
               <Text style={{ fontSize: 13, color: "#0e7490", lineHeight: 18 }}>
@@ -4551,7 +4914,7 @@ function VariableEditModal({
             returnKeyType="done"
           />
 
-          {(varType === 'number' || varType === 'boolean' || varType === 'stopwatch') && (
+          {(varType === 'number' || varType === 'boolean' || varType === 'stopwatch' || varType === 'string') && (
             <>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
@@ -4612,9 +4975,11 @@ function VariableEditModal({
                   points: varType === 'points' ? (variable?.points ?? []) : undefined,
                   isBoolean:   varType === 'boolean'   ? true : undefined,
                   isStopwatch: varType === 'stopwatch' ? true : undefined,
-                  isGlobal:        (varType === 'number' || varType === 'boolean' || varType === 'stopwatch') ? (isGlobal        || undefined) : undefined,
-                  displayOnMonitor:(varType === 'number' || varType === 'boolean' || varType === 'stopwatch') ? (displayOnMonitor || undefined) : undefined,
-                  isPersistent:    (varType === 'number' || varType === 'boolean') ? (isPersistent || undefined) : undefined,
+                  isString:    varType === 'string'    ? true : undefined,
+                  stringValue: varType === 'string'    ? stringVal : undefined,
+                  isGlobal:        (varType === 'number' || varType === 'boolean' || varType === 'stopwatch' || varType === 'string') ? (isGlobal        || undefined) : undefined,
+                  displayOnMonitor:(varType === 'number' || varType === 'boolean' || varType === 'stopwatch' || varType === 'string') ? (displayOnMonitor || undefined) : undefined,
+                  isPersistent:    (varType === 'number' || varType === 'boolean' || varType === 'string') ? (isPersistent || undefined) : undefined,
                   description: desc.trim() || undefined,
                 });
                 onClose();
@@ -4635,7 +5000,7 @@ function VariableEditModal({
 // ── Builder screen ────────────────────────────────────────────────────────────
 
 export default function BuilderScreen() {
-  const { name: editName, isRoutine: isRoutineParam, source: sourceParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string }>();
+  const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected     = useConnected();
   const isLocalMode   = sourceParam === 'local';
@@ -4655,8 +5020,11 @@ export default function BuilderScreen() {
   );
 
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [contextProgramName, setContextProgramName] = useState<string | undefined>(callerNameParam ?? undefined);
+  const [contextPickerOpen,  setContextPickerOpen]  = useState(false);
 
   const [programName, setProgramName] = useState(existing?.name ?? "");
+  const [programId, setProgramId]     = useState<string | undefined>(existing?.id);
   const [description, setDescription] = useState(existing?.description ?? "");
   const [steps, setSteps]             = useState<ProgramStep[]>(existing?.steps ?? []);
   const [variables, setVariables]     = useState<ProgramVariable[]>(existing?.variables ?? []);
@@ -4671,6 +5039,11 @@ export default function BuilderScreen() {
     () => JSON.stringify({ name: programName.trim(), description, steps, variables }) !== savedSnapshot,
     [programName, description, steps, variables, savedSnapshot]
   );
+
+  const contextVariables = useMemo(() => {
+    if (!isRoutineMode || !contextProgramName) return [];
+    return builtPrograms.find(p => p.name === contextProgramName)?.variables ?? [];
+  }, [isRoutineMode, contextProgramName, builtPrograms]);
 
   // Load local program from AsyncStorage when editing in local mode
   useEffect(() => {
@@ -4690,6 +5063,7 @@ export default function BuilderScreen() {
         setIsRoutineMode(prog.isRoutine ?? false);
         setIsBackgroundMode(prog.isBackground ?? false);
         setKillBackgroundOnStop(prog.killBackgroundOnStop ?? true);
+        if (prog.id) setProgramId(prog.id);
         setSavedSnapshot(JSON.stringify({ name: prog.name, description: prog.description, steps: hydratedSteps, variables: loadedVars }));
       }
       if (img) setCoverImage(img);
@@ -4994,6 +5368,8 @@ export default function BuilderScreen() {
       localName: undefined,
       saveImagePath: undefined,
       saveImageCameraId: undefined,
+      backgroundProgramName: undefined,
+      backgroundProgramId: undefined,
     };
   }
 
@@ -5053,6 +5429,7 @@ export default function BuilderScreen() {
 
   function buildProg(): BuiltProgram {
     return {
+      id: programId,
       name: programName.trim(),
       description: description.trim(),
       steps,
@@ -5074,6 +5451,11 @@ export default function BuilderScreen() {
     if (isLocalMode) {
       if (editName && editName !== name) await LocalProgramService.delete(editName);
       await LocalProgramService.save(prog);
+      // Capture the ID that was generated during save (for new programs)
+      if (!prog.id) {
+        const saved = (await LocalProgramService.getAll()).find(p => p.name === name);
+        if (saved?.id) setProgramId(saved.id);
+      }
       if (coverImage) await LocalProgramService.saveImage(name, coverImage);
     } else {
       await robotClient.saveBuiltProgram(prog).catch(() => {});
@@ -5112,13 +5494,13 @@ export default function BuilderScreen() {
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       handleBackRef.current();
       return true;
     });
     return () => sub.remove();
-  }, []);
+  }, []));
 
   async function handleRun() {
     if (!(await save())) return;
@@ -5214,6 +5596,10 @@ export default function BuilderScreen() {
                     onUpdateIfCondition={updateStep}
                     onItemLayout={handleItemLayout}
                     variables={variables}
+                    contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
+                    onEnterRoutine={!isRoutineMode ? (routineName) => {
+                      router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
+                    } : undefined}
                   />
                 ))}
               </View>
@@ -5351,6 +5737,25 @@ export default function BuilderScreen() {
               </TouchableOpacity>
             </>
           )}
+
+          {/* Variable context picker — routine mode only */}
+          {isRoutineMode && (
+            <>
+              <View style={styles.metaSep} />
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+                onPress={() => setContextPickerOpen(true)}
+                activeOpacity={0.7}
+              >
+                <ChevronsRight size={16} color="#6b7280" />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Variable Context</Text>
+                <Text style={{ fontSize: 12, color: contextProgramName ? "#2563eb" : "#9ca3af", maxWidth: 160 }} numberOfLines={1}>
+                  {contextProgramName ?? "None"}
+                </Text>
+                <ChevronRight size={15} color="#9ca3af" />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* Variables */}
@@ -5473,6 +5878,10 @@ export default function BuilderScreen() {
                 onUpdateIfCondition={updateStep}
                 onItemLayout={handleItemLayout}
                 variables={variables}
+                contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
+                onEnterRoutine={!isRoutineMode ? (routineName) => {
+                  router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
+                } : undefined}
               />
             ))}
           </View>
@@ -5527,6 +5936,7 @@ export default function BuilderScreen() {
         visible={configOpen}
         step={editingStep}
         variables={variables}
+        contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
         scopeSteps={editingScope}
         stepIndex={editingStepIndex}
         onSave={updateStep}
@@ -5538,6 +5948,58 @@ export default function BuilderScreen() {
         onSave={saveVar}
         onClose={() => setVarModalOpen(false)}
       />
+
+      {/* Variable context picker modal — routine mode only */}
+      <Modal visible={contextPickerOpen} transparent animationType="fade" onRequestClose={() => setContextPickerOpen(false)}>
+        <Pressable style={ms.overlay} onPress={() => setContextPickerOpen(false)}>
+          <Pressable style={[ms.card, { maxHeight: '70%' }]} onPress={() => {}}>
+            <View style={ms.header}>
+              <View style={{ width: 18 }} />
+              <Text style={ms.title}>Variable Context</Text>
+              <TouchableOpacity onPress={() => setContextPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
+                <X size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+            <Text style={{ fontSize: 12, color: '#6b7280', paddingHorizontal: 16, paddingBottom: 8 }}>
+              Pick a program whose variables will be available in this routine's expressions and conditions.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <TouchableOpacity
+                style={[ms.row, ms.rowBorder, !contextProgramName && ms.rowActive]}
+                onPress={() => { setContextProgramName(undefined); setContextPickerOpen(false); }}
+                activeOpacity={0.7}
+              >
+                <View style={[ms.radioRing, !contextProgramName && ms.radioRingActive]}>
+                  {!contextProgramName && <View style={ms.radioDot} />}
+                </View>
+                <View style={ms.rowText}>
+                  <Text style={[ms.rowLabel, !contextProgramName && ms.rowLabelActive]}>None</Text>
+                  <Text style={ms.rowDesc}>Use only this routine's own variables</Text>
+                </View>
+              </TouchableOpacity>
+              {builtPrograms.filter(p => !p.isRoutine && !p.isBackground).map((p, i, arr) => {
+                const active = contextProgramName === p.name;
+                return (
+                  <TouchableOpacity
+                    key={p.id ?? p.name}
+                    style={[ms.row, i < arr.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                    onPress={() => { setContextProgramName(p.name); setContextPickerOpen(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                      {active && <View style={ms.radioDot} />}
+                    </View>
+                    <View style={ms.rowText}>
+                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
+                      {p.description ? <Text style={ms.rowDesc}>{p.description}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Program Settings modal */}
       <Modal visible={settingsModalOpen} transparent animationType="fade" onRequestClose={() => setSettingsModalOpen(false)}>

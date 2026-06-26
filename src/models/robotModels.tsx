@@ -37,6 +37,7 @@ export type AuxAxisChannelState = {
 
 export type AuxDeviceState = {
   connected: boolean;
+  motorEnabled: boolean;
   deviceId: string;
   deviceName: string;
   portName: string | null;
@@ -160,12 +161,21 @@ export type VisionProgram = {
   colorInspections?: ColorCoverageInspection[];
   polygonInspections?: PolygonInspection[];
   arucoInspections?: ArucoInspection[];
+  lineInspections?: LineInspection[];
   lastUpdatedUnixMs: number;
 };
 
 export type BlobResult       = { x: number; y: number; size: number };
 export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[] };
+export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[] };
+
+export type ArucoResult = {
+  inspectionId: string;
+  name: string;
+  count: number;
+  found: boolean;
+  markers: { markerId: number; centerX: number; centerY: number }[];
+};
 
 export function defaultBlobParams(): BlobDetectionParams {
   return {
@@ -189,7 +199,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage';
 
 export type Vector6Val = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
@@ -254,6 +264,55 @@ export type ArucoInspection = {
   maxMarkerArea: number;
 };
 
+export type LineInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  cannyThreshold1: number;
+  cannyThreshold2: number;
+  houghThreshold: number;
+  minLineLength: number;
+  maxLineGap: number;
+  filterByAngle: boolean;
+  minAngle: number;
+  maxAngle: number;
+};
+
+export type LineSegment = {
+  /** Normalized (0–1) start X */
+  x1: number;
+  /** Normalized (0–1) start Y */
+  y1: number;
+  /** Normalized (0–1) end X */
+  x2: number;
+  /** Normalized (0–1) end Y */
+  y2: number;
+  /** Undirected angle in degrees (0–180): 0=horizontal, 90=vertical */
+  angle: number;
+  /** Pixel length of the detected segment */
+  length: number;
+};
+
+export type LineResult = {
+  inspectionId: string;
+  name: string;
+  count: number;
+  found: boolean;
+  lines: LineSegment[];
+};
+
+export type LineVisionStepOutput = {
+  inspectionId: string;
+  countVar?: string;
+  foundVar?: string;
+  firstAngleVar?: string;
+  firstX1Var?: string;
+  firstY1Var?: string;
+  firstX2Var?: string;
+  firstY2Var?: string;
+};
+
 export type ArucoVisionStepOutput = {
   inspectionId: string;
   countVar?: string;
@@ -311,6 +370,23 @@ export function defaultArucoInspection(index: number): ArucoInspection {
   };
 }
 
+export function defaultLineInspection(index: number): LineInspection {
+  return {
+    id: `lineinsp_${Date.now()}`,
+    name: `Line ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    cannyThreshold1: 50,
+    cannyThreshold2: 150,
+    houghThreshold: 50,
+    minLineLength: 30,
+    maxLineGap: 10,
+    filterByAngle: false,
+    minAngle: 0,
+    maxAngle: 180,
+  };
+}
+
 export function defaultPolygonInspection(index: number): PolygonInspection {
   return {
     id: `polyinsp_${Date.now()}`,
@@ -327,7 +403,7 @@ export function defaultPolygonInspection(index: number): PolygonInspection {
   };
 }
 
-export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
+export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=' | 'contains' | 'startsWith' | 'endsWith';
 
 export type ConditionItem = {
   id: string;
@@ -365,6 +441,10 @@ export type ProgramVariable = {
   isStopwatch?: boolean;
   /** When true, the runtime value is saved to disk when the program finishes and restored on the next run. */
   isPersistent?: boolean;
+  /** When true, this variable holds a string value (stored in stringValue). */
+  isString?: boolean;
+  /** String variable initial/default value — only meaningful when isString is true. */
+  stringValue?: string;
 };
 
 export type ProgramVariableSnapshot = {
@@ -451,6 +531,7 @@ export type ProgramStep = {
   varPointIndex?: string;
   // StartBackground / StopBackground / WaitForBackground
   backgroundProgramName?: string;
+  backgroundProgramId?: string;
   // StopwatchControl
   stopwatchAction?: 'Start' | 'Stop' | 'Reset';
   stopwatchVariableName?: string;
@@ -479,9 +560,12 @@ export type ProgramStep = {
   auxDecel?: number;        // steps/sec² (AuxMove + AuxStop ramp-down)
   auxWaitForDone?: boolean; // AuxMove: block until complete (default true)
   auxImmediate?: boolean;   // AuxStop: hard stop when true
+  auxAbsolute?: boolean;    // AuxMove: true = move to absolute position, false/undefined = relative offset
+  auxEnable?: boolean;      // AuxEnable: true = enable motors, false = disable
 };
 
 export type BuiltProgram = {
+  id?: string;
   name: string;
   description: string;
   steps: ProgramStep[];
@@ -494,6 +578,7 @@ export type BuiltProgram = {
 };
 
 export type BackgroundProgramStatus = {
+  id?: string;
   name: string;
   currentStep: string;
 };

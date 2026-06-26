@@ -1,17 +1,17 @@
+import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram, ProgramStatus, ProgramSummary, ProgramVariableSnapshot } from "@/src/models/robotModels";
 import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, Tabs, useLocalSearchParams } from "expo-router";
-import { AlertTriangle, Box, Camera, Cpu, Edit2, Gauge, Layers, Play, Trash2, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Camera, ChevronRight, Cpu, Edit2, Gauge, Layers, Play, Trash2, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Image,
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -140,75 +140,7 @@ function MarqueeText({ text, style }: { text: string; style?: object }) {
   );
 }
 
-// ── Speed override card ───────────────────────────────────────────────────────
 
-function SpeedOverrideCard({ overridePercent }: { overridePercent: number }) {
-  const THUMB_D    = 22;
-  const MIN        = 5;
-  const MAX        = 200;
-  const barWRef    = useRef(1);
-  const startRef   = useRef(overridePercent);
-  const currentRef = useRef(overridePercent);
-  currentRef.current = overridePercent;
-
-  const pan = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { startRef.current = currentRef.current; },
-    onPanResponderMove: (_, g) => {
-      const raw     = startRef.current + (g.dx / Math.max(1, barWRef.current)) * (MAX - MIN);
-      const clamped = Math.max(MIN, Math.min(MAX, Math.round(raw)));
-      robotClient.setSpeedOverride(clamped);
-    },
-    onPanResponderRelease: () => {},
-  })).current;
-
-  const frac  = Math.max(0, Math.min(1, (overridePercent - MIN) / (MAX - MIN)));
-  const color = overridePercent > 100 ? "#dc2626" : overridePercent < 50 ? "#d97706" : "#2563eb";
-
-  return (
-    <View style={styles.section}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Gauge size={16} color={color} />
-        <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Speed Override</Text>
-        <Text style={{ fontSize: 18, fontWeight: "700", color }}>{Math.round(overridePercent)}%</Text>
-      </View>
-
-      <View style={{ height: THUMB_D + 8, justifyContent: "center" }}
-        onLayout={e => { barWRef.current = e.nativeEvent.layout.width; }}
-        {...pan.panHandlers}
-      >
-        <View style={{ height: 6, backgroundColor: "#e5e7eb", borderRadius: 3, overflow: "hidden" }}>
-          <View style={{ width: `${frac * 100}%`, height: "100%", backgroundColor: color, borderRadius: 3 }} />
-        </View>
-        <View style={{
-          position: "absolute",
-          left: `${frac * 100}%`,
-          marginLeft: -THUMB_D / 2,
-          width: THUMB_D, height: THUMB_D,
-          borderRadius: THUMB_D / 2,
-          backgroundColor: "#fff",
-          borderWidth: 2, borderColor: color,
-          shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 3, elevation: 3,
-        }} />
-      </View>
-
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        {[25, 50, 75, 100, 150, 200].map(p => (
-          <TouchableOpacity key={p} onPress={() => robotClient.setSpeedOverride(p)} activeOpacity={0.7}
-            style={{ flex: 1, alignItems: "center", paddingVertical: 5, borderRadius: 8,
-              backgroundColor: Math.round(overridePercent) === p ? color : "#f3f4f6",
-              borderWidth: 1, borderColor: Math.round(overridePercent) === p ? color : "#e5e7eb" }}>
-            <Text style={{ fontSize: 11, fontWeight: "700",
-              color: Math.round(overridePercent) === p ? "#fff" : "#6b7280" }}>{p}%</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      <Text style={{ fontSize: 11, color: "#9ca3af" }}>
-        Scales all explicitly-set program speeds. Jog speeds are not affected.
-      </Text>
-    </View>
-  );
-}
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -242,6 +174,8 @@ export default function MonitorProgramScreen() {
     navigatingToEdit.current = true;
     router.push(`/program/builder?name=${encodeURIComponent(programName)}`);
   }
+
+  const [speedModalOpen, setSpeedModalOpen] = useState(false);
 
   // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
@@ -621,7 +555,20 @@ export default function MonitorProgramScreen() {
 
         {/* ── Speed Override ── */}
         <View style={styles.gapBand} />
-        <SpeedOverrideCard overridePercent={s?.speedOverridePercent ?? 100} />
+        <TouchableOpacity style={styles.section} onPress={() => setSpeedModalOpen(true)} activeOpacity={0.7}>
+          {(() => {
+            const pct   = s?.speedOverridePercent ?? 100;
+            const color = pct > 100 ? "#dc2626" : pct < 50 ? "#d97706" : "#2563eb";
+            return (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Gauge size={16} color={color} />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Speed Override</Text>
+                <Text style={{ fontSize: 16, fontWeight: "700", color }}>{Math.round(pct)}%</Text>
+                <ChevronRight size={16} color="#d1d5db" />
+              </View>
+            );
+          })()}
+        </TouchableOpacity>
 
         {/* ── Position ── */}
         <View style={styles.gapBand} />
@@ -852,6 +799,12 @@ export default function MonitorProgramScreen() {
 
         <View style={{ height: 48 }} />
       </ScrollView>
+
+      <SpeedOverrideModal
+        visible={speedModalOpen}
+        overridePercent={s?.speedOverridePercent ?? 100}
+        onClose={() => setSpeedModalOpen(false)}
+      />
     </View>
   );
 }

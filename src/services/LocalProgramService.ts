@@ -14,8 +14,11 @@ export const LocalProgramService = {
   },
 
   async save(program: BuiltProgram): Promise<void> {
+    if (!program.id) {
+      program = { ...program, id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}` };
+    }
     const all = await this.getAll();
-    const idx = all.findIndex(p => p.name === program.name);
+    const idx = all.findIndex(p => p.id ? p.id === program.id : p.name === program.name);
     if (idx >= 0) all[idx] = program;
     else all.push(program);
     await AsyncStorage.setItem(PROGRAMS_KEY, JSON.stringify(all));
