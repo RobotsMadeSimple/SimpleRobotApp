@@ -1,8 +1,9 @@
+import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { AlertTriangle, ChevronRight, Cpu, Repeat2, ScanSearch, XCircle } from "lucide-react-native";
+import { AlertTriangle, ChevronRight, Cpu, Gauge, Repeat2, ScanSearch, XCircle } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -69,10 +70,12 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
 
 // ── Running Program Card ───────────────────────────────────────────────────────
 
-function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
+function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, onSpeedPress }: {
   p: ProgramSummary;
   isBuilt: boolean;
   anotherBuiltRunning: boolean;
+  speedOverridePercent: number;
+  onSpeedPress: () => void;
 }) {
   const theme = STATUS_THEME[p.status] ?? STATUS_THEME.Ready;
   const pct = p.maxStepCount > 0 ? Math.round((p.currentStepNumber / p.maxStepCount) * 100) : 0;
@@ -121,6 +124,16 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning }: {
         <View style={styles.runningCardBody}>
           <View style={styles.runningNameRow}>
             <Text style={styles.runningName} numberOfLines={1}>{p.name}</Text>
+            <TouchableOpacity
+              style={styles.speedPill}
+              onPress={e => { e.stopPropagation?.(); onSpeedPress(); }}
+              activeOpacity={0.7}
+            >
+              <Gauge size={11} color={speedOverridePercent !== 100 ? (speedOverridePercent > 100 ? "#dc2626" : "#d97706") : "#6b7280"} />
+              <Text style={[styles.speedPillText, speedOverridePercent !== 100 && {
+                color: speedOverridePercent > 100 ? "#dc2626" : "#d97706",
+              }]}>{Math.round(speedOverridePercent)}%</Text>
+            </TouchableOpacity>
           </View>
 
           {!!p.currentStepDescription && (
@@ -216,7 +229,9 @@ function NavTile({
 export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
+  const robotStatus      = useRobotStatus();
   const [visionCount, setVisionCount] = useState(0);
+  const [speedModalOpen, setSpeedModalOpen] = useState(false);
 
   useEffect(() => {
     robotClient.getVisionPrograms()
@@ -256,6 +271,7 @@ export default function ProgramScreen() {
   const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={styles.content}
@@ -271,6 +287,8 @@ export default function ProgramScreen() {
           p={displayedProgram}
           isBuilt={builtNames.has(displayedProgram.name)}
           anotherBuiltRunning={anotherBuiltRunning(displayedProgram.name)}
+          speedOverridePercent={robotStatus?.speedOverridePercent ?? 100}
+          onSpeedPress={() => setSpeedModalOpen(true)}
         />
       ) : (
         <View style={styles.nothingRunning}>
@@ -311,6 +329,13 @@ export default function ProgramScreen() {
         onPress={() => router.navigate("/(tabs)/program/vision")}
       />
     </ScrollView>
+
+    <SpeedOverrideModal
+      visible={speedModalOpen}
+      overridePercent={robotStatus?.speedOverridePercent ?? 100}
+      onClose={() => setSpeedModalOpen(false)}
+    />
+    </View>
   );
 }
 
@@ -387,8 +412,15 @@ const styles = StyleSheet.create({
   alertStripeText: { flex: 1, fontSize: 12, fontWeight: "600", color: "#fff", lineHeight: 17 },
 
   runningCardBody: { padding: 14, gap: 10 },
-  runningNameRow:  { flexDirection: "row", alignItems: "center" },
+  runningNameRow:  { flexDirection: "row", alignItems: "center", gap: 8 },
   runningName:     { flex: 1, fontSize: 17, fontWeight: "700", color: "#111827" },
+  speedPill: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#f3f4f6", borderRadius: 20,
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderWidth: 1, borderColor: "#e5e7eb",
+  },
+  speedPillText: { fontSize: 11, fontWeight: "700", color: "#6b7280" },
 
   stepRow:   { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   stepLabel: { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.6, paddingTop: 2 },
