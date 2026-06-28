@@ -132,38 +132,6 @@ function DirectionToggle({
   );
 }
 
-// ── Robot type selector ────────────────────────────────────────────────────────
-
-const ROBOT_TYPES = [
-  { value: "ASTRO",    label: "ASTRO" },
-  { value: "CNC4Axis", label: "4-Axis CNC" },
-];
-
-function RobotTypeSelector({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <View style={styles.typeRow}>
-      {ROBOT_TYPES.map(opt => (
-        <TouchableOpacity
-          key={opt.value}
-          style={[styles.typeBtn, value === opt.value && styles.typeBtnActive]}
-          onPress={() => onChange(opt.value)}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.typeBtnText, value === opt.value && styles.typeBtnTextActive]}>
-            {opt.label}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function ConfigureRobot() {
@@ -193,13 +161,6 @@ export default function ConfigureRobot() {
     } finally {
       setSaving(false);
     }
-  }
-
-  async function changeRobotType(type: string) {
-    if (!config || config.robotType === type) return;
-    const updated = { ...config, robotType: type };
-    setConfig(updated);
-    await robotClient.setRobotConfig({ robotType: type }).catch(() => {});
   }
 
   async function toggleCard(
@@ -243,17 +204,6 @@ export default function ConfigureRobot() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-
-        {/* ── Machine Type ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>MACHINE TYPE</Text>
-        </View>
-        <View style={[styles.card, { padding: 14 }]}>
-          <RobotTypeSelector
-            value={config?.robotType ?? "ASTRO"}
-            onChange={changeRobotType}
-          />
-        </View>
 
         {/* ── Motor Directions ── */}
         <View style={styles.sectionHeader}>
@@ -588,33 +538,6 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     maxWidth: "45%",
     textAlign: "right",
-  },
-
-  // ── Robot type selector ────────────────────────────────────────────────────
-  typeRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  typeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    alignItems: "center",
-    backgroundColor: "#f9fafb",
-  },
-  typeBtnActive: {
-    borderColor: "#2563eb",
-    backgroundColor: "#eff6ff",
-  },
-  typeBtnText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#9ca3af",
-  },
-  typeBtnTextActive: {
-    color: "#2563eb",
   },
 
   // ── Modal ──────────────────────────────────────────────────────────────────
