@@ -24,6 +24,8 @@ import {
 } from "react-native";
 
 type RobotConfig = {
+  robotType: string;
+  // ASTRO homing
   homingSpeed: number;
   j1HomeOffsetDeg: number;
   verticalHomePosition: number;
@@ -32,14 +34,29 @@ type RobotConfig = {
   horizontalHomingDirection: number;
   j1HomingDirection: number;
   j4HomeOffsetDeg: number;
+  // Motor directions (shared)
   m1Direction: number;
   m2Direction: number;
   m3Direction: number;
   m4Direction: number;
+  // IO cards
   enableNanoCards: boolean;
   enableRelayCard: boolean;
   enableAuxAxis:   boolean;
   enableCameras:   boolean;
+  // CNC4Axis motor ratios
+  cncMotorDegsPerMmX:   number;
+  cncMotorDegsPerMmY:   number;
+  cncMotorDegsPerMmZ:   number;
+  cncMotorDegsPerDegRz: number;
+  // CNC4Axis homing
+  cncXHomePosition:   number;
+  cncYHomePosition:   number;
+  cncZHomePosition:   number;
+  cncRzHomePosition:  number;
+  cncXHomingDirection: number;
+  cncYHomingDirection: number;
+  cncZHomingDirection: number;
 };
 
 type EditingField = {
@@ -115,6 +132,38 @@ function DirectionToggle({
   );
 }
 
+// ── Robot type selector ────────────────────────────────────────────────────────
+
+const ROBOT_TYPES = [
+  { value: "ASTRO",    label: "ASTRO" },
+  { value: "CNC4Axis", label: "4-Axis CNC" },
+];
+
+function RobotTypeSelector({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <View style={styles.typeRow}>
+      {ROBOT_TYPES.map(opt => (
+        <TouchableOpacity
+          key={opt.value}
+          style={[styles.typeBtn, value === opt.value && styles.typeBtnActive]}
+          onPress={() => onChange(opt.value)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.typeBtnText, value === opt.value && styles.typeBtnTextActive]}>
+            {opt.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function ConfigureRobot() {
@@ -126,6 +175,8 @@ export default function ConfigureRobot() {
   useEffect(() => {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
   }, []);
+
+  const isCNC = config?.robotType === "CNC4Axis";
 
   async function saveField() {
     if (!editing || !config) return;
@@ -142,6 +193,13 @@ export default function ConfigureRobot() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function changeRobotType(type: string) {
+    if (!config || config.robotType === type) return;
+    const updated = { ...config, robotType: type };
+    setConfig(updated);
+    await robotClient.setRobotConfig({ robotType: type }).catch(() => {});
   }
 
   async function toggleCard(
@@ -163,12 +221,19 @@ export default function ConfigureRobot() {
     return v === 1 ? "+" : "−";
   }
 
-  const motorRows: { key: keyof RobotConfig; label: string }[] = [
-    { key: "m1Direction", label: "M1 — J1 Rotation" },
-    { key: "m2Direction", label: "M2 — CoreXY A" },
-    { key: "m3Direction", label: "M3 — CoreXY B" },
-    { key: "m4Direction", label: "M4 — J4 Rotation" },
-  ];
+  const motorRows: { key: keyof RobotConfig; label: string }[] = isCNC
+    ? [
+        { key: "m1Direction", label: "M1 — X Axis" },
+        { key: "m2Direction", label: "M2 — Y Axis" },
+        { key: "m3Direction", label: "M3 — Z Axis" },
+        { key: "m4Direction", label: "M4 — RZ Spindle" },
+      ]
+    : [
+        { key: "m1Direction", label: "M1 — J1 Rotation" },
+        { key: "m2Direction", label: "M2 — CoreXY A" },
+        { key: "m3Direction", label: "M3 — CoreXY B" },
+        { key: "m4Direction", label: "M4 — J4 Rotation" },
+      ];
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
@@ -178,6 +243,17 @@ export default function ConfigureRobot() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+
+        {/* ── Machine Type ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>MACHINE TYPE</Text>
+        </View>
+        <View style={[styles.card, { padding: 14 }]}>
+          <RobotTypeSelector
+            value={config?.robotType ?? "ASTRO"}
+            onChange={changeRobotType}
+          />
+        </View>
 
         {/* ── Motor Directions ── */}
         <View style={styles.sectionHeader}>
@@ -203,71 +279,172 @@ export default function ConfigureRobot() {
           ))}
         </View>
 
-        {/* ── Homing ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>HOMING</Text>
-        </View>
-        <View style={styles.card}>
-          <ConfigRow
-            icon={<Home size={16} color="#7c3aed" />}
-            tileBg="#f5f3ff"
-            label="Homing Speed"
-            value={config ? `${config.homingSpeed} u/s` : "—"}
-            onPress={config ? () => setEditing({
-              label: "Homing Speed", type: "number",
-              numKey: "homingSpeed", numText: String(config.homingSpeed),
-              unit: "u/s", placeholder: "20", dirValue: 1,
-            }) : undefined}
-          />
-          <ConfigRow
-            icon={<RotateCcw size={16} color="#0891b2" />}
-            tileBg="#ecfeff"
-            label="J1 Homing"
-            value={config ? `${config.j1HomeOffsetDeg}° · ${dirLabel(config.j1HomingDirection)}` : "—"}
-            onPress={config ? () => setEditing({
-              label: "J1 Homing", type: "homing",
-              numKey: "j1HomeOffsetDeg", numText: String(config.j1HomeOffsetDeg),
-              unit: "°", placeholder: "-17",
-              dirKey: "j1HomingDirection", dirValue: config.j1HomingDirection,
-            }) : undefined}
-          />
-          <ConfigRow
-            icon={<MoveVertical size={16} color="#16a34a" />}
-            tileBg="#f0fdf4"
-            label="Vertical Homing"
-            value={config ? `${config.verticalHomePosition} mm · ${dirLabel(config.verticalHomingDirection)}` : "—"}
-            onPress={config ? () => setEditing({
-              label: "Vertical Homing", type: "homing",
-              numKey: "verticalHomePosition", numText: String(config.verticalHomePosition),
-              unit: "mm", placeholder: "445",
-              dirKey: "verticalHomingDirection", dirValue: config.verticalHomingDirection,
-            }) : undefined}
-          />
-          <ConfigRow
-            icon={<MoveHorizontal size={16} color="#ea580c" />}
-            tileBg="#fff7ed"
-            label="Horizontal Homing"
-            value={config ? `${config.horizontalHomePosition} mm · ${dirLabel(config.horizontalHomingDirection)}` : "—"}
-            onPress={config ? () => setEditing({
-              label: "Horizontal Homing", type: "homing",
-              numKey: "horizontalHomePosition", numText: String(config.horizontalHomePosition),
-              unit: "mm", placeholder: "413",
-              dirKey: "horizontalHomingDirection", dirValue: config.horizontalHomingDirection,
-            }) : undefined}
-          />
-          <ConfigRow
-            icon={<RotateCcw size={16} color="#7c3aed" />}
-            tileBg="#f5f3ff"
-            label="J4 Home Offset"
-            value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
-            last
-            onPress={config ? () => setEditing({
-              label: "J4 Home Offset", type: "number",
-              numKey: "j4HomeOffsetDeg", numText: String(config.j4HomeOffsetDeg),
-              unit: "°", placeholder: "0", dirValue: 1,
-            }) : undefined}
-          />
-        </View>
+        {/* ── Homing — ASTRO ── */}
+        {!isCNC && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>HOMING</Text>
+            </View>
+            <View style={styles.card}>
+              <ConfigRow
+                icon={<Home size={16} color="#7c3aed" />}
+                tileBg="#f5f3ff"
+                label="Homing Speed"
+                value={config ? `${config.homingSpeed} u/s` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "Homing Speed", type: "number",
+                  numKey: "homingSpeed", numText: String(config.homingSpeed),
+                  unit: "u/s", placeholder: "20", dirValue: 1,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<RotateCcw size={16} color="#0891b2" />}
+                tileBg="#ecfeff"
+                label="J1 Homing"
+                value={config ? `${config.j1HomeOffsetDeg}° · ${dirLabel(config.j1HomingDirection)}` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "J1 Homing", type: "homing",
+                  numKey: "j1HomeOffsetDeg", numText: String(config.j1HomeOffsetDeg),
+                  unit: "°", placeholder: "-17",
+                  dirKey: "j1HomingDirection", dirValue: config.j1HomingDirection,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<MoveVertical size={16} color="#16a34a" />}
+                tileBg="#f0fdf4"
+                label="Vertical Homing"
+                value={config ? `${config.verticalHomePosition} mm · ${dirLabel(config.verticalHomingDirection)}` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "Vertical Homing", type: "homing",
+                  numKey: "verticalHomePosition", numText: String(config.verticalHomePosition),
+                  unit: "mm", placeholder: "445",
+                  dirKey: "verticalHomingDirection", dirValue: config.verticalHomingDirection,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<MoveHorizontal size={16} color="#ea580c" />}
+                tileBg="#fff7ed"
+                label="Horizontal Homing"
+                value={config ? `${config.horizontalHomePosition} mm · ${dirLabel(config.horizontalHomingDirection)}` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "Horizontal Homing", type: "homing",
+                  numKey: "horizontalHomePosition", numText: String(config.horizontalHomePosition),
+                  unit: "mm", placeholder: "413",
+                  dirKey: "horizontalHomingDirection", dirValue: config.horizontalHomingDirection,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<RotateCcw size={16} color="#7c3aed" />}
+                tileBg="#f5f3ff"
+                label="J4 Home Offset"
+                value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
+                last
+                onPress={config ? () => setEditing({
+                  label: "J4 Home Offset", type: "number",
+                  numKey: "j4HomeOffsetDeg", numText: String(config.j4HomeOffsetDeg),
+                  unit: "°", placeholder: "0", dirValue: 1,
+                }) : undefined}
+              />
+            </View>
+          </>
+        )}
+
+        {/* ── Homing — CNC4Axis ── */}
+        {isCNC && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>HOMING</Text>
+            </View>
+            <View style={styles.card}>
+              <ConfigRow
+                icon={<Home size={16} color="#7c3aed" />}
+                tileBg="#f5f3ff"
+                label="Homing Speed"
+                value={config ? `${config.homingSpeed} u/s` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "Homing Speed", type: "number",
+                  numKey: "homingSpeed", numText: String(config.homingSpeed),
+                  unit: "u/s", placeholder: "20", dirValue: 1,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<MoveHorizontal size={16} color="#16a34a" />}
+                tileBg="#f0fdf4"
+                label="X Home Position"
+                value={config ? `${config.cncXHomePosition} mm · ${dirLabel(config.cncXHomingDirection)}` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "X Home Position", type: "homing",
+                  numKey: "cncXHomePosition", numText: String(config.cncXHomePosition),
+                  unit: "mm", placeholder: "0",
+                  dirKey: "cncXHomingDirection", dirValue: config.cncXHomingDirection,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<MoveHorizontal size={16} color="#ea580c" />}
+                tileBg="#fff7ed"
+                label="Y Home Position"
+                value={config ? `${config.cncYHomePosition} mm · ${dirLabel(config.cncYHomingDirection)}` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "Y Home Position", type: "homing",
+                  numKey: "cncYHomePosition", numText: String(config.cncYHomePosition),
+                  unit: "mm", placeholder: "0",
+                  dirKey: "cncYHomingDirection", dirValue: config.cncYHomingDirection,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<MoveVertical size={16} color="#0891b2" />}
+                tileBg="#ecfeff"
+                label="Z Home Position"
+                value={config ? `${config.cncZHomePosition} mm · ${dirLabel(config.cncZHomingDirection)}` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "Z Home Position", type: "homing",
+                  numKey: "cncZHomePosition", numText: String(config.cncZHomePosition),
+                  unit: "mm", placeholder: "0",
+                  dirKey: "cncZHomingDirection", dirValue: config.cncZHomingDirection,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<RotateCcw size={16} color="#7c3aed" />}
+                tileBg="#f5f3ff"
+                label="RZ Home Angle"
+                value={config ? `${config.cncRzHomePosition}°` : "—"}
+                last
+                onPress={config ? () => setEditing({
+                  label: "RZ Home Angle", type: "number",
+                  numKey: "cncRzHomePosition", numText: String(config.cncRzHomePosition),
+                  unit: "°", placeholder: "0", dirValue: 1,
+                }) : undefined}
+              />
+            </View>
+
+            {/* ── Motor Ratios (CNC only) ── */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>MOTOR RATIOS</Text>
+            </View>
+            <View style={styles.card}>
+              {([
+                { key: "cncMotorDegsPerMmX"   as const, label: "X — Motor °/mm" },
+                { key: "cncMotorDegsPerMmY"   as const, label: "Y — Motor °/mm" },
+                { key: "cncMotorDegsPerMmZ"   as const, label: "Z — Motor °/mm" },
+                { key: "cncMotorDegsPerDegRz" as const, label: "RZ — Motor °/°" },
+              ] as { key: keyof RobotConfig; label: string }[]).map(({ key, label }, idx, arr) => (
+                <ConfigRow
+                  key={key}
+                  icon={<Gauge size={16} color="#7c3aed" />}
+                  tileBg="#f5f3ff"
+                  label={label}
+                  value={config ? String(config[key]) : "—"}
+                  last={idx === arr.length - 1}
+                  onPress={config ? () => setEditing({
+                    label, type: "number",
+                    numKey: key, numText: String(config[key]),
+                    placeholder: "1.0", dirValue: 1,
+                  }) : undefined}
+                />
+              ))}
+            </View>
+          </>
+        )}
 
         {/* ── IO Cards ── */}
         <View style={styles.sectionHeader}>
@@ -411,6 +588,33 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     maxWidth: "45%",
     textAlign: "right",
+  },
+
+  // ── Robot type selector ────────────────────────────────────────────────────
+  typeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  typeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    backgroundColor: "#f9fafb",
+  },
+  typeBtnActive: {
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  typeBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#9ca3af",
+  },
+  typeBtnTextActive: {
+    color: "#2563eb",
   },
 
   // ── Modal ──────────────────────────────────────────────────────────────────

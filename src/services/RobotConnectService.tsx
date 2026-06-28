@@ -1025,6 +1025,7 @@ export class RobotConnectService {
   }
 
   public getRobotConfig(): Promise<{
+    robotType: string;
     homingSpeed: number;
     j1HomeOffsetDeg: number;
     verticalHomePosition: number;
@@ -1042,11 +1043,23 @@ export class RobotConnectService {
     enableRelayCard: boolean;
     enableAuxAxis: boolean;
     enableCameras: boolean;
+    cncMotorDegsPerMmX: number;
+    cncMotorDegsPerMmY: number;
+    cncMotorDegsPerMmZ: number;
+    cncMotorDegsPerDegRz: number;
+    cncXHomePosition: number;
+    cncYHomePosition: number;
+    cncZHomePosition: number;
+    cncRzHomePosition: number;
+    cncXHomingDirection: number;
+    cncYHomingDirection: number;
+    cncZHomingDirection: number;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
 
   public setRobotConfig(fields: {
+    robotType?: string;
     homingSpeed?: number;
     j1HomeOffsetDeg?: number;
     verticalHomePosition?: number;
@@ -1060,6 +1073,17 @@ export class RobotConnectService {
     enableRelayCard?: boolean;
     enableAuxAxis?: boolean;
     enableCameras?: boolean;
+    cncMotorDegsPerMmX?: number;
+    cncMotorDegsPerMmY?: number;
+    cncMotorDegsPerMmZ?: number;
+    cncMotorDegsPerDegRz?: number;
+    cncXHomePosition?: number;
+    cncYHomePosition?: number;
+    cncZHomePosition?: number;
+    cncRzHomePosition?: number;
+    cncXHomingDirection?: number;
+    cncYHomingDirection?: number;
+    cncZHomingDirection?: number;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
   }
