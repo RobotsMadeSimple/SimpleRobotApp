@@ -1,7 +1,12 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+﻿import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { BottomSheet } from "@/src/components/ui/BottomSheet";
+import { makeZoneDrawHtml, FEED_HTML, makeColorPickHtml } from "@/src/vision/visionHtml";
+import { BlobParamsPanel, ParamRow, SliderParamRow, ThresholdRangeRow, ToggleRow } from "@/src/components/vision/VisionParams";
 import {
   ARUCO_DICTIONARIES,
+  BARCODE_FORMATS,
   ArucoInspection,
+  BarcodeInspection,
   BlobDetectionParams,
   BlobInspection,
   CameraState,
@@ -14,6 +19,7 @@ import {
   VisionZoneGeometry,
   VisionZoneShape,
   defaultArucoInspection,
+  defaultBarcodeInspection,
   defaultBlobParams,
   defaultColorEntry,
   defaultColorCoverageInspection,
@@ -23,8 +29,10 @@ import {
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import {
+  Barcode,
   Check,
   ChevronDown,
+  Copy,
   Eye,
   EyeOff,
   Hexagon,
@@ -40,6 +48,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   Modal,
   PanResponder,
   SafeAreaView,
@@ -54,566 +63,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
-// ── Zone-draw canvas HTML ──────────────────────────────────────────────────────
-
-function makeZoneDrawHtml(
-  imageUri: string,
-  zones: VisionZone[],
-  editingZoneId: string | null,
-  activeShape: VisionZoneShape
-): string {
-  return `<!DOCTYPE html><html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
-canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none}
-</style>
-</head>
-<body>
-<canvas id="c"></canvas>
-<script>
-var c=document.getElementById('c'),ctx=c.getContext('2d');
-var zones=${JSON.stringify(zones)};
-var editingId=${JSON.stringify(editingZoneId)};
-var drawShape=${JSON.stringify(activeShape)};
-var polyPts=[];
-var dragging=false,sx=0,sy=0,cx2=0,cy2=0;
-
-var img=new Image();
-img.onload=function(){resize();render();};
-img.onerror=function(){resize();render();};
-img.src=${JSON.stringify(imageUri)};
-
-function resize(){
-  c.width=window.innerWidth;
-  c.height=window.innerHeight;
-}
-window.addEventListener('resize',function(){resize();render();});
-
-window.setShape=function(s){
-  drawShape=s;polyPts=[];dragging=false;render();
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'polypts',count:0}));}catch(e){}
-};
-
-function imgRect(){
-  var iw=img.naturalWidth||1,ih=img.naturalHeight||1;
-  var cw=c.width,ch=c.height;
-  var scale=Math.min(cw/iw,ch/ih);
-  var w=iw*scale,h=ih*scale;
-  return{x:(cw-w)/2,y:(ch-h)/2,w:w,h:h};
-}
-function toNorm(px,py){var r=imgRect();return{x:(px-r.x)/r.w,y:(py-r.y)/r.h};}
-function clamp01(v){return Math.max(0,Math.min(1,v));}
-
-function render(){
-  c.width=c.width;
-  if(img.complete&&img.naturalWidth>0){
-    var r=imgRect();
-    ctx.drawImage(img,r.x,r.y,r.w,r.h);
-  }else{
-    ctx.fillStyle='#1f2937';ctx.fillRect(0,0,c.width,c.height);
-  }
-  zones.forEach(function(z){
-    var isEditing=z.id===editingId;
-    ctx.strokeStyle=isEditing?'rgba(250,204,21,0.5)':'rgba(34,211,238,0.75)';
-    ctx.fillStyle=isEditing?'rgba(250,204,21,0.07)':'rgba(34,211,238,0.07)';
-    ctx.lineWidth=2;
-    if(isEditing) ctx.setLineDash([6,4]);
-    drawZone(z.geometry,z.name,ctx.strokeStyle);
-    ctx.setLineDash([]);
-  });
-  var orange='#f97316';
-  ctx.strokeStyle=orange;ctx.lineWidth=2.5;ctx.fillStyle='rgba(249,115,22,0.1)';
-  if(drawShape==='Rectangle'&&dragging){
-    ctx.setLineDash([6,3]);
-    var x1=Math.min(sx,cx2),y1=Math.min(sy,cy2),x2=Math.max(sx,cx2),y2=Math.max(sy,cy2);
-    ctx.fillRect(x1,y1,x2-x1,y2-y1);ctx.strokeRect(x1,y1,x2-x1,y2-y1);
-    ctx.setLineDash([]);
-  }
-  if(drawShape==='Circle'&&dragging){
-    ctx.setLineDash([6,3]);
-    var rad=Math.sqrt((cx2-sx)*(cx2-sx)+(cy2-sy)*(cy2-sy));
-    ctx.beginPath();ctx.arc(sx,sy,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  if(drawShape==='Polygon'&&polyPts.length>0){
-    ctx.setLineDash([5,3]);
-    ctx.beginPath();ctx.moveTo(polyPts[0][0],polyPts[0][1]);
-    for(var i=1;i<polyPts.length;i++) ctx.lineTo(polyPts[i][0],polyPts[i][1]);
-    if(dragging) ctx.lineTo(cx2,cy2);
-    ctx.stroke();ctx.setLineDash([]);
-    polyPts.forEach(function(p){
-      ctx.fillStyle=orange;
-      ctx.beginPath();ctx.arc(p[0],p[1],5,0,2*Math.PI);ctx.fill();
-    });
-    if(polyPts.length>=3){
-      ctx.globalAlpha=0.35;ctx.beginPath();
-      ctx.moveTo(polyPts[polyPts.length-1][0],polyPts[polyPts.length-1][1]);
-      ctx.lineTo(polyPts[0][0],polyPts[0][1]);
-      ctx.setLineDash([3,3]);ctx.strokeStyle=orange;ctx.stroke();
-      ctx.setLineDash([]);ctx.globalAlpha=1;
-    }
-  }
-}
-
-function drawZone(g,label,color){
-  var r=imgRect();ctx.save();
-  if(g.shape==='Rectangle'){
-    var x=r.x+g.x*r.w,y=r.y+g.y*r.h,w=g.width*r.w,h=g.height*r.h;
-    ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
-    ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
-    ctx.fillText(label,x+4,y>16?y-4:y+14);
-  }else if(g.shape==='Circle'){
-    var px=r.x+g.cx*r.w,py=r.y+g.cy*r.h,rad=g.radius*Math.min(r.w,r.h);
-    ctx.beginPath();ctx.arc(px,py,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
-    ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
-    ctx.fillText(label,px+4,py-rad-4);
-  }else if(g.shape==='Polygon'&&g.points.length>=2){
-    ctx.beginPath();
-    ctx.moveTo(r.x+g.points[0][0]*r.w,r.y+g.points[0][1]*r.h);
-    for(var i=1;i<g.points.length;i++) ctx.lineTo(r.x+g.points[i][0]*r.w,r.y+g.points[i][1]*r.h);
-    ctx.closePath();ctx.fill();ctx.stroke();
-    ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
-    ctx.fillText(label,r.x+g.points[0][0]*r.w+4,r.y+g.points[0][1]*r.h-4);
-  }
-  ctx.restore();
-}
-
-function getTouchXY(e){
-  var t=e.touches&&e.touches.length?e.touches[0]:e.changedTouches[0];
-  return{x:t.clientX,y:t.clientY};
-}
-
-c.addEventListener('touchstart',function(e){
-  e.preventDefault();
-  var p=getTouchXY(e);
-  cx2=p.x;cy2=p.y;
-  if(drawShape==='Polygon'){
-    polyPts.push([p.x,p.y]);render();
-    try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'polypts',count:polyPts.length}));}catch(e){}
-    return;
-  }
-  sx=p.x;sy=p.y;dragging=true;render();
-},{passive:false});
-
-c.addEventListener('touchmove',function(e){
-  e.preventDefault();
-  var p=getTouchXY(e);cx2=p.x;cy2=p.y;
-  if(dragging||drawShape==='Polygon') render();
-},{passive:false});
-
-c.addEventListener('touchend',function(e){
-  e.preventDefault();
-  if(drawShape==='Polygon'||!dragging) return;
-  dragging=false;
-  var r=imgRect(),geom;
-  if(drawShape==='Rectangle'){
-    var n1=toNorm(Math.min(sx,cx2),Math.min(sy,cy2));
-    var n2=toNorm(Math.max(sx,cx2),Math.max(sy,cy2));
-    var rw=clamp01(n2.x-n1.x),rh=clamp01(n2.y-n1.y);
-    if(rw<0.01||rh<0.01){render();return;}
-    geom={shape:'Rectangle',x:clamp01(n1.x),y:clamp01(n1.y),width:rw,height:rh,cx:0.5,cy:0.5,radius:0.25,points:[]};
-  }else if(drawShape==='Circle'){
-    var nc=toNorm(sx,sy);
-    var rad=Math.sqrt((cx2-sx)*(cx2-sx)+(cy2-sy)*(cy2-sy));
-    var nr=rad/Math.min(r.w,r.h);
-    if(nr<0.01){render();return;}
-    geom={shape:'Circle',x:0,y:0,width:1,height:1,cx:clamp01(nc.x),cy:clamp01(nc.y),radius:Math.max(0.01,nr),points:[]};
-  }
-  if(geom) try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'zone',geometry:geom}));}catch(err){}
-  render();
-},{passive:false});
-
-window.finishPolygon=function(){
-  if(polyPts.length<3) return;
-  var r=imgRect();
-  var pts=polyPts.map(function(p){return[clamp01((p[0]-r.x)/r.w),clamp01((p[1]-r.y)/r.h)];});
-  var geom={shape:'Polygon',x:0,y:0,width:1,height:1,cx:0.5,cy:0.5,radius:0.25,points:pts};
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'zone',geometry:geom}));}catch(err){}
-  polyPts=[];dragging=false;render();
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'polypts',count:0}));}catch(err){}
-};
-<\/script>
-</body></html>`;
-}
-
-// ── Feed canvas HTML (mounted once, URL updated via injectJavaScript) ─────────
-// Accepts ws:// URLs (WebSocket push) or http:// URLs (snapshot poll fallback).
-
-const FEED_HTML = `<!DOCTYPE html><html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>
-*{margin:0;padding:0}html,body{width:100%;height:100%;background:#111;overflow:hidden}
-canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
-</style>
-</head>
-<body>
-<canvas id="c"></canvas>
-<script>
-var c=document.getElementById('c'),ctx=c.getContext('2d');
-var _ws=null,_timer=null,_lastUrl=null;
-
-function closeWs(){if(_ws){try{_ws.close();}catch(e){}_ws=null;}}
-function stopTimer(){if(_timer){clearInterval(_timer);_timer=null;}}
-
-function drawSrc(src){
-  var img=new Image();
-  img.onload=function(){
-    if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
-      c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
-    }
-    ctx.drawImage(img,0,0);
-  };
-  img.src=src;
-}
-
-function startWs(url){
-  _ws=new WebSocket(url);
-  _ws.onmessage=function(e){drawSrc(e.data);};
-  _ws.onerror=function(){_ws=null;};
-  _ws.onclose=function(){_ws=null;};
-}
-
-function startPoll(url,ms){
-  var busy=false;
-  function load(){
-    if(!url||busy)return;
-    busy=true;
-    var img=new Image();
-    img.onload=function(){
-      if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
-        c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
-      }
-      ctx.drawImage(img,0,0);busy=false;
-    };
-    img.onerror=function(){busy=false;};
-    img.src=url+'?_='+Date.now();
-  }
-  load();_timer=setInterval(load,ms||150);
-}
-
-window.setFeed=function(url){
-  _lastUrl=url;closeWs();stopTimer();
-  if(!url)return;
-  if(url.startsWith('ws://')||url.startsWith('wss://'))startWs(url);
-  else startPoll(url,150);
-};
-window.pauseFeed=function(){closeWs();stopTimer();};
-window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl);};
-<\/script>
-</body></html>`;
-
-// ── Blob params panel ──────────────────────────────────────────────────────────
-
-function ParamRow({ label, value, min, max, onChange, desc }: {
-  label: string; value: number; min: number; max: number; onChange: (v: number) => void; desc?: string;
-}) {
-  const [text, setText] = useState(String(value));
-
-  // Sync only when the external value changes (e.g. modal opens with new data).
-  // While the user is typing and the field is empty, value hasn't changed so
-  // this effect is a no-op — the empty field is left alone until they type again.
-  useEffect(() => { setText(String(value)); }, [value]);
-
-  return (
-    <View>
-      <View style={styles.paramRow}>
-        <Text style={styles.paramLabel}>{label}</Text>
-        <TextInput
-          style={styles.paramInput}
-          keyboardType="numeric"
-          value={text}
-          onChangeText={t => {
-            setText(t);
-            const n = parseFloat(t);
-            if (!isNaN(n) && n >= min && n <= max) onChange(n);
-          }}
-        />
-      </View>
-      {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
-    </View>
-  );
-}
-
-function ToggleRow({ label, value, onChange, desc }: {
-  label: string; value: boolean; onChange: (v: boolean) => void; desc?: string;
-}) {
-  return (
-    <View>
-      <View style={styles.paramRow}>
-        <Text style={styles.paramLabel}>{label}</Text>
-        <Switch value={value} onValueChange={onChange} trackColor={{ true: "#0891b2" }} />
-      </View>
-      {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
-    </View>
-  );
-}
-
-function SliderParamRow({ label, value, min, max, onChange, desc }: {
-  label: string; value: number; min: number; max: number;
-  onChange: (v: number) => void; desc?: string;
-}) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => { setText(String(value)); }, [value]);
-
-  const THUMB_D     = 20;
-  const ROW_H       = THUMB_D + 8;
-  const barWRef     = useRef(1);
-  const valueRef    = useRef(value);
-  const startValRef = useRef(value);
-  const onChangeRef = useRef(onChange);
-  valueRef.current    = value;
-  onChangeRef.current = onChange;
-
-  const pan = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { startValRef.current = valueRef.current; },
-    onPanResponderMove: (_, g) => {
-      if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const raw     = startValRef.current + (g.dx / Math.max(1, barWRef.current)) * (max - min);
-      const clamped = Math.max(min, Math.min(max, raw));
-      // Round to 3 decimal places to avoid floating-point noise
-      onChangeRef.current(Math.round(clamped * 1000) / 1000);
-    },
-    onPanResponderRelease: () => {},
-  })).current;
-
-  const frac = Math.max(0, Math.min(1, (value - min) / (max - min)));
-
-  return (
-    <View>
-      <View style={styles.paramRow}>
-        <Text style={styles.paramLabel}>{label}</Text>
-        <TextInput
-          style={styles.paramInput}
-          keyboardType="numeric"
-          value={text}
-          onChangeText={t => {
-            setText(t);
-            const n = parseFloat(t);
-            if (!isNaN(n) && n >= min && n <= max) onChange(n);
-          }}
-        />
-      </View>
-
-      <View
-        style={{ height: ROW_H, position: 'relative', marginTop: 6, marginBottom: 2 }}
-        onLayout={e => { barWRef.current = e.nativeEvent.layout.width; }}
-      >
-        {/* Track */}
-        <View style={{
-          position: 'absolute', left: 0, right: 0,
-          top: (ROW_H - 4) / 2, height: 4, borderRadius: 2,
-          backgroundColor: '#e5e7eb', overflow: 'hidden',
-        }}>
-          <View style={{ width: `${frac * 100}%`, height: '100%', borderRadius: 2, backgroundColor: '#d97706' }} />
-        </View>
-
-        {/* Thumb */}
-        <View
-          {...pan.panHandlers}
-          style={{
-            position: 'absolute',
-            left: `${frac * 100}%`,
-            top: 0,
-            width: THUMB_D, height: ROW_H,
-            marginLeft: -THUMB_D / 2,
-            justifyContent: 'center', alignItems: 'center',
-          }}
-        >
-          <View style={{
-            width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
-            backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#d97706',
-            shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, elevation: 3,
-          }} />
-        </View>
-      </View>
-
-      {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
-    </View>
-  );
-}
-
-function ThresholdRangeRow({
-  minVal, maxVal, inverted, onMinChange, onMaxChange, onInvertChange,
-}: {
-  minVal: number; maxVal: number; inverted: boolean;
-  onMinChange: (v: number) => void;
-  onMaxChange: (v: number) => void;
-  onInvertChange: (v: boolean) => void;
-}) {
-  const SEGS    = 40;
-  const BAR_H   = 20;
-  const THUMB_D = 22;
-  const ROW_H   = THUMB_D + 8;
-
-  const barWRef     = useRef(1);
-  const minRef      = useRef(minVal);
-  const maxRef      = useRef(maxVal);
-  const onMinRef    = useRef(onMinChange);
-  const onMaxRef    = useRef(onMaxChange);
-  const startMinRef = useRef(minVal);
-  const startMaxRef = useRef(maxVal);
-
-  minRef.current   = minVal;
-  maxRef.current   = maxVal;
-  onMinRef.current = onMinChange;
-  onMaxRef.current = onMaxChange;
-
-  const panMin = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { startMinRef.current = minRef.current; },
-    onPanResponderMove: (_, g) => {
-      if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const delta = (g.dx / Math.max(1, barWRef.current)) * 255;
-      const v = Math.round(Math.max(0, Math.min(maxRef.current, startMinRef.current + delta)));
-      onMinRef.current(v);
-    },
-    onPanResponderRelease: () => {},
-  })).current;
-
-  const panMax = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { startMaxRef.current = maxRef.current; },
-    onPanResponderMove: (_, g) => {
-      if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const delta = (g.dx / Math.max(1, barWRef.current)) * 255;
-      const v = Math.round(Math.max(minRef.current, Math.min(255, startMaxRef.current + delta)));
-      onMaxRef.current(v);
-    },
-    onPanResponderRelease: () => {},
-  })).current;
-
-  const minFrac = minVal / 255;
-  const maxFrac = maxVal / 255;
-
-  const thumbStyle = {
-    width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
-    backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#374151',
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 3, elevation: 4,
-  };
-
-  return (
-    <View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}>
-        <Text style={styles.paramLabel}>Threshold</Text>
-        <Text style={{ fontSize: 13, color: '#374151', fontWeight: '600' }}>{minVal}–{maxVal}</Text>
-      </View>
-
-      <View
-        style={{ height: ROW_H, position: 'relative', marginBottom: 8 }}
-        onLayout={e => { barWRef.current = e.nativeEvent.layout.width; }}
-      >
-        {/* Gradient bar — segments dim outside the selected range */}
-        <View style={{
-          position: 'absolute', left: 0, right: 0,
-          top: (ROW_H - BAR_H) / 2,
-          height: BAR_H, borderRadius: 6, overflow: 'hidden',
-          flexDirection: 'row',
-        }}>
-          {Array.from({ length: SEGS }, (_, i) => {
-            const segFrac = i / (SEGS - 1);
-            const bright  = Math.round(segFrac * 255);
-            const inRange = segFrac >= minFrac && segFrac <= maxFrac;
-            const active  = inverted ? !inRange : inRange;
-            return (
-              <View
-                key={i}
-                style={{
-                  flex: 1,
-                  backgroundColor: `rgb(${bright},${bright},${bright})`,
-                  opacity: active ? 1 : 0.18,
-                }}
-              />
-            );
-          })}
-        </View>
-
-        {/* Min thumb */}
-        <View
-          {...panMin.panHandlers}
-          style={{
-            position: 'absolute',
-            left: `${minFrac * 100}%`,
-            top: 0,
-            width: THUMB_D, height: ROW_H,
-            marginLeft: -THUMB_D / 2,
-            justifyContent: 'center', alignItems: 'center',
-          }}
-        >
-          <View style={thumbStyle} />
-        </View>
-
-        {/* Max thumb */}
-        <View
-          {...panMax.panHandlers}
-          style={{
-            position: 'absolute',
-            left: `${maxFrac * 100}%`,
-            top: 0,
-            width: THUMB_D, height: ROW_H,
-            marginLeft: -THUMB_D / 2,
-            justifyContent: 'center', alignItems: 'center',
-          }}
-        >
-          <View style={thumbStyle} />
-        </View>
-      </View>
-
-      <ToggleRow
-        label="Detect outside range"
-        value={inverted}
-        onChange={onInvertChange}
-        desc="When on, finds shapes made of pixels OUTSIDE this brightness range — useful for detecting dark shapes by selecting the bright background instead"
-      />
-    </View>
-  );
-}
-
-function BlobParamsPanel({ params, onUpdate }: { params: BlobDetectionParams; onUpdate: (p: BlobDetectionParams) => void }) {
-  function upd(patch: Partial<BlobDetectionParams>) { onUpdate({ ...params, ...patch }); }
-  return (
-    <View style={styles.blobPanel}>
-      <Text style={styles.blobPanelTitle}>Blob Detection</Text>
-      <ParamRow label="Min Area" value={params.minArea} min={1} max={999999} onChange={v => upd({ minArea: v })}
-        desc="Minimum blob size in pixels² — raise to ignore small noise" />
-      <ParamRow label="Max Area" value={params.maxArea} min={1} max={999999} onChange={v => upd({ maxArea: v })}
-        desc="Maximum blob size in pixels² — lower to exclude large regions" />
-      <SliderParamRow label="Min Threshold" value={params.minThreshold} min={0} max={255} onChange={v => upd({ minThreshold: Math.round(v) })}
-        desc="Lower grayscale level — blob detection runs at multiple steps from min to max" />
-      <SliderParamRow label="Max Threshold" value={params.maxThreshold} min={0} max={255} onChange={v => upd({ maxThreshold: Math.round(v) })}
-        desc="Upper grayscale level — more steps between min and max finds more blobs but is slower" />
-      <ToggleRow label="Filter by Color" value={params.filterByColor} onChange={v => upd({ filterByColor: v })}
-        desc="When on, only detect blobs of a specific brightness (dark or light)" />
-      {params.filterByColor && (
-        <SliderParamRow label="Blob Color" value={params.blobColor} min={0} max={255} onChange={v => upd({ blobColor: Math.round(v) })}
-          desc="0 = find dark blobs on a light background · 255 = find light blobs" />
-      )}
-      <ToggleRow label="Filter by Circularity" value={params.filterByCircularity} onChange={v => upd({ filterByCircularity: v })}
-        desc="When on, only detect blobs that are roughly circular" />
-      {params.filterByCircularity && (
-        <SliderParamRow label="Min Circularity" value={params.minCircularity} min={0} max={1} onChange={v => upd({ minCircularity: v })}
-          desc="1.0 = perfect circle · lower values allow less round shapes (0.7 = fairly round)" />
-      )}
-      <ToggleRow label="Filter by Convexity" value={params.filterByConvexity} onChange={v => upd({ filterByConvexity: v })}
-        desc="When on, only detect blobs without large dents or concavities" />
-      {params.filterByConvexity && (
-        <SliderParamRow label="Min Convexity" value={params.minConvexity} min={0} max={1} onChange={v => upd({ minConvexity: v })}
-          desc="Ratio of blob area to its convex hull — lower allows concave shapes like C or L" />
-      )}
-      <ToggleRow label="Filter by Inertia" value={params.filterByInertia} onChange={v => upd({ filterByInertia: v })}
-        desc="When on, filter blobs by how elongated they are" />
-      {params.filterByInertia && (
-        <SliderParamRow label="Min Inertia Ratio" value={params.minInertiaRatio} min={0} max={1} onChange={v => upd({ minInertiaRatio: v })}
-          desc="1.0 = circle · lower values allow more elongated shapes (0.1 = rod or needle)" />
-      )}
-    </View>
-  );
-}
-
 // ── Camera picker modal ────────────────────────────────────────────────────────
 
 function CameraPickerModal({ visible, cameras, selected, onSelect, onClose }: {
@@ -621,29 +70,24 @@ function CameraPickerModal({ visible, cameras, selected, onSelect, onClose }: {
   onSelect: (id: string) => void; onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Select Camera</Text>
-          {cameras.length === 0 ? (
-            <Text style={styles.sheetEmpty}>No cameras configured</Text>
-          ) : cameras.map(cam => (
-            <TouchableOpacity
-              key={cam.id}
-              style={[styles.sheetRow, cam.id === selected && styles.sheetRowActive]}
-              onPress={() => { onSelect(cam.id); onClose(); }}
-            >
-              <View style={[styles.dot, { backgroundColor: cam.connected ? "#22c55e" : "#d1d5db" }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sheetRowName}>{cam.name || cam.id}</Text>
-                <Text style={styles.sheetRowSub}>{cam.id} · {cam.width}×{cam.height}</Text>
-              </View>
-              {cam.id === selected && <Check size={16} color="#0891b2" />}
-            </TouchableOpacity>
-          ))}
-        </View>
-      </TouchableOpacity>
-    </Modal>
+    <BottomSheet visible={visible} onClose={onClose} title="Select Camera">
+      {cameras.length === 0 ? (
+        <Text style={styles.sheetEmpty}>No cameras configured</Text>
+      ) : cameras.map(cam => (
+        <TouchableOpacity
+          key={cam.id}
+          style={[styles.sheetRow, cam.id === selected && styles.sheetRowActive]}
+          onPress={() => { onSelect(cam.id); onClose(); }}
+        >
+          <View style={[styles.dot, { backgroundColor: cam.connected ? "#22c55e" : "#d1d5db" }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sheetRowName}>{cam.name || cam.id}</Text>
+            <Text style={styles.sheetRowSub}>{cam.id} · {cam.width}×{cam.height}</Text>
+          </View>
+          {cam.id === selected && <Check size={16} color="#0891b2" />}
+        </TouchableOpacity>
+      ))}
+    </BottomSheet>
   );
 }
 
@@ -654,112 +98,34 @@ function ZonePickerModal({ visible, zones, selected, onSelect, onClose }: {
   onSelect: (id: string | null) => void; onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Select Zone</Text>
-          <TouchableOpacity
-            style={[styles.sheetRow, selected === null && styles.sheetRowActive]}
-            onPress={() => { onSelect(null); onClose(); }}
-          >
-            <View style={[styles.dot, { backgroundColor: "#9ca3af" }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetRowName}>None — full image</Text>
-              <Text style={styles.sheetRowSub}>All blobs in frame are reported</Text>
-            </View>
-            {selected === null && <Check size={16} color="#0891b2" />}
-          </TouchableOpacity>
-          {zones.map(zone => (
-            <TouchableOpacity
-              key={zone.id}
-              style={[styles.sheetRow, zone.id === selected && styles.sheetRowActive]}
-              onPress={() => { onSelect(zone.id); onClose(); }}
-            >
-              <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sheetRowName}>{zone.name}</Text>
-                <Text style={styles.sheetRowSub}>{zone.geometry.shape}</Text>
-              </View>
-              {zone.id === selected && <Check size={16} color="#0891b2" />}
-            </TouchableOpacity>
-          ))}
+    <BottomSheet visible={visible} onClose={onClose} title="Select Zone">
+      <TouchableOpacity
+        style={[styles.sheetRow, selected === null && styles.sheetRowActive]}
+        onPress={() => { onSelect(null); onClose(); }}
+      >
+        <View style={[styles.dot, { backgroundColor: "#9ca3af" }]} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>None — full image</Text>
+          <Text style={styles.sheetRowSub}>All blobs in frame are reported</Text>
         </View>
+        {selected === null && <Check size={16} color="#0891b2" />}
       </TouchableOpacity>
-    </Modal>
+      {zones.map(zone => (
+        <TouchableOpacity
+          key={zone.id}
+          style={[styles.sheetRow, zone.id === selected && styles.sheetRowActive]}
+          onPress={() => { onSelect(zone.id); onClose(); }}
+        >
+          <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sheetRowName}>{zone.name}</Text>
+            <Text style={styles.sheetRowSub}>{zone.geometry.shape}</Text>
+          </View>
+          {zone.id === selected && <Check size={16} color="#0891b2" />}
+        </TouchableOpacity>
+      ))}
+    </BottomSheet>
   );
-}
-
-// ── Color pick canvas HTML ─────────────────────────────────────────────────────
-
-function makeColorPickHtml(imageUri: string): string {
-  return `<!DOCTYPE html><html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
-canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none}
-#ring{position:fixed;width:28px;height:28px;border:2px solid #fff;border-radius:50%;pointer-events:none;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 2px #000}
-</style>
-</head>
-<body>
-<canvas id="c"></canvas>
-<div id="ring"></div>
-<script>
-var c=document.getElementById('c'),ctx=c.getContext('2d');
-var ring=document.getElementById('ring');
-var offCanvas=null,offCtx=null;
-var imgRect={x:0,y:0,w:0,h:0};
-
-function resize(){c.width=window.innerWidth;c.height=window.innerHeight;}
-window.addEventListener('resize',function(){resize();render();});
-resize();
-
-function render(){
-  ctx.fillStyle='#000';ctx.fillRect(0,0,c.width,c.height);
-  if(!offCanvas)return;
-  var scale=Math.min(c.width/offCanvas.width,c.height/offCanvas.height);
-  var dw=offCanvas.width*scale,dh=offCanvas.height*scale;
-  var dx=(c.width-dw)/2,dy=(c.height-dh)/2;
-  imgRect={x:dx,y:dy,w:dw,h:dh};
-  ctx.drawImage(offCanvas,dx,dy,dw,dh);
-}
-
-var img=new Image();
-img.onload=function(){
-  offCanvas=document.createElement('canvas');
-  offCanvas.width=img.naturalWidth||640;
-  offCanvas.height=img.naturalHeight||480;
-  offCtx=offCanvas.getContext('2d');
-  offCtx.drawImage(img,0,0);
-  render();
-};
-img.src=${JSON.stringify(imageUri)};
-
-function pickAt(cx,cy){
-  if(!offCtx)return;
-  if(cx<imgRect.x||cx>imgRect.x+imgRect.w||cy<imgRect.y||cy>imgRect.y+imgRect.h)return;
-  var px=Math.round((cx-imgRect.x)/imgRect.w*offCanvas.width);
-  var py=Math.round((cy-imgRect.y)/imgRect.h*offCanvas.height);
-  px=Math.max(0,Math.min(offCanvas.width-1,px));
-  py=Math.max(0,Math.min(offCanvas.height-1,py));
-  var d=offCtx.getImageData(px,py,1,1).data;
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'color',r:d[0],g:d[1],b:d[2]}))}catch(e){}
-}
-
-c.addEventListener('click',function(e){pickAt(e.clientX,e.clientY);},{passive:true});
-c.addEventListener('touchend',function(e){
-  ring.style.display='none';
-  var t=e.changedTouches[0];
-  pickAt(t.clientX,t.clientY);
-},{passive:true});
-c.addEventListener('touchmove',function(e){
-  ring.style.display='block';
-  ring.style.left=e.touches[0].clientX+'px';
-  ring.style.top=e.touches[0].clientY+'px';
-},{passive:true});
-<\/script>
-</body></html>`;
 }
 
 // ── Color pick modal ───────────────────────────────────────────────────────────
@@ -1145,7 +511,8 @@ type InspItem =
   | { kind: 'color';   insp: ColorCoverageInspection }
   | { kind: 'polygon'; insp: PolygonInspection }
   | { kind: 'aruco';   insp: ArucoInspection }
-  | { kind: 'line';    insp: LineInspection };
+  | { kind: 'line';    insp: LineInspection }
+  | { kind: 'barcode'; insp: BarcodeInspection };
 
 // ── Inspection type picker ─────────────────────────────────────────────────────
 
@@ -1153,82 +520,86 @@ function InspectionTypePicker({
   visible, onSelect, onClose,
 }: {
   visible: boolean;
-  onSelect: (kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line') => void;
+  onSelect: (kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line' | 'barcode') => void;
   onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Add Inspection</Text>
-          <TouchableOpacity
-            style={styles.sheetRow}
-            onPress={() => { onSelect('blob'); onClose(); }}
-            activeOpacity={0.75}
-          >
-            <View style={styles.typePickerIcon}>
-              <ScanSearch size={18} color="#0891b2" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetRowName}>Blob Detection</Text>
-              <Text style={styles.sheetRowSub}>Detect and count objects by shape</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetRow}
-            onPress={() => { onSelect('color'); onClose(); }}
-            activeOpacity={0.75}
-          >
-            <View style={[styles.typePickerIcon, { backgroundColor: '#fdf4ff' }]}>
-              <Palette size={18} color="#d946ef" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetRowName}>Color Coverage</Text>
-              <Text style={styles.sheetRowSub}>Measure pixel color percentage in a zone</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetRow}
-            onPress={() => { onSelect('polygon'); onClose(); }}
-            activeOpacity={0.75}
-          >
-            <View style={[styles.typePickerIcon, { backgroundColor: '#fef3c7' }]}>
-              <Hexagon size={18} color="#d97706" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetRowName}>Polygon Detection</Text>
-              <Text style={styles.sheetRowSub}>Find N-sided shapes and measure orientation</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetRow}
-            onPress={() => { onSelect('aruco'); onClose(); }}
-            activeOpacity={0.75}
-          >
-            <View style={[styles.typePickerIcon, { backgroundColor: '#f0fdf4' }]}>
-              <QrCode size={18} color="#16a34a" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetRowName}>ArUco Marker</Text>
-              <Text style={styles.sheetRowSub}>Detect ArUco fiducial markers and read their IDs</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetRow}
-            onPress={() => { onSelect('line'); onClose(); }}
-            activeOpacity={0.75}
-          >
-            <View style={[styles.typePickerIcon, { backgroundColor: '#f5f3ff' }]}>
-              <Minus size={18} color="#7c3aed" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetRowName}>Line Detection</Text>
-              <Text style={styles.sheetRowSub}>Detect straight lines using Canny edges and Hough transform</Text>
-            </View>
-          </TouchableOpacity>
+    <BottomSheet visible={visible} onClose={onClose} title="Add Inspection">
+      <TouchableOpacity style={styles.sheetRow} onPress={() => { onSelect('blob'); onClose(); }} activeOpacity={0.75}>
+        <View style={styles.typePickerIcon}><ScanSearch size={18} color="#0891b2" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>Blob Detection</Text>
+          <Text style={styles.sheetRowSub}>Detect and count objects by shape</Text>
         </View>
       </TouchableOpacity>
-    </Modal>
+      <TouchableOpacity style={styles.sheetRow} onPress={() => { onSelect('color'); onClose(); }} activeOpacity={0.75}>
+        <View style={[styles.typePickerIcon, { backgroundColor: '#fdf4ff' }]}><Palette size={18} color="#d946ef" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>Color Coverage</Text>
+          <Text style={styles.sheetRowSub}>Measure pixel color percentage in a zone</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.sheetRow} onPress={() => { onSelect('polygon'); onClose(); }} activeOpacity={0.75}>
+        <View style={[styles.typePickerIcon, { backgroundColor: '#fef3c7' }]}><Hexagon size={18} color="#d97706" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>Polygon Detection</Text>
+          <Text style={styles.sheetRowSub}>Find N-sided shapes and measure orientation</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.sheetRow} onPress={() => { onSelect('aruco'); onClose(); }} activeOpacity={0.75}>
+        <View style={[styles.typePickerIcon, { backgroundColor: '#f0fdf4' }]}><QrCode size={18} color="#16a34a" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>ArUco Marker</Text>
+          <Text style={styles.sheetRowSub}>Detect ArUco fiducial markers and read their IDs</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.sheetRow} onPress={() => { onSelect('line'); onClose(); }} activeOpacity={0.75}>
+        <View style={[styles.typePickerIcon, { backgroundColor: '#f5f3ff' }]}><Minus size={18} color="#7c3aed" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>Line Detection</Text>
+          <Text style={styles.sheetRowSub}>Detect straight lines using Canny edges and Hough transform</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.sheetRow} onPress={() => { onSelect('barcode'); onClose(); }} activeOpacity={0.75}>
+        <View style={[styles.typePickerIcon, { backgroundColor: '#eff6ff' }]}><Barcode size={18} color="#2563eb" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowName}>Barcode / QR Code</Text>
+          <Text style={styles.sheetRowSub}>Read QR codes, Code 128, EAN, Data Matrix and more</Text>
+        </View>
+      </TouchableOpacity>
+    </BottomSheet>
+  );
+}
+
+function FormatPickerSheet({ visible, selected, onToggle, onClose }: {
+  visible: boolean;
+  selected: string[];
+  onToggle: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title="Barcode Formats">
+      <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+        Leave all unchecked to scan every supported format
+      </Text>
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+        {BARCODE_FORMATS.map(f => {
+          const active = selected.includes(f.id);
+          return (
+            <TouchableOpacity
+              key={f.id}
+              style={[styles.sheetRow, active && styles.sheetRowActive]}
+              onPress={() => onToggle(f.id)}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sheetRowName}>{f.label}</Text>
+              </View>
+              {active && <Check size={16} color="#2563eb" />}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </BottomSheet>
   );
 }
 
@@ -1239,42 +610,38 @@ function DictionaryPickerModal({ visible, selected, onSelect, onClose }: {
   onSelect: (id: number) => void; onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <View style={[styles.sheet, { maxHeight: '80%' }]}>
-          <Text style={styles.sheetTitle}>ArUco Dictionary</Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {ARUCO_DICTIONARIES.map(d => (
-              <TouchableOpacity
-                key={d.id}
-                style={[styles.sheetRow, d.id === selected && styles.sheetRowActive]}
-                onPress={() => { onSelect(d.id); onClose(); }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sheetRowName}>{d.label}</Text>
-                </View>
-                {d.id === selected && <Check size={16} color="#0891b2" />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      </TouchableOpacity>
-    </Modal>
+    <BottomSheet visible={visible} onClose={onClose} title="ArUco Dictionary">
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+        {ARUCO_DICTIONARIES.map(d => (
+          <TouchableOpacity
+            key={d.id}
+            style={[styles.sheetRow, d.id === selected && styles.sheetRowActive]}
+            onPress={() => { onSelect(d.id); onClose(); }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetRowName}>{d.label}</Text>
+            </View>
+            {d.id === selected && <Check size={16} color="#0891b2" />}
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </BottomSheet>
   );
 }
 
 function InspectionConfigModal({
-  visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, zones,
-  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onSaveLine, onClose,
+  visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode, zones,
+  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onSaveLine, onSaveBarcode, onClose,
   debugUrl, onLiveUpdate, onLiveUpdateBlob, onLiveUpdateColor, onLiveUpdateAruco, onLiveUpdateLine,
 }: {
   visible: boolean;
-  kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line' | null;
+  kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line' | 'barcode' | null;
   initialBlob: BlobInspection | null;
   initialColor: ColorCoverageInspection | null;
   initialPolygon: PolygonInspection | null;
   initialAruco: ArucoInspection | null;
   initialLine: LineInspection | null;
+  initialBarcode: BarcodeInspection | null;
   zones: VisionZone[];
   snapshotUri: string | null;
   onFetchSnapshot: () => Promise<void>;
@@ -1283,6 +650,7 @@ function InspectionConfigModal({
   onSavePolygon: (insp: PolygonInspection) => void;
   onSaveAruco: (insp: ArucoInspection) => void;
   onSaveLine: (insp: LineInspection) => void;
+  onSaveBarcode: (insp: BarcodeInspection) => void;
   onClose: () => void;
   debugUrl?: string | null;
   onLiveUpdate?: (insp: PolygonInspection) => void;
@@ -1359,6 +727,13 @@ function InspectionConfigModal({
   const [lineFilterByAngle, setLineFilterByAngle] = useState(false);
   const [lineMinAngle,      setLineMinAngle]      = useState(0);
   const [lineMaxAngle,      setLineMaxAngle]      = useState(180);
+
+  // Barcode-specific state
+  const [barcodeFormats,    setBarcodeFormats]   = useState<string[]>([]);
+  const [formatPickerOpen,  setFormatPickerOpen] = useState(false);
+
+  const initialBarcodeRef   = useRef(initialBarcode);
+  initialBarcodeRef.current = initialBarcode;
 
   const [zonePickerOpen, setZonePickerOpen]   = useState(false);
   const [colorEditState, setColorEditState]   = useState<{ entry: ColorEntry } | null>(null);
@@ -1508,8 +883,13 @@ function InspectionConfigModal({
       setLineFilterByAngle(initialLine.filterByAngle);
       setLineMinAngle(initialLine.minAngle);
       setLineMaxAngle(initialLine.maxAngle);
+    } else if (kind === 'barcode' && initialBarcode) {
+      setName(initialBarcode.name);
+      setEnabled(initialBarcode.enabled);
+      setZoneId(initialBarcode.zoneId);
+      setBarcodeFormats([...initialBarcode.formats]);
     }
-  }, [visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine]);
+  }, [visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode]);
 
   function handleClose() {
     if (kind === 'blob' && initialBlob) {
@@ -1530,19 +910,21 @@ function InspectionConfigModal({
         houghThreshold: lineHoughThresh,
         minLineLength: lineMinLineLen, maxLineGap: lineMaxLineGap,
         filterByAngle: lineFilterByAngle, minAngle: lineMinAngle, maxAngle: lineMaxAngle });
+    } else if (kind === 'barcode' && initialBarcode) {
+      onSaveBarcode({ ...initialBarcode, name, enabled, zoneId, formats: barcodeFormats });
     }
     onClose();
   }
 
   const linkedZone = zones.find(z => z.id === zoneId);
-  const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : '#d946ef';
+  const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.configRoot}>
         <View style={styles.configHeader}>
           <Text style={styles.configTitle}>
-            {kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : 'Color Coverage'}
+            {kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage'}
           </Text>
           <TouchableOpacity onPress={handleClose} style={styles.configDoneBtn}>
             <Check size={15} color="#fff" />
@@ -1604,7 +986,9 @@ function InspectionConfigModal({
                       ? [['#3cc800','Color match'],['#d946ef','Zone border']]
                       : kind === 'line'
                         ? [['#22c55e','Matched'],['#f97316','Angle filtered']]
-                        : [['#00ff7f','Detected marker']]
+                        : kind === 'barcode'
+                          ? [['#1e90ff','Detected code']]
+                          : [['#00ff7f','Detected marker']]
               ).map(([color, label]) => (
                 <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: color }} />
@@ -1744,6 +1128,37 @@ function InspectionConfigModal({
                     desc="Maximum angle in degrees" />
                 </>
               )}
+            </View>
+          )}
+
+          {/* Barcode / QR params */}
+          {kind === 'barcode' && (
+            <View style={styles.blobPanel}>
+              <Text style={styles.blobPanelTitle}>Barcode / QR Detection</Text>
+              <TouchableOpacity
+                style={[styles.configCard, { marginBottom: 4 }]}
+                onPress={() => setFormatPickerOpen(true)}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.paramLabel}>Formats</Text>
+                <Text style={{ flex: 1, fontSize: 13, color: '#111827' }}>
+                  {barcodeFormats.length === 0
+                    ? 'All formats'
+                    : barcodeFormats.map(f => BARCODE_FORMATS.find(b => b.id === f)?.label ?? f).join(', ')}
+                </Text>
+                <ChevronDown size={14} color="#9ca3af" />
+              </TouchableOpacity>
+              <Text style={styles.paramDesc}>
+                Select specific formats to speed up detection, or leave as "All formats" to scan everything.
+              </Text>
+              <FormatPickerSheet
+                visible={formatPickerOpen}
+                selected={barcodeFormats}
+                onToggle={id => setBarcodeFormats(prev =>
+                  prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
+                )}
+                onClose={() => setFormatPickerOpen(false)}
+              />
             </View>
           )}
 
@@ -1966,7 +1381,7 @@ export default function VisionEditorScreen() {
   const [program, setProgram]     = useState<VisionProgram>(initialProg);
   const [name, setName]           = useState(initialProg.name);
   const [isRunning, setIsRunning] = useState(initialRunning.has(initialProg.id));
-  const [saving, setSaving]       = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [cameras, setCameras]     = useState<CameraState[]>([]);
 
   // Modal states
@@ -1976,45 +1391,34 @@ export default function VisionEditorScreen() {
   const [snapshotUri, setSnapshotUri]     = useState<string | null>(null);
   const [configModal, setConfigModal]     = useState<InspItem | null>(null);
   const [typePicker, setTypePicker]       = useState(false);
-  const liveUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Dirty tracking — ref so the beforeRemove listener never has stale closure values
-  const isDirtyRef  = useRef(false);
   const programRef  = useRef(program);
   const nameRef     = useRef(name);
   programRef.current = program;
   nameRef.current    = name;
 
-  function markDirty() { isDirtyRef.current = true; }
-  function markClean() { isDirtyRef.current = false; }
+  const dirtySaveTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstRenderRef     = useRef(true);
+
+  // Auto-save whenever program state or name changes (skip the very first render)
+  useEffect(() => {
+    if (isFirstRenderRef.current) { isFirstRenderRef.current = false; return; }
+    if (dirtySaveTimerRef.current) clearTimeout(dirtySaveTimerRef.current);
+    dirtySaveTimerRef.current = setTimeout(() => {
+      autoSave({ ...programRef.current, name: nameRef.current });
+    }, 400);
+  }, [program, name]);
 
   const navigation = useNavigation();
   useEffect(() => {
-    return navigation.addListener('beforeRemove', (e: any) => {
-      if (!isDirtyRef.current) return;
-      e.preventDefault();
-      Alert.alert(
-        'Unsaved Changes',
-        'You have unsaved changes.',
-        [
-          { text: 'Keep Editing', style: 'cancel' },
-          { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
-          {
-            text: 'Save & Leave',
-            onPress: async () => {
-              const toSave = { ...programRef.current, name: nameRef.current };
-              try {
-                const result: any = await robotClient.saveVisionProgram(toSave);
-                if (result?.programId) {
-                  setProgram(prev => ({ ...prev, name: nameRef.current, id: result.programId, lastUpdatedUnixMs: result.lastUpdatedUnixMs }));
-                  markClean();
-                }
-              } catch {}
-              navigation.dispatch(e.data.action);
-            },
-          },
-        ]
-      );
+    return navigation.addListener('beforeRemove', () => {
+      // Flush any pending debounced save immediately before leaving
+      if (dirtySaveTimerRef.current) {
+        clearTimeout(dirtySaveTimerRef.current);
+        dirtySaveTimerRef.current = null;
+        robotClient.saveVisionProgram({ ...programRef.current, name: nameRef.current }).catch(() => {});
+      }
     });
   }, [navigation]);
 
@@ -2080,22 +1484,25 @@ export default function VisionEditorScreen() {
       updated = { ...program, name, zones: [...program.zones, newZone] };
     }
     setProgram(updated);
-    autoSave(updated);
   }
 
   async function autoSave(prog: VisionProgram) {
+    setSaveStatus('saving');
     try {
       const result: any = await robotClient.saveVisionProgram(prog);
-      if (result?.programId) {
-        setProgram(prev => ({ ...prev, id: result.programId, lastUpdatedUnixMs: result.lastUpdatedUnixMs }));
-        markClean();
+      if (result?.programId && !prog.id) {
+        setProgram(prev => ({ ...prev, id: result.programId }));
       }
-    } catch { /* silent — user can tap Save manually if disconnected */ }
+      setSaveStatus('saved');
+      if (savedFeedbackTimerRef.current) clearTimeout(savedFeedbackTimerRef.current);
+      savedFeedbackTimerRef.current = setTimeout(() => setSaveStatus('idle'), 1500);
+    } catch {
+      setSaveStatus('idle');
+    }
   }
 
   function updateZone(updated: VisionZone) {
     setProgram(prev => ({ ...prev, zones: prev.zones.map(z => z.id === updated.id ? updated : z) }));
-    markDirty();
   }
 
   function deleteZone(id: string) {
@@ -2105,20 +1512,18 @@ export default function VisionEditorScreen() {
       inspections:        prev.inspections.map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
       colorInspections:   (prev.colorInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
       polygonInspections: (prev.polygonInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
-      arucoInspections:   (prev.arucoInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
-      lineInspections:    (prev.lineInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      arucoInspections:    (prev.arucoInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      lineInspections:     (prev.lineInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      barcodeInspections:  (prev.barcodeInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
     }));
-    markDirty();
   }
 
   function updateInspection(updated: BlobInspection) {
     setProgram(prev => ({ ...prev, inspections: prev.inspections.map(i => i.id === updated.id ? updated : i) }));
-    markDirty();
   }
 
   function deleteInspection(id: string) {
     setProgram(prev => ({ ...prev, inspections: prev.inspections.filter(i => i.id !== id) }));
-    markDirty();
   }
 
   function updateColorInspection(updated: ColorCoverageInspection) {
@@ -2126,12 +1531,10 @@ export default function VisionEditorScreen() {
       ...prev,
       colorInspections: (prev.colorInspections ?? []).map(i => i.id === updated.id ? updated : i),
     }));
-    markDirty();
   }
 
   function deleteColorInspection(id: string) {
     setProgram(prev => ({ ...prev, colorInspections: (prev.colorInspections ?? []).filter(i => i.id !== id) }));
-    markDirty();
   }
 
   function updatePolygonInspection(updated: PolygonInspection) {
@@ -2139,12 +1542,10 @@ export default function VisionEditorScreen() {
       ...prev,
       polygonInspections: (prev.polygonInspections ?? []).map(i => i.id === updated.id ? updated : i),
     }));
-    markDirty();
   }
 
   function deletePolygonInspection(id: string) {
     setProgram(prev => ({ ...prev, polygonInspections: (prev.polygonInspections ?? []).filter(i => i.id !== id) }));
-    markDirty();
   }
 
   function updateArucoInspection(updated: ArucoInspection) {
@@ -2152,12 +1553,10 @@ export default function VisionEditorScreen() {
       ...prev,
       arucoInspections: (prev.arucoInspections ?? []).map(i => i.id === updated.id ? updated : i),
     }));
-    markDirty();
   }
 
   function deleteArucoInspection(id: string) {
     setProgram(prev => ({ ...prev, arucoInspections: (prev.arucoInspections ?? []).filter(i => i.id !== id) }));
-    markDirty();
   }
 
   function updateLineInspection(updated: LineInspection) {
@@ -2165,66 +1564,52 @@ export default function VisionEditorScreen() {
       ...prev,
       lineInspections: (prev.lineInspections ?? []).map(i => i.id === updated.id ? updated : i),
     }));
-    markDirty();
   }
 
   function deleteLineInspection(id: string) {
     setProgram(prev => ({ ...prev, lineInspections: (prev.lineInspections ?? []).filter(i => i.id !== id) }));
-    markDirty();
   }
 
-  function handlePolygonLiveUpdate(insp: PolygonInspection) {
-    updatePolygonInspection(insp);
-    if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
-    liveUpdateTimerRef.current = setTimeout(() => {
-      const prog = programRef.current;
-      autoSave({
-        ...prog,
-        name: nameRef.current,
-        polygonInspections: (prog.polygonInspections ?? []).map(i => i.id === insp.id ? insp : i),
-      });
-    }, 200);
+  function updateBarcodeInspection(updated: BarcodeInspection) {
+    setProgram(prev => ({
+      ...prev,
+      barcodeInspections: (prev.barcodeInspections ?? []).map(i => i.id === updated.id ? updated : i),
+    }));
   }
 
-  function handleBlobLiveUpdate(insp: BlobInspection) {
-    updateInspection(insp);
-    if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
-    liveUpdateTimerRef.current = setTimeout(() => {
-      const prog = programRef.current;
-      autoSave({ ...prog, name: nameRef.current,
-        inspections: prog.inspections.map(i => i.id === insp.id ? insp : i) });
-    }, 200);
+  function deleteBarcodeInspection(id: string) {
+    setProgram(prev => ({ ...prev, barcodeInspections: (prev.barcodeInspections ?? []).filter(i => i.id !== id) }));
   }
 
-  function handleColorLiveUpdate(insp: ColorCoverageInspection) {
-    updateColorInspection(insp);
-    if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
-    liveUpdateTimerRef.current = setTimeout(() => {
-      const prog = programRef.current;
-      autoSave({ ...prog, name: nameRef.current,
-        colorInspections: (prog.colorInspections ?? []).map(i => i.id === insp.id ? insp : i) });
-    }, 200);
+  function duplicateInspection(item: InspItem) {
+    const newId   = `insp_${Date.now()}`;
+    const newName = `${item.insp.name} (copy)`;
+    if (item.kind === 'blob') {
+      const dup: BlobInspection = { ...(item.insp as BlobInspection), id: newId, name: newName };
+      setProgram(prev => ({ ...prev, inspections: [...prev.inspections, dup] }));
+    } else if (item.kind === 'color') {
+      const dup: ColorCoverageInspection = { ...(item.insp as ColorCoverageInspection), id: newId, name: newName };
+      setProgram(prev => ({ ...prev, colorInspections: [...(prev.colorInspections ?? []), dup] }));
+    } else if (item.kind === 'polygon') {
+      const dup: PolygonInspection = { ...(item.insp as PolygonInspection), id: newId, name: newName };
+      setProgram(prev => ({ ...prev, polygonInspections: [...(prev.polygonInspections ?? []), dup] }));
+    } else if (item.kind === 'aruco') {
+      const dup: ArucoInspection = { ...(item.insp as ArucoInspection), id: newId, name: newName };
+      setProgram(prev => ({ ...prev, arucoInspections: [...(prev.arucoInspections ?? []), dup] }));
+    } else if (item.kind === 'line') {
+      const dup: LineInspection = { ...(item.insp as LineInspection), id: newId, name: newName };
+      setProgram(prev => ({ ...prev, lineInspections: [...(prev.lineInspections ?? []), dup] }));
+    } else if (item.kind === 'barcode') {
+      const dup: BarcodeInspection = { ...(item.insp as BarcodeInspection), id: newId, name: newName };
+      setProgram(prev => ({ ...prev, barcodeInspections: [...(prev.barcodeInspections ?? []), dup] }));
+    }
   }
 
-  function handleArucoLiveUpdate(insp: ArucoInspection) {
-    updateArucoInspection(insp);
-    if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
-    liveUpdateTimerRef.current = setTimeout(() => {
-      const prog = programRef.current;
-      autoSave({ ...prog, name: nameRef.current,
-        arucoInspections: (prog.arucoInspections ?? []).map(i => i.id === insp.id ? insp : i) });
-    }, 200);
-  }
-
-  function handleLineLiveUpdate(insp: LineInspection) {
-    updateLineInspection(insp);
-    if (liveUpdateTimerRef.current) clearTimeout(liveUpdateTimerRef.current);
-    liveUpdateTimerRef.current = setTimeout(() => {
-      const prog = programRef.current;
-      autoSave({ ...prog, name: nameRef.current,
-        lineInspections: (prog.lineInspections ?? []).map(i => i.id === insp.id ? insp : i) });
-    }, 200);
-  }
+  function handlePolygonLiveUpdate(insp: PolygonInspection) { updatePolygonInspection(insp); }
+  function handleBlobLiveUpdate(insp: BlobInspection)       { updateInspection(insp); }
+  function handleColorLiveUpdate(insp: ColorCoverageInspection) { updateColorInspection(insp); }
+  function handleArucoLiveUpdate(insp: ArucoInspection)     { updateArucoInspection(insp); }
+  function handleLineLiveUpdate(insp: LineInspection)        { updateLineInspection(insp); }
 
   const allInspections: InspItem[] = [
     ...program.inspections.map(insp => ({ kind: 'blob' as const, insp })),
@@ -2232,31 +1617,26 @@ export default function VisionEditorScreen() {
     ...(program.polygonInspections ?? []).map(insp => ({ kind: 'polygon' as const, insp })),
     ...(program.arucoInspections ?? []).map(insp => ({ kind: 'aruco' as const, insp })),
     ...(program.lineInspections ?? []).map(insp => ({ kind: 'line' as const, insp })),
+    ...(program.barcodeInspections ?? []).map(insp => ({ kind: 'barcode' as const, insp })),
   ];
 
-  async function save() {
-    setSaving(true);
-    const toSave: VisionProgram = { ...program, name };
-    try {
-      const result: any = await robotClient.saveVisionProgram(toSave);
-      if (result?.programId) {
-        setProgram(prev => ({ ...prev, name, id: result.programId, lastUpdatedUnixMs: result.lastUpdatedUnixMs }));
-        markClean();
-      }
-    } catch {
-      Alert.alert("Save Failed", "Could not save. Is the robot connected?");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function toggleRunning() {
-    if (!program.id) { Alert.alert("Save First", "Save the program before starting vision."); return; }
+    let id = program.id;
+    if (!id) {
+      try {
+        const result: any = await robotClient.saveVisionProgram({ ...program, name });
+        if (result?.programId) {
+          id = result.programId;
+          setProgram(prev => ({ ...prev, id: result.programId, lastUpdatedUnixMs: result.lastUpdatedUnixMs }));
+        }
+      } catch {}
+      if (!id) return;
+    }
     if (isRunning) {
-      await robotClient.stopVision(program.id).catch(() => {});
+      await robotClient.stopVision(id).catch(() => {});
       setIsRunning(false);
     } else {
-      await robotClient.startVision(program.id).catch(() => {});
+      await robotClient.startVision(id).catch(() => {});
       setIsRunning(true);
     }
   }
@@ -2267,16 +1647,18 @@ export default function VisionEditorScreen() {
     <View style={styles.root}>
       <SubPageHeader
         title={name}
-        subtitle={program.id ? undefined : "Unsaved"}
         right={
-          <TouchableOpacity
-            onPress={save}
-            style={[styles.saveBtn, saving && { opacity: 0.5 }]}
-            disabled={saving}
-          >
-            <Check size={15} color="#fff" />
-            <Text style={styles.saveBtnText}>Save</Text>
-          </TouchableOpacity>
+          saveStatus === 'saving' ? (
+            <View style={styles.saveStatusRow}>
+              <ActivityIndicator size="small" color="#6b7280" />
+              <Text style={styles.saveStatusText}>Saving…</Text>
+            </View>
+          ) : saveStatus === 'saved' ? (
+            <View style={styles.saveStatusRow}>
+              <Check size={14} color="#16a34a" />
+              <Text style={[styles.saveStatusText, { color: '#16a34a' }]}>Saved</Text>
+            </View>
+          ) : null
         }
       />
 
@@ -2284,6 +1666,7 @@ export default function VisionEditorScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
         {/* Name */}
@@ -2292,9 +1675,11 @@ export default function VisionEditorScreen() {
           <TextInput
             style={styles.nameInput}
             value={name}
-            onChangeText={t => { setName(t); markDirty(); }}
+            onChangeText={setName}
             placeholder="Program name"
             placeholderTextColor="#9ca3af"
+            returnKeyType="done"
+            onSubmitEditing={Keyboard.dismiss}
           />
         </View>
 
@@ -2361,7 +1746,13 @@ export default function VisionEditorScreen() {
             <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
               <Pencil size={14} color="#6b7280" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => deleteZone(zone.id)} style={styles.iconBtn} hitSlop={8}>
+            <TouchableOpacity
+              onPress={() => Alert.alert('Delete Zone', `Delete "${zone.name}"?`, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
+              ])}
+              style={styles.iconBtn} hitSlop={8}
+            >
               <Trash2 size={14} color="#ef4444" />
             </TouchableOpacity>
           </View>
@@ -2384,9 +1775,9 @@ export default function VisionEditorScreen() {
         {allInspections.map((item, index) => {
           const { kind, insp } = item;
           const linkedZone = program.zones.find(z => z.id === insp.zoneId);
-          const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : '#d946ef';
-          const iconBg     = kind === 'blob' ? '#ecfeff'  : kind === 'polygon' ? '#fef3c7'  : kind === 'aruco' ? '#f0fdf4'  : kind === 'line' ? '#f5f3ff'  : '#fdf4ff';
-          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : 'COLOR COVERAGE';
+          const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
+          const iconBg     = kind === 'blob' ? '#ecfeff' : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? '#f0fdf4' : kind === 'line' ? '#f5f3ff' : kind === 'barcode' ? '#eff6ff' : '#fdf4ff';
+          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : kind === 'barcode' ? 'BARCODE / QR CODE' : 'COLOR COVERAGE';
           return (
             <View key={insp.id} style={[styles.inspStepCard, { borderLeftColor: accent }]}>
               <TouchableOpacity
@@ -2399,6 +1790,7 @@ export default function VisionEditorScreen() {
                    kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
                    kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
                    kind === 'line'    ? <Minus      size={18} color={accent} /> :
+                   kind === 'barcode' ? <Barcode    size={18} color={accent} /> :
                                        <Palette    size={18} color={accent} />}
                 </View>
                 <View style={styles.inspStepText}>
@@ -2410,6 +1802,8 @@ export default function VisionEditorScreen() {
                     {linkedZone?.name ?? 'Full image'}
                     {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
                     {kind === 'aruco'   ? ` · dict ${(insp as ArucoInspection).dictionaryId}` : ''}
+                    {kind === 'barcode' && (insp as BarcodeInspection).formats.length > 0
+                      ? ` · ${(insp as BarcodeInspection).formats.length} format(s)` : ''}
                   </Text>
                 </View>
                 <Switch
@@ -2419,19 +1813,27 @@ export default function VisionEditorScreen() {
                     else if (kind === 'polygon') updatePolygonInspection({ ...(insp as PolygonInspection), enabled: v });
                     else if (kind === 'aruco')   updateArucoInspection({ ...(insp as ArucoInspection), enabled: v });
                     else if (kind === 'line')    updateLineInspection({ ...(insp as LineInspection), enabled: v });
+                    else if (kind === 'barcode') updateBarcodeInspection({ ...(insp as BarcodeInspection), enabled: v });
                     else                         updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
                   }}
                   trackColor={{ true: accent }}
                   style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
                 />
+                <TouchableOpacity onPress={() => duplicateInspection(item)} hitSlop={8} style={styles.iconBtn}>
+                  <Copy size={15} color="#6b7280" />
+                </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => {
-                    if (kind === 'blob')         deleteInspection(insp.id);
-                    else if (kind === 'polygon') deletePolygonInspection(insp.id);
-                    else if (kind === 'aruco')   deleteArucoInspection(insp.id);
-                    else if (kind === 'line')    deleteLineInspection(insp.id);
-                    else                         deleteColorInspection(insp.id);
-                  }}
+                  onPress={() => Alert.alert('Delete Inspection', `Delete "${insp.name}"?`, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete', style: 'destructive', onPress: () => {
+                      if (kind === 'blob')         deleteInspection(insp.id);
+                      else if (kind === 'polygon') deletePolygonInspection(insp.id);
+                      else if (kind === 'aruco')   deleteArucoInspection(insp.id);
+                      else if (kind === 'line')    deleteLineInspection(insp.id);
+                      else if (kind === 'barcode') deleteBarcodeInspection(insp.id);
+                      else                         deleteColorInspection(insp.id);
+                    }},
+                  ])}
                   hitSlop={8} style={styles.iconBtn}
                 >
                   <Trash2 size={15} color="#ef4444" />
@@ -2454,7 +1856,7 @@ export default function VisionEditorScreen() {
         visible={camPickerOpen}
         cameras={cameras}
         selected={program.cameraId}
-        onSelect={id => { setProgram(p => ({ ...p, cameraId: id })); markDirty(); }}
+        onSelect={id => setProgram(p => ({ ...p, cameraId: id }))}
         onClose={() => setCamPickerOpen(false)}
       />
 
@@ -2474,7 +1876,8 @@ export default function VisionEditorScreen() {
             (program.colorInspections ?? []).length +
             (program.polygonInspections ?? []).length +
             (program.arucoInspections ?? []).length +
-            (program.lineInspections ?? []).length;
+            (program.lineInspections ?? []).length +
+            (program.barcodeInspections ?? []).length;
           if (kind === 'blob') {
             const newInsp: BlobInspection = {
               id: `insp_${Date.now()}`,
@@ -2485,27 +1888,26 @@ export default function VisionEditorScreen() {
             };
             setProgram(prev => ({ ...prev, inspections: [...prev.inspections, newInsp] }));
             setConfigModal({ kind: 'blob', insp: newInsp });
-            markDirty();
           } else if (kind === 'color') {
             const newInsp = defaultColorCoverageInspection(totalCount);
             setProgram(prev => ({ ...prev, colorInspections: [...(prev.colorInspections ?? []), newInsp] }));
             setConfigModal({ kind: 'color', insp: newInsp });
-            markDirty();
           } else if (kind === 'aruco') {
             const newInsp = defaultArucoInspection(totalCount);
             setProgram(prev => ({ ...prev, arucoInspections: [...(prev.arucoInspections ?? []), newInsp] }));
             setConfigModal({ kind: 'aruco', insp: newInsp });
-            markDirty();
           } else if (kind === 'line') {
             const newInsp = defaultLineInspection(totalCount);
             setProgram(prev => ({ ...prev, lineInspections: [...(prev.lineInspections ?? []), newInsp] }));
             setConfigModal({ kind: 'line', insp: newInsp });
-            markDirty();
+          } else if (kind === 'barcode') {
+            const newInsp = defaultBarcodeInspection(totalCount);
+            setProgram(prev => ({ ...prev, barcodeInspections: [...(prev.barcodeInspections ?? []), newInsp] }));
+            setConfigModal({ kind: 'barcode', insp: newInsp });
           } else {
             const newInsp = defaultPolygonInspection(totalCount);
             setProgram(prev => ({ ...prev, polygonInspections: [...(prev.polygonInspections ?? []), newInsp] }));
             setConfigModal({ kind: 'polygon', insp: newInsp });
-            markDirty();
           }
         }}
         onClose={() => setTypePicker(false)}
@@ -2519,6 +1921,7 @@ export default function VisionEditorScreen() {
         initialPolygon={configModal?.kind === 'polygon' ? (configModal.insp as PolygonInspection) : null}
         initialAruco={configModal?.kind === 'aruco' ? (configModal.insp as ArucoInspection) : null}
         initialLine={configModal?.kind === 'line' ? (configModal.insp as LineInspection) : null}
+        initialBarcode={configModal?.kind === 'barcode' ? (configModal.insp as BarcodeInspection) : null}
         zones={program.zones}
         snapshotUri={snapshotUri}
         onFetchSnapshot={fetchSnapshot}
@@ -2541,6 +1944,10 @@ export default function VisionEditorScreen() {
         onSaveLine={insp => {
           updateLineInspection(insp);
           autoSave({ ...program, name, lineInspections: (program.lineInspections ?? []).map(i => i.id === insp.id ? insp : i) });
+        }}
+        onSaveBarcode={insp => {
+          updateBarcodeInspection(insp);
+          autoSave({ ...program, name, barcodeInspections: (program.barcodeInspections ?? []).map(i => i.id === insp.id ? insp : i) });
         }}
         debugUrl={configModal && program.id
           ? configModal.kind === 'polygon'
@@ -2567,11 +1974,8 @@ const styles = StyleSheet.create({
   scroll:  { flex: 1 },
   content: { padding: 14, gap: 8 },
 
-  saveBtn: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: "#16a34a", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
-  },
-  saveBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  saveStatusRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  saveStatusText: { fontSize: 13, color: "#6b7280" },
 
   // Shared card
   card: {

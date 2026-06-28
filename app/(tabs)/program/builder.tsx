@@ -1,4 +1,5 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+﻿import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { useBuiltPrograms, useConnected, useGrids, useLocals, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -1233,6 +1234,7 @@ const VAR_KIND_META: Record<VarKind, { label: string; color: string; bg: string;
   string:  { label: 'STR',  color: '#ea580c', bg: '#fff7ed', border: '#fed7aa' },
 };
 
+
 function VarPickerModal({
   visible, onClose, variables, selected, onSelect, title, showNone = false,
   contextVariables, contextLabel,
@@ -1540,11 +1542,13 @@ function SetVariableFields({
   variables,
   contextVariables,
   set,
+  onCreateVariable,
 }: {
   draft: ProgramStep;
   variables: ProgramVariable[] | undefined;
   contextVariables?: ProgramVariable[];
   set: (p: Partial<ProgramStep>) => void;
+  onCreateVariable?: () => void;
 }) {
   const varList = (variables ?? []).map(v => v.name);
   const contextVarList = (contextVariables ?? []).map(v => v.name);
@@ -1554,6 +1558,18 @@ function SetVariableFields({
   const [varDropOpen, setVarDropOpen] = useState(false);
   const [opDropOpen,  setOpDropOpen]  = useState(false);
   const [strVarPickerOpen, setStrVarPickerOpen] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState(false);
+  const prevVarCount = useRef(variables?.length ?? 0);
+
+  useEffect(() => {
+    const current = variables?.length ?? 0;
+    if (pendingCreate && current > prevVarCount.current) {
+      const newest = variables![current - 1];
+      selectVar(newest.name);
+      setPendingCreate(false);
+    }
+    prevVarCount.current = current;
+  }, [variables]);
 
   const selectedVar = [...(variables ?? []), ...(contextVariables ?? [])].find(v => v.name === draft.variableName);
   const isStringVar = selectedVar?.isString === true;
@@ -1704,6 +1720,16 @@ function SetVariableFields({
             ))}
           </>
         )}
+        {onCreateVariable && (
+          <TouchableOpacity
+            style={[svs.optionRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb', marginTop: 4 }]}
+            onPress={() => { setVarDropOpen(false); setPendingCreate(true); onCreateVariable(); }}
+            activeOpacity={0.7}
+          >
+            <Plus size={14} color="#7c3aed" />
+            <Text style={[svs.optionText, { color: '#7c3aed', marginLeft: 6 }]}>Create Variable…</Text>
+          </TouchableOpacity>
+        )}
       </SvDropdownModal>
 
       {/* Operator picker modal (numeric vars only) */}
@@ -1852,6 +1878,7 @@ function StepConfigModal({
   onSave,
   onClose,
   onEnterRoutine,
+  onCreateVariable,
 }: {
   visible: boolean;
   step: ProgramStep | null;
@@ -1862,6 +1889,7 @@ function StepConfigModal({
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
   onEnterRoutine?: (routineName: string) => void;
+  onCreateVariable?: () => void;
 }) {
   const points        = usePoints();
   const grids         = useGrids();
@@ -1884,6 +1912,9 @@ function StepConfigModal({
   const [auxDevices, setAuxDevices]       = useState<AuxDeviceState[]>([]);
   const [visionPrograms, setVisionPrograms] = useState<VisionProgram[]>([]);
   const [cameraDevices, setCameraDevices]   = useState<CameraState[]>([]);
+  const [visionProgPickerOpen, setVisionProgPickerOpen] = useState(false);
+  const [zonePickerOpen, setZonePickerOpen] = useState(false);
+  const [zoneVarPickerOpen, setZoneVarPickerOpen] = useState(false);
   const [visionPicker, setVisionPicker]   = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
   const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
   const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
@@ -3059,32 +3090,54 @@ function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>VISION PROGRAM</Text>
-            <Text style={ms.hintText}>
-              Starts the selected vision program, waits for one inspection result, then continues.
-            </Text>
-            {visionPrograms.length === 0 && (
-              <Text style={ms.emptyHint}>No vision programs saved yet. Create one from the Vision Programs page.</Text>
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4,
+                borderWidth: 1, borderColor: selectedVP ? '#0891b2' : '#e5e7eb',
+                borderRadius: 10, backgroundColor: '#f9fafb', paddingHorizontal: 12, paddingVertical: 11 }}
+              onPress={() => setVisionProgPickerOpen(true)}
+              activeOpacity={0.75}
+            >
+              {selectedVP ? (
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#0891b2' }}>{selectedVP.name}</Text>
+                  <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 1 }}>
+                    {selectedVP.cameraId || 'No camera'} · {selectedVP.zones.length} zone{selectedVP.zones.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={{ flex: 1, fontSize: 14, color: '#9ca3af' }}>Tap to select a vision program…</Text>
+              )}
+              <ChevronDown size={14} color={selectedVP ? '#0891b2' : '#9ca3af'} />
+            </TouchableOpacity>
+
+            {selectedVP && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>OVERRIDE ZONE</Text>
+                <Text style={ms.hintText}>
+                  None uses each inspection's own configured zone. Select a zone (or a variable) to override them all at runtime.
+                </Text>
+                {(() => {
+                  const fixedZone  = selectedVP.zones.find(z => z.id === draft!.visionZoneId);
+                  const hasVar     = !!draft!.visionZoneVar;
+                  const active     = !!(fixedZone || hasVar);
+                  const label      = hasVar ? `$${draft!.visionZoneVar}` : fixedZone ? fixedZone.name : 'None — use program defaults';
+                  return (
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4,
+                        borderWidth: 1, borderColor: active ? '#0891b2' : '#e5e7eb',
+                        borderRadius: 10, backgroundColor: '#f9fafb', paddingHorizontal: 12, paddingVertical: 11 }}
+                      onPress={() => setZonePickerOpen(true)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: active ? '700' : '400', color: active ? '#0891b2' : '#9ca3af' }}>
+                        {label}
+                      </Text>
+                      <ChevronDown size={14} color={active ? '#0891b2' : '#9ca3af'} />
+                    </TouchableOpacity>
+                  );
+                })()}
+              </>
             )}
-            {visionPrograms.map((vp, i) => {
-              const active = draft!.visionProgramId === vp.id;
-              return (
-                <TouchableOpacity
-                  key={vp.id}
-                  style={[ms.row, i < visionPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                  onPress={() => set({ visionProgramId: vp.id, visionProgramName: vp.name, visionOutputs: [] })}
-                  activeOpacity={0.7}
-                >
-                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                    {active && <View style={ms.radioDot} />}
-                  </View>
-                  <View style={ms.rowText}>
-                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{vp.name}</Text>
-                    {!!vp.description && <Text style={ms.rowDesc}>{vp.description}</Text>}
-                    <Text style={ms.rowDesc}>{vp.cameraId || "No camera"} · {vp.zones.length} zone{vp.zones.length !== 1 ? "s" : ""}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
 
             {inspections.length > 0 && (
               <>
@@ -3295,7 +3348,7 @@ function StepConfigModal({
       }
 
       case "SetVariable":
-        return <SetVariableFields draft={draft!} variables={variables} contextVariables={contextVariables} set={set} />;
+        return <SetVariableFields draft={draft!} variables={variables} contextVariables={contextVariables} set={set} onCreateVariable={onCreateVariable} />;
 
       case "Label": {
         const otherLabels = (scopeSteps ?? [])
@@ -4063,6 +4116,93 @@ function StepConfigModal({
           </Pressable>
         </Pressable>
     </Modal>
+    {/* Vision program picker */}
+    <BottomSheet visible={visionProgPickerOpen} onClose={() => setVisionProgPickerOpen(false)} title="Select Vision Program">
+      {visionPrograms.length === 0 && (
+        <Text style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: 16 }}>No vision programs saved yet.</Text>
+      )}
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+        {visionPrograms.map((vp, i) => {
+          const active = draft?.visionProgramId === vp.id;
+          return (
+            <TouchableOpacity
+              key={vp.id}
+              style={[ms.row, i < visionPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
+              onPress={() => {
+                set({ visionProgramId: vp.id, visionProgramName: vp.name, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: [], colorOutputs: [], polygonOutputs: [], arucoOutputs: [] });
+                setVisionProgPickerOpen(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                {active && <View style={ms.radioDot} />}
+              </View>
+              <View style={ms.rowText}>
+                <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{vp.name}</Text>
+                {!!vp.description && <Text style={ms.rowDesc}>{vp.description}</Text>}
+                <Text style={ms.rowDesc}>{vp.cameraId || 'No camera'} · {vp.zones.length} zone{vp.zones.length !== 1 ? 's' : ''}</Text>
+              </View>
+              {active && <Check size={16} color="#2563eb" />}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </BottomSheet>
+
+    {/* Zone override picker */}
+    <BottomSheet visible={zonePickerOpen} onClose={() => setZonePickerOpen(false)} title="Override Zone">
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+        <TouchableOpacity
+          style={[ms.row, ms.rowBorder, !draft?.visionZoneId && !draft?.visionZoneVar && ms.rowActive]}
+          onPress={() => { set({ visionZoneId: undefined, visionZoneVar: undefined }); setZonePickerOpen(false); }}
+          activeOpacity={0.7}
+        >
+          <View style={[ms.radioRing, !draft?.visionZoneId && !draft?.visionZoneVar && ms.radioRingActive]}>
+            {!draft?.visionZoneId && !draft?.visionZoneVar && <View style={ms.radioDot} />}
+          </View>
+          <Text style={[ms.rowLabel, !draft?.visionZoneId && !draft?.visionZoneVar && ms.rowLabelActive]}>None — use program defaults</Text>
+        </TouchableOpacity>
+        {(visionPrograms.find(vp => vp.id === draft?.visionProgramId)?.zones ?? []).map(z => {
+          const active = draft?.visionZoneId === z.id && !draft?.visionZoneVar;
+          return (
+            <TouchableOpacity
+              key={z.id}
+              style={[ms.row, ms.rowBorder, active && ms.rowActive]}
+              onPress={() => { set({ visionZoneId: z.id, visionZoneVar: undefined }); setZonePickerOpen(false); }}
+              activeOpacity={0.7}
+            >
+              <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                {active && <View style={ms.radioDot} />}
+              </View>
+              <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{z.name}</Text>
+              {active && <Check size={16} color="#2563eb" />}
+            </TouchableOpacity>
+          );
+        })}
+        <TouchableOpacity
+          style={[ms.row, !!draft?.visionZoneVar && ms.rowActive]}
+          onPress={() => { setZonePickerOpen(false); setZoneVarPickerOpen(true); }}
+          activeOpacity={0.7}
+        >
+          <View style={[ms.radioRing, !!draft?.visionZoneVar && ms.radioRingActive]}>
+            {!!draft?.visionZoneVar && <View style={ms.radioDot} />}
+          </View>
+          <Text style={[ms.rowLabel, !!draft?.visionZoneVar && ms.rowLabelActive]}>
+            {draft?.visionZoneVar ? `From variable $${draft.visionZoneVar}` : 'From variable…'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </BottomSheet>
+
+    <VarPickerModal
+      visible={zoneVarPickerOpen}
+      onClose={() => setZoneVarPickerOpen(false)}
+      variables={(variables ?? []).filter(v => !v.points && !v.values)}
+      selected={draft?.visionZoneVar}
+      title="Zone Variable"
+      showNone
+      onSelect={v => { set({ visionZoneVar: v?.name, visionZoneId: undefined }); }}
+    />
     <VarPickerModal
       visible={visionPicker !== null}
       onClose={() => setVisionPicker(null)}
@@ -5356,7 +5496,7 @@ export default function BuilderScreen() {
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
       routineName: undefined,
-      visionProgramId: undefined, visionProgramName: undefined, visionOutputs: undefined,
+      visionProgramId: undefined, visionProgramName: undefined, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: undefined,
       varPointName: undefined, varPointIndex: undefined,
       variableName: undefined, variableExpr: undefined,
       expressions: undefined,
@@ -5941,6 +6081,7 @@ export default function BuilderScreen() {
         stepIndex={editingStepIndex}
         onSave={updateStep}
         onClose={() => setConfigOpen(false)}
+        onCreateVariable={openNewVar}
       />
       <VariableEditModal
         visible={varModalOpen}
