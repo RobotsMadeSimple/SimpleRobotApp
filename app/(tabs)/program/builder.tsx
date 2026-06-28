@@ -3,7 +3,7 @@ import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { useBuiltPrograms, useConnected, useGrids, useLocals, useNanoIO, usePoints, useRelayIO, useSelectedRobot, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { ArucoVisionStepOutput, AuxDeviceState, AuxAxisChannelState, BuiltProgram, CameraState, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import { ArucoVisionStepOutput, AuxDeviceState, AuxAxisChannelState, BuiltProgram, CameraState, ColorVisionStepOutput, ConditionGroup, ConditionItem, ConditionOp, ElseIfBranch, Grid, GridPoint, PolygonVisionStepOutput, ProgramStep, ProgramVariable, RobotStack, StackPoint, StepType, THREAD_PRESETS, VisionProgram, VisionStepOutput, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
@@ -551,6 +551,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "StopBackground":     return <Square        size={size} color={color} />;
     case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
     case "StopwatchControl":   return <Timer         size={size} color={color} />;
+    case "ThreadMove":         return <RotateCw      size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
 }
@@ -588,6 +589,7 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   StopBackground:   { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Stop Background"    },
   WaitForBackground:{ accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait for Background"},
   StopwatchControl: { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Stopwatch"          },
+  ThreadMove:       { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Thread Move"        },
 };
 
 function fmtMoveModifiers(step: ProgramStep): string[] {
@@ -732,6 +734,17 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
     case "StopwatchControl":
       return step.stopwatchVariableName ? `$${step.stopwatchVariableName}` : null;
+    case "ThreadMove": {
+      const parts: string[] = [];
+      if (step.threadDistance != null) parts.push(`${step.threadDistance} mm`);
+      if (step.threadPitch != null) {
+        const preset = THREAD_PRESETS.find(p => Math.abs(p.pitch - step.threadPitch!) < 0.001);
+        parts.push(preset ? preset.label : `${step.threadPitch} mm/rev`);
+      }
+      if (step.threadPeck) parts.push(`peck ${step.threadPeckDepth ?? '?'} mm`);
+      if (step.threadReverseOut) parts.push('reverse out');
+      return parts.length ? parts.join('  ·  ') : null;
+    }
     default:
       return null;
   }
@@ -740,6 +753,7 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
 const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "MoveL",        label: "Move Linear",   desc: "Move to a saved point in a straight line" },
   { type: "MoveJ",        label: "Move Joint",    desc: "Move to a saved point via joint interpolation" },
+  { type: "ThreadMove",   label: "Thread Move",   desc: "Move the tool in Z while rotating RZ to follow a thread — set distance and pitch" },
   { type: "JumpL",        label: "Jump Linear",   desc: "Lift, move linearly over the target, then lower — avoids obstacles" },
   { type: "JumpJ",        label: "Jump Joint",    desc: "Lift, move via joint interpolation over the target, then lower — avoids obstacles" },
   { type: "SetOutput",    label: "Set Output",    desc: "Turn a digital output ON or OFF" },
@@ -773,12 +787,12 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
 const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
 
 const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
-  "MoveL", "MoveJ", "JumpL", "JumpJ",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove",
   "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
 ]);
 
 const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
-  { label: "Motion",       color: "#2563eb", types: ["MoveL", "MoveJ", "JumpL", "JumpJ"] },
+  { label: "Motion",       color: "#2563eb", types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove"] },
   { label: "Flow",         color: "#0891b2", types: ["Loop", "IfCondition", "PauseProgram", "Label", "GoToLabel"] },
   { label: "I/O",          color: "#ea580c", types: ["SetOutput"] },
   { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ"] },
@@ -1919,6 +1933,7 @@ function StepConfigModal({
   const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
   const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
   const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
+  const [threadPresetPickerOpen, setThreadPresetPickerOpen] = useState(false);
   const [statusVarPickerOpen, setStatusVarPickerOpen] = useState(false);
   const [waitTimeoutVarPicker,  setWaitTimeoutVarPicker]  = useState(false);
   const [loopIndexVarPicker,    setLoopIndexVarPicker]    = useState(false);
@@ -3499,6 +3514,117 @@ function StepConfigModal({
           </Text>
         );
 
+      case "ThreadMove": {
+        const pitch = draft!.threadPitch;
+        const pitchLabel = pitch != null
+          ? (() => {
+              const preset = THREAD_PRESETS.find(p => Math.abs(p.pitch - pitch) < 0.001);
+              return preset ? preset.label : `${pitch} mm/rev`;
+            })()
+          : null;
+        const distExpr  = draft!.expressions?.threadDistance;
+        const pitchExpr = draft!.expressions?.threadPitch;
+        const rotDeg    = pitch != null && draft!.threadDistance != null
+          ? ((draft!.threadDistance / pitch) * 360).toFixed(1)
+          : null;
+        const peckOn = draft!.threadPeck ?? false;
+        return (
+          <>
+            <Text style={[ms.fieldLabel, { marginTop: 0 }]}>DISTANCE  (mm)</Text>
+            <ExpressionInput style={ms.input} fieldKey="threadDistance"
+              value={draft!.threadDistance} expressions={draft!.expressions}
+              onChangeValue={v => set({ threadDistance: v })} onChangeExpr={setExpr}
+              placeholder="e.g. -10" variables={variables} />
+            <Text style={ms.hintText}>
+              Positive = move away from workpiece (+Z). Negative = drive in (-Z).
+              The tool rotates by (distance / pitch) x 360 on RZ simultaneously.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PITCH  (mm / revolution)</Text>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
+              <View style={{ flex: 1 }}>
+                <ExpressionInput style={ms.input} fieldKey="threadPitch"
+                  value={draft!.threadPitch} expressions={draft!.expressions}
+                  onChangeValue={v => set({ threadPitch: v })} onChangeExpr={setExpr}
+                  placeholder="required" variables={variables} />
+              </View>
+              <TouchableOpacity
+                style={[ms.seg, { paddingHorizontal: 14, height: 40, justifyContent: 'center' }]}
+                onPress={() => setThreadPresetPickerOpen(true)} activeOpacity={0.8}>
+                <Text style={ms.segText}>Pick Size</Text>
+              </TouchableOpacity>
+            </View>
+            {(pitchLabel != null || pitchExpr != null) && (
+              <Text style={ms.hintText}>
+                {pitchExpr ? `Expression: ${pitchExpr}` : pitchLabel}
+                {rotDeg != null && !distExpr && !pitchExpr ? `  ->  ${rotDeg} rotation` : ''}
+              </Text>
+            )}
+            <View style={[ms.switchRow, { marginTop: 14 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={ms.switchLabel}>Pecking</Text>
+                <Text style={[ms.hintText, { marginTop: 2, marginBottom: 0 }]}>
+                  Advance in steps, retracting to start between each peck to clear chips.
+                </Text>
+              </View>
+              <Switch
+                value={peckOn}
+                onValueChange={v => set({ threadPeck: v || undefined })}
+                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+              />
+            </View>
+            {peckOn && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PECK DEPTH  (mm per peck)</Text>
+                <ExpressionInput style={ms.input} fieldKey="threadPeckDepth"
+                  value={draft!.threadPeckDepth} expressions={draft!.expressions}
+                  onChangeValue={v => set({ threadPeckDepth: v })} onChangeExpr={setExpr}
+                  placeholder="e.g. 3" variables={variables} />
+                <Text style={ms.hintText}>
+                  How far to advance per peck. The last peck covers any remaining distance.
+                </Text>
+              </>
+            )}
+            <View style={[ms.switchRow, { marginTop: 14 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={ms.switchLabel}>Reverse out after threading</Text>
+                <Text style={[ms.hintText, { marginTop: 2, marginBottom: 0 }]}>
+                  After reaching full depth, rotate back and return to the start position.
+                </Text>
+              </View>
+              <Switch
+                value={draft!.threadReverseOut ?? true}
+                onValueChange={v => set({ threadReverseOut: v ? undefined : false })}
+                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+              />
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (deg/s)</Text>
+            <ExpressionInput style={ms.input} fieldKey="speed"
+              value={draft!.speed} expressions={draft!.expressions}
+              onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr}
+              allowUndefined placeholder="default" variables={variables} />
+            <Text style={ms.hintText}>
+              Controls RZ rotation rate. Z velocity follows automatically from pitch.
+            </Text>
+            <View style={ms.twoCol}>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (deg/s²)</Text>
+                <ExpressionInput style={ms.input} fieldKey="accel"
+                  value={draft!.accel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ accel: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="default" variables={variables} />
+              </View>
+              <View style={ms.twoColItem}>
+                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (deg/s²)</Text>
+                <ExpressionInput style={ms.input} fieldKey="decel"
+                  value={draft!.decel} expressions={draft!.expressions}
+                  onChangeValue={v => set({ decel: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="default" variables={variables} />
+              </View>
+            </View>
+          </>
+        );
+      }
+
       case "AuxMove": {
         const deviceId    = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
         const axisIndex   = draft!.auxAxisIndex ?? 0;
@@ -4191,6 +4317,37 @@ function StepConfigModal({
             {draft?.visionZoneVar ? `From variable $${draft.visionZoneVar}` : 'From variable…'}
           </Text>
         </TouchableOpacity>
+      </ScrollView>
+    </BottomSheet>
+
+    {/* Thread preset picker */}
+    <BottomSheet visible={threadPresetPickerOpen} onClose={() => setThreadPresetPickerOpen(false)} title="Select Thread Size">
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
+        {(['metric', 'imperial'] as const).map(group => (
+          <View key={group}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b7280', paddingHorizontal: 4, paddingTop: 8, paddingBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {group === 'metric' ? 'Metric' : 'Imperial UNC'}
+            </Text>
+            {THREAD_PRESETS.filter(p => p.group === group).map((p, i, arr) => {
+              const active = draft?.threadPitch != null && Math.abs(draft.threadPitch - p.pitch) < 0.001;
+              return (
+                <TouchableOpacity key={p.label}
+                  style={[ms.row, i < arr.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => { set({ threadPitch: p.pitch }); setThreadPresetPickerOpen(false); }}
+                  activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.label}</Text>
+                    <Text style={ms.rowDesc}>{p.pitch.toFixed(3)} mm / revolution</Text>
+                  </View>
+                  {active && <Check size={16} color="#2563eb" />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
       </ScrollView>
     </BottomSheet>
 
@@ -5510,6 +5667,11 @@ export default function BuilderScreen() {
       saveImageCameraId: undefined,
       backgroundProgramName: undefined,
       backgroundProgramId: undefined,
+      threadDistance: undefined,
+      threadPitch: undefined,
+      threadPeck: undefined,
+      threadPeckDepth: undefined,
+      threadReverseOut: undefined,
     };
   }
 

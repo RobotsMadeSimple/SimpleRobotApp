@@ -200,7 +200,38 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove';
+
+export const THREAD_PRESETS: { label: string; pitch: number; group: 'metric' | 'imperial' }[] = [
+  // Metric coarse
+  { label: 'M2 × 0.4',    pitch: 0.400, group: 'metric' },
+  { label: 'M2.5 × 0.45', pitch: 0.450, group: 'metric' },
+  { label: 'M3 × 0.5',    pitch: 0.500, group: 'metric' },
+  { label: 'M3.5 × 0.6',  pitch: 0.600, group: 'metric' },
+  { label: 'M4 × 0.7',    pitch: 0.700, group: 'metric' },
+  { label: 'M5 × 0.8',    pitch: 0.800, group: 'metric' },
+  { label: 'M6 × 1.0',    pitch: 1.000, group: 'metric' },
+  { label: 'M8 × 1.25',   pitch: 1.250, group: 'metric' },
+  { label: 'M10 × 1.5',   pitch: 1.500, group: 'metric' },
+  { label: 'M12 × 1.75',  pitch: 1.750, group: 'metric' },
+  { label: 'M14 × 2.0',   pitch: 2.000, group: 'metric' },
+  { label: 'M16 × 2.0',   pitch: 2.000, group: 'metric' },
+  { label: 'M20 × 2.5',   pitch: 2.500, group: 'metric' },
+  { label: 'M24 × 3.0',   pitch: 3.000, group: 'metric' },
+  // Imperial UNC
+  { label: '#4-40',        pitch: 0.635, group: 'imperial' },
+  { label: '#6-32',        pitch: 0.794, group: 'imperial' },
+  { label: '#8-32',        pitch: 0.794, group: 'imperial' },
+  { label: '#10-24',       pitch: 1.058, group: 'imperial' },
+  { label: '1/4"-20',      pitch: 1.270, group: 'imperial' },
+  { label: '5/16"-18',     pitch: 1.411, group: 'imperial' },
+  { label: '3/8"-16',      pitch: 1.588, group: 'imperial' },
+  { label: '7/16"-14',     pitch: 1.814, group: 'imperial' },
+  { label: '1/2"-13',      pitch: 1.954, group: 'imperial' },
+  { label: '5/8"-11',      pitch: 2.309, group: 'imperial' },
+  { label: '3/4"-10',      pitch: 2.540, group: 'imperial' },
+  { label: '1"-8',         pitch: 3.175, group: 'imperial' },
+];
 
 export type Vector6Val = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
@@ -621,6 +652,12 @@ export type ProgramStep = {
   auxImmediate?: boolean;   // AuxStop: hard stop when true
   auxAbsolute?: boolean;    // AuxMove: true = move to absolute position, false/undefined = relative offset
   auxEnable?: boolean;      // AuxEnable: true = enable motors, false = disable
+  // ThreadMove
+  threadDistance?: number;
+  threadPitch?: number;
+  threadPeck?: boolean;
+  threadPeckDepth?: number;
+  threadReverseOut?: boolean;
 };
 
 export type BuiltProgram = {
