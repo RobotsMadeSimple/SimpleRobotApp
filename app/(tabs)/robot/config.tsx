@@ -44,11 +44,19 @@ type RobotConfig = {
   enableRelayCard: boolean;
   enableAuxAxis:   boolean;
   enableCameras:   boolean;
-  // CNC4Axis motor ratios
-  cncMotorDegsPerMmX:   number;
-  cncMotorDegsPerMmY:   number;
-  cncMotorDegsPerMmZ:   number;
-  cncMotorDegsPerDegRz: number;
+  // Jog speeds
+  jogSlowSpeed:   number;
+  jogNormalSpeed: number;
+  jogFastSpeed:   number;
+  // CNC4Axis motor config
+  cncStepsPerRevX:  number;
+  cncStepsPerRevY:  number;
+  cncStepsPerRevZ:  number;
+  cncStepsPerRevRZ: number;
+  cncMmPerRevX:     number;
+  cncMmPerRevY:     number;
+  cncMmPerRevZ:     number;
+  cncDegPerRevRZ:   number;
   // CNC4Axis homing
   cncXHomePosition:   number;
   cncYHomePosition:   number;
@@ -61,13 +69,19 @@ type RobotConfig = {
 
 type EditingField = {
   label: string;
-  type: "number" | "direction" | "homing";
+  type: "number" | "direction" | "homing" | "cncAxis";
   numKey?: keyof RobotConfig;
   numText: string;
   unit?: string;
   placeholder?: string;
   dirKey?: keyof RobotConfig;
   dirValue: number;
+  // cncAxis only
+  cncStepsKey?: keyof RobotConfig;
+  cncStepsText?: string;
+  cncMeasureKey?: keyof RobotConfig;
+  cncMeasureText?: string;
+  cncIsRotary?: boolean;
 };
 
 // ── Config row ────────────────────────────────────────────────────────────────
@@ -155,6 +169,10 @@ export default function ConfigureRobot() {
         patch[editing.numKey] = parseFloat(editing.numText);
       if ((editing.type === "direction" || editing.type === "homing") && editing.dirKey)
         patch[editing.dirKey] = editing.dirValue;
+      if (editing.type === "cncAxis") {
+        if (editing.cncStepsKey)   patch[editing.cncStepsKey]   = parseInt(editing.cncStepsText  ?? "1600") || 1600;
+        if (editing.cncMeasureKey) patch[editing.cncMeasureKey] = parseFloat(editing.cncMeasureText ?? "5") || 5;
+      }
       await robotClient.setRobotConfig(patch);
       setConfig({ ...config, ...patch });
       setEditing(null);
@@ -367,34 +385,64 @@ export default function ConfigureRobot() {
               />
             </View>
 
-            {/* ── Motor Ratios (CNC only) ── */}
+            {/* ── Motor Setup (CNC only) ── */}
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>MOTOR RATIOS</Text>
+              <Text style={styles.sectionLabel}>MOTOR SETUP</Text>
             </View>
             <View style={styles.card}>
               {([
-                { key: "cncMotorDegsPerMmX"   as const, label: "X — Motor °/mm" },
-                { key: "cncMotorDegsPerMmY"   as const, label: "Y — Motor °/mm" },
-                { key: "cncMotorDegsPerMmZ"   as const, label: "Z — Motor °/mm" },
-                { key: "cncMotorDegsPerDegRz" as const, label: "RZ — Motor °/°" },
-              ] as { key: keyof RobotConfig; label: string }[]).map(({ key, label }, idx, arr) => (
+                { label: "X Axis",    stepsKey: "cncStepsPerRevX"  as const, measureKey: "cncMmPerRevX"   as const, isRotary: false },
+                { label: "Y Axis",    stepsKey: "cncStepsPerRevY"  as const, measureKey: "cncMmPerRevY"   as const, isRotary: false },
+                { label: "Z Axis",    stepsKey: "cncStepsPerRevZ"  as const, measureKey: "cncMmPerRevZ"   as const, isRotary: false },
+                { label: "RZ Spindle",stepsKey: "cncStepsPerRevRZ" as const, measureKey: "cncDegPerRevRZ" as const, isRotary: true  },
+              ] as { label: string; stepsKey: keyof RobotConfig; measureKey: keyof RobotConfig; isRotary: boolean }[]).map(({ label, stepsKey, measureKey, isRotary }, idx, arr) => (
                 <ConfigRow
-                  key={key}
+                  key={stepsKey}
                   icon={<Gauge size={16} color="#7c3aed" />}
                   tileBg="#f5f3ff"
                   label={label}
-                  value={config ? String(config[key]) : "—"}
+                  value={config ? `${config[stepsKey]} spr · ${config[measureKey]} ${isRotary ? "°/rev" : "mm/rev"}` : "—"}
                   last={idx === arr.length - 1}
                   onPress={config ? () => setEditing({
-                    label, type: "number",
-                    numKey: key, numText: String(config[key]),
-                    placeholder: "1.0", dirValue: 1,
+                    label, type: "cncAxis",
+                    numText: "", dirValue: 1,
+                    cncStepsKey:   stepsKey,
+                    cncStepsText:  String(config[stepsKey]),
+                    cncMeasureKey: measureKey,
+                    cncMeasureText: String(config[measureKey]),
+                    cncIsRotary: isRotary,
                   }) : undefined}
                 />
               ))}
             </View>
           </>
         )}
+
+        {/* ── Jog Speeds ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>JOGGING</Text>
+        </View>
+        <View style={styles.card}>
+          {([
+            { key: "jogSlowSpeed"   as const, label: "Slow Speed"   },
+            { key: "jogNormalSpeed" as const, label: "Normal Speed" },
+            { key: "jogFastSpeed"   as const, label: "Fast Speed"   },
+          ] as { key: keyof RobotConfig; label: string }[]).map(({ key, label }, idx, arr) => (
+            <ConfigRow
+              key={key}
+              icon={<Gauge size={16} color="#16a34a" />}
+              tileBg="#f0fdf4"
+              label={label}
+              value={config ? `${config[key]} u/s` : "—"}
+              last={idx === arr.length - 1}
+              onPress={config ? () => setEditing({
+                label, type: "number",
+                numKey: key, numText: String(config[key]),
+                unit: "u/s", placeholder: "100", dirValue: 1,
+              }) : undefined}
+            />
+          ))}
+        </View>
 
         {/* ── IO Cards ── */}
         <View style={styles.sectionHeader}>
@@ -455,6 +503,53 @@ export default function ConfigureRobot() {
                   <DirectionToggle
                     value={editing.dirValue}
                     onChange={v => setEditing(e => e ? { ...e, dirValue: v } : e)}
+                  />
+                </>
+              )}
+
+              {editing?.type === "cncAxis" && (
+                <>
+                  <Text style={styles.editLabel}>STEPS PER REVOLUTION</Text>
+                  <View style={styles.presetRow}>
+                    {([
+                      { label: "Full",  steps: 200  },
+                      { label: "1/2",   steps: 400  },
+                      { label: "1/4",   steps: 800  },
+                      { label: "1/8",   steps: 1600 },
+                      { label: "1/16",  steps: 3200 },
+                    ] as const).map(({ label, steps }) => {
+                      const active = editing.cncStepsText === String(steps);
+                      return (
+                        <TouchableOpacity
+                          key={steps}
+                          style={[styles.presetBtn, active && styles.presetBtnActive]}
+                          onPress={() => setEditing(e => e ? { ...e, cncStepsText: String(steps) } : e)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.presetBtnLabel, active && styles.presetBtnLabelActive]}>{label}</Text>
+                          <Text style={[styles.presetBtnSub, active && styles.presetBtnSubActive]}>{steps}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editing.cncStepsText ?? ""}
+                    onChangeText={v => setEditing(e => e ? { ...e, cncStepsText: v } : e)}
+                    keyboardType="numeric"
+                    placeholder="Custom"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <Text style={[styles.editLabel, { marginTop: 8 }]}>
+                    {editing.cncIsRotary ? "DEG PER REVOLUTION" : "MM PER REVOLUTION"}
+                  </Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editing.cncMeasureText ?? ""}
+                    onChangeText={v => setEditing(e => e ? { ...e, cncMeasureText: v } : e)}
+                    keyboardType="decimal-pad"
+                    placeholder={editing.cncIsRotary ? "360" : "5"}
+                    placeholderTextColor="#9ca3af"
                   />
                 </>
               )}
@@ -610,6 +705,44 @@ const styles = StyleSheet.create({
   },
   dirBtnTextActive: {
     color: "#2563eb",
+  },
+
+  // ── CNC preset picker ─────────────────────────────────────────────────────
+  presetRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 8,
+    flexWrap: "wrap",
+  },
+  presetBtn: {
+    flex: 1,
+    minWidth: 44,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    backgroundColor: "#f9fafb",
+  },
+  presetBtnActive: {
+    borderColor: "#7c3aed",
+    backgroundColor: "#f5f3ff",
+  },
+  presetBtnLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6b7280",
+  },
+  presetBtnLabelActive: {
+    color: "#7c3aed",
+  },
+  presetBtnSub: {
+    fontSize: 10,
+    color: "#9ca3af",
+  },
+  presetBtnSubActive: {
+    color: "#a78bfa",
   },
 
   // ── Modal buttons ──────────────────────────────────────────────────────────

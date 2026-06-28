@@ -8,14 +8,19 @@ import { JointJogPanel, JointAxis } from "@/src/components/ui/jog/JointJogPanel"
 // ── Speed map ─────────────────────────────────────────────────────────────────
 // "mm" entries are step-move magnitudes; others are continuous speeds (mm/s or °/s)
 
-const speedMap: Record<string, number> = {
-  "0.1mm": 0.1,
-  "1mm":   1,
-  "10mm":  10,
-  Slow:    10,
-  Normal:  100,
-  Fast:    300,
-};
+const DEFAULT_SPEEDS = { Slow: 10, Normal: 100, Fast: 300 };
+
+function buildSpeedMap(overrides?: { Slow: number; Normal: number; Fast: number }): Record<string, number> {
+  const s = overrides ?? DEFAULT_SPEEDS;
+  return {
+    "0.1mm": 0.1,
+    "1mm":   1,
+    "10mm":  10,
+    Slow:    s.Slow,
+    Normal:  s.Normal,
+    Fast:    s.Fast,
+  };
+}
 
 // Joint degree-step equivalents for the discrete "mm" speed options
 const jointStepMap: Record<string, number> = {
@@ -25,8 +30,9 @@ const jointStepMap: Record<string, number> = {
 };
 
 type JogPadProps = {
-  jogMode:       string;  // "XYZ" | "Tool" | "Joint"
-  selectedSpeed: string;
+  jogMode:        string;  // "XYZ" | "Tool" | "Joint"
+  selectedSpeed:  string;
+  speedOverrides?: { Slow: number; Normal: number; Fast: number };
 };
 
 /**
@@ -34,8 +40,9 @@ type JogPadProps = {
  * Handles all interval timing and robot commands; delegates visual layout
  * to CartesianJogPanel (XYZ / Tool) or JointJogPanel (Joint).
  */
-export default function JogPad({ jogMode, selectedSpeed }: JogPadProps) {
+export default function JogPad({ jogMode, selectedSpeed, speedOverrides }: JogPadProps) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speedMap    = buildSpeedMap(speedOverrides);
   const activeSpeed = speedMap[selectedSpeed];
   const isStep      = selectedSpeed.includes("mm");
 
