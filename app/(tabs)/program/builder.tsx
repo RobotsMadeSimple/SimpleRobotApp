@@ -515,6 +515,8 @@ function stepLabel(step: ProgramStep): string {
       return step.stopwatchVariableName
         ? `${step.stopwatchAction ?? "?"} $${step.stopwatchVariableName}`
         : `Stopwatch ${step.stopwatchAction ?? "?"}`;
+    case "CncProgram":
+      return step.cncDxfFile ?? "(no DXF selected)";
     default:              return step.type;
   }
 }
@@ -552,6 +554,7 @@ function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size
     case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
     case "StopwatchControl":   return <Timer         size={size} color={color} />;
     case "ThreadMove":         return <RotateCw      size={size} color={color} />;
+    case "CncProgram":         return <Cpu           size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
 }
@@ -590,6 +593,7 @@ const STEP_THEME: Record<string, { accent: string; iconBg: string; iconColor: st
   WaitForBackground:{ accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait for Background"},
   StopwatchControl: { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Stopwatch"          },
   ThreadMove:       { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Thread Move"        },
+  CncProgram:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "CNC Program"         },
 };
 
 function fmtMoveModifiers(step: ProgramStep): string[] {
@@ -745,6 +749,12 @@ function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): s
       if (step.threadReverseOut) parts.push('reverse out');
       return parts.length ? parts.join('  ·  ') : null;
     }
+    case "CncProgram": {
+      const n = Math.floor((step.cncProgramSteps ?? []).length / 2);
+      const parts = [`${n} hole${n !== 1 ? 's' : ''}`];
+      if (step.cncSafeZ != null) parts.push(`safe Z ${step.cncSafeZ} mm`);
+      return parts.join('  ·  ');
+    }
     default:
       return null;
   }
@@ -782,12 +792,13 @@ const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "WaitForBackground",label: "Wait for Background",   desc: "Block until a named background program finishes" },
   { type: "StopwatchControl", label: "Stopwatch",             desc: "Start, stop, or reset a stopwatch variable — value holds elapsed milliseconds" },
   { type: "SaveImage",        label: "Save Image",             desc: "Capture a camera snapshot and save to a file path — supports $variable interpolation including $time_ms" },
+  { type: "CncProgram",      label: "CNC Program",            desc: "Generate a CNC threading toolpath from a DXF file — select holes and produce MoveL + ThreadMove steps" },
 ];
 
 const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
 
 const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
-  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram",
   "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
 ]);
 
@@ -803,6 +814,7 @@ const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
   { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
   { label: "Background",   color: "#16a34a", types: ["StartBackground", "StopBackground", "WaitForBackground"] },
   { label: "Timing",       color: "#0891b2", types: ["StopwatchControl"] },
+  { label: "CNC",          color: "#7c3aed", types: ["CncProgram"] },
 ];
 
 // ── Insert target — tracks where the next step should be placed ───────────────
@@ -4786,6 +4798,7 @@ function StepRow({
   variables,
   contextVariables,
   onEnterRoutine,
+  onOpenCncBuilder,
 }: {
   step: ProgramStep;
   index: number;
@@ -4808,6 +4821,7 @@ function StepRow({
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
   onEnterRoutine?: (routineName: string) => void;
+  onOpenCncBuilder?: (stepId: string) => void;
 }) {
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
@@ -4912,6 +4926,25 @@ function StepRow({
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Enter</Text>
+                <ArrowRight size={13} color={theme.iconColor} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* CNC Program body — open dedicated builder */}
+        {step.type === 'CncProgram' && onOpenCncBuilder && (
+          <View style={[styles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
+              onPress={() => onOpenCncBuilder(step.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 12, color: "#64748b" }}>
+                {(step.cncProgramSteps ?? []).length / 2 | 0} hole{(step.cncProgramSteps ?? []).length / 2 !== 1 ? "s" : ""}{step.cncDxfFile ? `  ·  ${step.cncDxfFile}` : ""}
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Open</Text>
                 <ArrowRight size={13} color={theme.iconColor} />
               </View>
             </TouchableOpacity>
@@ -5672,6 +5705,9 @@ export default function BuilderScreen() {
       threadPeck: undefined,
       threadPeckDepth: undefined,
       threadReverseOut: undefined,
+      cncDxfFile: undefined,
+      cncSafeZ: undefined,
+      cncProgramSteps: type === "CncProgram" ? [] : undefined,
     };
   }
 
@@ -5902,6 +5938,9 @@ export default function BuilderScreen() {
                     onEnterRoutine={!isRoutineMode ? (routineName) => {
                       router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
                     } : undefined}
+                    onOpenCncBuilder={stepId => {
+                      router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName, stepId } });
+                    }}
                   />
                 ))}
               </View>
@@ -6184,6 +6223,9 @@ export default function BuilderScreen() {
                 onEnterRoutine={!isRoutineMode ? (routineName) => {
                   router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
                 } : undefined}
+                onOpenCncBuilder={stepId => {
+                  router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName, stepId } });
+                }}
               />
             ))}
           </View>

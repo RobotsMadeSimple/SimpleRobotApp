@@ -292,6 +292,9 @@ export default function AboutRobot() {
         robotName: editName !== robot.robotName ? editName : undefined,
         robotType: editType !== robot.robotType ? editType : undefined,
       });
+      if (editType !== robot.robotType) {
+        await robotClient.setRobotConfig({ robotType: editType });
+      }
       const updated = { ...robot, robotName: editName, robotType: editType };
       setSelectedRobot(updated);
       robotDiscovery.updateRobot(robot.serialNumber, updated);
@@ -645,7 +648,8 @@ export default function AboutRobot() {
               <Text style={styles.editLabel}>ROBOT TYPE</Text>
               <View style={styles.pickerWrapper}>
                 <Picker selectedValue={editType} onValueChange={setEditType} style={styles.picker} dropdownIconColor="#6b7280">
-                  <Picker.Item label="ASTRO" value="ASTRO" />
+                  <Picker.Item label="ASTRO"      value="ASTRO" />
+                  <Picker.Item label="4-Axis CNC" value="CNC4Axis" />
                 </Picker>
               </View>
               <View style={styles.modalButtons}>

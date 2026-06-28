@@ -1025,6 +1025,7 @@ export class RobotConnectService {
   }
 
   public getRobotConfig(): Promise<{
+    robotType: string;
     homingSpeed: number;
     j1HomeOffsetDeg: number;
     verticalHomePosition: number;
@@ -1042,11 +1043,30 @@ export class RobotConnectService {
     enableRelayCard: boolean;
     enableAuxAxis: boolean;
     enableCameras: boolean;
+    jogSlowSpeed: number;
+    jogNormalSpeed: number;
+    jogFastSpeed: number;
+    cncStepsPerRevX: number;
+    cncStepsPerRevY: number;
+    cncStepsPerRevZ: number;
+    cncStepsPerRevRZ: number;
+    cncMmPerRevX: number;
+    cncMmPerRevY: number;
+    cncMmPerRevZ: number;
+    cncDegPerRevRZ: number;
+    cncXHomePosition: number;
+    cncYHomePosition: number;
+    cncZHomePosition: number;
+    cncRzHomePosition: number;
+    cncXHomingDirection: number;
+    cncYHomingDirection: number;
+    cncZHomingDirection: number;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
 
   public setRobotConfig(fields: {
+    robotType?: string;
     homingSpeed?: number;
     j1HomeOffsetDeg?: number;
     verticalHomePosition?: number;
@@ -1060,6 +1080,24 @@ export class RobotConnectService {
     enableRelayCard?: boolean;
     enableAuxAxis?: boolean;
     enableCameras?: boolean;
+    jogSlowSpeed?: number;
+    jogNormalSpeed?: number;
+    jogFastSpeed?: number;
+    cncStepsPerRevX?: number;
+    cncStepsPerRevY?: number;
+    cncStepsPerRevZ?: number;
+    cncStepsPerRevRZ?: number;
+    cncMmPerRevX?: number;
+    cncMmPerRevY?: number;
+    cncMmPerRevZ?: number;
+    cncDegPerRevRZ?: number;
+    cncXHomePosition?: number;
+    cncYHomePosition?: number;
+    cncZHomePosition?: number;
+    cncRzHomePosition?: number;
+    cncXHomingDirection?: number;
+    cncYHomingDirection?: number;
+    cncZHomingDirection?: number;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
   }
@@ -1251,6 +1289,47 @@ export class RobotConnectService {
       this.emitRelayIO();
     }
     return this.sendCommand("RenameRelay", { relay, name });
+  }
+
+  // ── DXF files ──────────────────────────────────────────────────────────────
+
+  public async listDxfFiles(): Promise<string[]> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/dxf`);
+    if (!res.ok) throw new Error(`listDxfFiles: ${res.status}`);
+    return res.json();
+  }
+
+  public async uploadDxfFile(name: string, content: string): Promise<void> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/dxf?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: content,
+    });
+    if (!res.ok) throw new Error(`uploadDxfFile: ${res.status}`);
+  }
+
+  public async getDxfFile(name: string): Promise<string> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/dxf/${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(`getDxfFile: ${res.status}`);
+    return res.text();
+  }
+
+  public async deleteDxfFile(name: string): Promise<void> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/dxf/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`deleteDxfFile: ${res.status}`);
+  }
+
+  public dxfFileUrl(name: string): string | null {
+    const base = this.httpBaseUrl();
+    return base ? `${base}/dxf/${encodeURIComponent(name)}` : null;
   }
 }
 

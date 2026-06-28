@@ -2,6 +2,7 @@ import JogPad from "@/src/components/ui/JogPad";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { useFocusEffect } from "@react-navigation/native";
 import { router, Tabs } from "expo-router";
 import {
   ArrowRight,
@@ -16,7 +17,7 @@ import {
   Wrench,
   X,
 } from "lucide-react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Modal,
@@ -255,6 +256,7 @@ export default function JogScreen() {
   const [selectedSpeed, setSelectedSpeed] = useState("Slow");
   const [mode, setMode]                 = useState("XYZ");
   const [teachOpen, setTeachOpen]       = useState(false);
+  const [jogSpeeds, setJogSpeeds]       = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
 
   const tools      = useTools();
   const locals     = useLocals();
@@ -285,6 +287,13 @@ export default function JogScreen() {
     { key: "Tool",  icon: (active: boolean) => <Move    size={17} color={active ? "#fff" : "#6b7280"} /> },
     { key: "Joint", icon: (active: boolean) => <Rotate3d size={17} color={active ? "#fff" : "#6b7280"} /> },
   ];
+
+  // Reload jog speeds whenever this screen comes into focus (picks up config changes immediately)
+  useFocusEffect(useCallback(() => {
+    robotClient.getRobotConfig()
+      .then(cfg => setJogSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
+      .catch(() => {});
+  }, []));
 
   // Keep local selector in sync when active tool changes externally
   useEffect(() => {
@@ -397,7 +406,7 @@ export default function JogScreen() {
 
         {/* JogPad */}
         <View style={styles.jogWrapper}>
-          <JogPad jogMode={mode} selectedSpeed={selectedSpeed} />
+          <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} />
         </View>
       </ScrollView>
 
