@@ -162,12 +162,13 @@ export type VisionProgram = {
   polygonInspections?: PolygonInspection[];
   arucoInspections?: ArucoInspection[];
   lineInspections?: LineInspection[];
+  barcodeInspections?: BarcodeInspection[];
   lastUpdatedUnixMs: number;
 };
 
 export type BlobResult       = { x: number; y: number; size: number };
 export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[] };
+export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[] };
 
 export type ArucoResult = {
   inspectionId: string;
@@ -322,6 +323,61 @@ export type ArucoVisionStepOutput = {
   firstCenterYVar?: string;
 };
 
+export const BARCODE_FORMATS: { id: string; label: string }[] = [
+  { id: 'QR_CODE',     label: 'QR Code'    },
+  { id: 'DATA_MATRIX', label: 'Data Matrix' },
+  { id: 'AZTEC',       label: 'Aztec'       },
+  { id: 'PDF_417',     label: 'PDF 417'     },
+  { id: 'CODE_128',    label: 'Code 128'    },
+  { id: 'CODE_39',     label: 'Code 39'     },
+  { id: 'EAN_13',      label: 'EAN-13'      },
+  { id: 'EAN_8',       label: 'EAN-8'       },
+  { id: 'UPC_A',       label: 'UPC-A'       },
+  { id: 'UPC_E',       label: 'UPC-E'       },
+];
+
+export type BarcodeInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  /** ZXing BarcodeFormat names to scan for; empty = all formats */
+  formats: string[];
+};
+
+export type BarcodeCodeResult = {
+  value: string;
+  format: string;
+  centerX: number;
+  centerY: number;
+};
+
+export type BarcodeResult = {
+  inspectionId: string;
+  name: string;
+  count: number;
+  found: boolean;
+  codes: BarcodeCodeResult[];
+};
+
+export type BarcodeVisionStepOutput = {
+  inspectionId: string;
+  countVar?: string;
+  foundVar?: string;
+  firstValueVar?: string;
+  firstFormatVar?: string;
+};
+
+export function defaultBarcodeInspection(index: number): BarcodeInspection {
+  return {
+    id: `barcode_${Date.now()}`,
+    name: `Barcode ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    formats: [],
+  };
+}
+
 export function defaultColorEntry(): ColorEntry {
   return { id: `ce_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, r: 128, g: 128, b: 128, tolerance: 20 };
 }
@@ -339,6 +395,7 @@ export function defaultColorCoverageInspection(index: number): ColorCoverageInsp
 }
 
 export const ARUCO_DICTIONARIES: { id: number; label: string }[] = [
+  { id: -1, label: 'Auto Detect (All)' },
   { id: 0,  label: '4×4  (50 IDs)'   },
   { id: 1,  label: '4×4  (100 IDs)'  },
   { id: 2,  label: '4×4  (250 IDs)'  },
@@ -364,7 +421,7 @@ export function defaultArucoInspection(index: number): ArucoInspection {
     name: `ArUco ${index + 1}`,
     enabled: true,
     zoneId: null,
-    dictionaryId: 1,
+    dictionaryId: -1,
     minMarkerArea: 100,
     maxMarkerArea: 100000,
   };
@@ -522,6 +579,8 @@ export type ProgramStep = {
   // RunVision
   visionProgramId?: string;
   visionProgramName?: string;
+  visionZoneId?: string;
+  visionZoneVar?: string;
   visionOutputs?: VisionStepOutput[];
   colorOutputs?: ColorVisionStepOutput[];
   polygonOutputs?: PolygonVisionStepOutput[];
