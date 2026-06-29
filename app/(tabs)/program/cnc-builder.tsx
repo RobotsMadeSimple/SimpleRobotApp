@@ -4,7 +4,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { ProgramStep, THREAD_PRESETS } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   Check,
   ChevronDown,
