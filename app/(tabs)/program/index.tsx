@@ -1,4 +1,4 @@
-import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
+﻿import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -15,7 +15,7 @@ import {
   View,
 } from "react-native";
 
-// ── Status theming ─────────────────────────────────────────────────────────────
+// â”€â”€ Status theming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type StatusTheme = { bg: string; text: string; bar: string; dot: string };
 
@@ -30,7 +30,7 @@ const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
   Error:     { bg: "#fef2f2", text: "#dc2626", bar: "#ef4444", dot: "#ef4444" },
 };
 
-// ── Action buttons ─────────────────────────────────────────────────────────────
+// â”€â”€ Action buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type ActionBtn = { label: string; bg: string; onPress: () => void };
 
@@ -69,7 +69,7 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   }
 }
 
-// ── Running Program Card ───────────────────────────────────────────────────────
+// â”€â”€ Running Program Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, onSpeedPress }: {
   p: ProgramSummary;
@@ -97,7 +97,7 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
         onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`)}
         style={styles.runningCard}
       >
-        {/* Status bar — shows run state only */}
+        {/* Status bar â€” shows run state only */}
         <View style={[styles.statusBar, { backgroundColor: hasAlert ? alertColor : theme.bg }]}>
           <View style={[styles.statusDot, { backgroundColor: hasAlert ? '#fff' : theme.dot }]} />
           <Text style={[styles.statusText, { color: hasAlert ? '#fff' : theme.text }]} numberOfLines={1}>
@@ -111,7 +111,7 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
           )}
         </View>
 
-        {/* Alert strip — separate row below status bar, always fully visible */}
+        {/* Alert strip â€” separate row below status bar, always fully visible */}
         {hasAlert && (
           <View style={[styles.alertStripe, { backgroundColor: alertColor }]}>
             {isError
@@ -192,7 +192,7 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
   );
 }
 
-// ── Nav Tile ───────────────────────────────────────────────────────────────────
+// â”€â”€ Nav Tile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function NavTile({
   icon,
@@ -225,7 +225,7 @@ function NavTile({
   );
 }
 
-// ── Screen ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
@@ -243,11 +243,13 @@ export default function ProgramScreen() {
     }, [])
   );
 
-  useEffect(() => {
-    robotClient.getVisionPrograms()
-      .then(({ programs }) => setVisionCount(programs.length))
-      .catch(() => {});
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      robotClient.getVisionPrograms()
+        .then(({ programs }) => setVisionCount(programs.length))
+        .catch(() => {});
+    }, [])
+  );
 
   const builtNames = new Set(builtPrograms.map(p => p.name));
 
@@ -351,7 +353,7 @@ export default function ProgramScreen() {
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const styles = StyleSheet.create({
   scroll:   { flex: 1, backgroundColor: "#f3f4f6" },

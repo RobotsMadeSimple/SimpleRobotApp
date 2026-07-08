@@ -202,20 +202,24 @@ var _ws=null,_timer=null,_lastUrl=null;
 function closeWs(){if(_ws){try{_ws.close();}catch(e){}_ws=null;}}
 function stopTimer(){if(_timer){clearInterval(_timer);_timer=null;}}
 
-function drawSrc(src){
+function drawSrc(src,cb){
   var img=new Image();
   img.onload=function(){
     if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
       c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
     }
     ctx.drawImage(img,0,0);
+    if(cb)cb();
   };
+  img.onerror=function(){if(cb)cb();};
   img.src=src;
 }
 
 function startWs(url){
+  var dec=false,pend=null;
+  function step(src){dec=true;drawSrc(src,function(){dec=false;if(pend!==null){var n=pend;pend=null;step(n);}});}
   _ws=new WebSocket(url);
-  _ws.onmessage=function(e){drawSrc(e.data);};
+  _ws.onmessage=function(e){if(dec){pend=e.data;}else{step(e.data);}};
   _ws.onerror=function(){_ws=null;};
   _ws.onclose=function(){_ws=null;};
 }
