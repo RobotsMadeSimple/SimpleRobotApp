@@ -634,7 +634,7 @@ export class RobotConnectService {
     this.ws.send(JSON.stringify(data));
   }
 
-  sendCommand(command: string, params: Record<string, any> = {}) {
+  sendCommand(command: string, params: Record<string, any> = {}, timeoutMs = 10000) {
     if (!this.ws || !this.isConnected) {
       return Promise.reject("Not connected");
     }
@@ -655,7 +655,7 @@ export class RobotConnectService {
       const timer = setTimeout(() => {
         this.pendingAcks.delete(id);
         reject(`Command "${command}" timed out`);
-      }, 10000);
+      }, timeoutMs);
 
       this.pendingAcks.set(id, {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
@@ -1190,6 +1190,16 @@ export class RobotConnectService {
     targetFps: number;
   }) {
     return this.sendCommand("SetCameraConfig", params);
+  }
+
+  public async getCameraResolutions(deviceIndex: number): Promise<{ width: number; height: number }[]> {
+    try {
+      const data: any = await this.sendCommand("GetCameraResolutions", { deviceIndex }, 30000);
+      if (!data.resolutions) return [];
+      return JSON.parse(data.resolutions) as { width: number; height: number }[];
+    } catch {
+      return [];
+    }
   }
 
   /** Build the HTTP base URL from the current WebSocket URL (ws:// → http://). */

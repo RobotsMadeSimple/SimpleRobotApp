@@ -1,13 +1,10 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
-  Camera,
-  Cpu,
   Gauge,
   Home,
   MoveHorizontal,
   MoveVertical,
-  Radio,
   RotateCcw,
   Zap,
 } from "lucide-react-native";
@@ -16,7 +13,6 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -39,11 +35,6 @@ type RobotConfig = {
   m2Direction: number;
   m3Direction: number;
   m4Direction: number;
-  // IO cards
-  enableNanoCards: boolean;
-  enableRelayCard: boolean;
-  enableAuxAxis:   boolean;
-  enableCameras:   boolean;
   // Jog speeds
   jogSlowSpeed:   number;
   jogNormalSpeed: number;
@@ -152,7 +143,6 @@ export default function ConfigureRobot() {
   const [config, setConfig] = useState<RobotConfig | null>(null);
   const [editing, setEditing] = useState<EditingField | null>(null);
   const [saving, setSaving] = useState(false);
-  const [savingCards, setSavingCards] = useState(false);
 
   useEffect(() => {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
@@ -178,21 +168,6 @@ export default function ConfigureRobot() {
       setEditing(null);
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function toggleCard(
-    field: "enableStbCard" | "enableNanoCards" | "enableRelayCard" | "enableAuxAxis" | "enableCameras",
-    value: boolean
-  ) {
-    if (!config || savingCards) return;
-    setSavingCards(true);
-    try {
-      const updated = { ...config, [field]: value };
-      await robotClient.setRobotConfig({ [field]: value });
-      setConfig(updated);
-    } finally {
-      setSavingCards(false);
     }
   }
 
@@ -441,31 +416,6 @@ export default function ConfigureRobot() {
                 unit: "u/s", placeholder: "100", dirValue: 1,
               }) : undefined}
             />
-          ))}
-        </View>
-
-        {/* ── IO Cards ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>IO CARDS</Text>
-        </View>
-        <View style={styles.card}>
-          {[
-            { field: "enableNanoCards" as const, icon: <Cpu   size={16} color="#4f46e5" />, tileBg: "#eef2ff", label: "Arduino Nano Devices" },
-            { field: "enableRelayCard" as const, icon: <Radio size={16} color="#0891b2" />, tileBg: "#ecfeff", label: "USB Relay Board" },
-            { field: "enableAuxAxis"   as const, icon: <Gauge size={16} color="#7c3aed" />, tileBg: "#ede9fe", label: "Aux Stepper Axes" },
-            { field: "enableCameras"   as const, icon: <Camera size={16} color="#2563eb" />, tileBg: "#eff6ff", label: "USB Cameras" },
-          ].map(({ field, icon, tileBg, label }, idx, arr) => (
-            <View key={field} style={[styles.infoRow, idx < arr.length - 1 && styles.infoRowBorder]}>
-              <View style={[styles.rowTile, { backgroundColor: tileBg }]}>{icon}</View>
-              <Text style={[styles.infoLabel, { flex: 1 }]}>{label}</Text>
-              <Switch
-                value={config ? config[field] : false}
-                onValueChange={v => toggleCard(field, v)}
-                disabled={!config || savingCards}
-                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
-                thumbColor="#fff"
-              />
-            </View>
           ))}
         </View>
 

@@ -2,9 +2,10 @@ import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import { AlertTriangle, ChevronRight, Cpu, Gauge, Repeat2, ScanSearch, XCircle } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   ScrollView,
@@ -230,8 +231,17 @@ export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
   const robotStatus      = useRobotStatus();
-  const [visionCount, setVisionCount] = useState(0);
+  const [visionCount,    setVisionCount]    = useState(0);
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
+  const [showVision,     setShowVision]     = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      robotClient.getRobotConfig()
+        .then(cfg => setShowVision(cfg.enableCameras ?? false))
+        .catch(() => {});
+    }, [])
+  );
 
   useEffect(() => {
     robotClient.getVisionPrograms()
@@ -319,15 +329,17 @@ export default function ProgramScreen() {
         onPress={() => router.navigate("/program/routines")}
       />
 
-      <NavTile
-        icon={<ScanSearch size={20} color="#0891b2" />}
-        label="Vision Programs"
-        count={visionCount}
-        countLabel={visionCount === 1 ? "program" : "programs"}
-        color="#0891b2"
-        bg="#ecfeff"
-        onPress={() => router.navigate("/(tabs)/program/vision")}
-      />
+      {showVision && (
+        <NavTile
+          icon={<ScanSearch size={20} color="#0891b2" />}
+          label="Vision Programs"
+          count={visionCount}
+          countLabel={visionCount === 1 ? "program" : "programs"}
+          color="#0891b2"
+          bg="#ecfeff"
+          onPress={() => router.navigate("/(tabs)/program/vision")}
+        />
+      )}
     </ScrollView>
 
     <SpeedOverrideModal
