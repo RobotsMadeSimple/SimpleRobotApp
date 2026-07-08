@@ -1424,6 +1424,7 @@ export default function VisionEditorScreen() {
 
   // Feed WebView ref — URL updates are injected without rebuilding the WebView
   const feedWebViewRef = useRef<any>(null);
+  const feedSnapshotResolveRef = useRef<((uri: string | null) => void) | null>(null);
 
   const feedSourceUrl = useMemo(() => {
     if (isRunning && program.id) return robotClient.visionWsUrl(program.id);
@@ -1445,8 +1446,43 @@ export default function VisionEditorScreen() {
     return robotClient.onCameras(setCameras);
   }, []);
 
-  // Fetch camera snapshot for zone drawing canvas
+  // Grab the current displayed frame from the live feed WebView canvas — no network
+  // round-trip. Injects JS to read the canvas and receive the data URL via onMessage.
+  const grabFeedSnapshot = useCallback((): Promise<string | null> => {
+    return new Promise(resolve => {
+      feedSnapshotResolveRef.current = resolve;
+      feedWebViewRef.current?.injectJavaScript(
+        `(function(){try{var d=c.toDataURL('image/jpeg',0.85);` +
+        `window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedSnapshot',data:d}));}` +
+        `catch(e){window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedSnapshot',data:null}));}` +
+        `})();true;`
+      );
+      setTimeout(() => {
+        if (feedSnapshotResolveRef.current === resolve) {
+          feedSnapshotResolveRef.current = null;
+          resolve(null);
+        }
+      }, 1500);
+    });
+  }, []);
+
+  const onFeedMessage = useCallback((e: any) => {
+    try {
+      const msg = JSON.parse(e.nativeEvent.data);
+      if (msg.type === 'feedSnapshot' && feedSnapshotResolveRef.current) {
+        const resolve = feedSnapshotResolveRef.current;
+        feedSnapshotResolveRef.current = null;
+        if (msg.data) setSnapshotUri(msg.data);
+        resolve(msg.data ?? null);
+      }
+    } catch {}
+  }, []);
+
+  // Snapshot for zone drawing / color picker: grabs the live feed canvas first
+  // (instant, no network), falls back to HTTP snapshot if feed isn't running.
   const fetchSnapshot = useCallback(async () => {
+    const grabbed = await grabFeedSnapshot();
+    if (grabbed) { setSnapshotUri(grabbed); return; }
     const url = program.cameraId ? robotClient.cameraSnapshotUrl(program.cameraId) : null;
     if (!url) { setSnapshotUri(null); return; }
     try {
@@ -1459,12 +1495,12 @@ export default function VisionEditorScreen() {
         reader.readAsDataURL(blob);
       });
     } catch { setSnapshotUri(null); }
-  }, [program.cameraId]);
+  }, [program.cameraId, grabFeedSnapshot]);
 
-  async function openZoneModal(editId?: string) {
-    await fetchSnapshot();
+  function openZoneModal(editId?: string) {
     setEditingZoneId(editId ?? null);
     setZoneModalOpen(true);
+    fetchSnapshot();
   }
 
   function onZoneDrawDone(geometry: VisionZoneGeometry) {
@@ -1705,6 +1741,7 @@ export default function VisionEditorScreen() {
             focusable={false}
             accessible={false}
             onLoad={injectFeedUrl}
+            onMessage={onFeedMessage}
           />
           {!feedSourceUrl && (
             <View style={styles.feedPlaceholder}>
