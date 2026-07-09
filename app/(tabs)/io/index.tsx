@@ -124,7 +124,11 @@ export default function IoPage() {
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
-    return robotClient.onAuxAxis(devices => setAuxDevices(devices));
+    const unsub = robotClient.onAuxAxis(devices => setAuxDevices(devices));
+    // Aux state isn't in the status poll; refresh so the card reflects the
+    // device coming online (and enable state) without a manual reload.
+    const poll = setInterval(() => robotClient.getAuxState().catch(() => {}), 2000);
+    return () => { unsub(); clearInterval(poll); };
   }, []);
 
   useEffect(() => {

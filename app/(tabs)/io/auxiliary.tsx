@@ -232,6 +232,27 @@ function AuxAxisConfigModal({
 function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
   const [configAxis, setConfigAxis] = useState<AuxAxisChannelState | null>(null);
 
+  // Optimistic override for the enable toggle. The Switch is otherwise driven
+  // entirely by server state, so a tap would snap back until the next poll —
+  // and while state is stale it sends the wrong command. Reflect the tapped
+  // value immediately, then clear once the server confirms it.
+  const [pendingEnable, setPendingEnable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (pendingEnable !== null && (device.motorEnabled ?? false) === pendingEnable) {
+      setPendingEnable(null);
+    }
+  }, [device.motorEnabled, pendingEnable]);
+
+  const shownEnabled = pendingEnable ?? device.motorEnabled ?? false;
+
+  const toggleEnable = (val: boolean) => {
+    setPendingEnable(val);
+    robotClient.enableAux(device.deviceId, val);
+    // Nudge a fresh read so the confirmed state arrives promptly.
+    setTimeout(() => robotClient.getAuxState().catch(() => {}), 150);
+  };
+
   return (
     <>
       {configAxis && (
@@ -248,14 +269,14 @@ function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
           <View style={[ios.row]}>
             <View style={ios.rowInfo}>
               <Text style={ios.rowLabel}>Motor Drivers</Text>
-              <Text style={ios.rowSub}>{device.motorEnabled ? "Enabled" : "Disabled"}</Text>
+              <Text style={ios.rowSub}>{shownEnabled ? "Enabled" : "Disabled"}</Text>
             </View>
             <Switch
-              value={device.motorEnabled ?? true}
-              onValueChange={val => robotClient.enableAux(device.deviceId, val)}
+              value={shownEnabled}
+              onValueChange={toggleEnable}
               disabled={!device.connected}
               trackColor={{ false: "#e5e7eb", true: "#c4b5fd" }}
-              thumbColor={device.motorEnabled ? "#7c3aed" : "#9ca3af"}
+              thumbColor={shownEnabled ? "#7c3aed" : "#9ca3af"}
             />
           </View>
         </View>
@@ -311,7 +332,11 @@ export default function AuxPage() {
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
-    return robotClient.onAuxAxis(devices => setAuxDevices(devices));
+    const unsub = robotClient.onAuxAxis(devices => setAuxDevices(devices));
+    // Aux state isn't part of the 100ms status poll, so refresh it here while
+    // the screen is open — keeps connection/enable state current.
+    const poll = setInterval(() => robotClient.getAuxState().catch(() => {}), 1500);
+    return () => { unsub(); clearInterval(poll); };
   }, []);
 
   const device = deviceId ? (auxDevices.find(d => d.deviceId === deviceId) ?? null) : null;
