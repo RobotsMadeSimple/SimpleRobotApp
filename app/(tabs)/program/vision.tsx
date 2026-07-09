@@ -1,9 +1,9 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { VisionProgram } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { Plus, ScanSearch, Trash2 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -29,7 +29,9 @@ export default function VisionListScreen() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // Refresh on focus (not just mount) so edits made in the editor — renames,
+  // zone changes — are reflected here and passed fresh into the editor next time.
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   function createNew() {
     const newProg: VisionProgram = {
