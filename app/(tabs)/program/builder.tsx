@@ -1,5 +1,4 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -43,8 +42,8 @@ import { StepConfigModal } from "@/src/components/ui/builder/StepConfigModal";
 import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
-import { VarPickerModal } from "@/src/components/ui/builder/VarPicker";
 import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
+import { ms } from "@/src/components/ui/builder/builderStyles";
 
 export default function BuilderScreen() {
   const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
