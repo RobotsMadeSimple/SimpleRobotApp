@@ -3,6 +3,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -10,7 +11,7 @@ import {
   View,
   Image,
 } from "react-native";
-import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, X } from "lucide-react-native";
+import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Radio, RotateCcw, RotateCw, X } from "lucide-react-native";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -2336,8 +2337,12 @@ export function StepConfigModal({
   return (
     <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
-        <Pressable style={ms.overlay} onPress={() => subPage ? setSubPage(null) : onClose()}>
-          <Pressable style={ms.card} onPress={() => {}}>
+        <View style={ms.overlay}>
+          {/* Backdrop sits BEHIND the card (not wrapping it) so the card's
+              ScrollView owns its gestures cleanly — a Pressable wrapping the
+              ScrollView blocks scrolling when a drag starts on a focused input. */}
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? setSubPage(null) : onClose()} />
+          <View style={ms.card}>
             {/* Header */}
             <View style={ms.header}>
               {subPage ? (
@@ -2410,8 +2415,8 @@ export function StepConfigModal({
                 </TouchableOpacity>
               </View>
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
     </Modal>
     {/* Vision program picker */}
     <BottomSheet visible={visionProgPickerOpen} onClose={() => setVisionProgPickerOpen(false)} title="Select Vision Program">
