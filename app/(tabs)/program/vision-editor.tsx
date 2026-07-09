@@ -40,6 +40,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Keyboard,
   ScrollView,
   StyleSheet,
@@ -64,8 +65,22 @@ export default function VisionEditorScreen() {
 
   const [program, setProgram]     = useState<VisionProgram>(initialProg);
   const [name, setName]           = useState(initialProg.name);
-  const [isRunning, setIsRunning] = useState(initialRunning.has(initialProg.id));
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [isRunning, setIsRunning]         = useState(initialRunning.has(initialProg.id));
+  const [transitioning, setTransitioning] = useState<'starting' | 'stopping' | null>(null);
+  const [saveStatus, setSaveStatus]       = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!transitioning) { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.55, duration: 550, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 550, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [transitioning]);
   const [cameras, setCameras]     = useState<CameraState[]>([]);
 
   // Modal states
@@ -105,7 +120,8 @@ export default function VisionEditorScreen() {
     });
   }, [navigation]);
 
-  const feedWebViewRef = useRef<any>(null);
+  const feedWebViewRef           = useRef<any>(null);
+  const feedSnapshotResolveRef   = useRef<((uri: string | null) => void) | null>(null);
 
   const feedSourceUrl = useMemo(() => {
     if (isRunning && program.id) return robotClient.visionWsUrl(program.id);
@@ -126,7 +142,39 @@ export default function VisionEditorScreen() {
     return robotClient.onCameras(setCameras);
   }, []);
 
+  const grabFeedSnapshot = useCallback((): Promise<string | null> => {
+    return new Promise(resolve => {
+      feedSnapshotResolveRef.current = resolve;
+      feedWebViewRef.current?.injectJavaScript(
+        `(function(){try{var d=c.toDataURL('image/jpeg',0.85);` +
+        `window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedSnapshot',data:d}));}` +
+        `catch(e){window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedSnapshot',data:null}));}` +
+        `})();true;`
+      );
+      setTimeout(() => {
+        if (feedSnapshotResolveRef.current === resolve) {
+          feedSnapshotResolveRef.current = null;
+          resolve(null);
+        }
+      }, 1500);
+    });
+  }, []);
+
+  const onFeedMessage = useCallback((e: any) => {
+    try {
+      const msg = JSON.parse(e.nativeEvent.data);
+      if (msg.type === 'feedSnapshot' && feedSnapshotResolveRef.current) {
+        const resolve = feedSnapshotResolveRef.current;
+        feedSnapshotResolveRef.current = null;
+        if (msg.data) setSnapshotUri(msg.data);
+        resolve(msg.data ?? null);
+      }
+    } catch {}
+  }, []);
+
   const fetchSnapshot = useCallback(async () => {
+    const grabbed = await grabFeedSnapshot();
+    if (grabbed) { setSnapshotUri(grabbed); return; }
     const url = program.cameraId ? robotClient.cameraSnapshotUrl(program.cameraId) : null;
     if (!url) { setSnapshotUri(null); return; }
     try {
@@ -139,12 +187,12 @@ export default function VisionEditorScreen() {
         reader.readAsDataURL(blob);
       });
     } catch { setSnapshotUri(null); }
-  }, [program.cameraId]);
+  }, [program.cameraId, grabFeedSnapshot]);
 
-  async function openZoneModal(editId?: string) {
-    await fetchSnapshot();
+  function openZoneModal(editId?: string) {
     setEditingZoneId(editId ?? null);
     setZoneModalOpen(true);
+    fetchSnapshot();
   }
 
   function onZoneDrawDone(geometry: VisionZoneGeometry) {
@@ -280,6 +328,7 @@ export default function VisionEditorScreen() {
   ];
 
   async function toggleRunning() {
+    if (transitioning) return;
     let id = program.id;
     if (!id) {
       try {
@@ -292,10 +341,20 @@ export default function VisionEditorScreen() {
       if (!id) return;
     }
     if (isRunning) {
-      await robotClient.stopVision(id).catch(() => {});
+      setTransitioning('stopping');
+      try {
+        await robotClient.stopVision(id).catch(() => {});
+      } finally {
+        setTransitioning(null);
+      }
       setIsRunning(false);
     } else {
-      await robotClient.startVision(id).catch(() => {});
+      setTransitioning('starting');
+      try {
+        await robotClient.startVision(id).catch(() => {});
+      } finally {
+        setTransitioning(null);
+      }
       setIsRunning(true);
     }
   }
@@ -364,6 +423,7 @@ export default function VisionEditorScreen() {
             focusable={false}
             accessible={false}
             onLoad={injectFeedUrl}
+            onMessage={onFeedMessage}
           />
           {!feedSourceUrl && (
             <View style={styles.feedPlaceholder}>
@@ -375,14 +435,27 @@ export default function VisionEditorScreen() {
         </View>
 
         {/* Run / Stop */}
-        <TouchableOpacity
-          style={[styles.runBtn, isRunning ? styles.runBtnStop : styles.runBtnStart]}
-          onPress={toggleRunning}
-          activeOpacity={0.8}
-        >
-          {isRunning ? <EyeOff size={16} color="#fff" /> : <Eye size={16} color="#fff" />}
-          <Text style={styles.runBtnText}>{isRunning ? "Stop Vision" : "Start Vision"}</Text>
-        </TouchableOpacity>
+        <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
+          <TouchableOpacity
+            style={[styles.runBtn, isRunning ? styles.runBtnStop : styles.runBtnStart]}
+            onPress={toggleRunning}
+            activeOpacity={0.8}
+            disabled={!!transitioning}
+          >
+            {transitioning
+              ? <ActivityIndicator size="small" color="#fff" />
+              : isRunning
+                ? <EyeOff size={16} color="#fff" />
+                : <Eye size={16} color="#fff" />
+            }
+            <Text style={styles.runBtnText}>
+              {transitioning === 'starting' ? "Starting..."
+                : transitioning === 'stopping' ? "Stopping..."
+                : isRunning ? "Stop Vision"
+                : "Start Vision"}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* ── Zones ──────────────────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>ZONES</Text>

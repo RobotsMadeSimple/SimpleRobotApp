@@ -109,15 +109,16 @@ export default function IoPage() {
       robotClient.getRobotConfig()
         .then(cfg => setIoConfig({
           enableStbCard:   cfg.enableStbCard   ?? true,
-          enableNanoCards: cfg.enableNanoCards ?? true,
+          enableNanoCards: cfg.enableNanoCards ?? false,
           enableRelayCard: cfg.enableRelayCard ?? false,
           enableAuxAxis:   cfg.enableAuxAxis   ?? false,
           enableCameras:   cfg.enableCameras   ?? false,
         }))
         .catch(() => setIoConfig({
-          enableStbCard: true, enableNanoCards: true,
+          enableStbCard: true, enableNanoCards: false,
           enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
         }));
+      robotClient.getCameras().catch(() => {});
     }, [])
   );
 
@@ -127,7 +128,6 @@ export default function IoPage() {
   }, []);
 
   useEffect(() => {
-    robotClient.getCameras().catch(() => {});
     const unsub = robotClient.onCameras(cams => setCameras(cams));
     const poll  = setInterval(() => robotClient.getCameras().catch(() => {}), 3000);
     return () => { unsub(); clearInterval(poll); };
