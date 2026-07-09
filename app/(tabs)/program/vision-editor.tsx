@@ -48,6 +48,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Keyboard,
   Modal,
   PanResponder,
@@ -828,8 +829,8 @@ function InspectionConfigModal({
 
   // Start / stop the debug feed when visibility, URL, or paused state changes
   useEffect(() => {
-    if (!debugWebviewRef.current || !debugUrl) return;
-    if (visible && !debugPaused) {
+    if (!debugWebviewRef.current) return;
+    if (visible && debugUrl && !debugPaused) {
       debugWebviewRef.current.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
     } else {
       debugWebviewRef.current.injectJavaScript(`window.pauseFeed();true;`);
@@ -932,31 +933,31 @@ function InspectionConfigModal({
           </TouchableOpacity>
         </View>
 
-        {/* Live debug feed */}
-        {debugUrl && (
-          <View style={{ height: 210, backgroundColor: '#0d1117' }}>
-            <WebView
-              ref={debugWebviewRef}
-              source={{ html: FEED_HTML }}
-              style={{ flex: 1, backgroundColor: '#0d1117' }}
-              scrollEnabled={false}
-              originWhitelist={['*']}
-              javaScriptEnabled
-              onLoad={() => {
-                if (!debugPaused && debugUrl)
-                  debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
-              }}
-            />
-            {/* LIVE badge */}
-            {!debugPaused && (
-              <View style={{ position: 'absolute', top: 8, left: 8, flexDirection: 'row',
-                alignItems: 'center', gap: 4, backgroundColor: 'rgba(220,38,38,0.85)',
-                borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
-                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>LIVE</Text>
-              </View>
-            )}
-            {/* Pause / Resume */}
+        {/* Live debug feed — WebView always mounted so FEED_HTML loads once */}
+        <View style={{ height: debugUrl ? 210 : 0, overflow: 'hidden', backgroundColor: '#0d1117' }}>
+          <WebView
+            ref={debugWebviewRef}
+            source={{ html: FEED_HTML }}
+            style={{ flex: 1, backgroundColor: '#0d1117' }}
+            scrollEnabled={false}
+            originWhitelist={['*']}
+            javaScriptEnabled
+            onLoad={() => {
+              if (!debugPaused && debugUrl)
+                debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
+            }}
+          />
+          {/* LIVE badge */}
+          {debugUrl && !debugPaused && (
+            <View style={{ position: 'absolute', top: 8, left: 8, flexDirection: 'row',
+              alignItems: 'center', gap: 4, backgroundColor: 'rgba(220,38,38,0.85)',
+              borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>LIVE</Text>
+            </View>
+          )}
+          {/* Pause / Resume */}
+          {debugUrl && (
             <TouchableOpacity
               onPress={() => {
                 const next = !debugPaused;
@@ -974,7 +975,9 @@ function InspectionConfigModal({
                 {debugPaused ? '▶ Resume' : '⏸ Pause'}
               </Text>
             </TouchableOpacity>
-            {/* Legend strip — kind-specific */}
+          )}
+          {/* Legend strip — kind-specific */}
+          {debugUrl && (
             <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
               flexDirection: 'row', justifyContent: 'center', gap: 14,
               backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 5 }}>
@@ -996,8 +999,8 @@ function InspectionConfigModal({
                 </View>
               ))}
             </View>
-          </View>
-        )}
+          )}
+        </View>
 
         <ScrollView
           style={{ flex: 1 }}
@@ -1380,8 +1383,22 @@ export default function VisionEditorScreen() {
 
   const [program, setProgram]     = useState<VisionProgram>(initialProg);
   const [name, setName]           = useState(initialProg.name);
-  const [isRunning, setIsRunning] = useState(initialRunning.has(initialProg.id));
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [isRunning, setIsRunning]         = useState(initialRunning.has(initialProg.id));
+  const [transitioning, setTransitioning] = useState<'starting' | 'stopping' | null>(null);
+  const [saveStatus, setSaveStatus]       = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!transitioning) { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.55, duration: 550, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 550, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [transitioning]);
   const [cameras, setCameras]     = useState<CameraState[]>([]);
 
   // Modal states
@@ -1657,6 +1674,7 @@ export default function VisionEditorScreen() {
   ];
 
   async function toggleRunning() {
+    if (transitioning) return;
     let id = program.id;
     if (!id) {
       try {
@@ -1669,10 +1687,20 @@ export default function VisionEditorScreen() {
       if (!id) return;
     }
     if (isRunning) {
-      await robotClient.stopVision(id).catch(() => {});
+      setTransitioning('stopping');
+      try {
+        await robotClient.stopVision(id).catch(() => {});
+      } finally {
+        setTransitioning(null);
+      }
       setIsRunning(false);
     } else {
-      await robotClient.startVision(id).catch(() => {});
+      setTransitioning('starting');
+      try {
+        await robotClient.startVision(id).catch(() => {});
+      } finally {
+        setTransitioning(null);
+      }
       setIsRunning(true);
     }
   }
@@ -1753,14 +1781,27 @@ export default function VisionEditorScreen() {
         </View>
 
         {/* Run / Stop */}
-        <TouchableOpacity
-          style={[styles.runBtn, isRunning ? styles.runBtnStop : styles.runBtnStart]}
-          onPress={toggleRunning}
-          activeOpacity={0.8}
-        >
-          {isRunning ? <EyeOff size={16} color="#fff" /> : <Eye size={16} color="#fff" />}
-          <Text style={styles.runBtnText}>{isRunning ? "Stop Vision" : "Start Vision"}</Text>
-        </TouchableOpacity>
+        <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
+          <TouchableOpacity
+            style={[styles.runBtn, isRunning ? styles.runBtnStop : styles.runBtnStart]}
+            onPress={toggleRunning}
+            activeOpacity={0.8}
+            disabled={!!transitioning}
+          >
+            {transitioning
+              ? <ActivityIndicator size="small" color="#fff" />
+              : isRunning
+                ? <EyeOff size={16} color="#fff" />
+                : <Eye size={16} color="#fff" />
+            }
+            <Text style={styles.runBtnText}>
+              {transitioning === 'starting' ? "Starting..."
+                : transitioning === 'stopping' ? "Stopping..."
+                : isRunning ? "Stop Vision"
+                : "Start Vision"}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* ── Zones ──────────────────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>ZONES</Text>

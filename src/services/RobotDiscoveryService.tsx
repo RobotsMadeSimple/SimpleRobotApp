@@ -4,7 +4,9 @@ import { RobotInfo } from '../models/robotModels';
 
 
 class RobotDiscoveryService {
-  private zeroconf = new Zeroconf();
+  private zeroconf: Zeroconf | null = (() => {
+    try { return new Zeroconf(); } catch { return null; }
+  })();
   private robots = new Map<string, RobotInfo>();
   private listeners: ((robots: RobotInfo[]) => void)[] = [];
 
@@ -21,34 +23,41 @@ class RobotDiscoveryService {
       return;
     }
 
+    if (!this.zeroconf) return;
+
     if (this.started) return;
     this.started = true;
 
-    if (!this.listenersRegistered) {
-      this.listenersRegistered = true;
+    try {
+      if (!this.listenersRegistered) {
+        this.listenersRegistered = true;
 
-      this.zeroconf.on('resolved', service => {
-        console.log(`New Robot Service: ${service.host} ${service.txt}`);
-        const robot: RobotInfo = {
-          robotName: service.txt.RobotName,
-          ipAddress: service.host,
-          port: service.port,
-          robotType: service.txt.RobotType,
-          controlEndpoint: service.txt.ControlEndpoint,
-          serialNumber: service.txt.SerialNumber
-        };
+        this.zeroconf.on('resolved', service => {
+          console.log(`New Robot Service: ${service.host} ${service.txt}`);
+          const robot: RobotInfo = {
+            robotName: service.txt.RobotName,
+            ipAddress: service.host,
+            port: service.port,
+            robotType: service.txt.RobotType,
+            controlEndpoint: service.txt.ControlEndpoint,
+            serialNumber: service.txt.SerialNumber
+          };
 
-        this.robots.set(service.name, robot);
-        this.emit();
-      });
+          this.robots.set(service.name, robot);
+          this.emit();
+        });
 
-      this.zeroconf.on('remove', service => {
-        this.robots.delete(service.name);
-        this.emit();
-      });
+        this.zeroconf.on('remove', service => {
+          this.robots.delete(service.name);
+          this.emit();
+        });
+      }
+
+      this.zeroconf.scan('robot', 'tcp', 'local.');
+    } catch {
+      // Native mDNS module unavailable (e.g. Expo Go) — discovery disabled
+      this.started = false;
     }
-
-    this.zeroconf.scan('robot', 'tcp', 'local.');
   }
 
   private async fetchFromHttp() {
@@ -77,7 +86,7 @@ class RobotDiscoveryService {
     if (!this.started) return;
 
     this.started = false;
-    this.zeroconf.stop();
+    try { this.zeroconf?.stop(); } catch {}
     this.robots.clear();
     this.emit();
   }
