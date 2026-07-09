@@ -53,7 +53,7 @@ import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
 
-function StepConfigModal({
+export function StepConfigModal({
   visible,
   step,
   variables,
