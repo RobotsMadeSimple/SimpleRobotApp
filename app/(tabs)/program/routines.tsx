@@ -1,5 +1,6 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -73,13 +74,7 @@ export default function RoutinesScreen() {
                 )}
                 <Text style={styles.cardMeta}>{r.steps.length} step{r.steps.length !== 1 ? "s" : ""}</Text>
               </View>
-              <TouchableOpacity
-                onPress={() => handleDelete(r.name)}
-                style={styles.deleteBtn}
-                hitSlop={8}
-              >
-                <Trash2 size={16} color="#ef4444" />
-              </TouchableOpacity>
+              <DeleteIconButton onPress={() => handleDelete(r.name)} style={styles.deleteBtn} />
             </TouchableOpacity>
           ))
         )}

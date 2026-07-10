@@ -30,6 +30,7 @@ import {
   defaultColorEntry,
 } from "@/src/models/robotModels";
 import { FEED_HTML } from "@/src/vision/visionHtml";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { WebView } from "react-native-webview";
 import { ves } from "./visionEditorStyles";
 import { ZonePickerModal } from "./ZonePickerModal";
@@ -606,12 +607,11 @@ export function InspectionConfigModal({
                       ±{ce.tolerance}
                     </Text>
                   </View>
-                  <TouchableOpacity
+                  <DeleteIconButton
+                    size={13}
                     onPress={() => setColors(prev => prev.filter(c => c.id !== ce.id))}
-                    hitSlop={8} style={ves.iconBtn}
-                  >
-                    <Trash2 size={13} color="#ef4444" />
-                  </TouchableOpacity>
+                    style={ves.iconBtn}
+                  />
                 </TouchableOpacity>
               ))}
 

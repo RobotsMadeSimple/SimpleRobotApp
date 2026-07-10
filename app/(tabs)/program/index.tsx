@@ -1,4 +1,5 @@
-﻿import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
+﻿import { ActionButton } from "@/src/components/ui/ActionButton";
+import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -81,6 +82,16 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
   const theme = STATUS_THEME[p.status] ?? STATUS_THEME.Ready;
   const pct = p.maxStepCount > 0 ? Math.round((p.currentStepNumber / p.maxStepCount) * 100) : 0;
   const buttons = getButtons(p, isBuilt);
+
+  // Spinner while an action is being applied — cleared when the status changes
+  // (the action took effect) or after a short fallback timeout.
+  const [pending, setPending] = useState<string | null>(null);
+  useEffect(() => { setPending(null); }, [p.status]);
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => setPending(null), 3000);
+    return () => clearTimeout(t);
+  }, [pending]);
 
   const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => { progressAnim.setValue(pct); }, [pct]);
@@ -165,15 +176,15 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
                 const isStartAction = btn.label === "Start" || btn.label === "Continue" || btn.label === "Run Again";
                 const blocked = !!(isBuilt && anotherBuiltRunning && isStartAction);
                 return (
-                  <TouchableOpacity
+                  <ActionButton
                     key={btn.label}
+                    label={blocked ? "Another Program Running" : btn.label}
+                    loading={pending === btn.label}
+                    disabled={blocked || (pending !== null && pending !== btn.label)}
                     style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
-                    onPress={(e) => { e.stopPropagation?.(); if (!blocked) btn.onPress(); }}
-                    disabled={blocked}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.actionBtnText}>{blocked ? "Another Program Running" : btn.label}</Text>
-                  </TouchableOpacity>
+                    textStyle={styles.actionBtnText}
+                    onPress={(e) => { e.stopPropagation?.(); setPending(btn.label); btn.onPress(); }}
+                  />
                 );
               })}
             </View>

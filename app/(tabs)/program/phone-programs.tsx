@@ -1,4 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { BuiltProgram } from "@/src/models/robotModels";
 import { useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
@@ -103,14 +104,13 @@ function LocalProgramCard({
           <FileJson size={13} color="#6b7280" />
           <Text style={[styles.actionBtnText, { color: "#6b7280" }]}>Export</Text>
         </TouchableOpacity>
-        <TouchableOpacity
+        <AnimatedPressable
           style={[styles.actionBtn, { borderColor: "#dc2626" }]}
           onPress={(e) => { e.stopPropagation?.(); handleDelete(); }}
-          activeOpacity={0.75}
         >
           <Trash2 size={13} color="#dc2626" />
           <Text style={[styles.actionBtnText, { color: "#dc2626" }]}>Delete</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
     </TouchableOpacity>
   );

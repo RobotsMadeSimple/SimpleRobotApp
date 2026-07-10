@@ -1,4 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { ProgramStep, THREAD_PRESETS } from "@/src/models/robotModels";
@@ -433,9 +434,7 @@ export default function CncBuilderScreen() {
                 <FileText size={15} color={selectedDxf === name ? "#7c3aed" : "#6b7280"} />
                 <Text style={[s.fileName, selectedDxf === name && s.fileNameSelected]} numberOfLines={1}>{name}</Text>
                 {selectedDxf === name && <Check size={14} color="#7c3aed" />}
-                <TouchableOpacity onPress={() => handleDeleteDxf(name)} hitSlop={8} style={{ marginLeft: "auto" }}>
-                  <Trash2 size={14} color="#ef4444" />
-                </TouchableOpacity>
+                <DeleteIconButton size={14} onPress={() => handleDeleteDxf(name)} style={{ marginLeft: "auto" }} />
               </TouchableOpacity>
             ))
           )}

@@ -1,4 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { FEED_HTML } from "@/src/vision/visionHtml";
 import {
   ArucoInspection,
@@ -478,15 +479,14 @@ export default function VisionEditorScreen() {
             <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
               <Pencil size={14} color="#6b7280" />
             </TouchableOpacity>
-            <TouchableOpacity
+            <DeleteIconButton
+              size={14}
+              style={styles.iconBtn}
               onPress={() => Alert.alert('Delete Zone', `Delete "${zone.name}"?`, [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
               ])}
-              style={styles.iconBtn} hitSlop={8}
-            >
-              <Trash2 size={14} color="#ef4444" />
-            </TouchableOpacity>
+            />
           </View>
         ))}
 
@@ -554,7 +554,9 @@ export default function VisionEditorScreen() {
                 <TouchableOpacity onPress={() => duplicateInspection(item)} hitSlop={8} style={styles.iconBtn}>
                   <Copy size={15} color="#6b7280" />
                 </TouchableOpacity>
-                <TouchableOpacity
+                <DeleteIconButton
+                  size={15}
+                  style={styles.iconBtn}
                   onPress={() => Alert.alert('Delete Inspection', `Delete "${insp.name}"?`, [
                     { text: 'Cancel', style: 'cancel' },
                     { text: 'Delete', style: 'destructive', onPress: () => {
@@ -566,10 +568,7 @@ export default function VisionEditorScreen() {
                       else                         deleteColorInspection(insp.id);
                     }},
                   ])}
-                  hitSlop={8} style={styles.iconBtn}
-                >
-                  <Trash2 size={15} color="#ef4444" />
-                </TouchableOpacity>
+                />
               </TouchableOpacity>
             </View>
           );

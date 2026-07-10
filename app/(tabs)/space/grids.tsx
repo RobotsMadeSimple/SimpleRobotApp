@@ -1,5 +1,6 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -54,14 +55,7 @@ export default function GridsPage() {
             : ""}
         </Text>
       </View>
-      <TouchableOpacity
-        style={gs.deleteBtn}
-        onPress={() => handleDelete(item)}
-        hitSlop={8}
-        activeOpacity={0.7}
-      >
-        <Trash2 size={15} color="#ef4444" />
-      </TouchableOpacity>
+      <DeleteIconButton size={15} style={gs.deleteBtn} onPress={() => handleDelete(item)} />
       <ChevronRight size={16} color="#d1d5db" />
     </TouchableOpacity>
   );
