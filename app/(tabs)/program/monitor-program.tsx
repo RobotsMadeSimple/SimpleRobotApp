@@ -1,6 +1,6 @@
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { BuiltProgram, ProgramStatus, ProgramSummary, ProgramVariableSnapshot } from "@/src/models/robotModels";
+import { BuiltProgram, ProgramStatus, ProgramStep, ProgramSummary, ProgramVariableSnapshot } from "@/src/models/robotModels";
 import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
@@ -232,12 +232,23 @@ export default function MonitorProgramScreen() {
   const visionSteps: { id: string; name: string }[] = [];
   if (builtProgram) {
     const seen = new Set<string>();
-    for (const step of builtProgram.steps) {
-      if (step.type === 'RunVision' && step.visionProgramId && !seen.has(step.visionProgramId)) {
-        seen.add(step.visionProgramId);
-        visionSteps.push({ id: step.visionProgramId, name: step.visionProgramName ?? step.visionProgramId });
+    // Walk nested step lists too — a RunVision step can live inside a loop,
+    // an if/else-if/else branch, or a CNC sub-program.
+    const collect = (steps: ProgramStep[] | undefined) => {
+      if (!steps) return;
+      for (const step of steps) {
+        if (step.type === 'RunVision' && step.visionProgramId && !seen.has(step.visionProgramId)) {
+          seen.add(step.visionProgramId);
+          visionSteps.push({ id: step.visionProgramId, name: step.visionProgramName ?? step.visionProgramId });
+        }
+        collect(step.loopSteps);
+        collect(step.ifSteps);
+        collect(step.elseSteps);
+        collect(step.cncProgramSteps);
+        step.elseIfBranches?.forEach(b => collect(b.steps));
       }
-    }
+    };
+    collect(builtProgram.steps);
   }
   const visionStepsRef = useRef<{ id: string; name: string }[]>(visionSteps);
   visionStepsRef.current = visionSteps;
@@ -250,18 +261,26 @@ export default function MonitorProgramScreen() {
       const fetchSnapshots = async () => {
         if (cancelled) return;
         for (const { id } of visionStepsRef.current) {
-          const url = robotClient.programVisionSnapshotUrl(id);
-          if (!url) continue;
-          try {
-            const res = await fetch(url);
-            if (!res.ok) continue;
-            const buffer = await res.arrayBuffer();
-            const bytes = new Uint8Array(buffer);
-            let binary = '';
-            for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-            const dataUri = `data:image/jpeg;base64,${btoa(binary)}`;
-            if (!cancelled) setVisionSnapshots(prev => ({ ...prev, [id]: dataUri }));
-          } catch {}
+          // Prefer the live annotated debug frame (inspection overlays drawn) and
+          // fall back to the snapshot captured at the end of the last RunVision step.
+          const urls = [
+            robotClient.visionAnnotatedUrl(id),
+            robotClient.programVisionSnapshotUrl(id),
+          ].filter((u): u is string => !!u);
+          for (const url of urls) {
+            try {
+              const res = await fetch(url);
+              if (res.status !== 200) continue; // 204 = no live frame yet, 404 = none
+              const buffer = await res.arrayBuffer();
+              if (buffer.byteLength === 0) continue;
+              const bytes = new Uint8Array(buffer);
+              let binary = '';
+              for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+              const dataUri = `data:image/jpeg;base64,${btoa(binary)}`;
+              if (!cancelled) setVisionSnapshots(prev => ({ ...prev, [id]: dataUri }));
+              break; // newest frame for this program obtained
+            } catch {}
+          }
         }
       };
 
@@ -726,7 +745,7 @@ export default function MonitorProgramScreen() {
             <View style={styles.section}>
               <View style={styles.snapshotHeader}>
                 <Camera size={12} color="#9ca3af" />
-                <Text style={styles.sectionLabel}>VISION SNAPSHOTS</Text>
+                <Text style={styles.sectionLabel}>VISION DEBUG FRAMES</Text>
               </View>
               {visionSteps.map(({ id, name }) => {
                 const dataUri = visionSnapshots[id];
@@ -743,7 +762,7 @@ export default function MonitorProgramScreen() {
                       <View style={styles.snapshotPlaceholder}>
                         <Camera size={24} color="#d1d5db" />
                         <Text style={styles.snapshotPlaceholderText}>
-                          {isActivelyRunning ? 'Waiting for vision step…' : 'No snapshot yet'}
+                          {isActivelyRunning ? 'Waiting for vision frame…' : 'No debug frame yet'}
                         </Text>
                       </View>
                     )}
