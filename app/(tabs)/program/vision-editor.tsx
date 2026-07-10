@@ -681,13 +681,10 @@ export default function VisionEditorScreen() {
           updateBarcodeInspection(insp);
           autoSave({ ...program, name, barcodeInspections: (program.barcodeInspections ?? []).map(i => i.id === insp.id ? insp : i) });
         }}
-        debugUrl={configModal && program.id
-          ? configModal.kind === 'polygon'
-            ? robotClient.visionPolygonDebugUrl(program.id, configModal.insp.id)
-            : configModal.kind === 'line'
-              ? robotClient.visionLineDebugUrl(program.id, configModal.insp.id)
-              : robotClient.visionAnnotatedUrl(program.id)
-          : null}
+        feedUrl={feedSourceUrl}
+        isRunning={isRunning}
+        transitioning={transitioning}
+        onToggleRunning={toggleRunning}
         onLiveUpdate={handlePolygonLiveUpdate}
         onLiveUpdateBlob={handleBlobLiveUpdate}
         onLiveUpdateColor={handleColorLiveUpdate}

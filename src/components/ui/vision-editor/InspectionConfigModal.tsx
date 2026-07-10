@@ -1,5 +1,7 @@
 ﻿import React, { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
+  Animated,
   Modal,
   PanResponder,
   SafeAreaView,
@@ -10,11 +12,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Check, ChevronDown, Plus, Trash2 } from "lucide-react-native";
+import { Check, ChevronDown, Eye, EyeOff, Plus, Trash2 } from "lucide-react-native";
 import { BlobParamsPanel, ParamRow, SliderParamRow, ThresholdRangeRow, ToggleRow } from "@/src/components/vision/VisionParams";
 import {
   ARUCO_DICTIONARIES,
   ArucoInspection,
+  BARCODE_FORMATS,
   BarcodeInspection,
   BlobDetectionParams,
   BlobInspection,
@@ -37,7 +40,8 @@ import { FormatPickerSheet } from "./InspectionTypePicker";
 export function InspectionConfigModal({
   visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode, zones,
   snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onSaveLine, onSaveBarcode, onClose,
-  debugUrl, onLiveUpdate, onLiveUpdateBlob, onLiveUpdateColor, onLiveUpdateAruco, onLiveUpdateLine,
+  feedUrl, isRunning, transitioning, onToggleRunning,
+  onLiveUpdate, onLiveUpdateBlob, onLiveUpdateColor, onLiveUpdateAruco, onLiveUpdateLine,
 }: {
   visible: boolean;
   kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line' | 'barcode' | null;
@@ -57,7 +61,12 @@ export function InspectionConfigModal({
   onSaveLine: (insp: LineInspection) => void;
   onSaveBarcode: (insp: BarcodeInspection) => void;
   onClose: () => void;
-  debugUrl?: string | null;
+  // Same live feed the main editor view uses: annotated stream while running,
+  // raw camera stream otherwise (ws:// URL), plus the Start/Stop Vision control.
+  feedUrl?: string | null;
+  isRunning?: boolean;
+  transitioning?: 'starting' | 'stopping' | null;
+  onToggleRunning?: () => void;
   onLiveUpdate?: (insp: PolygonInspection) => void;
   onLiveUpdateBlob?: (insp: BlobInspection) => void;
   onLiveUpdateColor?: (insp: ColorCoverageInspection) => void;
@@ -142,8 +151,21 @@ export function InspectionConfigModal({
 
   const [zonePickerOpen, setZonePickerOpen]   = useState(false);
   const [colorEditState, setColorEditState]   = useState<{ entry: ColorEntry } | null>(null);
-  const [debugPaused, setDebugPaused]         = useState(false);
   const debugWebviewRef = useRef<any>(null);
+
+  // Pulse the Start/Stop button while a start/stop transition is in flight — mirrors the main view.
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!transitioning) { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.55, duration: 550, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 550, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [transitioning]);
 
   // Refs so notifyLiveUpdate always sees the latest state without stale closures
   const polyStateRef = useRef({ name, enabled, zoneId, polySides, polyMinArea, polyMaxArea, polyEpsilon, polyMinThresh, polyMaxThresh, polyInverted });
@@ -234,16 +256,15 @@ export function InspectionConfigModal({
   // Start / stop the debug feed when visibility, URL, or paused state changes
   useEffect(() => {
     if (!debugWebviewRef.current) return;
-    if (visible && debugUrl && !debugPaused) {
-      debugWebviewRef.current.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
+    if (visible && feedUrl) {
+      debugWebviewRef.current.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
     } else {
       debugWebviewRef.current.injectJavaScript(`window.pauseFeed();true;`);
     }
-  }, [visible, debugUrl, debugPaused]);
+  }, [visible, feedUrl]);
 
   useEffect(() => {
     if (!visible) return;
-    setDebugPaused(false);
     if (kind === 'blob' && initialBlob) {
       setName(initialBlob.name);
       setEnabled(initialBlob.enabled);
@@ -337,8 +358,9 @@ export function InspectionConfigModal({
           </TouchableOpacity>
         </View>
 
-        {/* Live debug feed */}
-        <View style={{ height: debugUrl ? 210 : 0, overflow: 'hidden', backgroundColor: '#0d1117' }}>
+        {/* Live feed — mirrors the main editor view: annotated stream while
+            running, raw camera stream otherwise, with the same Start/Stop control. */}
+        <View style={{ height: 210, backgroundColor: '#0d1117' }}>
             <WebView
               ref={debugWebviewRef}
               source={{ html: FEED_HTML }}
@@ -347,64 +369,44 @@ export function InspectionConfigModal({
               originWhitelist={['*']}
               javaScriptEnabled
               onLoad={() => {
-                if (!debugPaused && debugUrl)
-                  debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(debugUrl)});true;`);
+                if (feedUrl)
+                  debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
               }}
             />
-            {/* LIVE badge */}
-            {debugUrl && !debugPaused && (
-              <View style={{ position: 'absolute', top: 8, left: 8, flexDirection: 'row',
-                alignItems: 'center', gap: 4, backgroundColor: 'rgba(220,38,38,0.85)',
-                borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
-                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>LIVE</Text>
+            {!feedUrl && (
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: '#9ca3af', fontSize: 13 }}>No camera feed</Text>
               </View>
             )}
-            {/* Pause / Resume */}
-            {debugUrl && (
-            <TouchableOpacity
-              onPress={() => {
-                const next = !debugPaused;
-                setDebugPaused(next);
-                debugWebviewRef.current?.injectJavaScript(
-                  next ? `window.pauseFeed();true;` : `window.resumeFeed();true;`
-                );
-              }}
-              style={{ position: 'absolute', top: 8, right: 8,
-                backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 8,
-                paddingHorizontal: 10, paddingVertical: 5 }}
-              activeOpacity={0.75}
-            >
-              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-                {debugPaused ? '▶ Resume' : '⏸ Pause'}
-              </Text>
-            </TouchableOpacity>
-            )}
-            {/* Legend strip — kind-specific */}
-            {debugUrl && (
-            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
-              flexDirection: 'row', justifyContent: 'center', gap: 14,
-              backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 5 }}>
-              {(kind === 'polygon'
-                  ? [['#4b5563','Area fail'],['#f97316','Wrong sides'],['#22c55e','Matched']]
-                  : kind === 'blob'
-                    ? [['#22c55e','Detected blob']]
-                    : kind === 'color'
-                      ? [['#3cc800','Color match'],['#d946ef','Zone border']]
-                      : kind === 'line'
-                        ? [['#22c55e','Matched'],['#f97316','Angle filtered']]
-                        : kind === 'barcode'
-                          ? [['#1e90ff','Detected code']]
-                          : [['#00ff7f','Detected marker']]
-              ).map(([color, label]) => (
-                <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: color }} />
-                  <Text style={{ color: '#d1d5db', fontSize: 10 }}>{label}</Text>
-                </View>
-              ))}
-            </View>
-            )}
         </View>
+
+        {onToggleRunning && (
+          <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+            <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  borderRadius: 12, paddingVertical: 13,
+                  backgroundColor: isRunning ? '#dc2626' : '#0891b2' }}
+                onPress={onToggleRunning}
+                activeOpacity={0.8}
+                disabled={!!transitioning}
+              >
+                {transitioning
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : isRunning
+                    ? <EyeOff size={16} color="#fff" />
+                    : <Eye size={16} color="#fff" />}
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                  {transitioning === 'starting' ? 'Starting...'
+                    : transitioning === 'stopping' ? 'Stopping...'
+                    : isRunning ? 'Stop Vision'
+                    : 'Start Vision'}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+        )}
 
         <ScrollView
           style={{ flex: 1 }}
@@ -748,7 +750,7 @@ export function InspectionConfigModal({
         visible={zonePickerOpen}
         zones={zones}
         selected={zoneId}
-        onSelect={id => setZoneId(id)}
+        onSelect={id => { setZoneId(id); notifyLiveUpdate({ zoneId: id }); }}
         onClose={() => setZonePickerOpen(false)}
       />
 
