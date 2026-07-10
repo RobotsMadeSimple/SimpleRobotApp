@@ -3,6 +3,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
 import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { useFocusEffect } from "expo-router";
 import {
   MapPin,
   Navigation,
@@ -12,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -291,6 +292,18 @@ export default function PointsPage() {
   const [editVisible, setEditVisible] = useState(false);
   const [editDraft, setEditDraft] = useState({ name: "", x: "", y: "", z: "", rz: "" });
 
+  // Move speed — reuses the jog Slow/Normal/Fast speeds from robot config.
+  const [moveSpeeds, setMoveSpeeds] = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
+  const [selectedSpeed, setSelectedSpeed] = useState<"Slow" | "Normal" | "Fast">("Normal");
+
+  useFocusEffect(
+    useCallback(() => {
+      robotClient.getRobotConfig()
+        .then(cfg => setMoveSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
+        .catch(() => {});
+    }, [])
+  );
+
   const AT_THRESHOLD = 0.5;
 
   function isAtPoint(p: Point) {
@@ -321,7 +334,7 @@ export default function PointsPage() {
     if (!selectedPoint) return;
     if (isAtPoint(selectedPoint)) { setAlreadyHere(true); return; }
     setMovingToName(selectedPoint.name);
-    robotClient.sendCommand("MoveL", { name: selectedPoint.name });
+    robotClient.sendCommand("MoveL", { name: selectedPoint.name, speed: moveSpeeds?.[selectedSpeed] });
     closeMenu();
     setMovingFromPage(true);
   }
@@ -330,7 +343,7 @@ export default function PointsPage() {
     if (!selectedPoint) return;
     if (isAtPoint(selectedPoint)) { setAlreadyHere(true); return; }
     setMovingToName(selectedPoint.name);
-    robotClient.sendCommand("MoveJ", { name: selectedPoint.name });
+    robotClient.sendCommand("MoveJ", { name: selectedPoint.name, speed: moveSpeeds?.[selectedSpeed] });
     closeMenu();
     setMovingFromPage(true);
   }
@@ -398,6 +411,25 @@ export default function PointsPage() {
       <NotConnectedOverlay />
       <SubPageHeader title="Points" />
       <PointsMap points={points} onPointPress={setSelectedPoint} />
+
+      {/* Move speed selector — applies to Line/Joint moves triggered from this page */}
+      <View style={styles.speedBar}>
+        <Text style={styles.speedBarLabel}>SPEED</Text>
+        <View style={styles.speedSegRow}>
+          {(["Slow", "Normal", "Fast"] as const).map((spd) => {
+            const active = selectedSpeed === spd;
+            return (
+              <Pressable
+                key={spd}
+                style={[styles.speedSeg, active && styles.speedSegActive]}
+                onPress={() => setSelectedSpeed(spd)}
+              >
+                <Text style={[styles.speedSegText, active && styles.speedSegTextActive]}>{spd}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
 
       <FlatList
         data={points}
@@ -655,6 +687,49 @@ const styles = StyleSheet.create({
     right: 8,
     fontSize: 10,
     color: "rgba(148, 163, 184, 0.55)",
+  },
+
+  speedBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e7eb",
+    backgroundColor: "#fff",
+  },
+  speedBarLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    color: "#6b7280",
+  },
+  speedSegRow: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+  },
+  speedSeg: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#f9fafb",
+    alignItems: "center",
+  },
+  speedSegActive: {
+    backgroundColor: "#2563eb",
+    borderColor: "#2563eb",
+  },
+  speedSegText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  speedSegTextActive: {
+    color: "#fff",
   },
 
   list: {
