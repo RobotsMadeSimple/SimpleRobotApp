@@ -1,9 +1,11 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
+import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Plus, Repeat2 } from "lucide-react-native";
+import { Box, Plus, Repeat2, Trash2 } from "lucide-react-native";
 import {
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +16,17 @@ import {
 export default function RoutinesScreen() {
   const allPrograms = useBuiltPrograms();
   const routines = allPrograms.filter(p => p.isRoutine);
+
+  function handleDelete(name: string) {
+    Alert.alert("Delete Routine", `Delete "${name}"? This cannot be undone.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}),
+      },
+    ]);
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
@@ -60,6 +73,13 @@ export default function RoutinesScreen() {
                 )}
                 <Text style={styles.cardMeta}>{r.steps.length} step{r.steps.length !== 1 ? "s" : ""}</Text>
               </View>
+              <TouchableOpacity
+                onPress={() => handleDelete(r.name)}
+                style={styles.deleteBtn}
+                hitSlop={8}
+              >
+                <Trash2 size={16} color="#ef4444" />
+              </TouchableOpacity>
             </TouchableOpacity>
           ))
         )}
@@ -107,6 +127,7 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
   cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
   cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+  deleteBtn: { padding: 6 },
 
   addBtn: {
     width: 32, height: 32, borderRadius: 16,
