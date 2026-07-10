@@ -1,4 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionProgram } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useFocusEffect } from "expo-router";
@@ -99,9 +100,7 @@ export default function VisionListScreen() {
                   <Text style={styles.cardMetaText}>{prog.zones.length} zone{prog.zones.length !== 1 ? "s" : ""}</Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={() => confirmDelete(prog)} style={styles.iconBtn} hitSlop={8}>
-                <Trash2 size={16} color="#ef4444" />
-              </TouchableOpacity>
+              <DeleteIconButton onPress={() => confirmDelete(prog)} style={styles.iconBtn} />
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={styles.addCard} onPress={createNew} activeOpacity={0.7}>

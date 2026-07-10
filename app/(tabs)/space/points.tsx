@@ -3,6 +3,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
 import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useFocusEffect } from "expo-router";
 import {
   MapPin,
@@ -485,10 +486,10 @@ export default function PointsPage() {
                   <Pencil size={18} color="#2563eb" />
                   <Text style={styles.actionText}>Edit Point</Text>
                 </Pressable>
-                <Pressable style={styles.actionRow} onPress={() => setConfirmDelete(true)}>
+                <AnimatedPressable style={styles.actionRow} onPress={() => setConfirmDelete(true)}>
                   <Trash2 size={18} color="#dc2626" />
                   <Text style={styles.deleteActionText}>Delete</Text>
-                </Pressable>
+                </AnimatedPressable>
               </>
             ) : (
               <>
@@ -499,10 +500,10 @@ export default function PointsPage() {
                   <Pressable style={styles.confirmCancel} onPress={() => setConfirmDelete(false)}>
                     <Text style={styles.confirmCancelText}>Cancel</Text>
                   </Pressable>
-                  <Pressable style={styles.confirmDelete} onPress={deletePoint}>
+                  <AnimatedPressable style={styles.confirmDelete} onPress={deletePoint}>
                     <Trash2 size={15} color="white" />
                     <Text style={styles.confirmDeleteText}>Delete</Text>
-                  </Pressable>
+                  </AnimatedPressable>
                 </View>
               </>
             )}

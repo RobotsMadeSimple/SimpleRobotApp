@@ -1,4 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useLocals, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
@@ -351,14 +352,7 @@ export default function LocalsPage() {
                   </TouchableOpacity>
 
                   {/* Delete */}
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    onPress={() => confirmDelete(local.name)}
-                    hitSlop={8}
-                    activeOpacity={0.7}
-                  >
-                    <Trash2 size={16} color="#ef4444" />
-                  </TouchableOpacity>
+                  <DeleteIconButton style={styles.iconBtn} onPress={() => confirmDelete(local.name)} />
                 </TouchableOpacity>
               );
             })}

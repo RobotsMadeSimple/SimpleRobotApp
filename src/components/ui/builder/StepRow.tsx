@@ -8,6 +8,7 @@ import {
 import { ArrowRight, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
 import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
 
@@ -190,9 +191,7 @@ export function StepRow({
           <TouchableOpacity onPress={onCopy}   hitSlop={8} style={sharedStyles.cardAction} activeOpacity={0.7}>
             <Copy   size={15} color="#9ca3af" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={onDelete} hitSlop={8} style={sharedStyles.cardAction} activeOpacity={0.7}>
-            <Trash2 size={15} color="#ef4444" />
-          </TouchableOpacity>
+          <DeleteIconButton onPress={onDelete} size={15} style={sharedStyles.cardAction} />
         </TouchableOpacity>
 
         {/* If Condition body — branch navigation */}

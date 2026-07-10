@@ -1,4 +1,5 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AuxDeviceState, CameraState } from "@/src/models/robotModels";
@@ -78,13 +79,7 @@ function DeviceNavCard({
         </Text>
       </View>
       {onDelete && (
-        <TouchableOpacity
-          onPress={onDelete}
-          hitSlop={8}
-          style={styles.deleteBtn}
-        >
-          <Trash2 size={16} color="#ef4444" />
-        </TouchableOpacity>
+        <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />
       )}
       <ChevronRight size={18} color="#9ca3af" />
     </TouchableOpacity>

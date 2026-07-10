@@ -1,3 +1,4 @@
+import { ActionButton } from "@/src/components/ui/ActionButton";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram, ProgramStatus, ProgramStep, ProgramSummary, ProgramVariableSnapshot } from "@/src/models/robotModels";
@@ -176,6 +177,18 @@ export default function MonitorProgramScreen() {
   }
 
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
+
+  // Spinner while an action is being applied — cleared when the status changes
+  // (the action took effect) or after a short fallback timeout.
+  const [pending, setPending] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const status = program?.status;
+  useEffect(() => { setPending(null); }, [status]);
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => setPending(null), 3000);
+    return () => clearTimeout(t);
+  }, [pending]);
 
   // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
@@ -514,33 +527,29 @@ export default function MonitorProgramScreen() {
           {showActions && (
             <View style={styles.inlineActions}>
               {isRunnable ? (
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? "#9ca3af" : "#16a34a" }]}
-                  onPress={() => { if (!anotherBuiltRunning) robotClient.executeBuiltProgram(programName).catch(() => {}); }}
+                <ActionButton
+                  label={anotherBuiltRunning ? "Another Program Running" : "Run Program"}
+                  icon={<Play size={15} color="#fff" />}
+                  loading={pending === "Run Program"}
                   disabled={anotherBuiltRunning}
-                  activeOpacity={0.8}
-                >
-                  <Play size={15} color="#fff" />
-                  <Text style={styles.actionBtnText}>
-                    {anotherBuiltRunning ? "Another Program Running" : "Run Program"}
-                  </Text>
-                </TouchableOpacity>
+                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? "#9ca3af" : "#16a34a" }]}
+                  textStyle={styles.actionBtnText}
+                  onPress={() => { setPending("Run Program"); robotClient.executeBuiltProgram(programName).catch(() => {}); }}
+                />
               ) : (
                 buttons.map((btn) => {
                   const isStartAction = isBuilt && (btn.label === "Continue" || btn.label === "Run Again");
                   const blocked = isStartAction && anotherBuiltRunning;
                   return (
-                    <TouchableOpacity
+                    <ActionButton
                       key={btn.label}
+                      label={blocked ? "Another Program Running" : btn.label}
+                      loading={pending === btn.label}
+                      disabled={blocked || (pending !== null && pending !== btn.label)}
                       style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
-                      onPress={blocked ? undefined : btn.onPress}
-                      disabled={blocked}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.actionBtnText}>
-                        {blocked ? "Another Program Running" : btn.label}
-                      </Text>
-                    </TouchableOpacity>
+                      textStyle={styles.actionBtnText}
+                      onPress={() => { setPending(btn.label); btn.onPress(); }}
+                    />
                   );
                 })
               )}
@@ -672,18 +681,23 @@ export default function MonitorProgramScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>PROGRAM</Text>
               <View style={styles.managementRow}>
-                <TouchableOpacity
+                <ActionButton
+                  label="Edit"
+                  icon={<Edit2 size={15} color="#2563eb" />}
                   style={styles.editBtn}
+                  textStyle={styles.editBtnText}
+                  spinnerColor="#2563eb"
                   onPress={handleEditPress}
-                  activeOpacity={0.8}
-                >
-                  <Edit2 size={15} color="#2563eb" />
-                  <Text style={styles.editBtnText}>Edit</Text>
-                </TouchableOpacity>
+                />
 
-                <TouchableOpacity
-                  style={[styles.deleteBtn, isActivelyRunning && styles.deleteBtnDisabled]}
+                <ActionButton
+                  label="Delete"
+                  icon={<Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />}
+                  loading={deleting}
                   disabled={isActivelyRunning}
+                  style={[styles.deleteBtn, isActivelyRunning && styles.deleteBtnDisabled]}
+                  textStyle={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}
+                  spinnerColor="#dc2626"
                   onPress={() =>
                     Alert.alert(
                       "Delete Program",
@@ -694,6 +708,7 @@ export default function MonitorProgramScreen() {
                           text: "Delete",
                           style: "destructive",
                           onPress: async () => {
+                            setDeleting(true);
                             await robotClient.deleteBuiltProgram(programName).catch(() => {});
                             robotClient.getBuiltPrograms().catch(() => {});
                             router.back();
@@ -702,13 +717,7 @@ export default function MonitorProgramScreen() {
                       ]
                     )
                   }
-                  activeOpacity={0.8}
-                >
-                  <Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />
-                  <Text style={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}>
-                    Delete
-                  </Text>
-                </TouchableOpacity>
+                />
               </View>
             </View>
           </>

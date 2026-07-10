@@ -1,4 +1,6 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { ActionButton } from "@/src/components/ui/ActionButton";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -522,13 +524,27 @@ export default function BuilderScreen() {
   async function saveToRobot() {
     const name = programName.trim();
     if (!name) { Alert.alert("Name required", "Please give the program a name."); return; }
-    const prog = buildProg();
-    await robotClient.saveBuiltProgram(prog).catch(() => {});
-    if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
-    Alert.alert("Saved to Robot", `"${name}" has been saved to the robot.`);
+    if (savingToRobot) return;
+    setSavingToRobot(true);
+    try {
+      const prog = buildProg();
+      await robotClient.saveBuiltProgram(prog).catch(() => {});
+      if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
+      Alert.alert("Saved to Robot", `"${name}" has been saved to the robot.`);
+    } finally {
+      setSavingToRobot(false);
+    }
   }
 
-  async function handleSave() { if (await save()) router.back(); }
+  const [saving, setSaving]             = useState(false);
+  const [savingToRobot, setSavingToRobot] = useState(false);
+
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    try { if (await save()) router.back(); }
+    finally { setSaving(false); }
+  }
 
   function handleBack() {
     if (scopeStackRef.current.length > 0) { popScope(); return; }
@@ -686,10 +702,15 @@ export default function BuilderScreen() {
 
           {isLocalMode && connected && (
             <View style={styles.bottomBar}>
-              <TouchableOpacity style={styles.uploadBtn} onPress={saveToRobot} activeOpacity={0.8}>
-                <Upload size={15} color="#16a34a" />
-                <Text style={styles.uploadBtnText}>Save to Robot</Text>
-              </TouchableOpacity>
+              <ActionButton
+                label="Save to Robot"
+                icon={<Upload size={15} color="#16a34a" />}
+                loading={savingToRobot}
+                style={styles.uploadBtn}
+                textStyle={styles.uploadBtnText}
+                spinnerColor="#16a34a"
+                onPress={saveToRobot}
+              />
             </View>
           )}
         </>
@@ -873,15 +894,13 @@ export default function BuilderScreen() {
                       <Text style={styles.varDesc}>Initial: {v.value}</Text>
                     )}
                   </View>
-                  <TouchableOpacity
+                  <DeleteIconButton
+                    size={14}
                     onPress={() => Alert.alert("Delete Variable", `Remove $${v.name}?`, [
                       { text: "Cancel", style: "cancel" },
                       { text: "Delete", style: "destructive", onPress: () => deleteVar(v.id) },
                     ])}
-                    hitSlop={8} activeOpacity={0.7}
-                  >
-                    <Trash2 size={14} color="#ef4444" />
-                  </TouchableOpacity>
+                  />
                 </TouchableOpacity>
               </React.Fragment>
             ))
@@ -973,15 +992,25 @@ export default function BuilderScreen() {
       {/* Bottom bar */}
       <View style={styles.bottomBar}>
         {isLocalMode && connected && (
-          <TouchableOpacity style={styles.uploadBtn} onPress={saveToRobot} activeOpacity={0.8}>
-            <Upload size={15} color="#16a34a" />
-            <Text style={styles.uploadBtnText}>Save to Robot</Text>
-          </TouchableOpacity>
+          <ActionButton
+            label="Save to Robot"
+            icon={<Upload size={15} color="#16a34a" />}
+            loading={savingToRobot}
+            style={styles.uploadBtn}
+            textStyle={styles.uploadBtnText}
+            spinnerColor="#16a34a"
+            onPress={saveToRobot}
+          />
         )}
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.8}>
-          <Wrench size={16} color="#2563eb" />
-          <Text style={styles.saveBtnText}>Save</Text>
-        </TouchableOpacity>
+        <ActionButton
+          label="Save"
+          icon={<Wrench size={16} color="#2563eb" />}
+          loading={saving}
+          style={styles.saveBtn}
+          textStyle={styles.saveBtnText}
+          spinnerColor="#2563eb"
+          onPress={handleSave}
+        />
       </View>
         </>
       )}

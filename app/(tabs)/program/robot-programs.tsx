@@ -1,4 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { BuiltProgram, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -100,9 +101,7 @@ function ProgramRow({
       )}
 
       {onDelete && !isBackground && (
-        <TouchableOpacity onPress={onDelete} style={styles.deleteBtn} hitSlop={8}>
-          <Trash2 size={16} color="#ef4444" />
-        </TouchableOpacity>
+        <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />
       )}
     </>
   );
