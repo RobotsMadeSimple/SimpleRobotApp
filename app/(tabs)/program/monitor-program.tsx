@@ -1,14 +1,39 @@
-import { ActionButton } from "@/src/components/ui/ActionButton";
+import {
+  ActionButton } from "@/src/components/ui/ActionButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { BuiltProgram, ProgramStatus, ProgramStep, ProgramSummary, ProgramVariableSnapshot, VisionResult } from "@/src/models/robotModels";
-import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { BuiltProgram,
+  ProgramStatus,
+  ProgramStep,
+  ProgramSummary,
+  ProgramVariableSnapshot,
+  VisionResult } from "@/src/models/robotModels";
+import { useBuiltPrograms,
+  useBuiltProgramsLoaded,
+  useProgramSummaries,
+  useRobotStatus,
+  useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
-import { router, Tabs, useLocalSearchParams } from "expo-router";
-import { AlertTriangle, Box, Camera, ChevronRight, Cpu, Edit2, Gauge, Layers, Play, Trash2, XCircle } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { router,
+  Tabs,
+  useLocalSearchParams } from "expo-router";
+import { AlertTriangle,
+  Box,
+  Camera,
+  ChevronRight,
+  Cpu,
+  Edit2,
+  Gauge,
+  Layers,
+  Play,
+  Trash2,
+  XCircle } from "lucide-react-native";
+import { useCallback,
+  useEffect,
+  useRef,
+  useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +45,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
@@ -711,7 +737,7 @@ export default function MonitorProgramScreen() {
                   textStyle={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}
                   spinnerColor="#dc2626"
                   onPress={() =>
-                    Alert.alert(
+                    appAlert(
                       "Delete Program",
                       `Delete "${programName}"? This cannot be undone.`,
                       [

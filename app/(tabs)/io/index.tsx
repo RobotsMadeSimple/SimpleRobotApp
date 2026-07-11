@@ -1,8 +1,12 @@
-import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import {
+  NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useNanoIO, useRelayIO, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useNanoIO,
+  useRelayIO,
+  useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxDeviceState, CameraState } from "@/src/models/robotModels";
+import { AuxDeviceState,
+  CameraState } from "@/src/models/robotModels";
 import {
   Camera,
   ChevronRight,
@@ -15,13 +19,15 @@ import {
   Wifi,
   WifiOff,
   X,
-} from "lucide-react-native";
+  } from "lucide-react-native";
 import { router } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useEffect, useState } from "react";
+import React,
+  { useCallback,
+  useEffect,
+  useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -30,6 +36,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 // ── IOConfig type ─────────────────────────────────────────────────────────────
 
@@ -144,7 +151,7 @@ export default function IoPage() {
   };
 
   const confirmRemove = (label: string, onConfirm: () => void) => {
-    Alert.alert(
+    appAlert(
       "Remove Device",
       `Remove "${label}" from the IO panel?`,
       [

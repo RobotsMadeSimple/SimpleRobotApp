@@ -1,10 +1,14 @@
-import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import {
+  NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Plus, Repeat2, Trash2 } from "lucide-react-native";
+import { Box,
+  Plus,
+  Repeat2,
+  Trash2 } from "lucide-react-native";
 import {
   Alert,
   ScrollView,
@@ -13,13 +17,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function RoutinesScreen() {
   const allPrograms = useBuiltPrograms();
   const routines = allPrograms.filter(p => p.isRoutine);
 
   function handleDelete(name: string) {
-    Alert.alert("Delete Routine", `Delete "${name}"? This cannot be undone.`, [
+    appAlert("Delete Routine", `Delete "${name}"? This cannot be undone.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",

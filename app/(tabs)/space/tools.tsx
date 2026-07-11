@@ -1,6 +1,9 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useRobotStatus, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
+import { useRobotStatus,
+  useSelectedRobot,
+  useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Check,
@@ -10,8 +13,10 @@ import {
   Trash2,
   Wrench,
   X,
-} from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+  } from "lucide-react-native";
+import { useEffect,
+  useRef,
+  useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -25,6 +30,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -219,7 +225,7 @@ export default function ToolsPage() {
   }
 
   function confirmDelete(name: string) {
-    Alert.alert(
+    appAlert(
       "Delete Tool",
       `Delete "${name}"? This cannot be undone.`,
       [

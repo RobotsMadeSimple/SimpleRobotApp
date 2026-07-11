@@ -1,4 +1,5 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { FEED_HTML } from "@/src/vision/visionHtml";
@@ -20,9 +21,10 @@ import {
   defaultColorCoverageInspection,
   defaultLineInspection,
   defaultPolygonInspection,
-} from "@/src/models/robotModels";
+  } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useLocalSearchParams, useNavigation } from "expo-router";
+import { useLocalSearchParams,
+  useNavigation } from "expo-router";
 import {
   Barcode,
   Check,
@@ -38,11 +40,14 @@ import {
   QrCode,
   ScanSearch,
   Trash2,
-} from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+  } from "lucide-react-native";
+import { useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Keyboard,
   ScrollView,
@@ -53,6 +58,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { WebView } from "react-native-webview";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
 import { ZoneDrawModal } from "@/src/components/ui/vision-editor/ZoneDrawModal";
@@ -506,7 +512,7 @@ export default function VisionEditorScreen() {
             <DeleteIconButton
               size={14}
               style={styles.iconBtn}
-              onPress={() => Alert.alert('Delete Zone', `Delete "${zone.name}"?`, [
+              onPress={() => appAlert('Delete Zone', `Delete "${zone.name}"?`, [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
               ])}
@@ -581,7 +587,7 @@ export default function VisionEditorScreen() {
                 <DeleteIconButton
                   size={15}
                   style={styles.iconBtn}
-                  onPress={() => Alert.alert('Delete Inspection', `Delete "${insp.name}"?`, [
+                  onPress={() => appAlert('Delete Inspection', `Delete "${insp.name}"?`, [
                     { text: 'Cancel', style: 'cancel' },
                     { text: 'Delete', style: 'destructive', onPress: () => {
                       if (kind === 'blob')         deleteInspection(insp.id);

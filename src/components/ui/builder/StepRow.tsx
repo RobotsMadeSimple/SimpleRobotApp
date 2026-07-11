@@ -138,9 +138,6 @@ export function StepRow({
   const isIfCondition = step.type === "IfCondition";
   const isSetSpeed    = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
                      || step.type === "Label"      || step.type === "GoToLabel";
-  const isMoveStep    = step.type === "MoveL"  || step.type === "MoveJ"
-                     || step.type === "JumpL"  || step.type === "JumpJ"
-                     || step.type === "SetOutput";
   const innerSteps    = step.loopSteps ?? [];
   const theme         = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
   const detail        = stepDetail(step);
@@ -169,20 +166,14 @@ export function StepRow({
             <Text style={[sharedStyles.stepCardType, { color: theme.accent }]}>
               {index + 1} · {theme.label.toUpperCase()}
             </Text>
-            {(!isSetSpeed || !!step.name) && (
+            {(!(isSetSpeed || isIfCondition) || !!step.name) && (
               <Text style={sharedStyles.stepCardName} numberOfLines={1}>
-                {step.name || (isMoveStep ? (detailLines[0] ?? step.type) : (detail ?? step.type))}
+                {step.name || detailLines[0] || step.type}
               </Text>
             )}
-            {isSetSpeed && detailLines.map((line, i) => (
-              <Text key={i} style={sharedStyles.stepCardDetail}>{line}</Text>
-            ))}
-            {isMoveStep && (step.name ? detailLines : detailLines.slice(1)).map((line, i) => (
+            {(isSetSpeed ? detailLines : (step.name ? detailLines : detailLines.slice(1))).map((line, i) => (
               <Text key={i} style={sharedStyles.stepCardDetail} numberOfLines={1}>{line}</Text>
             ))}
-            {!isSetSpeed && !isMoveStep && !!step.name && detail && (
-              <Text style={sharedStyles.stepCardDetail} numberOfLines={1}>{detail}</Text>
-            )}
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
               <Text style={sharedStyles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
             )}

@@ -1,11 +1,15 @@
-import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import {
+  NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { RobotStack } from "@/src/models/robotModels";
 import { useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ChevronRight, Layers, Plus, Trash2 } from "lucide-react-native";
+import { ChevronRight,
+  Layers,
+  Plus,
+  Trash2 } from "lucide-react-native";
 import {
   Alert,
   FlatList,
@@ -14,12 +18,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function StacksPage() {
   const stacks = useStacks();
 
   function handleDelete(item: RobotStack) {
-    Alert.alert(
+    appAlert(
       "Delete Stack",
       `Delete "${item.name}"? This cannot be undone.`,
       [
