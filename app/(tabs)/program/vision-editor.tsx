@@ -1,5 +1,6 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { VisionResults } from "@/src/components/ui/VisionResults";
 import { FEED_HTML } from "@/src/vision/visionHtml";
 import {
   ArucoInspection,
@@ -10,6 +11,7 @@ import {
   LineInspection,
   PolygonInspection,
   VisionProgram,
+  VisionResult,
   VisionZone,
   VisionZoneGeometry,
   defaultArucoInspection,
@@ -142,6 +144,20 @@ export default function VisionEditorScreen() {
     robotClient.getCameras().catch(() => {});
     return robotClient.onCameras(setCameras);
   }, []);
+
+  // Poll structured inspection results while vision is running — shown as text
+  // under the feed in the inspection config modal.
+  const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
+  useEffect(() => {
+    if (!isRunning || !program.id) { setVisionResult(null); return; }
+    let cancelled = false;
+    const poll = () => robotClient.getVisionResult(program.id)
+      .then(r => { if (!cancelled) setVisionResult(r); })
+      .catch(() => {});
+    poll();
+    const t = setInterval(poll, 1000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isRunning, program.id]);
 
   const grabFeedSnapshot = useCallback((): Promise<string | null> => {
     return new Promise(resolve => {
@@ -458,6 +474,14 @@ export default function VisionEditorScreen() {
           </TouchableOpacity>
         </Animated.View>
 
+        {/* ── Results ────────────────────────────────────────────────────────── */}
+        {isRunning && visionResult && (
+          <>
+            <Text style={styles.sectionLabel}>RESULTS</Text>
+            <VisionResults result={visionResult} />
+          </>
+        )}
+
         {/* ── Zones ──────────────────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>ZONES</Text>
 
@@ -684,6 +708,7 @@ export default function VisionEditorScreen() {
         isRunning={isRunning}
         transitioning={transitioning}
         onToggleRunning={toggleRunning}
+        visionResult={visionResult}
         onLiveUpdate={handlePolygonLiveUpdate}
         onLiveUpdateBlob={handleBlobLiveUpdate}
         onLiveUpdateColor={handleColorLiveUpdate}
