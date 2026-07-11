@@ -1,6 +1,7 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -25,7 +26,6 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   BackHandler,
   Dimensions,
   Image,
@@ -179,7 +179,7 @@ export default function BuilderScreen() {
   async function pickFromCamera() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert("Permission needed", "Camera access is required to take a photo.");
+      appAlert("Permission needed", "Camera access is required to take a photo.");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -195,7 +195,7 @@ export default function BuilderScreen() {
   async function pickFromLibrary() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert("Permission needed", "Photo library access is required.");
+      appAlert("Permission needed", "Photo library access is required.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -500,7 +500,7 @@ export default function BuilderScreen() {
   async function save(): Promise<boolean> {
     const name = programName.trim();
     if (!name) {
-      Alert.alert("Name required", "Please give the program a name.");
+      appAlert("Name required", "Please give the program a name.");
       return false;
     }
     const prog = buildProg();
@@ -523,14 +523,14 @@ export default function BuilderScreen() {
 
   async function saveToRobot() {
     const name = programName.trim();
-    if (!name) { Alert.alert("Name required", "Please give the program a name."); return; }
+    if (!name) { appAlert("Name required", "Please give the program a name."); return; }
     if (savingToRobot) return;
     setSavingToRobot(true);
     try {
       const prog = buildProg();
       await robotClient.saveBuiltProgram(prog).catch(() => {});
       if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
-      Alert.alert("Saved to Robot", `"${name}" has been saved to the robot.`);
+      appAlert("Saved to Robot", `"${name}" has been saved to the robot.`);
     } finally {
       setSavingToRobot(false);
     }
@@ -549,7 +549,7 @@ export default function BuilderScreen() {
   function handleBack() {
     if (scopeStackRef.current.length > 0) { popScope(); return; }
     if (!isDirty) { router.back(); return; }
-    Alert.alert(
+    appAlert(
       "Unsaved Changes",
       "You have unsaved changes. Exit without saving?",
       [
@@ -653,7 +653,7 @@ export default function BuilderScreen() {
                     isDragging={!!drag}
                     onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
                     onCopy={() => setClipboard(step)}
-                    onDelete={() => Alert.alert("Delete Step", "Remove this step?", [
+                    onDelete={() => appAlert("Delete Step", "Remove this step?", [
                       { text: "Cancel", style: "cancel" },
                       { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
                     ])}
@@ -896,7 +896,7 @@ export default function BuilderScreen() {
                   </View>
                   <DeleteIconButton
                     size={14}
-                    onPress={() => Alert.alert("Delete Variable", `Remove $${v.name}?`, [
+                    onPress={() => appAlert("Delete Variable", `Remove $${v.name}? This can't be undone.`, [
                       { text: "Cancel", style: "cancel" },
                       { text: "Delete", style: "destructive", onPress: () => deleteVar(v.id) },
                     ])}
@@ -941,7 +941,7 @@ export default function BuilderScreen() {
                 isDragging={!!drag}
                 onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
                 onCopy={() => setClipboard(step)}
-                onDelete={() => Alert.alert("Delete Step", "Remove this step?", [
+                onDelete={() => appAlert("Delete Step", "Remove this step?", [
                   { text: "Cancel", style: "cancel" },
                   { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
                 ])}
@@ -1038,6 +1038,7 @@ export default function BuilderScreen() {
         onSave={saveVar}
         onClose={() => setVarModalOpen(false)}
       />
+
 
       {/* Variable context picker modal — routine mode only */}
       <Modal visible={contextPickerOpen} transparent animationType="fade" onRequestClose={() => setContextPickerOpen(false)}>

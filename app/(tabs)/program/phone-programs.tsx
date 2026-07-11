@@ -1,12 +1,20 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { BuiltProgram } from "@/src/models/robotModels";
 import { useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { FileJson, Plus, Repeat2, Smartphone, Trash2, Upload } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { FileJson,
+  Plus,
+  Repeat2,
+  Smartphone,
+  Trash2,
+  Upload } from "lucide-react-native";
+import { useCallback,
+  useEffect,
+  useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -15,6 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 // ── Local Program Card ────────────────────────────────────────────────────────
 
@@ -30,9 +39,9 @@ function LocalProgramCard({
   async function handleSendToRobot() {
     try {
       await robotClient.saveBuiltProgram(program);
-      Alert.alert("Saved to Robot", `"${program.name}" has been saved to the robot.`);
+      appAlert("Saved to Robot", `"${program.name}" has been saved to the robot.`);
     } catch {
-      Alert.alert("Error", "Failed to save program to robot.");
+      appAlert("Error", "Failed to save program to robot.");
     }
   }
 
@@ -40,12 +49,12 @@ function LocalProgramCard({
     try {
       await LocalProgramService.exportAsFile(program);
     } catch (e: any) {
-      Alert.alert("Export Failed", e?.message ?? "Could not export program.");
+      appAlert("Export Failed", e?.message ?? "Could not export program.");
     }
   }
 
   function handleDelete() {
-    Alert.alert(
+    appAlert(
       "Delete Local Program",
       `Delete "${program.name}" from this device? This cannot be undone.`,
       [
@@ -134,7 +143,7 @@ export default function PhoneProgramsScreen() {
       if (!prog) return;
       const existing = programs.find(p => p.name === prog.name);
       if (existing) {
-        Alert.alert(
+        appAlert(
           "Program Already Exists",
           `A local program named "${prog.name}" already exists. Replace it?`,
           [
@@ -154,7 +163,7 @@ export default function PhoneProgramsScreen() {
         refresh();
       }
     } catch (e: any) {
-      Alert.alert("Import Failed", e?.message ?? "Could not read the file.");
+      appAlert("Import Failed", e?.message ?? "Could not read the file.");
     }
   }
 

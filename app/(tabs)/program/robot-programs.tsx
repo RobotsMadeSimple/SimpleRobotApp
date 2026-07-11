@@ -1,11 +1,22 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { BuiltProgram, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { BuiltProgram,
+  ProgramSummary } from "@/src/models/robotModels";
+import { useBuiltPrograms,
+  useProgramSummaries,
+  useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Cpu, Layers, Play, Plus, Square, Trash2 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { Box,
+  Cpu,
+  Layers,
+  Play,
+  Plus,
+  Square,
+  Trash2 } from "lucide-react-native";
+import { useEffect,
+  useState } from "react";
 import {
   Alert,
   Image,
@@ -17,6 +28,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 // ── Program Row ────────────────────────────────────────────────────────────────
 
@@ -170,7 +182,7 @@ export default function RobotProgramsScreen() {
   const allRegularCards = [...regularCards, ...externalCards];
 
   function handleDelete(name: string) {
-    Alert.alert("Delete Program", `Delete "${name}" from the robot? This cannot be undone.`, [
+    appAlert("Delete Program", `Delete "${name}" from the robot? This cannot be undone.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -181,7 +193,7 @@ export default function RobotProgramsScreen() {
   }
 
   function handleDeleteBackground(name: string) {
-    Alert.alert("Delete Background Program", `Delete "${name}" from the robot? This cannot be undone.`, [
+    appAlert("Delete Background Program", `Delete "${name}" from the robot? This cannot be undone.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",

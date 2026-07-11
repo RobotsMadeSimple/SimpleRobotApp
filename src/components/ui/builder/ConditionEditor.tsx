@@ -36,11 +36,8 @@ const COND_OP_LABELS: Record<ConditionOp, string> = {
 
 export function conditionSummary(group: ConditionGroup | undefined): string {
   if (!group || !group.items || group.items.length === 0) return "(no conditions)";
-  if (group.items.length === 1) {
-    const it = group.items[0];
-    return `${it.left || "?"} ${it.operator} ${it.right || "?"}`;
-  }
-  return `${group.combinator} of ${group.items.length} conditions`;
+  const join = group.combinator === "ANY" ? "  OR  " : "  AND  ";
+  return group.items.map(it => `${it.left || "?"} ${it.operator} ${it.right || "?"}`).join(join);
 }
 
 function ConditionItemEditor({

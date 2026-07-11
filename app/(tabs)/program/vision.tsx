@@ -1,19 +1,24 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionProgram } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router, useFocusEffect } from "expo-router";
-import { Plus, ScanSearch, Trash2 } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { router,
+  useFocusEffect } from "expo-router";
+import { Plus,
+  ScanSearch,
+  Trash2 } from "lucide-react-native";
+import { useCallback,
+  useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function VisionListScreen() {
   const [programs, setPrograms] = useState<VisionProgram[]>([]);
@@ -43,7 +48,7 @@ export default function VisionListScreen() {
   }
 
   function confirmDelete(prog: VisionProgram) {
-    Alert.alert("Delete Vision Program", `Delete "${prog.name}"?`, [
+    appAlert("Delete Vision Program", `Delete "${prog.name}"?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete", style: "destructive",

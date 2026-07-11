@@ -1,9 +1,13 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms,
+  useConnected } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { ProgramStep, THREAD_PRESETS } from "@/src/models/robotModels";
-import { router, useLocalSearchParams } from "expo-router";
+import { ProgramStep,
+  THREAD_PRESETS } from "@/src/models/robotModels";
+import { router,
+  useLocalSearchParams } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import {
@@ -14,11 +18,15 @@ import {
   RefreshCw,
   Trash2,
   Upload,
-} from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+  } from "lucide-react-native";
+import React,
+  { useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -28,6 +36,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import Svg, { Circle, G, Line, Rect, Text as SvgText } from "react-native-svg";
 import DxfParser from "dxf-parser";
 
@@ -276,7 +285,7 @@ export default function CncBuilderScreen() {
       await refreshFiles();
       setSelectedDxf(name);
     } catch (e: any) {
-      Alert.alert("Upload Failed", e?.message ?? "Unknown error");
+      appAlert("Upload Failed", e?.message ?? "Unknown error");
     } finally {
       setUploading(false);
     }
@@ -285,7 +294,7 @@ export default function CncBuilderScreen() {
   // ── Delete DXF ────────────────────────────────────────────────────────────
 
   function handleDeleteDxf(name: string) {
-    Alert.alert("Delete DXF", `Delete "${name}" from the controller?`, [
+    appAlert("Delete DXF", `Delete "${name}" from the controller?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete", style: "destructive", onPress: async () => {
@@ -294,7 +303,7 @@ export default function CncBuilderScreen() {
             if (selectedDxf === name) setSelectedDxf(undefined);
             refreshFiles();
           } catch (e: any) {
-            Alert.alert("Error", e?.message ?? "Delete failed");
+            appAlert("Error", e?.message ?? "Delete failed");
           }
         }
       },
@@ -325,7 +334,7 @@ export default function CncBuilderScreen() {
   async function handleSave() {
     if (!programName || !stepId) return;
     const prog = builtPrograms.find(p => p.name === programName);
-    if (!prog) { Alert.alert("Error", "Program not found"); return; }
+    if (!prog) { appAlert("Error", "Program not found"); return; }
 
     const orderedHoles = Array.from(selectedHoles)
       .sort((a, b) => a - b)
@@ -371,7 +380,7 @@ export default function CncBuilderScreen() {
       });
       router.back();
     } catch (e: any) {
-      Alert.alert("Save Failed", e?.message ?? "Unknown error");
+      appAlert("Save Failed", e?.message ?? "Unknown error");
     } finally {
       setSaving(false);
     }

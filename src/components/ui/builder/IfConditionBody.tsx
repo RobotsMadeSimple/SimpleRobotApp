@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -9,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { ArrowRight, Check, Pencil, Plus, X } from "lucide-react-native";
 import { ConditionGroup, ElseIfBranch, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { ms, sharedStyles } from "./builderStyles";
@@ -164,7 +164,7 @@ export function IfConditionBody({
                 <Pencil size={13} color="#c4b5fd" />
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => Alert.alert("Delete Branch", "Remove this ELSE IF branch and its steps?", [
+                onPress={() => appAlert("Delete Branch", "Remove this ELSE IF branch and its steps?", [
                   { text: "Cancel", style: "cancel" },
                   { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) }) },
                 ])}
@@ -195,7 +195,7 @@ export function IfConditionBody({
               </View>
               <View style={{ flex: 1 }} />
               <TouchableOpacity
-                onPress={() => Alert.alert("Delete Branch", "Remove the ELSE branch and its steps?", [
+                onPress={() => appAlert("Delete Branch", "Remove the ELSE branch and its steps?", [
                   { text: "Cancel", style: "cancel" },
                   { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
                 ])}

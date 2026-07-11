@@ -28,7 +28,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import React from "react";
-import { ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS } from "@/src/models/robotModels";
+import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS } from "@/src/models/robotModels";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -270,6 +270,16 @@ export function fmtSetVar(varName: string | undefined, expr: string | undefined)
   return op === "=" ? `$${varName} = ${val || "?"}` : `$${varName} ${op} ${val || "?"}`;
 }
 
+// ── Condition formatting ──────────────────────────────────────────────────────
+
+/** Spells out every item of a condition group joined by AND/OR (not just a count). */
+export function fmtConditionFull(group: ConditionGroup | undefined): string {
+  const items = group?.items ?? [];
+  if (items.length === 0) return "(no conditions)";
+  const join = group!.combinator === "ANY" ? "  OR  " : "  AND  ";
+  return items.map(i => `${i.left || "?"} ${i.operator} ${i.right || "?"}`).join(join);
+}
+
 // ── Step detail ───────────────────────────────────────────────────────────────
 
 export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
@@ -281,7 +291,13 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : (step.pointName ?? "current pos");
       const lines = [`→ ${target}`];
-      if (step.speed != null) lines.push(`${step.speed} mm/s`);
+      const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
+      if (spd) lines.push(spd);
+      const acc = step.expressions?.accel ?? (step.accel != null ? `${step.accel} mm/s²` : null);
+      const dec = step.expressions?.decel ?? (step.decel != null ? `${step.decel} mm/s²` : null);
+      if (acc) lines.push(`accel ${acc}`);
+      if (dec) lines.push(`decel ${dec}`);
+      if (step.localName) lines.push(`local: ${step.localName}`);
       lines.push(...fmtMoveModifiers(step));
       return lines.join('\n');
     }
@@ -294,6 +310,9 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const lines = [`→ ${target}`];
       if (step.jumpZ != null) lines.push(`Z: ${step.jumpZ} mm`);
       if (step.speed != null) lines.push(`${step.speed} mm/s`);
+      if (step.accel != null) lines.push(`accel ${step.accel} mm/s²`);
+      if (step.decel != null) lines.push(`decel ${step.decel} mm/s²`);
+      if (step.localName) lines.push(`local: ${step.localName}`);
       lines.push(...fmtMoveModifiers(step));
       return lines.join('\n');
     }
@@ -305,15 +324,17 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
                   : card === "nano"  ? `Nano · Pin ${num}  →  ${val}`
                   :                    `STB · Output ${num}  →  ${val}`;
       const lines = [label];
-      if (step.pulseMs && step.pulseMs > 0) lines.push(`Pulse  ${step.pulseMs} ms`);
+      if (step.pulseMs && step.pulseMs > 0) lines.push(`Pulse  ${step.pulseMs} ms${step.pulseBlocking ? "  (blocking)" : ""}`);
       return lines.join('\n');
     }
     case "Wait": {
       if (step.waitMode === 'condition') {
+        const lines = [`until  ${fmtConditionFull(step.waitCondition)}`];
         const parts: string[] = [];
         if (step.waitTimeoutMs) parts.push(`max ${step.waitTimeoutMs} ms`);
         if (step.waitTimeoutVariableName) parts.push(`timeout → $${step.waitTimeoutVariableName}`);
-        return parts.join("  ·  ") || "Wait for condition";
+        if (parts.length) lines.push(parts.join("  ·  "));
+        return lines.join("\n");
       }
       const waitExpr = step.expressions?.waitMs;
       return waitExpr ?? `${step.waitMs ?? 0} ms`;
@@ -328,8 +349,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.loopMode === 'while') {
         const g = step.loopWhileCondition;
         if (!g || (g.items ?? []).length === 0) return "Exits when condition is false";
-        if ((g.items ?? []).length === 1) return `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
-        return `${g.combinator} of ${(g.items ?? []).length} conditions`;
+        return `while  ${fmtConditionFull(g)}`;
       }
       const loopExpr = step.expressions?.loopCount;
       const countStr = `×${loopExpr ?? (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1))}`;
@@ -339,8 +359,16 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.statusMessage || null;
     case "CallRoutine":
       return step.routineName ? `→ ${step.routineName}` : null;
-    case "RunVision":
-      return step.visionProgramName ? `→ ${step.visionProgramName}` : null;
+    case "RunVision": {
+      const lines: string[] = [];
+      if (step.visionProgramName) lines.push(`→ ${step.visionProgramName}`);
+      if (step.visionZoneVar) lines.push(`zone → $${step.visionZoneVar}`);
+      else if (step.visionZoneId) lines.push(`zone override`);
+      const outN = (step.visionOutputs?.length ?? 0) + (step.colorOutputs?.length ?? 0)
+        + (step.polygonOutputs?.length ?? 0) + (step.arucoOutputs?.length ?? 0);
+      if (outN > 0) lines.push(`${outN} output${outN !== 1 ? "s" : ""} → variables`);
+      return lines.length ? lines.join("\n") : null;
+    }
     case "SaveImage":
       return step.saveImagePath ? step.saveImagePath : null;
     case "SetSpeedL":
@@ -360,12 +388,10 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.labelName ? `⬤ ${step.labelName}` : null;
     case "GoToLabel":
       return step.labelName ? `↩ ${step.labelName}` : null;
-    case "IfCondition": {
-      const g = step.condition;
-      if (!g || (g.items ?? []).length === 0) return "(no conditions)";
-      if ((g.items ?? []).length === 1) return `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
-      return `${g.combinator} of ${(g.items ?? []).length} conditions`;
-    }
+    case "IfCondition":
+      // Conditions are shown on the IF / ELSE-IF branch cards in the body below,
+      // so don't repeat them in the card header.
+      return null;
     case "SetTool":
       return step.toolName  ? `→ ${step.toolName}`  : "→ None";
     case "SetLocal":
@@ -375,8 +401,13 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
     case "RunHoming":
       return "Runs the full homing sequence";
     case "AuxMove": {
-      const unit  = step.auxUnit ?? "steps";
-      const parts: string[] = [step.auxAbsolute ? "absolute" : "relative"];
+      const unit   = step.auxUnit ?? "steps";
+      const amount = step.auxUnit && step.auxDistance != null ? `${step.auxDistance} ${unit}`
+        : step.auxSteps != null ? `${step.auxSteps} steps`
+        : null;
+      const parts: string[] = [];
+      if (amount) parts.push(amount);
+      parts.push(step.auxAbsolute ? "absolute" : "relative");
       if (step.auxVelocity != null) parts.push(`${step.auxVelocity} ${unit}/s`);
       if (step.auxWaitForDone === false) parts.push("no wait");
       return parts.join("  ·  ");
@@ -393,8 +424,10 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
     case "WaitForBackground":
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
-    case "StopwatchControl":
-      return step.stopwatchVariableName ? `$${step.stopwatchVariableName}` : null;
+    case "StopwatchControl": {
+      const action = step.stopwatchAction ?? "Start";
+      return step.stopwatchVariableName ? `${action}  ·  $${step.stopwatchVariableName}` : action;
+    }
     case "ThreadMove": {
       const parts: string[] = [];
       if (step.threadDistance != null) parts.push(`${step.threadDistance} mm`);

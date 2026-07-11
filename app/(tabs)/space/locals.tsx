@@ -1,6 +1,8 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useLocals, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useLocals,
+  useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Check,
@@ -9,8 +11,9 @@ import {
   Plus,
   Trash2,
   X,
-} from "lucide-react-native";
-import { useRef, useState } from "react";
+  } from "lucide-react-native";
+import { useRef,
+  useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -24,6 +27,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -236,7 +240,7 @@ export default function LocalsPage() {
   }
 
   function confirmDelete(name: string) {
-    Alert.alert(
+    appAlert(
       "Delete Local",
       `Delete "${name}"? This cannot be undone.`,
       [

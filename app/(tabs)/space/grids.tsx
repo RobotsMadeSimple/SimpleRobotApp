@@ -1,11 +1,15 @@
-import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import {
+  NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ChevronRight, Grid3x3, Plus, Trash2 } from "lucide-react-native";
+import { ChevronRight,
+  Grid3x3,
+  Plus,
+  Trash2 } from "lucide-react-native";
 import {
   Alert,
   FlatList,
@@ -14,12 +18,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function GridsPage() {
   const grids = useGrids();
 
   function handleDelete(item: Grid) {
-    Alert.alert(
+    appAlert(
       "Delete Grid",
       `Delete "${item.name}"? This cannot be undone.`,
       [
