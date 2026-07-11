@@ -197,40 +197,47 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 <canvas id="c"></canvas>
 <script>
 var c=document.getElementById('c'),ctx=c.getContext('2d');
-var _ws=null,_timer=null,_lastUrl=null;
+var _ws=null,_timer=null,_lastUrl=null,_gen=0;
 
-function closeWs(){if(_ws){try{_ws.close();}catch(e){}_ws=null;}}
+// Each setFeed bumps the generation; only the current generation is allowed to
+// draw, so a just-closed feed (e.g. the raw camera socket while switching to the
+// annotated vision socket) can't paint stale frames and cause flicker.
+function closeWs(){if(_ws){try{_ws.onmessage=null;_ws.close();}catch(e){}_ws=null;}}
 function stopTimer(){if(_timer){clearInterval(_timer);_timer=null;}}
 
-function drawSrc(src,cb){
+function drawSrc(src,cb,g){
   var img=new Image();
   img.onload=function(){
-    if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
-      c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
+    // Drop a frame whose feed was replaced while it was still decoding.
+    if(g===undefined||g===_gen){
+      if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
+        c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
+      }
+      ctx.drawImage(img,0,0);
     }
-    ctx.drawImage(img,0,0);
     if(cb)cb();
   };
   img.onerror=function(){if(cb)cb();};
   img.src=src;
 }
 
-function startWs(url){
+function startWs(url,g){
   var dec=false,pend=null;
-  function step(src){dec=true;drawSrc(src,function(){dec=false;if(pend!==null){var n=pend;pend=null;step(n);}});}
+  function step(src){dec=true;drawSrc(src,function(){dec=false;if(pend!==null){var n=pend;pend=null;step(n);}},g);}
   _ws=new WebSocket(url);
-  _ws.onmessage=function(e){if(dec){pend=e.data;}else{step(e.data);}};
+  _ws.onmessage=function(e){if(g!==_gen)return;if(dec){pend=e.data;}else{step(e.data);}};
   _ws.onerror=function(){_ws=null;};
   _ws.onclose=function(){_ws=null;};
 }
 
-function startPoll(url,ms){
+function startPoll(url,ms,g){
   var busy=false;
   function load(){
-    if(!url||busy)return;
+    if(g!==_gen||!url||busy)return;
     busy=true;
     var img=new Image();
     img.onload=function(){
+      if(g!==_gen){busy=false;return;}
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
@@ -243,12 +250,13 @@ function startPoll(url,ms){
 }
 
 window.setFeed=function(url){
+  _gen++;var g=_gen;
   _lastUrl=url;closeWs();stopTimer();
   if(!url)return;
-  if(url.startsWith('ws://')||url.startsWith('wss://'))startWs(url);
-  else startPoll(url,150);
+  if(url.startsWith('ws://')||url.startsWith('wss://'))startWs(url,g);
+  else startPoll(url,150,g);
 };
-window.pauseFeed=function(){closeWs();stopTimer();};
+window.pauseFeed=function(){_gen++;closeWs();stopTimer();};
 window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl);};
 <\/script>
 </body></html>`;

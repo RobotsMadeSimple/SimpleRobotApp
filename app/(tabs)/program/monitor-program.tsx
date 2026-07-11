@@ -1,7 +1,8 @@
 import { ActionButton } from "@/src/components/ui/ActionButton";
+import { VisionResults } from "@/src/components/ui/VisionResults";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { BuiltProgram, ProgramStatus, ProgramStep, ProgramSummary, ProgramVariableSnapshot } from "@/src/models/robotModels";
+import { BuiltProgram, ProgramStatus, ProgramStep, ProgramSummary, ProgramVariableSnapshot, VisionResult } from "@/src/models/robotModels";
 import { useBuiltPrograms, useBuiltProgramsLoaded, useProgramSummaries, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "@react-navigation/native";
@@ -218,7 +219,12 @@ export default function MonitorProgramScreen() {
           if (cancelled) return;
           setTotalLogCount(result.totalCount);
           if (result.logs.length > 0) {
-            setLogs((prev) => [...prev, ...result.logs]);
+            // Keep only the most recent ~100k in memory so a long run doesn't
+            // accumulate millions of entries in the app.
+            setLogs((prev) => {
+              const next = [...prev, ...result.logs];
+              return next.length > 100_000 ? next.slice(next.length - 100_000) : next;
+            });
             fetchedUntil = result.totalCount;
           }
         } catch {}
@@ -241,6 +247,7 @@ export default function MonitorProgramScreen() {
 
   // ── Vision snapshot polling ────────────────────────────────────────────────
   const [visionSnapshots, setVisionSnapshots] = useState<Record<string, string | null>>({});
+  const [visionResults, setVisionResults]     = useState<Record<string, VisionResult | null>>({});
 
   const visionSteps: { id: string; name: string }[] = [];
   if (builtProgram) {
@@ -294,6 +301,11 @@ export default function MonitorProgramScreen() {
               break; // newest frame for this program obtained
             } catch {}
           }
+          // Structured result values — shown as text alongside the image.
+          try {
+            const r = await robotClient.getVisionResult(id);
+            if (!cancelled) setVisionResults(prev => ({ ...prev, [id]: r }));
+          } catch {}
         }
       };
 
@@ -775,6 +787,7 @@ export default function MonitorProgramScreen() {
                         </Text>
                       </View>
                     )}
+                    <VisionResults result={visionResults[id] ?? null} />
                   </View>
                 );
               })}

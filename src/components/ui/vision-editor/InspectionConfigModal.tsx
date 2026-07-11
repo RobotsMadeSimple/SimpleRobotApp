@@ -25,12 +25,14 @@ import {
   ColorEntry,
   LineInspection,
   PolygonInspection,
+  VisionResult,
   VisionZone,
   defaultBlobParams,
   defaultColorEntry,
 } from "@/src/models/robotModels";
 import { FEED_HTML } from "@/src/vision/visionHtml";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { VisionResults } from "@/src/components/ui/VisionResults";
 import { WebView } from "react-native-webview";
 import { ves } from "./visionEditorStyles";
 import { ZonePickerModal } from "./ZonePickerModal";
@@ -41,7 +43,7 @@ import { FormatPickerSheet } from "./InspectionTypePicker";
 export function InspectionConfigModal({
   visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode, zones,
   snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onSaveLine, onSaveBarcode, onClose,
-  feedUrl, isRunning, transitioning, onToggleRunning,
+  feedUrl, isRunning, transitioning, onToggleRunning, visionResult,
   onLiveUpdate, onLiveUpdateBlob, onLiveUpdateColor, onLiveUpdateAruco, onLiveUpdateLine,
 }: {
   visible: boolean;
@@ -68,6 +70,7 @@ export function InspectionConfigModal({
   isRunning?: boolean;
   transitioning?: 'starting' | 'stopping' | null;
   onToggleRunning?: () => void;
+  visionResult?: VisionResult | null;
   onLiveUpdate?: (insp: PolygonInspection) => void;
   onLiveUpdateBlob?: (insp: BlobInspection) => void;
   onLiveUpdateColor?: (insp: ColorCoverageInspection) => void;
@@ -406,6 +409,15 @@ export function InspectionConfigModal({
                 </Text>
               </TouchableOpacity>
             </Animated.View>
+          </View>
+        )}
+
+        {isRunning && (
+          <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+            <VisionResults
+              result={visionResult ?? null}
+              only={initialBlob?.id ?? initialColor?.id ?? initialPolygon?.id ?? initialAruco?.id ?? initialLine?.id ?? initialBarcode?.id}
+            />
           </View>
         )}
 
