@@ -698,6 +698,33 @@ export function StepConfigModal({
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
+
+            {draft!.type === "MoveL" && (
+              <>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Blend Into Next Move</Text>
+                    <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                      Round this corner instead of stopping, carrying speed into the next MoveL.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={!!draft!.blend}
+                    onValueChange={v => set({ blend: v || undefined })}
+                    trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                  />
+                </View>
+                {draft!.blend && (
+                  <>
+                    <Text style={[ms.fieldLabel, { marginTop: 6 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
+                    <ExpressionInput style={ms.input} fieldKey="blendRadius"
+                      value={draft!.blendRadius} expressions={draft!.expressions}
+                      onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
+                    <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
+                  </>
+                )}
+              </>
+            )}
           </>
         );
       }
@@ -761,6 +788,33 @@ export function StepConfigModal({
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
+
+            {draft!.type === "JumpL" && (
+              <>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Blend Apex Corners</Text>
+                    <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                      Round the lift and lower corners into a smooth arch instead of stopping at the top.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={!!draft!.blend}
+                    onValueChange={v => set({ blend: v || undefined })}
+                    trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                  />
+                </View>
+                {draft!.blend && (
+                  <>
+                    <Text style={[ms.fieldLabel, { marginTop: 6 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
+                    <ExpressionInput style={ms.input} fieldKey="blendRadius"
+                      value={draft!.blendRadius} expressions={draft!.expressions}
+                      onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
+                    <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
+                  </>
+                )}
+              </>
+            )}
           </>
         );
       }
@@ -1546,6 +1600,20 @@ export function StepConfigModal({
           </>
         );
       }
+
+      case "SetBlendRadius":
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Sets the default corner blend radius for subsequent MoveL steps that have blending turned on.
+              An individual move can override this with its own radius.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>BLEND RADIUS  (mm)</Text>
+            <ExpressionInput style={ms.input} fieldKey="blendRadius"
+              value={draft!.blendRadius} expressions={draft!.expressions}
+              onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} autoFocus />
+          </>
+        );
 
       case "SetVariable":
         return <SetVariableFields draft={draft!} variables={variables} contextVariables={contextVariables} set={set} onCreateVariable={onCreateVariable} />;

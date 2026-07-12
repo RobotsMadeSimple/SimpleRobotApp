@@ -112,6 +112,7 @@ export function stepLabel(step: ProgramStep): string {
       if (step.decel != null) parts.push(`decel ${step.decel}`);
       return parts.length ? `${label}  →  ${parts.join("  ·  ")}` : label;
     }
+    case "SetBlendRadius": return `Set Blend Radius  →  ${step.blendRadius ?? 0} mm`;
     case "SetVariable":   return fmtSetVar(step.variableName, step.variableExpr);
     case "PauseProgram":  return "Pause Program";
     case "IfCondition": {
@@ -176,6 +177,7 @@ export function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepTyp
     case "SaveImage":    return <ImagePlus    size={size} color={color} />;
     case "SetSpeedL":
     case "SetSpeedJ":    return <Gauge         size={size} color={color} />;
+    case "SetBlendRadius": return <CornerUpLeft size={size} color={color} />;
     case "SetVariable":  return <Hash          size={size} color={color} />;
     case "PauseProgram": return <PauseCircle   size={size} color={color} />;
     case "Label":        return <Bookmark      size={size} color={color} />;
@@ -213,6 +215,7 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   CallRoutine:  { accent: "#16a34a", iconBg: "#bbf7d0", iconColor: "#16a34a", label: "Call Routine" },
   SetSpeedL:    { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed (Linear)" },
   SetSpeedJ:    { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Set Speed (Joint)"  },
+  SetBlendRadius: { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Blend Radius" },
   SetVariable:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Variable"       },
   PauseProgram: { accent: "#374151", iconBg: "#f3f4f6", iconColor: "#374151", label: "Pause Program"  },
   Label:        { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Label"          },
@@ -298,6 +301,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (acc) lines.push(`accel ${acc}`);
       if (dec) lines.push(`decel ${dec}`);
       if (step.localName) lines.push(`local: ${step.localName}`);
+      if (step.type === "MoveL" && step.blend)
+        lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
       return lines.join('\n');
     }
@@ -313,6 +318,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.accel != null) lines.push(`accel ${step.accel} mm/s²`);
       if (step.decel != null) lines.push(`decel ${step.decel} mm/s²`);
       if (step.localName) lines.push(`local: ${step.localName}`);
+      if (step.type === "JumpL" && step.blend)
+        lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
       return lines.join('\n');
     }
@@ -382,6 +389,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (decelStr) lines.push(`Decel  ${decelStr}`);
       return lines.length ? lines.join("\n") : null;
     }
+    case "SetBlendRadius":
+      return `${step.blendRadius ?? 0} mm`;
     case "SetVariable":
       return step.variableName ? fmtSetVar(step.variableName, step.variableExpr) : null;
     case "Label":
@@ -465,6 +474,7 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "CallRoutine",  label: "Call Routine",  desc: "Run a saved routine inline then continue" },
   { type: "SetSpeedL",    label: "Set Speed (Linear)", desc: "Update the linear move speed, accel and decel" },
   { type: "SetSpeedJ",    label: "Set Speed (Joint)",  desc: "Update the joint move speed, accel and decel" },
+  { type: "SetBlendRadius", label: "Set Blend Radius", desc: "Set the default corner blend radius for subsequent blended MoveL steps" },
   { type: "SetVariable",  label: "Set Variable",       desc: "Assign a new value or expression to a program variable" },
   { type: "PauseProgram", label: "Pause Program",      desc: "Stop the program — operator can Continue or Exit from the monitor" },
   { type: "Label",        label: "Label",              desc: "Mark a named point in the program that GoToLabel can jump back to" },
@@ -498,7 +508,7 @@ export const STEP_CATEGORIES: { label: string; color: string; types: StepType[] 
   { label: "Motion",       color: "#2563eb", types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove"] },
   { label: "Flow",         color: "#0891b2", types: ["Loop", "IfCondition", "PauseProgram", "Label", "GoToLabel"] },
   { label: "I/O",          color: "#ea580c", types: ["SetOutput"] },
-  { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ"] },
+  { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius"] },
   { label: "Variables",    color: "#7c3aed", types: ["SetVariable"] },
   { label: "Vision",       color: "#0891b2", types: ["RunVision", "SaveImage"] },
   { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"] },
