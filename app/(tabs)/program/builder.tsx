@@ -523,6 +523,7 @@ export default function BuilderScreen() {
       name: undefined,
       pointName: undefined,
       speed: undefined, accel: undefined, decel: undefined,
+      blend: undefined, blendRadius: type === "SetBlendRadius" ? 10 : undefined,
       offsetX: undefined, offsetY: undefined, offsetZ: undefined,
       offsetRX: undefined, offsetRY: undefined, offsetRZ: undefined,
       toolOffsetX: undefined, toolOffsetY: undefined, toolOffsetZ: undefined,
