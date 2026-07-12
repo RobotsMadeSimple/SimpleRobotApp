@@ -45,6 +45,7 @@ import {
   useTools,
 } from "@/src/providers/RobotProvider";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
+import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { ms } from "./builderStyles";
 import { ExpressionInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
@@ -94,6 +95,8 @@ export function StepConfigModal({
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
+  // Which modifier row is currently showing its inline "clear?" confirmation.
+  const [clearConfirm, setClearConfirm] = useState<SubPage>(null);
   const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint' | 'varPoint'>('savedPoint');
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
   const [stackPickerOpen, setStackPickerOpen] = useState(false);
@@ -144,6 +147,7 @@ export function StepConfigModal({
       setGridPointMode('savedPoint');
     }
     setSubPage(null);
+    setClearConfirm(null);
   }, [step]);
 
   if (!draft) return null;
@@ -167,40 +171,75 @@ export function StepConfigModal({
   const hasToolOff   = toolOffKeys.some(k  => (draft as any)[k] != null || draft.expressions?.[k] != null);
   const hasOverride  = overrideKeys.some(k => (draft as any)[k] != null || draft.expressions?.[k] != null);
 
-  // Summary label for the override button, e.g. "Z=100"
-  const overrideSummary = (() => {
-    if (!hasOverride) return "None";
+  // Per-axis summary of set fields, e.g. "X=10  Z=-5". prefix strips the field name.
+  const axisSummary = (keys: string[], prefix: string) =>
+    keys
+      .filter(k => (draft as any)[k] != null || draft.expressions?.[k] != null)
+      .map(k => `${k.replace(prefix, "")}=${draft.expressions?.[k] ?? (draft as any)[k]}`)
+      .join("  ");
+
+  const offsetSummary   = axisSummary(offsetKeys,   "offset");
+  const toolOffSummary  = axisSummary(toolOffKeys,  "toolOffset");
+  const overrideSummary = axisSummary(overrideKeys, "override");
+
+  const speedKeys    = ["speed", "accel", "decel"];
+  const speedSet     = speedKeys.some(k => (draft as any)[k] != null || draft.expressions?.[k] != null);
+  const speedSummary = (() => {
     const parts: string[] = [];
-    (["overrideX","overrideY","overrideZ","overrideRX","overrideRY","overrideRZ"] as const).forEach(k => {
-      if ((draft as any)[k] != null || draft.expressions?.[k] != null) {
-        const axis = k.replace("override","");
-        const val  = draft.expressions?.[k] ?? (draft as any)[k];
-        parts.push(`${axis}=${val}`);
-      }
-    });
-    return parts.join("  ");
+    const sp = draft.expressions?.speed ?? (draft.speed != null ? `${draft.speed} mm/s` : null);
+    const ac = draft.expressions?.accel ?? (draft.accel != null ? `${draft.accel}` : null);
+    const de = draft.expressions?.decel ?? (draft.decel != null ? `${draft.decel}` : null);
+    if (sp) parts.push(sp);
+    if (ac) parts.push(`accel ${ac}`);
+    if (de) parts.push(`decel ${de}`);
+    return parts.join("  ·  ");
   })();
 
-  const speedSet    = draft?.speed != null || draft?.expressions?.speed != null;
-  const speedValue  = draft?.expressions?.speed ?? `${draft?.speed} mm/s`;
+  // Clear a modifier's direct fields and any expression overrides on those fields.
+  const clearFields = (keys: string[]) =>
+    setDraft(d => {
+      if (!d) return d;
+      const next: any = { ...d };
+      const exprs = { ...(d.expressions ?? {}) };
+      for (const k of keys) { next[k] = undefined; delete exprs[k]; }
+      return { ...next, expressions: Object.keys(exprs).length > 0 ? exprs : undefined };
+    });
 
-  // Move-modifier row: a solid card with the value when set, or a dashed grayed-out
-  // "Add …" button when unset. Tapping opens the modifier's sub-page either way.
-  const modifierRow = (label: string, isSet: boolean, value: string, page: SubPage) =>
-    isSet ? (
-      <TouchableOpacity style={ms.modRow} onPress={() => setSubPage(page)} activeOpacity={0.7}>
-        <View style={ms.subRowLeft}>
+  // Move-modifier row. When set: a solid card whose body opens the editor and whose
+  // trash button asks for an inline confirmation before clearing. When unset: a
+  // dashed grayed-out "Add …" button.
+  const modifierRow = (label: string, isSet: boolean, value: string, page: SubPage, clearKeys: string[]) => {
+    if (!isSet) {
+      return (
+        <TouchableOpacity style={ms.modRowAdd} onPress={() => setSubPage(page)} activeOpacity={0.7}>
+          <Plus size={15} color="#b8bec9" />
+          <Text style={ms.modAddText}>{label}</Text>
+        </TouchableOpacity>
+      );
+    }
+    if (clearConfirm === page) {
+      return (
+        <View style={ms.modRow}>
+          <Text style={[ms.subRowLabel, { flex: 1 }]} numberOfLines={1}>Clear {label}?</Text>
+          <TouchableOpacity onPress={() => setClearConfirm(null)} hitSlop={8} activeOpacity={0.7} style={{ paddingHorizontal: 10, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: "#6b7280" }}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { clearFields(clearKeys); setClearConfirm(null); }} hitSlop={8} activeOpacity={0.7} style={{ paddingHorizontal: 10, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 13, fontWeight: "700", color: "#dc2626" }}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return (
+      <View style={ms.modRow}>
+        <TouchableOpacity style={ms.subRowLeft} onPress={() => setSubPage(page)} activeOpacity={0.7}>
           <Text style={ms.subRowLabel}>{label}</Text>
           <Text style={ms.subRowValue} numberOfLines={1}>{value}</Text>
-        </View>
-        <ChevronRight size={16} color="#d1d5db" />
-      </TouchableOpacity>
-    ) : (
-      <TouchableOpacity style={ms.modRowAdd} onPress={() => setSubPage(page)} activeOpacity={0.7}>
-        <Plus size={15} color="#b8bec9" />
-        <Text style={ms.modAddText}>{label}</Text>
-      </TouchableOpacity>
+        </TouchableOpacity>
+        <DeleteIconButton onPress={() => setClearConfirm(page)} size={16} style={{ padding: 4 }} />
+      </View>
     );
+  };
 
   // ── Sub-page content ──────────────────────────────────────────────────────
 
@@ -692,10 +731,10 @@ export function StepConfigModal({
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
-            {modifierRow("Override Speed",    speedSet,    speedValue,      "speed")}
-            {modifierRow("Position Offset",   hasOffset,   "Set",           "posOffset")}
-            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride")}
-            {modifierRow("Tool Offset",       hasToolOff,  "Set",           "toolOffset")}
+            {modifierRow("Override Speed",    speedSet,    speedSummary,    "speed",       speedKeys)}
+            {modifierRow("Position Offset",   hasOffset,   offsetSummary,   "posOffset",   offsetKeys)}
+            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride", overrideKeys)}
+            {modifierRow("Tool Offset",       hasToolOff,  toolOffSummary,  "toolOffset",  toolOffKeys)}
 
             {draft!.type === "MoveL" && (
               <View style={[ms.modCard, !draft!.blend && ms.modCardOff]}>
@@ -758,10 +797,10 @@ export function StepConfigModal({
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
-            {modifierRow("Override Speed",    speedSet,    speedValue,      "speed")}
-            {modifierRow("Position Offset",   hasOffset,   "Set",           "posOffset")}
-            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride")}
-            {modifierRow("Tool Offset",       hasToolOff,  "Set",           "toolOffset")}
+            {modifierRow("Override Speed",    speedSet,    speedSummary,    "speed",       speedKeys)}
+            {modifierRow("Position Offset",   hasOffset,   offsetSummary,   "posOffset",   offsetKeys)}
+            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride", overrideKeys)}
+            {modifierRow("Tool Offset",       hasToolOff,  toolOffSummary,  "toolOffset",  toolOffKeys)}
 
             {draft!.type === "JumpL" && (
               <View style={[ms.modCard, !draft!.blend && ms.modCardOff]}>

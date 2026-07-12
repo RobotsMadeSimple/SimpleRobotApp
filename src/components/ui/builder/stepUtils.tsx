@@ -313,7 +313,13 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : (step.pointName ?? "current pos");
       const lines = [`→ ${target}`];
-      if (step.jumpZ != null) lines.push(`Z: ${step.jumpZ} mm`);
+      if (step.jumpZStart != null || step.jumpZEnd != null) {
+        const s = step.jumpZStart != null ? `start ${step.jumpZStart}` : null;
+        const e = step.jumpZEnd   != null ? `end ${step.jumpZEnd}`     : null;
+        lines.push(`Jump height  ${[s, e].filter(Boolean).join("  ·  ")}`);
+      } else if (step.jumpZ != null) {
+        lines.push(`Jump height ${step.jumpZ} mm`);
+      }
       if (step.speed != null) lines.push(`${step.speed} mm/s`);
       if (step.accel != null) lines.push(`accel ${step.accel} mm/s²`);
       if (step.decel != null) lines.push(`decel ${step.decel} mm/s²`);
