@@ -89,7 +89,8 @@ export function StepConfigModal({
   const nanos         = useNanoIO();
   const relay         = useRelayIO();
   const robot         = useSelectedRobot();
-  const isAstro       = robot?.robotType === 'ASTRO';
+  // ASTRO and CNC 4-axis robots only have Z rotation — hide RX/RY offset fields.
+  const rzOnly        = robot?.robotType === 'ASTRO' || robot?.robotType === 'CNC4Axis';
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
@@ -179,6 +180,27 @@ export function StepConfigModal({
     });
     return parts.join("  ");
   })();
+
+  const speedSet    = draft?.speed != null || draft?.expressions?.speed != null;
+  const speedValue  = draft?.expressions?.speed ?? `${draft?.speed} mm/s`;
+
+  // Move-modifier row: a solid card with the value when set, or a dashed grayed-out
+  // "Add …" button when unset. Tapping opens the modifier's sub-page either way.
+  const modifierRow = (label: string, isSet: boolean, value: string, page: SubPage) =>
+    isSet ? (
+      <TouchableOpacity style={ms.modRow} onPress={() => setSubPage(page)} activeOpacity={0.7}>
+        <View style={ms.subRowLeft}>
+          <Text style={ms.subRowLabel}>{label}</Text>
+          <Text style={ms.subRowValue} numberOfLines={1}>{value}</Text>
+        </View>
+        <ChevronRight size={16} color="#d1d5db" />
+      </TouchableOpacity>
+    ) : (
+      <TouchableOpacity style={ms.modRowAdd} onPress={() => setSubPage(page)} activeOpacity={0.7}>
+        <Plus size={15} color="#b8bec9" />
+        <Text style={ms.modAddText}>{label}</Text>
+      </TouchableOpacity>
+    );
 
   // ── Sub-page content ──────────────────────────────────────────────────────
 
@@ -569,7 +591,7 @@ export function StepConfigModal({
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
               </View>
             ))}
-            {(isAstro ? ["offsetRZ"] : ["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
+            {(rzOnly ? ["offsetRZ"] : ["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
               <View key={k} style={{ marginBottom: 10 }}>
                 <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
                 <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
@@ -596,7 +618,7 @@ export function StepConfigModal({
                   onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
               </View>
             ))}
-            {(isAstro ? ["toolOffsetRZ"] : ["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
+            {(rzOnly ? ["toolOffsetRZ"] : ["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
               <View key={k} style={{ marginBottom: 10 }}>
                 <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
                 <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
@@ -628,7 +650,7 @@ export function StepConfigModal({
                   variables={variables} allowUndefined placeholder="not set" />
               </View>
             ))}
-            {(isAstro ? ["overrideRZ"] : ["overrideRX","overrideRY","overrideRZ"] as const).map(k => (
+            {(rzOnly ? ["overrideRZ"] : ["overrideRX","overrideRY","overrideRZ"] as const).map(k => (
               <View key={k} style={{ marginBottom: 10 }}>
                 <Text style={ms.fieldLabel}>{k.replace("override","").toUpperCase()}  (°)</Text>
                 <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
@@ -663,47 +685,23 @@ export function StepConfigModal({
           : (draft!.pointName ?? "Current Position");
         return (
           <>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
+            <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("speed")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Override Speed</Text>
-                <Text style={ms.subRowValue}>{draft!.speed != null ? `${draft!.speed} mm/s` : "Default"}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOffset")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Position Offset</Text>
-                <Text style={ms.subRowValue}>{hasOffset ? "Set" : "None"}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOverride")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Position Override</Text>
-                <Text style={ms.subRowValue} numberOfLines={1}>{overrideSummary}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-            <TouchableOpacity style={[ms.subRow, { borderBottomWidth: 0 }]} onPress={() => setSubPage("toolOffset")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Tool Offset</Text>
-                <Text style={ms.subRowValue}>{hasToolOff ? "Set" : "None"}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
+            {modifierRow("Override Speed",    speedSet,    speedValue,      "speed")}
+            {modifierRow("Position Offset",   hasOffset,   "Set",           "posOffset")}
+            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride")}
+            {modifierRow("Tool Offset",       hasToolOff,  "Set",           "toolOffset")}
 
             {draft!.type === "MoveL" && (
-              <>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={[ms.modCard, !draft!.blend && ms.modCardOff]}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                   <View style={{ flex: 1, marginRight: 12 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Blend Into Next Move</Text>
+                    <Text style={[ms.subRowLabel, !draft!.blend && ms.modLabelOff]}>Blend Into Next Move</Text>
                     <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
                       Round this corner instead of stopping, carrying speed into the next MoveL.
                     </Text>
@@ -716,14 +714,14 @@ export function StepConfigModal({
                 </View>
                 {draft!.blend && (
                   <>
-                    <Text style={[ms.fieldLabel, { marginTop: 6 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
+                    <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
                     <ExpressionInput style={ms.input} fieldKey="blendRadius"
                       value={draft!.blendRadius} expressions={draft!.expressions}
                       onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
                     <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
                   </>
                 )}
-              </>
+              </View>
             )}
           </>
         );
@@ -746,54 +744,30 @@ export function StepConfigModal({
         })();
         return (
           <>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
+            <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("jumpHeight")} activeOpacity={0.7}>
+            <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("jumpHeight")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Jump Height</Text>
                 <Text style={ms.subRowValue}>{jumpHeightLabel}</Text>
               </View>
               <ChevronRight size={16} color="#d1d5db" />
             </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("speed")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Override Speed</Text>
-                <Text style={ms.subRowValue}>{draft!.speed != null ? `${draft!.speed} mm/s` : "Default"}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOffset")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Position Offset</Text>
-                <Text style={ms.subRowValue}>{hasOffset ? "Set" : "None"}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-            <TouchableOpacity style={ms.subRow} onPress={() => setSubPage("posOverride")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Position Override</Text>
-                <Text style={ms.subRowValue} numberOfLines={1}>{overrideSummary}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
-            <TouchableOpacity style={[ms.subRow, { borderBottomWidth: 0 }]} onPress={() => setSubPage("toolOffset")} activeOpacity={0.7}>
-              <View style={ms.subRowLeft}>
-                <Text style={ms.subRowLabel}>Tool Offset</Text>
-                <Text style={ms.subRowValue}>{hasToolOff ? "Set" : "None"}</Text>
-              </View>
-              <ChevronRight size={16} color="#d1d5db" />
-            </TouchableOpacity>
+            {modifierRow("Override Speed",    speedSet,    speedValue,      "speed")}
+            {modifierRow("Position Offset",   hasOffset,   "Set",           "posOffset")}
+            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride")}
+            {modifierRow("Tool Offset",       hasToolOff,  "Set",           "toolOffset")}
 
             {draft!.type === "JumpL" && (
-              <>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={[ms.modCard, !draft!.blend && ms.modCardOff]}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                   <View style={{ flex: 1, marginRight: 12 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Blend Apex Corners</Text>
+                    <Text style={[ms.subRowLabel, !draft!.blend && ms.modLabelOff]}>Blend Apex Corners</Text>
                     <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
                       Round the lift and lower corners into a smooth arch instead of stopping at the top.
                     </Text>
@@ -806,14 +780,14 @@ export function StepConfigModal({
                 </View>
                 {draft!.blend && (
                   <>
-                    <Text style={[ms.fieldLabel, { marginTop: 6 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
+                    <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
                     <ExpressionInput style={ms.input} fieldKey="blendRadius"
                       value={draft!.blendRadius} expressions={draft!.expressions}
                       onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
                     <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
                   </>
                 )}
-              </>
+              </View>
             )}
           </>
         );

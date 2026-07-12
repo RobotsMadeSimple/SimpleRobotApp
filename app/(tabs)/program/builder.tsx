@@ -2,6 +2,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -851,23 +852,21 @@ export default function BuilderScreen() {
             )}
 
             <View style={styles.addRow}>
-              <TouchableOpacity
+              <AnimatedPressable
                 style={styles.addCard}
                 onPress={() => openTypePicker({ mode: "append" })}
-                activeOpacity={0.7}
               >
                 <Plus size={16} color="#2563eb" />
                 <Text style={styles.addCardText}>Add Step</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
               {clipboard.length > 0 && (
-                <TouchableOpacity
+                <AnimatedPressable
                   style={styles.pasteCard}
                   onPress={() => pasteStep({ mode: "append" })}
-                  activeOpacity={0.7}
                 >
                   <ClipboardPaste size={16} color="#7c3aed" />
                   <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               )}
             </View>
           </ScrollView>
@@ -1144,23 +1143,21 @@ export default function BuilderScreen() {
 
         {/* Add / Paste step */}
         <View style={styles.addRow}>
-          <TouchableOpacity
+          <AnimatedPressable
             style={styles.addCard}
             onPress={() => openTypePicker({ mode: "append" })}
-            activeOpacity={0.7}
           >
             <Plus size={16} color="#2563eb" />
             <Text style={styles.addCardText}>Add Step</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
           {clipboard.length > 0 && (
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.pasteCard}
               onPress={() => pasteStep({ mode: "append" })}
-              activeOpacity={0.7}
             >
               <ClipboardPaste size={16} color="#7c3aed" />
-              <Text style={styles.pasteCardText}>Paste</Text>
-            </TouchableOpacity>
+              <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
+            </AnimatedPressable>
           )}
         </View>
       </ScrollView>

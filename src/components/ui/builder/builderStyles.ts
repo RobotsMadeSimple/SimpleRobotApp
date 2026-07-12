@@ -115,6 +115,30 @@ export const ms = StyleSheet.create({
   subRowLeft: { flex: 1 },
   subRowLabel: { fontSize: 14, fontWeight: "600", color: "#111827" },
   subRowValue: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+
+  // Move-modifier rows rendered as cards. Set = solid card; unset = dashed "add" button.
+  modRow: {
+    flexDirection: "row", alignItems: "center",
+    borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 10,
+    paddingVertical: 11, paddingHorizontal: 12, marginBottom: 8,
+    backgroundColor: "#fff",
+  },
+  modRowAdd: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    borderWidth: 1.5, borderColor: "#e5e7eb", borderStyle: "dashed",
+    borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12,
+    marginBottom: 8, backgroundColor: "transparent",
+  },
+  modAddText: { fontSize: 13, fontWeight: "600", color: "#b8bec9" },
+  // Card container for a toggle-style modifier (e.g. blend) that can expand.
+  modCard: {
+    borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 10,
+    paddingVertical: 11, paddingHorizontal: 12, marginBottom: 8,
+    backgroundColor: "#fff",
+  },
+  // Muted, dashed look for a toggle card while it is off — matches the "add" rows.
+  modCardOff:  { borderWidth: 1.5, borderStyle: "dashed", borderColor: "#e5e7eb", backgroundColor: "transparent" },
+  modLabelOff: { color: "#9ca3af" },
 });
 
 // ── SetVariableFields styles — used by SetVariableFields and ConditionEditor ────
