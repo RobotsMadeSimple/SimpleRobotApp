@@ -249,6 +249,23 @@ export const sharedStyles = StyleSheet.create({
   stepCardStatus: { fontSize: 12, color: "#93c5fd", fontStyle: "italic" },
   cardAction:     { padding: 4 },
 
+  // Multi-select mode
+  stepCardSelected: {
+    borderWidth: 1.5,
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  selectCheckbox: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: "#cbd5e1",
+    justifyContent: "center", alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  selectCheckboxOn: {
+    borderColor: "#2563eb",
+    backgroundColor: "#2563eb",
+  },
+
   dragHandle: {
     paddingHorizontal: 2,
     justifyContent: "center", alignItems: "center",

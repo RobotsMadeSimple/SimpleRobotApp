@@ -13,9 +13,11 @@ import {
   ChevronRight,
   ChevronsRight,
   ClipboardPaste,
+  Copy,
   Cpu,
   ImagePlus,
   Plus,
+  Repeat2,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -211,7 +213,7 @@ export default function BuilderScreen() {
 
   // ── Clipboard ─────────────────────────────────────────────────────────────
 
-  const [clipboard, setClipboard] = useState<ProgramStep | null>(null);
+  const [clipboard, setClipboard] = useState<ProgramStep[]>([]);
 
   function cloneStepWithNewIds(step: ProgramStep): ProgramStep {
     return {
@@ -225,20 +227,125 @@ export default function BuilderScreen() {
   }
 
   function pasteStep(target: InsertTarget) {
-    if (!clipboard) return;
-    const step = cloneStepWithNewIds(clipboard);
+    if (clipboard.length === 0) return;
+    const clones = clipboard.map(cloneStepWithNewIds);
     setSteps(prev => {
       const scoped = getStepsAtScope(prev, scopeStackRef.current);
       let newScoped: ProgramStep[];
       if (target.mode === "append") {
-        newScoped = [...scoped, step];
+        newScoped = [...scoped, ...clones];
       } else {
         const arr = [...scoped];
-        arr.splice(target.afterIndex + 1, 0, step);
+        arr.splice(target.afterIndex + 1, 0, ...clones);
         newScoped = arr;
       }
       return setStepsAtScope(prev, scopeStackRef.current, newScoped);
     });
+  }
+
+  // ── Multi-select mode ─────────────────────────────────────────────────────
+
+  const [selectMode, setSelectMode]   = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  function enterSelect(id: string) {
+    if (selectMode) { toggleSelect(id); return; }
+    setSelectMode(true);
+    setSelectedIds([id]);
+  }
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function exitSelect() {
+    setSelectMode(false);
+    setSelectedIds([]);
+  }
+
+  // Selected steps from the currently visible scope, in their display order.
+  function selectedInOrder(): ProgramStep[] {
+    const scoped = getStepsAtScope(steps, scopeStackRef.current);
+    return scoped.filter(s => selectedIds.includes(s.id));
+  }
+
+  function copySelected() {
+    const sel = selectedInOrder();
+    if (sel.length === 0) return;
+    setClipboard(sel);
+    exitSelect();
+  }
+
+  function deleteSelected() {
+    const n = selectedIds.length;
+    if (n === 0) return;
+    appAlert("Delete Steps", `Remove ${n} step${n !== 1 ? "s" : ""}?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => {
+        setSteps(prev => {
+          const scoped = getStepsAtScope(prev, scopeStackRef.current).filter(s => !selectedIds.includes(s.id));
+          return setStepsAtScope(prev, scopeStackRef.current, scoped);
+        });
+        exitSelect();
+      } },
+    ]);
+  }
+
+  // Replace the selected steps in place with a single CallRoutine step.
+  function replaceSelectedWithRoutineCall(routineId: string, routineName: string) {
+    setSteps(prev => {
+      const scoped = getStepsAtScope(prev, scopeStackRef.current);
+      const firstIdx = scoped.findIndex(s => selectedIds.includes(s.id));
+      const call: ProgramStep = { ...defaultStep("CallRoutine"), routineId, routineName };
+      const rebuilt: ProgramStep[] = [];
+      scoped.forEach((s, i) => {
+        if (i === firstIdx) rebuilt.push(call);
+        if (!selectedIds.includes(s.id)) rebuilt.push(s);
+      });
+      if (firstIdx < 0) rebuilt.push(call);
+      return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
+    });
+  }
+
+  const [makeRoutineOpen,   setMakeRoutineOpen]   = useState(false);
+  const [routineNameInput,  setRoutineNameInput]  = useState("");
+  const [makingRoutine,     setMakingRoutine]     = useState(false);
+
+  const routineNameValid = routineNameInput.trim().length > 0
+    && !builtPrograms.some(p => p.name.toLowerCase() === routineNameInput.trim().toLowerCase());
+
+  function openMakeRoutine() {
+    if (selectedIds.length === 0) return;
+    if (!connected) {
+      appAlert("Not Connected", "Connect to the robot to save a routine.");
+      return;
+    }
+    setRoutineNameInput("");
+    setMakeRoutineOpen(true);
+  }
+
+  async function confirmMakeRoutine() {
+    const name = routineNameInput.trim();
+    if (!routineNameValid || makingRoutine) return;
+    setMakingRoutine(true);
+    try {
+      const routineId = newId();
+      const routineSteps = selectedInOrder().map(cloneStepWithNewIds);
+      const prog: BuiltProgram = {
+        id: routineId,
+        name,
+        description: "",
+        steps: routineSteps,
+        isRoutine: true,
+        lastUpdatedUnixMs: Date.now(),
+      };
+      await robotClient.saveBuiltProgram(prog).catch(() => {});
+      setMakeRoutineOpen(false);
+      appAlert("Routine Created", `Replace the selected step${selectedIds.length !== 1 ? "s" : ""} with a call to "${name}"?`, [
+        { text: "Keep Steps", style: "cancel", onPress: exitSelect },
+        { text: "Replace", onPress: () => { replaceSelectedWithRoutineCall(routineId, name); exitSelect(); } },
+      ]);
+    } finally {
+      setMakingRoutine(false);
+    }
   }
 
   // ── Variable editor state ─────────────────────────────────────────────────
@@ -267,6 +374,25 @@ export default function BuilderScreen() {
   const [configOpen, setConfigOpen]         = useState(false);
   const [editingStep, setEditingStep]       = useState<ProgramStep | null>(null);
 
+  // When creating a routine from a CallRoutine step, remember which step and the
+  // routine ids that existed beforehand, so we can auto-select the new one on return.
+  const [pendingRoutine, setPendingRoutine] = useState<{ stepId: string; beforeIds: string[] } | null>(null);
+
+  useEffect(() => {
+    if (!pendingRoutine) return;
+    const added = builtPrograms.find(p => p.isRoutine && p.id && !pendingRoutine.beforeIds.includes(p.id));
+    if (!added) return;
+    const scoped = getStepsAtScope(steps, scopeStackRef.current);
+    const target = scoped.find(s => s.id === pendingRoutine.stepId);
+    if (target) {
+      const updated = { ...target, routineId: added.id, routineName: added.name };
+      updateStep(updated);
+      setEditingStep(updated);
+      setConfigOpen(true);
+    }
+    setPendingRoutine(null);
+  }, [builtPrograms, pendingRoutine, steps]);
+
   // ── Scope navigation ──────────────────────────────────────────────────────
 
   const [scopeStack, setScopeStack] = useState<ScopeFrame[]>([]);
@@ -281,11 +407,13 @@ export default function BuilderScreen() {
 
   function pushScope(frame: ScopeFrame) {
     scrollYRef.current = 0;
+    exitSelect();
     setScopeStack(prev => [...prev, frame]);
   }
 
   function popScope() {
     scrollYRef.current = 0;
+    exitSelect();
     setScopeStack(prev => prev.slice(0, -1));
   }
 
@@ -403,7 +531,7 @@ export default function BuilderScreen() {
       waitMs: 500,
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
-      routineName: undefined,
+      routineName: undefined, routineId: undefined,
       visionProgramId: undefined, visionProgramName: undefined, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: undefined,
       varPointName: undefined, varPointIndex: undefined,
       variableName: undefined, variableExpr: undefined,
@@ -547,6 +675,7 @@ export default function BuilderScreen() {
   }
 
   function handleBack() {
+    if (selectMode) { exitSelect(); return; }
     if (scopeStackRef.current.length > 0) { popScope(); return; }
     if (!isDirty) { router.back(); return; }
     appAlert(
@@ -599,18 +728,56 @@ export default function BuilderScreen() {
   return (
     <View style={styles.container}>
       <SubPageHeader title={builderTitle} onBack={handleBack} />
+
+      {/* Multi-select toolbar */}
+      {selectMode && (
+        <View style={styles.selectBar}>
+          <TouchableOpacity onPress={exitSelect} hitSlop={10} activeOpacity={0.7}>
+            <X size={20} color="#374151" />
+          </TouchableOpacity>
+          <Text style={styles.selectCount}>{selectedIds.length} selected</Text>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={copySelected}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            <Copy size={16} color="#2563eb" />
+            <Text style={styles.selectActionText}>Copy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={openMakeRoutine}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            <Repeat2 size={16} color="#7c3aed" />
+            <Text style={[styles.selectActionText, { color: "#7c3aed" }]}>Routine</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={deleteSelected}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            <Trash2 size={16} color="#dc2626" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {scopeStack.length > 0 ? (
         <>
           {/* Breadcrumb */}
           {scopeStack.length > 0 && (
             <View style={styles.scopeBreadcrumb}>
-              <TouchableOpacity onPress={() => setScopeStack([])} hitSlop={8} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => { exitSelect(); setScopeStack([]); }} hitSlop={8} activeOpacity={0.7}>
                 <Text style={styles.scopeBreadcrumbRoot}>Program</Text>
               </TouchableOpacity>
               {scopeStack.slice(0, -1).map((frame, fi) => (
                 <React.Fragment key={fi}>
                   <ChevronRight size={12} color="#9ca3af" />
-                  <TouchableOpacity onPress={() => setScopeStack(prev => prev.slice(0, fi + 1))} hitSlop={8} activeOpacity={0.7}>
+                  <TouchableOpacity onPress={() => { exitSelect(); setScopeStack(prev => prev.slice(0, fi + 1)); }} hitSlop={8} activeOpacity={0.7}>
                     <Text style={styles.scopeBreadcrumbItem}>{frame.label}</Text>
                   </TouchableOpacity>
                 </React.Fragment>
@@ -638,7 +805,7 @@ export default function BuilderScreen() {
               <View style={styles.stepsList}>
                 <InsertDivider
                   onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
-                  onPaste={clipboard ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
+                  onPaste={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
                   disabled={!!drag}
                 />
                 {currentSteps.map((step, i) => (
@@ -647,12 +814,16 @@ export default function BuilderScreen() {
                     step={step}
                     index={i}
                     isLast={i === currentSteps.length - 1}
+                    selectMode={selectMode}
+                    selected={selectedIds.includes(step.id)}
+                    onLongPress={() => enterSelect(step.id)}
+                    onToggleSelect={() => toggleSelect(step.id)}
                     isBeingDragged={drag?.id === step.id}
                     isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
                     isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
                     isDragging={!!drag}
                     onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
-                    onCopy={() => setClipboard(step)}
+                    onCopy={() => setClipboard([step])}
                     onDelete={() => appAlert("Delete Step", "Remove this step?", [
                       { text: "Cancel", style: "cancel" },
                       { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
@@ -661,7 +832,7 @@ export default function BuilderScreen() {
                     onDragMove={handleDragMove}
                     onDragEnd={handleDragEnd}
                     onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
-                    onPasteAfter={clipboard ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
+                    onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
                     onEnterScope={pushScope}
                     onUpdateIfCondition={updateStep}
                     onItemLayout={handleItemLayout}
@@ -687,14 +858,14 @@ export default function BuilderScreen() {
                 <Plus size={16} color="#2563eb" />
                 <Text style={styles.addCardText}>Add Step</Text>
               </TouchableOpacity>
-              {clipboard && (
+              {clipboard.length > 0 && (
                 <TouchableOpacity
                   style={styles.pasteCard}
                   onPress={() => pasteStep({ mode: "append" })}
                   activeOpacity={0.7}
                 >
                   <ClipboardPaste size={16} color="#7c3aed" />
-                  <Text style={styles.pasteCardText}>Paste</Text>
+                  <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -926,7 +1097,7 @@ export default function BuilderScreen() {
           <View style={styles.stepsList}>
             <InsertDivider
               onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
-              onPaste={clipboard ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
+              onPaste={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
               disabled={!!drag}
             />
             {steps.map((step, i) => (
@@ -935,12 +1106,16 @@ export default function BuilderScreen() {
                 step={step}
                 index={i}
                 isLast={i === steps.length - 1}
+                selectMode={selectMode}
+                selected={selectedIds.includes(step.id)}
+                onLongPress={() => enterSelect(step.id)}
+                onToggleSelect={() => toggleSelect(step.id)}
                 isBeingDragged={drag?.id === step.id}
                 isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
                 isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
                 isDragging={!!drag}
                 onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
-                onCopy={() => setClipboard(step)}
+                onCopy={() => setClipboard([step])}
                 onDelete={() => appAlert("Delete Step", "Remove this step?", [
                   { text: "Cancel", style: "cancel" },
                   { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
@@ -949,7 +1124,7 @@ export default function BuilderScreen() {
                 onDragMove={handleDragMove}
                 onDragEnd={handleDragEnd}
                 onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
-                onPasteAfter={clipboard ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
+                onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
                 onEnterScope={pushScope}
                 onUpdateIfCondition={updateStep}
                 onItemLayout={handleItemLayout}
@@ -976,7 +1151,7 @@ export default function BuilderScreen() {
             <Plus size={16} color="#2563eb" />
             <Text style={styles.addCardText}>Add Step</Text>
           </TouchableOpacity>
-          {clipboard && (
+          {clipboard.length > 0 && (
             <TouchableOpacity
               style={styles.pasteCard}
               onPress={() => pasteStep({ mode: "append" })}
@@ -1031,6 +1206,16 @@ export default function BuilderScreen() {
         onSave={updateStep}
         onClose={() => setConfigOpen(false)}
         onCreateVariable={openNewVar}
+        onCreateRoutine={() => {
+          if (editingStep) {
+            setPendingRoutine({
+              stepId: editingStep.id,
+              beforeIds: builtPrograms.filter(p => p.isRoutine && p.id).map(p => p.id!) as string[],
+            });
+          }
+          setConfigOpen(false);
+          router.push({ pathname: "/(tabs)/program/builder", params: { isRoutine: "1" } });
+        }}
       />
       <VariableEditModal
         visible={varModalOpen}
@@ -1038,6 +1223,55 @@ export default function BuilderScreen() {
         onSave={saveVar}
         onClose={() => setVarModalOpen(false)}
       />
+
+      {/* Make Routine from selected steps */}
+      <Modal visible={makeRoutineOpen} transparent animationType="fade" onRequestClose={() => setMakeRoutineOpen(false)}>
+        <Pressable style={ms.overlay} onPress={() => setMakeRoutineOpen(false)}>
+          <Pressable style={ms.card} onPress={() => {}}>
+            <View style={ms.header}>
+              <View style={{ width: 18 }} />
+              <Text style={ms.title}>New Routine</Text>
+              <TouchableOpacity onPress={() => setMakeRoutineOpen(false)} hitSlop={12} activeOpacity={0.7}>
+                <X size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+            <Text style={{ fontSize: 13, color: "#6b7280", paddingHorizontal: 16, paddingBottom: 10, lineHeight: 18 }}>
+              Save the {selectedIds.length} selected step{selectedIds.length !== 1 ? "s" : ""} as a reusable routine.
+            </Text>
+            <View style={{ paddingHorizontal: 16 }}>
+              <Text style={ms.fieldLabel}>NAME</Text>
+              <TextInput
+                style={ms.input}
+                value={routineNameInput}
+                onChangeText={setRoutineNameInput}
+                placeholder="e.g. PickAndPlace"
+                placeholderTextColor="#9ca3af"
+                autoFocus
+                autoCapitalize="none"
+                returnKeyType="done"
+                onSubmitEditing={confirmMakeRoutine}
+              />
+              {routineNameInput.trim().length > 0 && !routineNameValid && (
+                <Text style={ms.fieldError}>A program or routine with this name already exists.</Text>
+              )}
+            </View>
+            <View style={[ms.actions, { marginTop: 16 }]}>
+              <TouchableOpacity style={ms.cancelBtn} onPress={() => setMakeRoutineOpen(false)} activeOpacity={0.7}>
+                <Text style={ms.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[ms.saveBtn, (!routineNameValid || makingRoutine) && { opacity: 0.4 }]}
+                onPress={confirmMakeRoutine}
+                disabled={!routineNameValid || makingRoutine}
+                activeOpacity={0.7}
+              >
+                <Repeat2 size={15} color="white" />
+                <Text style={ms.saveText}>Create Routine</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
 
       {/* Variable context picker modal — routine mode only */}
@@ -1156,6 +1390,30 @@ export default function BuilderScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f3f4f6" },
   content:   { padding: 16, paddingBottom: 32, gap: 12 },
+
+  // Multi-select toolbar
+  selectBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "#fff",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e7eb",
+  },
+  selectCount: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  selectAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 9,
+    backgroundColor: "#f3f4f6",
+  },
+  selectActionText: { fontSize: 13, fontWeight: "700", color: "#2563eb" },
+  selectActionDisabled: { opacity: 0.4 },
 
   metaCard: {
     backgroundColor: "#fff",

@@ -5,7 +5,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ArrowRight, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
+import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
 import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -110,6 +110,10 @@ export function StepRow({
   contextVariables,
   onEnterRoutine,
   onOpenCncBuilder,
+  selectMode,
+  selected,
+  onLongPress,
+  onToggleSelect,
 }: {
   step: ProgramStep;
   index: number;
@@ -133,6 +137,10 @@ export function StepRow({
   contextVariables?: ProgramVariable[];
   onEnterRoutine?: (routineName: string) => void;
   onOpenCncBuilder?: (stepId: string) => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onLongPress?: () => void;
+  onToggleSelect?: () => void;
 }) {
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
@@ -152,11 +160,25 @@ export function StepRow({
         isDropBelow    && sharedStyles.dropTargetItemBottom,
       ]}
     >
-      <View style={[sharedStyles.stepCard, { borderLeftColor: theme.accent }]}>
+      <View style={[sharedStyles.stepCard, { borderLeftColor: theme.accent }, selected && sharedStyles.stepCardSelected]}>
 
         {/* Card header row */}
-        <TouchableOpacity style={sharedStyles.stepCardHeader} onPress={onEdit} activeOpacity={0.75}>
-          <DragHandle stepId={step.id} onStart={onDragStart} onMove={onDragMove} onEnd={onDragEnd} />
+        <TouchableOpacity
+          style={sharedStyles.stepCardHeader}
+          onPress={selectMode ? onToggleSelect : onEdit}
+          onLongPress={onLongPress}
+          delayLongPress={300}
+          activeOpacity={0.75}
+        >
+          {selectMode ? (
+            <View style={sharedStyles.dragHandle}>
+              <View style={[sharedStyles.selectCheckbox, selected && sharedStyles.selectCheckboxOn]}>
+                {selected && <Check size={13} color="#fff" strokeWidth={3} />}
+              </View>
+            </View>
+          ) : (
+            <DragHandle stepId={step.id} onStart={onDragStart} onMove={onDragMove} onEnd={onDragEnd} />
+          )}
 
           <View style={[sharedStyles.stepCardIcon, { backgroundColor: theme.iconBg }]}>
             <StepIcon type={step.type} size={18} color={theme.iconColor} />
@@ -179,10 +201,14 @@ export function StepRow({
             )}
           </View>
 
-          <TouchableOpacity onPress={onCopy}   hitSlop={8} style={sharedStyles.cardAction} activeOpacity={0.7}>
-            <Copy   size={15} color="#9ca3af" />
-          </TouchableOpacity>
-          <DeleteIconButton onPress={onDelete} size={15} style={sharedStyles.cardAction} />
+          {!selectMode && (
+            <>
+              <TouchableOpacity onPress={onCopy}   hitSlop={8} style={sharedStyles.cardAction} activeOpacity={0.7}>
+                <Copy   size={15} color="#9ca3af" />
+              </TouchableOpacity>
+              <DeleteIconButton onPress={onDelete} size={15} style={sharedStyles.cardAction} />
+            </>
+          )}
         </TouchableOpacity>
 
         {/* If Condition body — branch navigation */}
@@ -201,7 +227,7 @@ export function StepRow({
           <View style={[sharedStyles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
             <TouchableOpacity
               style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
-              onPress={() => onEnterRoutine(step.routineName!)}
+              onPress={() => selectMode ? onToggleSelect?.() : onEnterRoutine(step.routineName!)}
               activeOpacity={0.7}
             >
               <Text style={{ fontSize: 12, color: "#64748b" }}>{step.routineName}</Text>
@@ -218,7 +244,7 @@ export function StepRow({
           <View style={[sharedStyles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
             <TouchableOpacity
               style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
-              onPress={() => onEnterScope({ kind: "loop", stepId: step.id, label: stepLabel(step) })}
+              onPress={() => selectMode ? onToggleSelect?.() : onEnterScope({ kind: "loop", stepId: step.id, label: stepLabel(step) })}
               activeOpacity={0.7}
             >
               <Text style={{ fontSize: 12, color: "#64748b" }}>
@@ -237,7 +263,7 @@ export function StepRow({
           <View style={[sharedStyles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
             <TouchableOpacity
               style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
-              onPress={() => onOpenCncBuilder(step.id)}
+              onPress={() => selectMode ? onToggleSelect?.() : onOpenCncBuilder(step.id)}
               activeOpacity={0.7}
             >
               <Text style={{ fontSize: 12, color: "#64748b" }}>
