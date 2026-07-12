@@ -11,7 +11,7 @@ import {
   View,
   Image,
 } from "react-native";
-import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Radio, RotateCcw, RotateCw, X } from "lucide-react-native";
+import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Plus, Radio, RotateCcw, RotateCw, X } from "lucide-react-native";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -65,6 +65,7 @@ export function StepConfigModal({
   onClose,
   onEnterRoutine,
   onCreateVariable,
+  onCreateRoutine,
 }: {
   visible: boolean;
   step: ProgramStep | null;
@@ -76,6 +77,7 @@ export function StepConfigModal({
   onClose: () => void;
   onEnterRoutine?: (routineName: string) => void;
   onCreateVariable?: () => void;
+  onCreateRoutine?: () => void;
 }) {
   const points        = usePoints();
   const grids         = useGrids();
@@ -1227,15 +1229,16 @@ export function StepConfigModal({
           <>
             <Text style={ms.fieldLabel}>ROUTINE</Text>
             {routines.length === 0 && (
-              <Text style={ms.emptyHint}>No routines saved yet. Create one from the Routines page.</Text>
+              <Text style={ms.emptyHint}>No routines saved yet. Create one below.</Text>
             )}
             {routines.map((r, i) => {
-              const active = draft!.routineName === r.name;
+              // Match by id when the step has one, otherwise fall back to name (legacy steps).
+              const active = draft!.routineId ? draft!.routineId === r.id : draft!.routineName === r.name;
               return (
                 <TouchableOpacity
-                  key={r.name}
-                  style={[ms.row, i < routines.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                  onPress={() => set({ routineName: r.name })}
+                  key={r.id ?? r.name}
+                  style={[ms.row, (i < routines.length - 1 || !!onCreateRoutine) && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ routineId: r.id, routineName: r.name })}
                   activeOpacity={0.7}
                 >
                   <View style={[ms.radioRing, active && ms.radioRingActive]}>
@@ -1248,6 +1251,16 @@ export function StepConfigModal({
                 </TouchableOpacity>
               );
             })}
+            {onCreateRoutine && (
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, paddingHorizontal: 4 }}
+                onPress={onCreateRoutine}
+                activeOpacity={0.7}
+              >
+                <Plus size={16} color="#7c3aed" />
+                <Text style={{ fontSize: 14, fontWeight: "600", color: "#7c3aed" }}>Create New Routine…</Text>
+              </TouchableOpacity>
+            )}
           </>
         );
 

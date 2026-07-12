@@ -585,6 +585,7 @@ export type ProgramStep = {
   statusError?: string;
   statusSeverity?: 'Info' | 'Warning' | 'Error';
   routineName?: string;
+  routineId?: string;
   // SetVariable
   variableName?: string;
   variableExpr?: string;
