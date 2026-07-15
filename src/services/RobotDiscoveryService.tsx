@@ -32,7 +32,7 @@ class RobotDiscoveryService {
       if (!this.listenersRegistered) {
         this.listenersRegistered = true;
 
-        this.zeroconf.on('resolved', service => {
+        this.zeroconf.on('resolved', (service: any) => {
           console.log(`New Robot Service: ${service.host} ${service.txt}`);
           const robot: RobotInfo = {
             robotName: service.txt.RobotName,
@@ -47,7 +47,7 @@ class RobotDiscoveryService {
           this.emit();
         });
 
-        this.zeroconf.on('remove', service => {
+        this.zeroconf.on('remove', (service: any) => {
           this.robots.delete(service.name);
           this.emit();
         });

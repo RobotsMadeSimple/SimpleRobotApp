@@ -28,19 +28,37 @@ type MoveParams = {
   decel?: number
 }
 
+// ---------------------------------------------------------------------------
+// Generic pub/sub topic — lightweight alternative to per-topic listener arrays.
+// Listeners are stored in a Set (deduplicates accidental double-subscriptions).
+// on() returns an unsubscribe function; emit() broadcasts the current value.
+// ---------------------------------------------------------------------------
+function createTopic<T>() {
+  const listeners = new Set<(v: T) => void>();
+  return {
+    listeners,
+    on(cb: (v: T) => void): () => void {
+      listeners.add(cb);
+      return () => { listeners.delete(cb); };
+    },
+    emit(v: T): void { listeners.forEach(cb => cb(v)); },
+  };
+}
+
 export class RobotConnectService {
   private statusListeners:        StatusListener[]        = [];
-  private pointsListeners:        PointsListener[]        = [];
-  private toolsListeners:         ToolsListener[]         = [];
-  private localsListeners:        LocalsListener[]        = [];
-  private builtProgramsListeners:  BuiltProgramsListener[]  = [];
-  private nanoIOListeners:         NanoIOListener[]         = [];
-  private relayIOListeners:        RelayIOListener[]        = [];
-  private auxAxisListeners:        AuxAxisListener[]        = [];
-  private camerasListeners:        CamerasListener[]        = [];
-  private programImagesListeners:  ProgramImagesListener[]  = [];
-  private gridsListeners:          GridsListener[]           = [];
-  private stacksListeners:         StacksListener[]          = [];
+  // Topics created via createTopic<T>() — replaces per-topic listener arrays
+  private readonly pointsTopic        = createTopic<Point[]>();
+  private readonly toolsTopic         = createTopic<Tool[]>();
+  private readonly localsTopic        = createTopic<Local[]>();
+  private readonly builtProgramsTopic = createTopic<BuiltProgram[]>();
+  private readonly nanoIOTopic        = createTopic<NanoState[]>();
+  private readonly relayIOTopic       = createTopic<UsbRelayState | null>();
+  private readonly auxAxisTopic       = createTopic<AuxDeviceState[]>();
+  private readonly camerasTopic       = createTopic<CameraState[]>();
+  private readonly programImagesTopic = createTopic<Record<string, string | null>>();
+  private readonly gridsTopic         = createTopic<Grid[]>();
+  private readonly stacksTopic        = createTopic<RobotStack[]>();
   private status:       RobotStatus        = createDefaultStatus();
   private connecting:   boolean            = false;
   private points:       Point[]            = [];
@@ -296,10 +314,7 @@ export class RobotConnectService {
   }
 
   private decodePoints(data: any) {
-    if (!data.points) {
-      this.points = [];
-      return;
-    }
+    if (!data.points) { this.points = []; this.emitPoints(); return; }
 
     let parsed: any[];
 
@@ -308,13 +323,11 @@ export class RobotConnectService {
     } catch {
       console.warn("[RobotWS] Failed to parse points JSON");
       this.points = [];
+      this.emitPoints();
       return;
     }
 
-    if (!Array.isArray(parsed)) {
-      this.points = [];
-      return;
-    }
+    if (!Array.isArray(parsed)) { this.points = []; this.emitPoints(); return; }
 
     this.points = parsed.map((p: any): Point => ({
       name: p.Name,
@@ -385,160 +398,120 @@ export class RobotConnectService {
   }
 
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
-    return (
-      a.connected       === b.connected       &&
-      a.version         === b.version         &&
-      a.moving          === b.moving          &&
-      a.wasHomed        === b.wasHomed        &&
-      a.driverConnected === b.driverConnected &&
-      a.driverOk        === b.driverOk        &&
-      a.homingState     === b.homingState     &&
-      a.activeTool      === b.activeTool      &&
-      a.activeLocal     === b.activeLocal     &&
-      a.lastPointUpdate        === b.lastPointUpdate        &&
-      a.lastToolUpdate         === b.lastToolUpdate         &&
-      a.lastLocalUpdate        === b.lastLocalUpdate        &&
-      a.lastBuiltProgramUpdate === b.lastBuiltProgramUpdate &&
-      a.lastGridUpdate         === b.lastGridUpdate         &&
-      a.lastStackUpdate        === b.lastStackUpdate        &&
-      a.joint1Angle === b.joint1Angle && a.joint2X === b.joint2X &&
-      a.joint2Z     === b.joint2Z     && a.joint4Angle === b.joint4Angle &&
-      a.x  === b.x  && a.y  === b.y  && a.z  === b.z  &&
-      a.rx === b.rx && a.ry === b.ry && a.rz === b.rz &&
-      a.targetX  === b.targetX  && a.targetY  === b.targetY  && a.targetZ  === b.targetZ  &&
-      a.targetRx === b.targetRx && a.targetRy === b.targetRy && a.targetRz === b.targetRz &&
-      a.poseX  === b.poseX  && a.poseY  === b.poseY  && a.poseZ  === b.poseZ  &&
-      a.poseRx === b.poseRx && a.poseRy === b.poseRy && a.poseRz === b.poseRz &&
-      a.speedS === b.speedS && a.accelS === b.accelS && a.decelS === b.decelS &&
-      a.speedJ === b.speedJ && a.accelJ === b.accelJ && a.decelJ === b.decelJ &&
-      a.input1 === b.input1 && a.input2 === b.input2 &&
-      a.input3 === b.input3 && a.input4 === b.input4 &&
-      a.output1 === b.output1 && a.output2 === b.output2 &&
-      a.output3 === b.output3 && a.output4 === b.output4 &&
-      JSON.stringify(a.programs) === JSON.stringify(b.programs) &&
-      JSON.stringify(a.backgroundPrograms) === JSON.stringify(b.backgroundPrograms) &&
-      a.speedOverridePercent === b.speedOverridePercent
-    );
+    // Non-primitive fields that require deep comparison
+    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms']);
+
+    // Compare over the union of all keys so newly added fields are never silently skipped
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof RobotStatus>;
+    for (const key of keys) {
+      const av = a[key], bv = b[key];
+      if (NON_PRIMITIVE.has(key)) {
+        if (JSON.stringify(av) !== JSON.stringify(bv)) return false;
+      } else {
+        if (av !== bv) return false;
+      }
+    }
+    return true;
   }
 
   onPoints(cb: PointsListener) {
-    this.pointsListeners.push(cb);
+    const unsub = this.pointsTopic.on(cb);
     cb(this.points);
-    return () => {
-      this.pointsListeners = this.pointsListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitPoints() {
-    this.pointsListeners.forEach(cb => cb(this.points));
+    this.pointsTopic.emit(this.points);
   }
 
   onTools(cb: ToolsListener) {
-    this.toolsListeners.push(cb);
+    const unsub = this.toolsTopic.on(cb);
     cb(this.tools);
-    return () => {
-      this.toolsListeners = this.toolsListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitTools() {
-    this.toolsListeners.forEach(cb => cb(this.tools));
+    this.toolsTopic.emit(this.tools);
   }
 
   onLocals(cb: LocalsListener) {
-    this.localsListeners.push(cb);
+    const unsub = this.localsTopic.on(cb);
     cb(this.locals);
-    return () => {
-      this.localsListeners = this.localsListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitLocals() {
-    this.localsListeners.forEach(cb => cb(this.locals));
+    this.localsTopic.emit(this.locals);
   }
 
   onBuiltPrograms(cb: BuiltProgramsListener) {
-    this.builtProgramsListeners.push(cb);
+    const unsub = this.builtProgramsTopic.on(cb);
     cb(this.builtPrograms);
-    return () => {
-      this.builtProgramsListeners = this.builtProgramsListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitBuiltPrograms() {
-    this.builtProgramsListeners.forEach(cb => cb(this.builtPrograms));
+    this.builtProgramsTopic.emit(this.builtPrograms);
   }
 
   onProgramImages(cb: ProgramImagesListener) {
-    this.programImagesListeners.push(cb);
+    const unsub = this.programImagesTopic.on(cb);
     cb(this.programImages);
-    return () => {
-      this.programImagesListeners = this.programImagesListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitProgramImages() {
-    this.programImagesListeners.forEach(cb => cb(this.programImages));
+    this.programImagesTopic.emit(this.programImages);
   }
 
   onNanoIO(cb: NanoIOListener) {
-    this.nanoIOListeners.push(cb);
+    const unsub = this.nanoIOTopic.on(cb);
     cb(this.nanoIO);
-    return () => {
-      this.nanoIOListeners = this.nanoIOListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitNanoIO() {
-    this.nanoIOListeners.forEach(cb => cb(this.nanoIO));
+    this.nanoIOTopic.emit(this.nanoIO);
   }
 
   onRelayIO(cb: RelayIOListener) {
-    this.relayIOListeners.push(cb);
+    const unsub = this.relayIOTopic.on(cb);
     cb(this.relayIO);
-    return () => {
-      this.relayIOListeners = this.relayIOListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitRelayIO() {
-    this.relayIOListeners.forEach(cb => cb(this.relayIO));
+    this.relayIOTopic.emit(this.relayIO);
   }
 
   onAuxAxis(cb: AuxAxisListener) {
-    this.auxAxisListeners.push(cb);
+    const unsub = this.auxAxisTopic.on(cb);
     cb(this.auxAxis);
-    return () => {
-      this.auxAxisListeners = this.auxAxisListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitAuxAxis() {
-    this.auxAxisListeners.forEach(cb => cb(this.auxAxis));
+    this.auxAxisTopic.emit(this.auxAxis);
   }
 
   onCameras(cb: CamerasListener) {
-    this.camerasListeners.push(cb);
+    const unsub = this.camerasTopic.on(cb);
     cb(this.cameras);
-    return () => {
-      this.camerasListeners = this.camerasListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitCameras() {
-    this.camerasListeners.forEach(cb => cb(this.cameras));
+    this.camerasTopic.emit(this.cameras);
   }
 
   onGrids(cb: GridsListener) {
-    this.gridsListeners.push(cb);
+    const unsub = this.gridsTopic.on(cb);
     cb(this.grids);
-    return () => {
-      this.gridsListeners = this.gridsListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitGrids() {
-    this.gridsListeners.forEach(cb => cb(this.grids));
+    this.gridsTopic.emit(this.grids);
   }
 
   private decodeGrids(data: any) {
@@ -552,15 +525,13 @@ export class RobotConnectService {
   }
 
   onStacks(cb: StacksListener) {
-    this.stacksListeners.push(cb);
+    const unsub = this.stacksTopic.on(cb);
     cb(this.stacks);
-    return () => {
-      this.stacksListeners = this.stacksListeners.filter(l => l !== cb);
-    };
+    return unsub;
   }
 
   private emitStacks() {
-    this.stacksListeners.forEach(cb => cb(this.stacks));
+    this.stacksTopic.emit(this.stacks);
   }
 
   private decodeStacks(data: any) {
