@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
@@ -77,7 +78,7 @@ export default function SpacePage() {
       <NotConnectedOverlay />
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
 

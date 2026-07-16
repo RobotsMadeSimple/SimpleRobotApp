@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { ios } from "@/src/components/ui/io/ioShared";
@@ -352,7 +353,7 @@ export default function AuxPage() {
         }
       />
       <ScrollView
-        contentContainerStyle={{ paddingTop: 24, paddingBottom: 40, gap: 24 }}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {device ? (

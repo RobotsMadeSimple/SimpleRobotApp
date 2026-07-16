@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { RobotStack } from "@/src/models/robotModels";
 import { usePoints, useStacks } from "@/src/providers/RobotProvider";
@@ -142,7 +143,7 @@ export default function StackEditPage() {
       />
 
       <ScrollView
-        contentContainerStyle={s.scroll}
+        contentContainerStyle={[s.scroll, wide.content]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

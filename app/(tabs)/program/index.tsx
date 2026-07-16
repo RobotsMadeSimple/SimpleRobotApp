@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 ﻿import { ActionButton } from "@/src/components/ui/ActionButton";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
@@ -297,7 +298,7 @@ export default function ProgramScreen() {
     <View style={{ flex: 1 }}>
     <ScrollView
       style={styles.scroll}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, wide.content]}
       showsVerticalScrollIndicator={false}
     >
       {/* Now Running / Last Ran */}

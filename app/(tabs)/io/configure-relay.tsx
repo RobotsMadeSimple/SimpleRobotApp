@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -88,7 +89,7 @@ export default function ConfigureRelayPage() {
         </View>
 
         {/* ── Column headers ── */}
-        <View style={styles.colHeaders}>
+        <View style={[styles.colHeaders, wide.bar]}>
           <Text style={[styles.colHeader, { width: 60 }]}>CHANNEL</Text>
           <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
         </View>
@@ -96,7 +97,7 @@ export default function ConfigureRelayPage() {
         {/* ── Relay rows ── */}
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, wide.content]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >

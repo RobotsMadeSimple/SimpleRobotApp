@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -107,7 +108,7 @@ export default function ConnectedRobot() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, wide.content]}
       showsVerticalScrollIndicator={false}
     >
       {/* Robot info card */}

@@ -2,10 +2,10 @@
 import {
   ActivityIndicator,
   Animated,
-  Modal,
+  BackHandler,
   PanResponder,
-  SafeAreaView,
   ScrollView,
+  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -35,6 +35,8 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { WebView } from "react-native-webview";
 import { ves } from "./visionEditorStyles";
+import { usePaneLayout, wide } from "@/src/components/ui/responsive";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ZonePickerModal } from "./ZonePickerModal";
 import { DictionaryPickerModal } from "./DictionaryPickerModal";
 import { ColorEditModal } from "./ColorEditModal";
@@ -77,6 +79,9 @@ export function InspectionConfigModal({
   onLiveUpdateAruco?: (insp: ArucoInspection) => void;
   onLiveUpdateLine?: (insp: LineInspection) => void;
 }) {
+  const paneLayout = usePaneLayout();
+  const isWide  = paneLayout !== "single";
+  const isSplit = paneLayout === "split";
   const [name, setName]               = useState('');
   const [enabled, setEnabled]         = useState(true);
   const [zoneId, setZoneId]           = useState<string | null>(null);
@@ -321,6 +326,18 @@ export function InspectionConfigModal({
     }
   }, [visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode]);
 
+  // Rendered as an in-place subpage (not a Modal), so the Android hardware back
+  // button must close-and-save instead of popping the vision-editor route.
+  const handleCloseRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleCloseRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible]);
+
   function handleClose() {
     if (kind === 'blob' && initialBlob) {
       onSaveBlob({ ...initialBlob, name, enabled, zoneId, blobParams });
@@ -346,25 +363,19 @@ export function InspectionConfigModal({
     onClose();
   }
 
+  handleCloseRef.current = handleClose;
+
+  if (!visible) return null;
+
   const linkedZone = zones.find(z => z.id === zoneId);
   const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
 
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
-      <SafeAreaView style={ves.configRoot}>
-        <View style={ves.configHeader}>
-          <Text style={ves.configTitle}>
-            {kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage'}
-          </Text>
-          <TouchableOpacity onPress={handleClose} style={ves.configDoneBtn}>
-            <Check size={15} color="#fff" />
-            <Text style={ves.configDoneBtnText}>Done</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Live feed — mirrors the main editor view: annotated stream while
-            running, raw camera stream otherwise, with the same Start/Stop control. */}
-        <View style={{ height: 210, backgroundColor: '#0d1117' }}>
+  // Live feed — mirrors the main editor view: annotated stream while running,
+  // raw camera stream otherwise, with the same Start/Stop control. Rendered
+  // above the config fields on phones, in a left pane on wide screens.
+  const feedSection = (
+    <>
+        <View style={ws.feedCard}>
             <WebView
               ref={debugWebviewRef}
               source={{ html: FEED_HTML }}
@@ -420,10 +431,40 @@ export function InspectionConfigModal({
             />
           </View>
         )}
+    </>
+  );
+
+  return (
+    <View style={ves.configRoot}>
+        <SubPageHeader
+          title={kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage'}
+          subtitle={name || undefined}
+          onBack={handleClose}
+          right={
+            <TouchableOpacity onPress={handleClose} style={ves.configDoneBtn}>
+              <Check size={15} color="#fff" />
+              <Text style={ves.configDoneBtnText}>Done</Text>
+            </TouchableOpacity>
+          }
+        />
+
+        <View style={isWide ? ws.wideRow : ws.stack}>
+        {isWide ? (
+          /* Wide layout: feed + run + results in a fixed left pane */
+          <ScrollView
+            style={[ws.leftPane, isSplit && wide.paneSplit]}
+            contentContainerStyle={ws.leftPaneContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {feedSection}
+          </ScrollView>
+        ) : (
+          feedSection
+        )}
 
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 14, gap: 10 }}
+          contentContainerStyle={[{ padding: 14, gap: 10 }, isWide && ws.rightPaneContent]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -756,7 +797,7 @@ export function InspectionConfigModal({
 
           <View style={{ height: 40 }} />
         </ScrollView>
-      </SafeAreaView>
+        </View>
 
       <ZonePickerModal
         visible={zonePickerOpen}
@@ -788,6 +829,29 @@ export function InspectionConfigModal({
         snapshotUri={snapshotUri}
         onFetchSnapshot={onFetchSnapshot}
       />
-    </Modal>
+    </View>
   );
 }
+
+// ── Wide (desktop) two-pane layout ────────────────────────────────────────────
+
+const ws = StyleSheet.create({
+  stack: { flex: 1 },
+  // Matches the main vision editor's feedCard so both feeds read the same.
+  feedCard: {
+    height: 220, backgroundColor: "#0d1117",
+    borderRadius: 12, overflow: "hidden",
+    marginHorizontal: 14, marginTop: 12,
+    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
+  },
+  wideRow: {
+    flex: 1, flexDirection: "row",
+    width: "100%", maxWidth: 1200, alignSelf: "center",
+  },
+  leftPane: {
+    width: 420, flexGrow: 0, flexShrink: 0,
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+  },
+  leftPaneContent: { paddingBottom: 24 },
+  rightPaneContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
+});

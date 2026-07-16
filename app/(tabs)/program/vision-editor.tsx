@@ -59,6 +59,7 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { wide, usePaneLayout } from "@/src/components/ui/responsive";
 import { WebView } from "react-native-webview";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
 import { ZoneDrawModal } from "@/src/components/ui/vision-editor/ZoneDrawModal";
@@ -72,6 +73,9 @@ export default function VisionEditorScreen() {
   const initialProg    = JSON.parse(params.program) as VisionProgram;
   const initialRunning = params.runningIds ? new Set<string>(JSON.parse(params.runningIds)) : new Set<string>();
 
+  const paneLayout = usePaneLayout();
+  const isWide  = paneLayout !== "single";
+  const isSplit = paneLayout === "split";
   const [program, setProgram]     = useState<VisionProgram>(initialProg);
   const [name, setName]           = useState(initialProg.name);
   const [isRunning, setIsRunning]         = useState(initialRunning.has(initialProg.id));
@@ -384,8 +388,223 @@ export default function VisionEditorScreen() {
 
   const selectedCam = cameras.find(c => c.id === program.cameraId);
 
+  // ── Shared render fragments (used by both narrow and wide layouts) ─────────
+
+  const infoSection = (
+    <>
+      {/* Name */}
+      <View style={styles.card}>
+        <Text style={styles.rowLabel}>Name</Text>
+        <TextInput
+          style={styles.nameInput}
+          value={name}
+          onChangeText={setName}
+          placeholder="Program name"
+          placeholderTextColor="#9ca3af"
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
+        />
+      </View>
+
+      {/* Camera */}
+      <TouchableOpacity style={styles.card} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
+        <Text style={styles.rowLabel}>Camera</Text>
+        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? "#22c55e" : "#d1d5db" }]} />
+        <Text style={styles.cameraValue} numberOfLines={1}>
+          {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
+        </Text>
+        <ChevronDown size={15} color="#9ca3af" />
+      </TouchableOpacity>
+
+      {/* Camera feed */}
+      <View style={styles.feedCard} pointerEvents="none">
+        <WebView
+          ref={feedWebViewRef}
+          source={{ html: FEED_HTML }}
+          style={{ flex: 1, backgroundColor: "#111" }}
+          scrollEnabled={false}
+          originWhitelist={["*"]}
+          javaScriptEnabled
+          focusable={false}
+          accessible={false}
+          onLoad={injectFeedUrl}
+          onMessage={onFeedMessage}
+        />
+        {!feedSourceUrl && (
+          <View style={styles.feedPlaceholder}>
+            <Text style={styles.feedPlaceholderText}>
+              {program.cameraId ? "Connecting to camera…" : "Select a camera above"}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Run / Stop */}
+      <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
+        <TouchableOpacity
+          style={[styles.runBtn, isRunning ? styles.runBtnStop : styles.runBtnStart]}
+          onPress={toggleRunning}
+          activeOpacity={0.8}
+          disabled={!!transitioning}
+        >
+          {transitioning
+            ? <ActivityIndicator size="small" color="#fff" />
+            : isRunning
+              ? <EyeOff size={16} color="#fff" />
+              : <Eye size={16} color="#fff" />
+          }
+          <Text style={styles.runBtnText}>
+            {transitioning === 'starting' ? "Starting..."
+              : transitioning === 'stopping' ? "Stopping..."
+              : isRunning ? "Stop Vision"
+              : "Start Vision"}
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* ── Results ────────────────────────────────────────────────────────── */}
+      {isRunning && visionResult && (
+        <>
+          <Text style={styles.sectionLabel}>RESULTS</Text>
+          <VisionResults result={visionResult} />
+        </>
+      )}
+    </>
+  );
+
+  const editorSection = (
+    <>
+      {/* ── Zones ──────────────────────────────────────────────────────────── */}
+      <Text style={styles.sectionLabel}>ZONES</Text>
+
+      {program.zones.length === 0 && (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyText}>No zones defined — add one to restrict where blobs are counted</Text>
+        </View>
+      )}
+
+      {program.zones.map(zone => (
+        <View key={zone.id} style={styles.zoneCard}>
+          <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
+          <TextInput
+            style={styles.zoneNameInput}
+            value={zone.name}
+            onChangeText={t => updateZone({ ...zone, name: t })}
+          />
+          <Text style={styles.shapeBadge}>{zone.geometry.shape}</Text>
+          <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
+            <Pencil size={14} color="#6b7280" />
+          </TouchableOpacity>
+          <DeleteIconButton
+            size={14}
+            style={styles.iconBtn}
+            onPress={() => appAlert('Delete Zone', `Delete "${zone.name}"?`, [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
+            ])}
+          />
+        </View>
+      ))}
+
+      <TouchableOpacity style={styles.addBtn} onPress={() => openZoneModal()} activeOpacity={0.75}>
+        <Plus size={15} color="#0891b2" />
+        <Text style={styles.addBtnText}>Add Zone</Text>
+      </TouchableOpacity>
+
+      {/* ── Inspections ──────────────────────────────────────────────────── */}
+      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>INSPECTIONS</Text>
+
+      {allInspections.length === 0 && (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyText}>No inspections — add one to detect blobs or measure colors</Text>
+        </View>
+      )}
+
+      {allInspections.map((item, index) => {
+        const { kind, insp } = item;
+        const linkedZone = program.zones.find(z => z.id === insp.zoneId);
+        const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
+        const iconBg     = kind === 'blob' ? '#ecfeff' : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? '#f0fdf4' : kind === 'line' ? '#f5f3ff' : kind === 'barcode' ? '#eff6ff' : '#fdf4ff';
+        const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : kind === 'barcode' ? 'BARCODE / QR CODE' : 'COLOR COVERAGE';
+        return (
+          <View key={insp.id} style={[styles.inspStepCard, { borderLeftColor: accent }]}>
+            <TouchableOpacity
+              style={styles.inspStepHeader}
+              onPress={() => setConfigModal(item)}
+              activeOpacity={0.75}
+            >
+              <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
+                {kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
+                 kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
+                 kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
+                 kind === 'line'    ? <Minus      size={18} color={accent} /> :
+                 kind === 'barcode' ? <Barcode    size={18} color={accent} /> :
+                                     <Palette    size={18} color={accent} />}
+              </View>
+              <View style={styles.inspStepText}>
+                <Text style={[styles.inspStepType, { color: accent }]}>
+                  {index + 1} · {typeLabel}
+                </Text>
+                <Text style={styles.inspStepName}>{insp.name}</Text>
+                <Text style={styles.inspStepDetail}>
+                  {linkedZone?.name ?? 'Full image'}
+                  {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
+                  {kind === 'aruco'   ? ` · dict ${(insp as ArucoInspection).dictionaryId}` : ''}
+                  {kind === 'barcode' && (insp as BarcodeInspection).formats.length > 0
+                    ? ` · ${(insp as BarcodeInspection).formats.length} format(s)` : ''}
+                </Text>
+              </View>
+              <Switch
+                value={insp.enabled}
+                onValueChange={v => {
+                  if (kind === 'blob')         updateInspection({ ...(insp as BlobInspection), enabled: v });
+                  else if (kind === 'polygon') updatePolygonInspection({ ...(insp as PolygonInspection), enabled: v });
+                  else if (kind === 'aruco')   updateArucoInspection({ ...(insp as ArucoInspection), enabled: v });
+                  else if (kind === 'line')    updateLineInspection({ ...(insp as LineInspection), enabled: v });
+                  else if (kind === 'barcode') updateBarcodeInspection({ ...(insp as BarcodeInspection), enabled: v });
+                  else                         updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
+                }}
+                trackColor={{ true: accent }}
+                style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+              />
+              <TouchableOpacity onPress={() => duplicateInspection(item)} hitSlop={8} style={styles.iconBtn}>
+                <Copy size={15} color="#6b7280" />
+              </TouchableOpacity>
+              <DeleteIconButton
+                size={15}
+                style={styles.iconBtn}
+                onPress={() => appAlert('Delete Inspection', `Delete "${insp.name}"?`, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => {
+                    if (kind === 'blob')         deleteInspection(insp.id);
+                    else if (kind === 'polygon') deletePolygonInspection(insp.id);
+                    else if (kind === 'aruco')   deleteArucoInspection(insp.id);
+                    else if (kind === 'line')    deleteLineInspection(insp.id);
+                    else if (kind === 'barcode') deleteBarcodeInspection(insp.id);
+                    else                         deleteColorInspection(insp.id);
+                  }},
+                ])}
+              />
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+
+      <TouchableOpacity style={styles.addBtn} onPress={() => setTypePicker(true)} activeOpacity={0.75}>
+        <Plus size={15} color="#7c3aed" />
+        <Text style={[styles.addBtnText, { color: '#7c3aed' }]}>Add Inspection</Text>
+      </TouchableOpacity>
+
+      <View style={{ height: 40 }} />
+    </>
+  );
+
   return (
     <View style={styles.root}>
+      {/* Hidden while an inspection is being edited — the inspection config
+          renders as a full-screen subpage in its place. */}
+      {configModal === null && (
+      <>
       <SubPageHeader
         title={name}
         right={
@@ -403,214 +622,42 @@ export default function VisionEditorScreen() {
         }
       />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Name */}
-        <View style={styles.card}>
-          <Text style={styles.rowLabel}>Name</Text>
-          <TextInput
-            style={styles.nameInput}
-            value={name}
-            onChangeText={setName}
-            placeholder="Program name"
-            placeholderTextColor="#9ca3af"
-            returnKeyType="done"
-            onSubmitEditing={Keyboard.dismiss}
-          />
-        </View>
-
-        {/* Camera */}
-        <TouchableOpacity style={styles.card} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
-          <Text style={styles.rowLabel}>Camera</Text>
-          <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? "#22c55e" : "#d1d5db" }]} />
-          <Text style={styles.cameraValue} numberOfLines={1}>
-            {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
-          </Text>
-          <ChevronDown size={15} color="#9ca3af" />
-        </TouchableOpacity>
-
-        {/* Camera feed */}
-        <View style={styles.feedCard} pointerEvents="none">
-          <WebView
-            ref={feedWebViewRef}
-            source={{ html: FEED_HTML }}
-            style={{ flex: 1, backgroundColor: "#111" }}
-            scrollEnabled={false}
-            originWhitelist={["*"]}
-            javaScriptEnabled
-            focusable={false}
-            accessible={false}
-            onLoad={injectFeedUrl}
-            onMessage={onFeedMessage}
-          />
-          {!feedSourceUrl && (
-            <View style={styles.feedPlaceholder}>
-              <Text style={styles.feedPlaceholderText}>
-                {program.cameraId ? "Connecting to camera…" : "Select a camera above"}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Run / Stop */}
-        <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
-          <TouchableOpacity
-            style={[styles.runBtn, isRunning ? styles.runBtnStop : styles.runBtnStart]}
-            onPress={toggleRunning}
-            activeOpacity={0.8}
-            disabled={!!transitioning}
+      {isWide ? (
+        /* ── Wide layout: vision info + feed left, zones/inspections right ── */
+        <View style={styles.wideRow}>
+          <ScrollView
+            style={[styles.widePaneLeft, isSplit && wide.paneSplit]}
+            contentContainerStyle={styles.widePaneLeftContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
           >
-            {transitioning
-              ? <ActivityIndicator size="small" color="#fff" />
-              : isRunning
-                ? <EyeOff size={16} color="#fff" />
-                : <Eye size={16} color="#fff" />
-            }
-            <Text style={styles.runBtnText}>
-              {transitioning === 'starting' ? "Starting..."
-                : transitioning === 'stopping' ? "Stopping..."
-                : isRunning ? "Stop Vision"
-                : "Start Vision"}
-            </Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* ── Results ────────────────────────────────────────────────────────── */}
-        {isRunning && visionResult && (
-          <>
-            <Text style={styles.sectionLabel}>RESULTS</Text>
-            <VisionResults result={visionResult} />
-          </>
-        )}
-
-        {/* ── Zones ──────────────────────────────────────────────────────────── */}
-        <Text style={styles.sectionLabel}>ZONES</Text>
-
-        {program.zones.length === 0 && (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No zones defined — add one to restrict where blobs are counted</Text>
-          </View>
-        )}
-
-        {program.zones.map(zone => (
-          <View key={zone.id} style={styles.zoneCard}>
-            <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
-            <TextInput
-              style={styles.zoneNameInput}
-              value={zone.name}
-              onChangeText={t => updateZone({ ...zone, name: t })}
-            />
-            <Text style={styles.shapeBadge}>{zone.geometry.shape}</Text>
-            <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
-              <Pencil size={14} color="#6b7280" />
-            </TouchableOpacity>
-            <DeleteIconButton
-              size={14}
-              style={styles.iconBtn}
-              onPress={() => appAlert('Delete Zone', `Delete "${zone.name}"?`, [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
-              ])}
-            />
-          </View>
-        ))}
-
-        <TouchableOpacity style={styles.addBtn} onPress={() => openZoneModal()} activeOpacity={0.75}>
-          <Plus size={15} color="#0891b2" />
-          <Text style={styles.addBtnText}>Add Zone</Text>
-        </TouchableOpacity>
-
-        {/* ── Inspections ──────────────────────────────────────────────────── */}
-        <Text style={[styles.sectionLabel, { marginTop: 8 }]}>INSPECTIONS</Text>
-
-        {allInspections.length === 0 && (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No inspections — add one to detect blobs or measure colors</Text>
-          </View>
-        )}
-
-        {allInspections.map((item, index) => {
-          const { kind, insp } = item;
-          const linkedZone = program.zones.find(z => z.id === insp.zoneId);
-          const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
-          const iconBg     = kind === 'blob' ? '#ecfeff' : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? '#f0fdf4' : kind === 'line' ? '#f5f3ff' : kind === 'barcode' ? '#eff6ff' : '#fdf4ff';
-          const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : kind === 'barcode' ? 'BARCODE / QR CODE' : 'COLOR COVERAGE';
-          return (
-            <View key={insp.id} style={[styles.inspStepCard, { borderLeftColor: accent }]}>
-              <TouchableOpacity
-                style={styles.inspStepHeader}
-                onPress={() => setConfigModal(item)}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
-                  {kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
-                   kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
-                   kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
-                   kind === 'line'    ? <Minus      size={18} color={accent} /> :
-                   kind === 'barcode' ? <Barcode    size={18} color={accent} /> :
-                                       <Palette    size={18} color={accent} />}
-                </View>
-                <View style={styles.inspStepText}>
-                  <Text style={[styles.inspStepType, { color: accent }]}>
-                    {index + 1} · {typeLabel}
-                  </Text>
-                  <Text style={styles.inspStepName}>{insp.name}</Text>
-                  <Text style={styles.inspStepDetail}>
-                    {linkedZone?.name ?? 'Full image'}
-                    {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
-                    {kind === 'aruco'   ? ` · dict ${(insp as ArucoInspection).dictionaryId}` : ''}
-                    {kind === 'barcode' && (insp as BarcodeInspection).formats.length > 0
-                      ? ` · ${(insp as BarcodeInspection).formats.length} format(s)` : ''}
-                  </Text>
-                </View>
-                <Switch
-                  value={insp.enabled}
-                  onValueChange={v => {
-                    if (kind === 'blob')         updateInspection({ ...(insp as BlobInspection), enabled: v });
-                    else if (kind === 'polygon') updatePolygonInspection({ ...(insp as PolygonInspection), enabled: v });
-                    else if (kind === 'aruco')   updateArucoInspection({ ...(insp as ArucoInspection), enabled: v });
-                    else if (kind === 'line')    updateLineInspection({ ...(insp as LineInspection), enabled: v });
-                    else if (kind === 'barcode') updateBarcodeInspection({ ...(insp as BarcodeInspection), enabled: v });
-                    else                         updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
-                  }}
-                  trackColor={{ true: accent }}
-                  style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
-                />
-                <TouchableOpacity onPress={() => duplicateInspection(item)} hitSlop={8} style={styles.iconBtn}>
-                  <Copy size={15} color="#6b7280" />
-                </TouchableOpacity>
-                <DeleteIconButton
-                  size={15}
-                  style={styles.iconBtn}
-                  onPress={() => appAlert('Delete Inspection', `Delete "${insp.name}"?`, [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: () => {
-                      if (kind === 'blob')         deleteInspection(insp.id);
-                      else if (kind === 'polygon') deletePolygonInspection(insp.id);
-                      else if (kind === 'aruco')   deleteArucoInspection(insp.id);
-                      else if (kind === 'line')    deleteLineInspection(insp.id);
-                      else if (kind === 'barcode') deleteBarcodeInspection(insp.id);
-                      else                         deleteColorInspection(insp.id);
-                    }},
-                  ])}
-                />
-              </TouchableOpacity>
-            </View>
-          );
-        })}
-
-        <TouchableOpacity style={styles.addBtn} onPress={() => setTypePicker(true)} activeOpacity={0.75}>
-          <Plus size={15} color="#7c3aed" />
-          <Text style={[styles.addBtnText, { color: '#7c3aed' }]}>Add Inspection</Text>
-        </TouchableOpacity>
-
-        <View style={{ height: 40 }} />
-      </ScrollView>
+            {infoSection}
+          </ScrollView>
+          <ScrollView
+            style={styles.widePaneRight}
+            contentContainerStyle={[styles.content, styles.wideEditorContent]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+          >
+            {editorSection}
+          </ScrollView>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.content, wide.content]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
+          {infoSection}
+          {editorSection}
+        </ScrollView>
+      )}
+      </>
+      )}
 
       {/* Modals */}
       <CameraPickerModal
@@ -732,6 +779,19 @@ const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: "#f3f4f6" },
   scroll:  { flex: 1 },
   content: { padding: 14, gap: 8 },
+
+  // ── Wide (desktop) two-pane layout ────────────────────────────────────────
+  wideRow: {
+    flex: 1, flexDirection: "row",
+    width: "100%", maxWidth: 1200, alignSelf: "center",
+  },
+  widePaneLeft: {
+    width: 400, flexGrow: 0, flexShrink: 0,
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+  },
+  widePaneLeftContent: { padding: 14, paddingBottom: 32, gap: 8 },
+  widePaneRight: { flex: 1 },
+  wideEditorContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 
   saveStatusRow:  { flexDirection: "row", alignItems: "center", gap: 5 },
   saveStatusText: { fontSize: 13, color: "#6b7280" },

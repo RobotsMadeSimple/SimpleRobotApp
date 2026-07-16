@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoPinState, PinType } from "@/src/models/robotModels";
@@ -314,7 +315,7 @@ export default function ConfigurePage() {
         </View>
 
         {/* ── Column headers ── */}
-        <View style={styles.colHeaders}>
+        <View style={[styles.colHeaders, wide.bar]}>
           <Text style={[styles.colHeader, { width: 44 }]}>PIN</Text>
           <Text style={[styles.colHeader, { width: 52 }]}>TYPE</Text>
           <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
@@ -323,7 +324,7 @@ export default function ConfigurePage() {
         {/* ── Pin list ── */}
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, wide.content]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >

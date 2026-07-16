@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { RobotCard } from "@/src/components/ui/RobotCards";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
@@ -56,7 +57,7 @@ export default function Robot() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.scrollContent, wide.content]}>
       {/* Manual connection card */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>MANUAL CONNECTION</Text>
@@ -122,7 +123,7 @@ export default function Robot() {
       ) : (
         <FlatList
           scrollEnabled={false}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, wide.content]}
           data={robots}
           keyExtractor={(r) => r.serialNumber || r.ipAddress}
           renderItem={({ item }) => <RobotCard robot={item} />}

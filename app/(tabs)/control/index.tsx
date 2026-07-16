@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -82,7 +83,7 @@ export default function Control() {
     <View style={styles.container}>
       <NotConnectedOverlay />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scroll, wide.content]} showsVerticalScrollIndicator={false}>
 
         {/* ── Position card ────────────────────────────────────────── */}
         <View style={styles.posCard}>

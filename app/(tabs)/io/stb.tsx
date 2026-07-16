@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
@@ -28,7 +29,7 @@ export default function StbPage() {
         subtitle={`STB4100 · USB HID · ${status.driverConnected ? "Connected" : "Offline"}`}
       />
       <ScrollView
-        contentContainerStyle={{ paddingTop: 24, paddingBottom: 40, gap: 24 }}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         <View>

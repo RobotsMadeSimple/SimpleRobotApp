@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -218,7 +219,7 @@ export default function RobotProgramsScreen() {
       />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {allRegularCards.length === 0 && backgroundPrograms.length === 0 ? (

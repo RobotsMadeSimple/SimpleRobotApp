@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import JogPad from "@/src/components/ui/JogPad";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
@@ -322,7 +323,7 @@ export default function JogScreen() {
       {/* ── Scrollable area: position + controls + jogpad ── */}
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, wide.content]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >

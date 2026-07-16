@@ -46,6 +46,7 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { wide } from "@/src/components/ui/responsive";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
@@ -481,7 +482,7 @@ export default function MonitorProgramScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={wide.content} showsVerticalScrollIndicator={false}>
 
         {/* ── Hero: full-width status banner ── */}
         <View style={[styles.hero, { backgroundColor: hasAlert ? alertLight : theme.bg }]}>

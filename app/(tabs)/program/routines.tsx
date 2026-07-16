@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
@@ -50,7 +51,7 @@ export default function RoutinesScreen() {
       />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {routines.length === 0 ? (
