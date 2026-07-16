@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "@/src/connections/robotState";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -328,7 +329,7 @@ export default function AboutRobot() {
       <SubPageHeader title="About Robot" />
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero card */}

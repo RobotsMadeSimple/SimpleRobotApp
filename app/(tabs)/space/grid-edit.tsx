@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids, usePoints } from "@/src/providers/RobotProvider";
@@ -144,7 +145,7 @@ export default function GridEditPage() {
       />
 
       <ScrollView
-        contentContainerStyle={s.scroll}
+        contentContainerStyle={[s.scroll, wide.content]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -82,7 +83,7 @@ export default function VisionListScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
+        <ScrollView style={styles.scroll} contentContainerStyle={[styles.list, wide.content]}>
           {programs.map(prog => (
             <TouchableOpacity
               key={prog.id}

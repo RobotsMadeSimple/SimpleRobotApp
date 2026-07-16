@@ -1,3 +1,4 @@
+import { wide, useIsWide } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
@@ -99,9 +100,12 @@ const HIT_THRESHOLD_PX = 28;
 function PointsMap({
   points,
   onPointPress,
+  fill = false,
 }: {
   points: Point[];
   onPointPress: (p: Point) => void;
+  /** Fill the parent instead of the fixed map height (wide-mode left pane). */
+  fill?: boolean;
 }) {
   const robot = useSelectedRobot();
   const [layout, setLayout] = useState<LayoutRectangle | null>(null);
@@ -209,6 +213,30 @@ function PointsMap({
 
   const composed = Gesture.Race(tap, Gesture.Simultaneous(pan, pinch));
 
+  // Web: scroll-wheel zoom anchored at the cursor — pins the world point under
+  // the pointer exactly like the pinch gesture pins its focal point.
+  const containerRef = useRef<any>(null);
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const node = containerRef.current;
+    if (!node?.addEventListener) return;
+    const onWheel = (we: WheelEvent) => {
+      we.preventDefault();
+      const rect = node.getBoundingClientRect();
+      const fx = we.clientX - rect.left;
+      const fy = we.clientY - rect.top;
+      const cur  = scale.value;
+      const next = Math.max(0.05, Math.min(20, cur * Math.exp(-we.deltaY * 0.0015)));
+      const childX = (fx - centerX.value - offsetX.value) / cur;
+      const childY = (fy - centerY.value - offsetY.value) / cur;
+      offsetX.value = fx - centerX.value - childX * next;
+      offsetY.value = fy - centerY.value - childY * next;
+      scale.value = next;
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
   const animStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: offsetX.value },
@@ -219,7 +247,8 @@ function PointsMap({
 
   return (
     <View
-      style={styles.mapContainer}
+      ref={containerRef}
+      style={[styles.mapContainer, fill && styles.mapContainerFill]}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
         setLayout(e.nativeEvent.layout);
@@ -277,7 +306,11 @@ function PointsMap({
         </View>
       )}
 
-      <Text style={styles.hint}>Pinch to zoom · drag to pan · tap a point</Text>
+      <Text style={styles.hint}>
+        {Platform.OS === "web"
+          ? "Scroll to zoom · drag to pan · click a point"
+          : "Pinch to zoom · drag to pan · tap a point"}
+      </Text>
     </View>
   );
 }
@@ -285,6 +318,7 @@ function PointsMap({
 export default function PointsPage() {
   const points = usePoints();
   const robot = useSelectedRobot();
+  const isWide = useIsWide();
   const [selectedPoint, setSelectedPoint] = useState<Point | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movingFromPage, setMovingFromPage] = useState(false);
@@ -407,42 +441,65 @@ export default function PointsPage() {
     </View>
   );
 
+  // Speed selector + table — right pane in wide mode, stacked below the map on phones.
+  const speedBarEl = (
+    <View style={[styles.speedBar, wide.bar]}>
+      <Text style={styles.speedBarLabel}>SPEED</Text>
+      <View style={styles.speedSegRow}>
+        {(["Slow", "Normal", "Fast"] as const).map((spd) => {
+          const active = selectedSpeed === spd;
+          return (
+            <Pressable
+              key={spd}
+              style={[styles.speedSeg, active && styles.speedSegActive]}
+              onPress={() => setSelectedSpeed(spd)}
+            >
+              <Text style={[styles.speedSegText, active && styles.speedSegTextActive]}>{spd}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  const pointsList = (
+    <FlatList
+      data={points}
+      keyExtractor={(item) => item.name}
+      renderItem={renderItem}
+      ListHeaderComponent={Header}
+      stickyHeaderIndices={[0]}
+      contentContainerStyle={[styles.list, wide.content]}
+      ListEmptyComponent={
+        <Text style={styles.empty}>No points available</Text>
+      }
+    />
+  );
+
   return (
     <View style={styles.page}>
       <NotConnectedOverlay />
       <SubPageHeader title="Points" />
-      <PointsMap points={points} onPointPress={setSelectedPoint} />
 
-      {/* Move speed selector — applies to Line/Joint moves triggered from this page */}
-      <View style={styles.speedBar}>
-        <Text style={styles.speedBarLabel}>SPEED</Text>
-        <View style={styles.speedSegRow}>
-          {(["Slow", "Normal", "Fast"] as const).map((spd) => {
-            const active = selectedSpeed === spd;
-            return (
-              <Pressable
-                key={spd}
-                style={[styles.speedSeg, active && styles.speedSegActive]}
-                onPress={() => setSelectedSpeed(spd)}
-              >
-                <Text style={[styles.speedSegText, active && styles.speedSegTextActive]}>{spd}</Text>
-              </Pressable>
-            );
-          })}
+      {isWide ? (
+        /* ── Wide layout: map fills the left half, speed + table on the right ── */
+        <View style={styles.wideRow}>
+          <View style={styles.mapPane}>
+            <PointsMap points={points} onPointPress={setSelectedPoint} fill />
+          </View>
+          <View style={styles.listPane}>
+            {speedBarEl}
+            {pointsList}
+          </View>
         </View>
-      </View>
-
-      <FlatList
-        data={points}
-        keyExtractor={(item) => item.name}
-        renderItem={renderItem}
-        ListHeaderComponent={Header}
-        stickyHeaderIndices={[0]}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <Text style={styles.empty}>No points available</Text>
-        }
-      />
+      ) : (
+        <>
+          <PointsMap points={points} onPointPress={setSelectedPoint} />
+          {/* Move speed selector — applies to Line/Joint moves triggered from this page */}
+          {speedBarEl}
+          {pointsList}
+        </>
+      )}
 
       {/* Point options modal */}
       <Modal
@@ -622,6 +679,15 @@ const styles = StyleSheet.create({
     backgroundColor: BP_BG,
     overflow: "hidden",
   },
+  mapContainerFill: { height: "auto", flex: 1 },
+
+  // ── Wide (desktop / foldable) two-pane layout ───────────────────────────────
+  wideRow:  { flex: 1, flexDirection: "row" },
+  mapPane:  {
+    flex: 1,
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+  },
+  listPane: { flex: 1 },
   axisH: {
     position: "absolute",
     top: "50%",

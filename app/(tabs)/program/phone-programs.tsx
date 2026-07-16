@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
@@ -180,7 +181,7 @@ export default function PhoneProgramsScreen() {
       />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {programs.length === 0 ? (

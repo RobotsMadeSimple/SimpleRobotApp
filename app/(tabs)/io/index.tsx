@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -238,7 +239,7 @@ export default function IoPage() {
       <NotConnectedOverlay />
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {/* STB4100 — always visible, 1 card */}

@@ -9,6 +9,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
+  ArrowLeft,
   Camera,
   Check,
   ChevronRight,
@@ -49,11 +50,15 @@ import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
 import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
 import { ms } from "@/src/components/ui/builder/builderStyles";
+import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 
 export default function BuilderScreen() {
   const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected     = useConnected();
+  const paneLayout    = usePaneLayout();
+  const isWide        = paneLayout !== "single";
+  const isSplit       = paneLayout === "split";
   const isLocalMode   = sourceParam === 'local';
 
   const existing = !isLocalMode && editName
@@ -434,8 +439,9 @@ export default function BuilderScreen() {
   const dragRef = useRef<DragInfo | null>(null);
 
   // Auto-scroll while dragging
-  const scrollViewRef      = useRef<ScrollView>(null);
-  const scopeScrollViewRef = useRef<ScrollView>(null);
+  // Both refs point at the single steps ScrollView in the wide layout.
+  const scrollViewRef      = useRef<ScrollView | null>(null);
+  const scopeScrollViewRef = useRef<ScrollView | null>(null);
   const scrollYRef         = useRef(0);
   const autoScrollTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -676,9 +682,11 @@ export default function BuilderScreen() {
     finally { setSaving(false); }
   }
 
-  function handleBack() {
+  // Leave the builder screen entirely (with the unsaved-changes prompt).
+  // In wide mode the main header back always does this — exiting a nested
+  // scope is handled by the scope header above the steps pane instead.
+  function exitBuilder() {
     if (selectMode) { exitSelect(); return; }
-    if (scopeStackRef.current.length > 0) { popScope(); return; }
     if (!isDirty) { router.back(); return; }
     appAlert(
       "Unsaved Changes",
@@ -689,6 +697,12 @@ export default function BuilderScreen() {
         { text: "Cancel",      style: "cancel" },
       ]
     );
+  }
+
+  function handleBack() {
+    if (selectMode) { exitSelect(); return; }
+    if (scopeStackRef.current.length > 0) { popScope(); return; }
+    exitBuilder();
   }
 
   // Keep a stable ref so the BackHandler effect can always call the latest version.
@@ -723,13 +737,337 @@ export default function BuilderScreen() {
     );
   }
 
-  const builderTitle = scopeStack.length > 0
+  const inScope = scopeStack.length > 0;
+
+  // Narrow mode titles the whole screen after the scope; wide mode keeps the
+  // builder title and shows the scope in the steps-pane header instead.
+  const builderTitle = inScope && !isWide
     ? scopeStack[scopeStack.length - 1].label
     : `${isRoutineMode ? "Routine" : isBackgroundMode ? "Background" : "Program"} Builder${isLocalMode ? " · Local" : ""}`;
 
+  // ── Shared render fragments (used by both narrow and wide layouts) ────────
+
+  const breadcrumbTrail = inScope ? (
+    <>
+      <TouchableOpacity onPress={() => { exitSelect(); setScopeStack([]); }} hitSlop={8} activeOpacity={0.7}>
+        <Text style={styles.scopeBreadcrumbRoot}>Program</Text>
+      </TouchableOpacity>
+      {scopeStack.slice(0, -1).map((frame, fi) => (
+        <React.Fragment key={fi}>
+          <ChevronRight size={12} color="#9ca3af" />
+          <TouchableOpacity onPress={() => { exitSelect(); setScopeStack(prev => prev.slice(0, fi + 1)); }} hitSlop={8} activeOpacity={0.7}>
+            <Text style={styles.scopeBreadcrumbItem}>{frame.label}</Text>
+          </TouchableOpacity>
+        </React.Fragment>
+      ))}
+      <ChevronRight size={12} color="#9ca3af" />
+      <Text style={styles.scopeBreadcrumbCurrent}>{scopeStack[scopeStack.length - 1].label}</Text>
+    </>
+  ) : null;
+
+  const breadcrumb = inScope ? (
+    <View style={styles.scopeBreadcrumb}>{breadcrumbTrail}</View>
+  ) : null;
+
+  const metaSection = (
+    <View style={styles.metaCard}>
+      <TextInput
+        style={styles.nameInput}
+        value={programName}
+        onChangeText={setProgramName}
+        placeholder={isRoutineMode ? "Routine name…" : isBackgroundMode ? "Background program name…" : "Program name…"}
+        placeholderTextColor="#9ca3af"
+        returnKeyType="next"
+      />
+      <View style={styles.metaSep} />
+      <TextInput
+        style={styles.descInput}
+        value={description}
+        onChangeText={setDescription}
+        placeholder="Description (optional)"
+        placeholderTextColor="#c4c4c4"
+        returnKeyType="done"
+      />
+      <View style={styles.metaSep} />
+
+      {/* Cover image row — hidden for routines and background programs */}
+      {!isRoutineMode && !isBackgroundMode && (
+        <>
+          <View style={styles.imageRow}>
+            <View style={styles.imagePreviewWrap}>
+              {coverImage ? (
+                <Image
+                  source={{ uri: `data:image/jpeg;base64,${coverImage}` }}
+                  style={styles.imagePreview}
+                />
+              ) : (
+                <View style={styles.imagePreviewPlaceholder}>
+                  <ImagePlus size={22} color="#d1d5db" />
+                </View>
+              )}
+            </View>
+            <View style={styles.imageActions}>
+              <TouchableOpacity style={styles.imageBtn} onPress={pickFromCamera} activeOpacity={0.75}>
+                <Camera size={15} color="#2563eb" />
+                <Text style={styles.imageBtnText}>Camera</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.imageBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
+                <ImagePlus size={15} color="#2563eb" />
+                <Text style={styles.imageBtnText}>Photo Library</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          {!isLocalMode && (
+            <>
+              <View style={styles.metaSep} />
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+                onPress={() => setSettingsModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <SlidersHorizontal size={16} color="#6b7280" />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
+                {isBackgroundMode && (
+                  <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
+                  </View>
+                )}
+                <ChevronRight size={15} color="#9ca3af" />
+              </TouchableOpacity>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Settings button for routines/background programs (no image row) */}
+      {!isLocalMode && (isRoutineMode || isBackgroundMode) && (
+        <>
+          <View style={styles.metaSep} />
+          <TouchableOpacity
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+            onPress={() => setSettingsModalOpen(true)}
+            activeOpacity={0.7}
+          >
+            <SlidersHorizontal size={16} color="#6b7280" />
+            <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
+            {isBackgroundMode && (
+              <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
+              </View>
+            )}
+            <ChevronRight size={15} color="#9ca3af" />
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Variable context picker — routine mode only */}
+      {isRoutineMode && (
+        <>
+          <View style={styles.metaSep} />
+          <TouchableOpacity
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+            onPress={() => setContextPickerOpen(true)}
+            activeOpacity={0.7}
+          >
+            <ChevronsRight size={16} color="#6b7280" />
+            <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Variable Context</Text>
+            <Text style={{ fontSize: 12, color: contextProgramName ? "#2563eb" : "#9ca3af", maxWidth: 160 }} numberOfLines={1}>
+              {contextProgramName ?? "None"}
+            </Text>
+            <ChevronRight size={15} color="#9ca3af" />
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+
+  const variablesSection = (
+    <>
+      <Text style={styles.sectionLabel}>VARIABLES</Text>
+      <View style={styles.variablesCard}>
+        {variables.length === 0 ? (
+          <Text style={styles.varEmptyText}>
+            No variables yet. Tap + to define reusable values you can reference in any numeric field.
+          </Text>
+        ) : (
+          variables.map((v, i) => (
+            <React.Fragment key={v.id}>
+              {i > 0 && <View style={styles.varSep} />}
+              <TouchableOpacity style={styles.varRow} onPress={() => openEditVar(v)} activeOpacity={0.7}>
+                <View style={styles.varInfo}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={styles.varName}>${v.name}</Text>
+                    {v.points != null && (
+                      <View style={{ backgroundColor: "#ecfeff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>POINTS</Text>
+                      </View>
+                    )}
+                    {v.isBoolean && (
+                      <View style={{ backgroundColor: "#f0fdf4", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bbf7d0" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#16a34a", letterSpacing: 0.3 }}>BOOL</Text>
+                      </View>
+                    )}
+                    {v.isGlobal && (
+                      <View style={{ backgroundColor: "#fffbeb", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#fde68a" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#b45309", letterSpacing: 0.3 }}>GLOBAL</Text>
+                      </View>
+                    )}
+                    {v.displayOnMonitor && (
+                      <View style={{ backgroundColor: "#eff6ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bfdbfe" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#2563eb", letterSpacing: 0.3 }}>MONITOR</Text>
+                      </View>
+                    )}
+                    {v.isStopwatch && (
+                      <View style={{ backgroundColor: "#e0f2fe", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#7dd3fc" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>STOPWATCH</Text>
+                      </View>
+                    )}
+                    {v.isPersistent && (
+                      <View style={{ backgroundColor: "#f5f3ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#ddd6fe" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#7c3aed", letterSpacing: 0.3 }}>PERSIST</Text>
+                      </View>
+                    )}
+                  </View>
+                  {v.description ? (
+                    <Text style={styles.varDesc}>{v.description}</Text>
+                  ) : v.points != null ? (
+                    <Text style={styles.varDesc}>Vector6[ ] — populated by RunVision</Text>
+                  ) : v.isBoolean ? (
+                    <Text style={styles.varDesc}>Boolean — initial: {v.value !== 0 ? "True" : "False"}</Text>
+                  ) : v.isStopwatch ? (
+                    <Text style={styles.varDesc}>Stopwatch — elapsed ms</Text>
+                  ) : (
+                    <Text style={styles.varDesc}>Initial: {v.value}</Text>
+                  )}
+                </View>
+                <DeleteIconButton
+                  size={14}
+                  onPress={() => appAlert("Delete Variable", `Remove $${v.name}? This can't be undone.`, [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Delete", style: "destructive", onPress: () => deleteVar(v.id) },
+                  ])}
+                />
+              </TouchableOpacity>
+            </React.Fragment>
+          ))
+        )}
+        <TouchableOpacity
+          style={[styles.varAddBtn, variables.length > 0 && styles.varAddBtnBorder]}
+          onPress={openNewVar} activeOpacity={0.7}
+        >
+          <Plus size={13} color="#7c3aed" />
+          <Text style={styles.varAddText}>Add Variable</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const stepsSection = (
+    <>
+      {currentSteps.length === 0 ? (
+        <View style={styles.emptySteps}>
+          <Cpu size={32} color="#d1d5db" />
+          <Text style={styles.emptyStepsText}>{inScope ? "No steps in this scope" : "No steps yet"}</Text>
+        </View>
+      ) : (
+        <View style={styles.stepsList}>
+          <InsertDivider
+            onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
+            onPaste={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
+            disabled={!!drag}
+          />
+          {currentSteps.map((step, i) => (
+            <StepRow
+              key={step.id}
+              step={step}
+              index={i}
+              isLast={i === currentSteps.length - 1}
+              selectMode={selectMode}
+              selected={selectedIds.includes(step.id)}
+              onLongPress={() => enterSelect(step.id)}
+              onToggleSelect={() => toggleSelect(step.id)}
+              isBeingDragged={drag?.id === step.id}
+              isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
+              isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
+              isDragging={!!drag}
+              onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
+              onCopy={() => setClipboard([step])}
+              onDelete={() => appAlert("Delete Step", "Remove this step?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
+              ])}
+              onDragStart={handleDragStart}
+              onDragMove={handleDragMove}
+              onDragEnd={handleDragEnd}
+              onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
+              onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
+              onEnterScope={pushScope}
+              onUpdateIfCondition={updateStep}
+              onItemLayout={handleItemLayout}
+              variables={variables}
+              contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
+              onEnterRoutine={!isRoutineMode ? (routineName) => {
+                router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
+              } : undefined}
+              onOpenCncBuilder={stepId => {
+                router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName, stepId } });
+              }}
+            />
+          ))}
+        </View>
+      )}
+
+      <View style={styles.addRow}>
+        <AnimatedPressable
+          style={styles.addCard}
+          onPress={() => openTypePicker({ mode: "append" })}
+        >
+          <Plus size={16} color="#2563eb" />
+          <Text style={styles.addCardText}>Add Step</Text>
+        </AnimatedPressable>
+        {clipboard.length > 0 && (
+          <AnimatedPressable
+            style={styles.pasteCard}
+            onPress={() => pasteStep({ mode: "append" })}
+          >
+            <ClipboardPaste size={16} color="#7c3aed" />
+            <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
+          </AnimatedPressable>
+        )}
+      </View>
+    </>
+  );
+
+  // On wide screens the save actions live in the header instead of a bottom
+  // bar — the bar's floating buttons can clip off-screen at some widths.
+  const headerActions = isWide ? (
+    <View style={{ flexDirection: "row", gap: 8 }}>
+      {isLocalMode && connected && (
+        <ActionButton
+          label="Save to Robot"
+          icon={<Upload size={14} color="#16a34a" />}
+          loading={savingToRobot}
+          style={styles.headerUploadBtn}
+          textStyle={styles.headerUploadText}
+          spinnerColor="#16a34a"
+          onPress={saveToRobot}
+        />
+      )}
+      <ActionButton
+        label="Save"
+        icon={<Wrench size={14} color="#fff" />}
+        loading={saving}
+        style={styles.headerSaveBtn}
+        textStyle={styles.headerSaveText}
+        spinnerColor="#fff"
+        onPress={handleSave}
+      />
+    </View>
+  ) : undefined;
+
   return (
     <View style={styles.container}>
-      <SubPageHeader title={builderTitle} onBack={handleBack} />
+      <SubPageHeader title={builderTitle} onBack={isWide ? exitBuilder : handleBack} right={headerActions} />
 
       {/* Multi-select toolbar */}
       {selectMode && (
@@ -768,27 +1106,47 @@ export default function BuilderScreen() {
         </View>
       )}
 
-      {scopeStack.length > 0 ? (
+      {isWide ? (
+        /* ── Wide layout: program info + variables left, step editor right ── */
         <>
-          {/* Breadcrumb */}
-          {scopeStack.length > 0 && (
-            <View style={styles.scopeBreadcrumb}>
-              <TouchableOpacity onPress={() => { exitSelect(); setScopeStack([]); }} hitSlop={8} activeOpacity={0.7}>
-                <Text style={styles.scopeBreadcrumbRoot}>Program</Text>
-              </TouchableOpacity>
-              {scopeStack.slice(0, -1).map((frame, fi) => (
-                <React.Fragment key={fi}>
-                  <ChevronRight size={12} color="#9ca3af" />
-                  <TouchableOpacity onPress={() => { exitSelect(); setScopeStack(prev => prev.slice(0, fi + 1)); }} hitSlop={8} activeOpacity={0.7}>
-                    <Text style={styles.scopeBreadcrumbItem}>{frame.label}</Text>
+          <View style={styles.wideRow}>
+            <ScrollView
+              style={[styles.widePaneLeft, isSplit && wide.paneSplit]}
+              contentContainerStyle={styles.widePaneLeftContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {metaSection}
+              {variablesSection}
+            </ScrollView>
+            <View style={styles.widePaneRight}>
+              {/* Scope header — back arrow + breadcrumb, scoped to the steps pane */}
+              {inScope && (
+                <View style={[styles.scopeBreadcrumb, styles.scopeHeaderWide]}>
+                  <TouchableOpacity style={styles.scopeBackBtn} onPress={popScope} hitSlop={8} activeOpacity={0.7}>
+                    <ArrowLeft size={16} color="#111827" />
                   </TouchableOpacity>
-                </React.Fragment>
-              ))}
-              <ChevronRight size={12} color="#9ca3af" />
-              <Text style={styles.scopeBreadcrumbCurrent}>{scopeStack[scopeStack.length - 1].label}</Text>
+                  <View style={styles.scopeTrailWrap}>{breadcrumbTrail}</View>
+                </View>
+              )}
+              <ScrollView
+                ref={el => { scrollViewRef.current = el; scopeScrollViewRef.current = el; }}
+                contentContainerStyle={[styles.content, styles.wideStepsContent]}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                scrollEnabled={drag === null}
+                onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+                scrollEventThrottle={16}
+              >
+                {!inScope && <Text style={styles.sectionLabel}>STEPS</Text>}
+                {stepsSection}
+              </ScrollView>
             </View>
-          )}
-
+          </View>
+        </>
+      ) : inScope ? (
+        <>
+          {breadcrumb}
           <ScrollView
             ref={scopeScrollViewRef}
             contentContainerStyle={styles.content}
@@ -798,77 +1156,7 @@ export default function BuilderScreen() {
             onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
             scrollEventThrottle={16}
           >
-            {currentSteps.length === 0 ? (
-              <View style={styles.emptySteps}>
-                <Cpu size={32} color="#d1d5db" />
-                <Text style={styles.emptyStepsText}>No steps in this scope</Text>
-              </View>
-            ) : (
-              <View style={styles.stepsList}>
-                <InsertDivider
-                  onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
-                  onPaste={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
-                  disabled={!!drag}
-                />
-                {currentSteps.map((step, i) => (
-                  <StepRow
-                    key={step.id}
-                    step={step}
-                    index={i}
-                    isLast={i === currentSteps.length - 1}
-                    selectMode={selectMode}
-                    selected={selectedIds.includes(step.id)}
-                    onLongPress={() => enterSelect(step.id)}
-                    onToggleSelect={() => toggleSelect(step.id)}
-                    isBeingDragged={drag?.id === step.id}
-                    isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
-                    isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
-                    isDragging={!!drag}
-                    onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
-                    onCopy={() => setClipboard([step])}
-                    onDelete={() => appAlert("Delete Step", "Remove this step?", [
-                      { text: "Cancel", style: "cancel" },
-                      { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
-                    ])}
-                    onDragStart={handleDragStart}
-                    onDragMove={handleDragMove}
-                    onDragEnd={handleDragEnd}
-                    onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
-                    onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
-                    onEnterScope={pushScope}
-                    onUpdateIfCondition={updateStep}
-                    onItemLayout={handleItemLayout}
-                    variables={variables}
-                    contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
-                    onEnterRoutine={!isRoutineMode ? (routineName) => {
-                      router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
-                    } : undefined}
-                    onOpenCncBuilder={stepId => {
-                      router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName, stepId } });
-                    }}
-                  />
-                ))}
-              </View>
-            )}
-
-            <View style={styles.addRow}>
-              <AnimatedPressable
-                style={styles.addCard}
-                onPress={() => openTypePicker({ mode: "append" })}
-              >
-                <Plus size={16} color="#2563eb" />
-                <Text style={styles.addCardText}>Add Step</Text>
-              </AnimatedPressable>
-              {clipboard.length > 0 && (
-                <AnimatedPressable
-                  style={styles.pasteCard}
-                  onPress={() => pasteStep({ mode: "append" })}
-                >
-                  <ClipboardPaste size={16} color="#7c3aed" />
-                  <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
-                </AnimatedPressable>
-              )}
-            </View>
+            {stepsSection}
           </ScrollView>
 
           {isLocalMode && connected && (
@@ -896,270 +1184,12 @@ export default function BuilderScreen() {
         onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
       >
-        {/* Name + description */}
-        <View style={styles.metaCard}>
-          <TextInput
-            style={styles.nameInput}
-            value={programName}
-            onChangeText={setProgramName}
-            placeholder={isRoutineMode ? "Routine name…" : isBackgroundMode ? "Background program name…" : "Program name…"}
-            placeholderTextColor="#9ca3af"
-            returnKeyType="next"
-          />
-          <View style={styles.metaSep} />
-          <TextInput
-            style={styles.descInput}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Description (optional)"
-            placeholderTextColor="#c4c4c4"
-            returnKeyType="done"
-          />
-          <View style={styles.metaSep} />
-
-          {/* Cover image row — hidden for routines and background programs */}
-          {!isRoutineMode && !isBackgroundMode && (
-            <>
-              <View style={styles.imageRow}>
-                <View style={styles.imagePreviewWrap}>
-                  {coverImage ? (
-                    <Image
-                      source={{ uri: `data:image/jpeg;base64,${coverImage}` }}
-                      style={styles.imagePreview}
-                    />
-                  ) : (
-                    <View style={styles.imagePreviewPlaceholder}>
-                      <ImagePlus size={22} color="#d1d5db" />
-                    </View>
-                  )}
-                </View>
-                <View style={styles.imageActions}>
-                  <TouchableOpacity style={styles.imageBtn} onPress={pickFromCamera} activeOpacity={0.75}>
-                    <Camera size={15} color="#2563eb" />
-                    <Text style={styles.imageBtnText}>Camera</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.imageBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
-                    <ImagePlus size={15} color="#2563eb" />
-                    <Text style={styles.imageBtnText}>Photo Library</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              {!isLocalMode && (
-                <>
-                  <View style={styles.metaSep} />
-                  <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
-                    onPress={() => setSettingsModalOpen(true)}
-                    activeOpacity={0.7}
-                  >
-                    <SlidersHorizontal size={16} color="#6b7280" />
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
-                    {isBackgroundMode && (
-                      <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                        <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
-                      </View>
-                    )}
-                    <ChevronRight size={15} color="#9ca3af" />
-                  </TouchableOpacity>
-                </>
-              )}
-            </>
-          )}
-
-          {/* Settings button for routines/background programs (no image row) */}
-          {!isLocalMode && (isRoutineMode || isBackgroundMode) && (
-            <>
-              <View style={styles.metaSep} />
-              <TouchableOpacity
-                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
-                onPress={() => setSettingsModalOpen(true)}
-                activeOpacity={0.7}
-              >
-                <SlidersHorizontal size={16} color="#6b7280" />
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
-                {isBackgroundMode && (
-                  <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                    <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
-                  </View>
-                )}
-                <ChevronRight size={15} color="#9ca3af" />
-              </TouchableOpacity>
-            </>
-          )}
-
-          {/* Variable context picker — routine mode only */}
-          {isRoutineMode && (
-            <>
-              <View style={styles.metaSep} />
-              <TouchableOpacity
-                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
-                onPress={() => setContextPickerOpen(true)}
-                activeOpacity={0.7}
-              >
-                <ChevronsRight size={16} color="#6b7280" />
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Variable Context</Text>
-                <Text style={{ fontSize: 12, color: contextProgramName ? "#2563eb" : "#9ca3af", maxWidth: 160 }} numberOfLines={1}>
-                  {contextProgramName ?? "None"}
-                </Text>
-                <ChevronRight size={15} color="#9ca3af" />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-
-        {/* Variables */}
-        <Text style={styles.sectionLabel}>VARIABLES</Text>
-        <View style={styles.variablesCard}>
-          {variables.length === 0 ? (
-            <Text style={styles.varEmptyText}>
-              No variables yet. Tap + to define reusable values you can reference in any numeric field.
-            </Text>
-          ) : (
-            variables.map((v, i) => (
-              <React.Fragment key={v.id}>
-                {i > 0 && <View style={styles.varSep} />}
-                <TouchableOpacity style={styles.varRow} onPress={() => openEditVar(v)} activeOpacity={0.7}>
-                  <View style={styles.varInfo}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text style={styles.varName}>${v.name}</Text>
-                      {v.points != null && (
-                        <View style={{ backgroundColor: "#ecfeff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>POINTS</Text>
-                        </View>
-                      )}
-                      {v.isBoolean && (
-                        <View style={{ backgroundColor: "#f0fdf4", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bbf7d0" }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#16a34a", letterSpacing: 0.3 }}>BOOL</Text>
-                        </View>
-                      )}
-                      {v.isGlobal && (
-                        <View style={{ backgroundColor: "#fffbeb", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#fde68a" }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#b45309", letterSpacing: 0.3 }}>GLOBAL</Text>
-                        </View>
-                      )}
-                      {v.displayOnMonitor && (
-                        <View style={{ backgroundColor: "#eff6ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bfdbfe" }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#2563eb", letterSpacing: 0.3 }}>MONITOR</Text>
-                        </View>
-                      )}
-                      {v.isStopwatch && (
-                        <View style={{ backgroundColor: "#e0f2fe", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#7dd3fc" }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>STOPWATCH</Text>
-                        </View>
-                      )}
-                      {v.isPersistent && (
-                        <View style={{ backgroundColor: "#f5f3ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#ddd6fe" }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: "#7c3aed", letterSpacing: 0.3 }}>PERSIST</Text>
-                        </View>
-                      )}
-                    </View>
-                    {v.description ? (
-                      <Text style={styles.varDesc}>{v.description}</Text>
-                    ) : v.points != null ? (
-                      <Text style={styles.varDesc}>Vector6[ ] — populated by RunVision</Text>
-                    ) : v.isBoolean ? (
-                      <Text style={styles.varDesc}>Boolean — initial: {v.value !== 0 ? "True" : "False"}</Text>
-                    ) : v.isStopwatch ? (
-                      <Text style={styles.varDesc}>Stopwatch — elapsed ms</Text>
-                    ) : (
-                      <Text style={styles.varDesc}>Initial: {v.value}</Text>
-                    )}
-                  </View>
-                  <DeleteIconButton
-                    size={14}
-                    onPress={() => appAlert("Delete Variable", `Remove $${v.name}? This can't be undone.`, [
-                      { text: "Cancel", style: "cancel" },
-                      { text: "Delete", style: "destructive", onPress: () => deleteVar(v.id) },
-                    ])}
-                  />
-                </TouchableOpacity>
-              </React.Fragment>
-            ))
-          )}
-          <TouchableOpacity
-            style={[styles.varAddBtn, variables.length > 0 && styles.varAddBtnBorder]}
-            onPress={openNewVar} activeOpacity={0.7}
-          >
-            <Plus size={13} color="#7c3aed" />
-            <Text style={styles.varAddText}>Add Variable</Text>
-          </TouchableOpacity>
-        </View>
+        {metaSection}
+        {variablesSection}
 
         {/* Steps (root level) */}
         <Text style={styles.sectionLabel}>STEPS</Text>
-
-        {steps.length === 0 ? (
-          <View style={styles.emptySteps}>
-            <Cpu size={32} color="#d1d5db" />
-            <Text style={styles.emptyStepsText}>No steps yet</Text>
-          </View>
-        ) : (
-          <View style={styles.stepsList}>
-            <InsertDivider
-              onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
-              onPaste={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
-              disabled={!!drag}
-            />
-            {steps.map((step, i) => (
-              <StepRow
-                key={step.id}
-                step={step}
-                index={i}
-                isLast={i === steps.length - 1}
-                selectMode={selectMode}
-                selected={selectedIds.includes(step.id)}
-                onLongPress={() => enterSelect(step.id)}
-                onToggleSelect={() => toggleSelect(step.id)}
-                isBeingDragged={drag?.id === step.id}
-                isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
-                isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
-                isDragging={!!drag}
-                onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
-                onCopy={() => setClipboard([step])}
-                onDelete={() => appAlert("Delete Step", "Remove this step?", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
-                ])}
-                onDragStart={handleDragStart}
-                onDragMove={handleDragMove}
-                onDragEnd={handleDragEnd}
-                onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
-                onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
-                onEnterScope={pushScope}
-                onUpdateIfCondition={updateStep}
-                onItemLayout={handleItemLayout}
-                variables={variables}
-                contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
-                onEnterRoutine={!isRoutineMode ? (routineName) => {
-                  router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
-                } : undefined}
-                onOpenCncBuilder={stepId => {
-                  router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName, stepId } });
-                }}
-              />
-            ))}
-          </View>
-        )}
-
-        {/* Add / Paste step */}
-        <View style={styles.addRow}>
-          <AnimatedPressable
-            style={styles.addCard}
-            onPress={() => openTypePicker({ mode: "append" })}
-          >
-            <Plus size={16} color="#2563eb" />
-            <Text style={styles.addCardText}>Add Step</Text>
-          </AnimatedPressable>
-          {clipboard.length > 0 && (
-            <AnimatedPressable
-              style={styles.pasteCard}
-              onPress={() => pasteStep({ mode: "append" })}
-            >
-              <ClipboardPaste size={16} color="#7c3aed" />
-              <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
-            </AnimatedPressable>
-          )}
-        </View>
+        {stepsSection}
       </ScrollView>
 
       {/* Bottom bar */}
@@ -1388,6 +1418,35 @@ export default function BuilderScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f3f4f6" },
   content:   { padding: 16, paddingBottom: 32, gap: 12 },
+
+  // ── Wide (desktop) two-pane layout ──────────────────────────────────────────
+  wideRow: {
+    flex: 1, flexDirection: "row",
+    width: "100%", maxWidth: 1200, alignSelf: "center",
+  },
+  widePaneLeft: {
+    width: 380, flexGrow: 0, flexShrink: 0,
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+  },
+  widePaneLeftContent: { padding: 16, paddingBottom: 32, gap: 12 },
+  widePaneRight: { flex: 1 },
+  wideStepsContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
+  // Compact header-slot save buttons (wide layout only).
+  headerSaveBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 7, backgroundColor: "#2563eb", borderRadius: 10,
+    paddingVertical: 9, paddingHorizontal: 20, minWidth: 96,
+    shadowColor: "#2563eb", shadowOpacity: 0.3, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 3,
+  },
+  headerSaveText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  headerUploadBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 7, backgroundColor: "#f0fdf4", borderRadius: 10,
+    borderWidth: 1.5, borderColor: "#86efac",
+    paddingVertical: 8, paddingHorizontal: 14,
+  },
+  headerUploadText: { fontSize: 13, fontWeight: "600", color: "#16a34a" },
 
   // Multi-select toolbar
   selectBar: {
@@ -1627,6 +1686,16 @@ const styles = StyleSheet.create({
   scopeBreadcrumbRoot: { fontSize: 12, fontWeight: "600", color: "#2563eb" },
   scopeBreadcrumbItem: { fontSize: 12, fontWeight: "600", color: "#374151" },
   scopeBreadcrumbCurrent: { fontSize: 12, fontWeight: "700", color: "#111827" },
+
+  // Wide-mode scope header — lives above the steps pane, not the whole screen
+  scopeHeaderWide: { gap: 10, paddingVertical: 8, flexWrap: "nowrap" },
+  scopeBackBtn: {
+    width: 30, height: 30, borderRadius: 8, backgroundColor: "#f3f4f6",
+    justifyContent: "center", alignItems: "center", flexShrink: 0,
+  },
+  scopeTrailWrap: {
+    flex: 1, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4,
+  },
 
   bottomBar: {
     flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16,

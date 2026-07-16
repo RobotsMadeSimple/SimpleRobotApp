@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -246,7 +247,7 @@ export default function ToolsPage() {
       <SubPageHeader title="Tools" />
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {/* Section header */}

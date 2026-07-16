@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
@@ -194,7 +195,7 @@ export default function ConfigureRobot() {
       <SubPageHeader title="Configure Robot" />
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, wide.content]}
         showsVerticalScrollIndicator={false}
       >
 

@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -412,7 +413,7 @@ export default function CncBuilderScreen() {
         }
       />
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.scroll}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[s.scroll, wide.content]}>
 
         {/* DXF file selector */}
         <Text style={s.sectionLabel}>DXF FILE</Text>

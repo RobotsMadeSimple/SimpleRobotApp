@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useNanoIO } from "@/src/providers/RobotProvider";
@@ -85,7 +86,7 @@ export default function NanosPage() {
         }
       />
       <ScrollView
-        contentContainerStyle={{ paddingTop: 24, paddingBottom: 40, gap: 24 }}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {nano ? (

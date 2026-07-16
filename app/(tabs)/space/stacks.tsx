@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
@@ -70,7 +71,7 @@ export default function StacksPage() {
         data={stacks}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={gs.listContent}
+        contentContainerStyle={[gs.listContent, wide.content]}
         ListEmptyComponent={
           <View style={gs.emptyContainer}>
             <Layers size={40} color="#d1d5db" />

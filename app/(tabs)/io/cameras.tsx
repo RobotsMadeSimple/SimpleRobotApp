@@ -1,3 +1,4 @@
+import { wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraState } from "@/src/models/robotModels";
@@ -418,7 +419,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
         subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height} · ${camera.connected ? "Connected" : "Offline"}`}
       />
       <ScrollView
-        contentContainerStyle={{ paddingTop: 24, paddingBottom: 40, gap: 24 }}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         {camera.connected
@@ -485,7 +486,7 @@ function NewCameraPage() {
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <SubPageHeader title="New Camera" subtitle="USB Camera" />
       <ScrollView
-        contentContainerStyle={{ paddingTop: 24, paddingBottom: 40, gap: 24 }}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
         showsVerticalScrollIndicator={false}
       >
         <CameraConfigFields
