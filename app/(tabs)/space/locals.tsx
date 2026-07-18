@@ -326,18 +326,19 @@ export default function LocalsPage() {
                     {isActive && <View style={styles.radioDot} />}
                   </View>
 
-                  {/* Name + coords */}
+                  {/* Name + coords (position and rotation) */}
                   <View style={styles.localInfo}>
                     <Text style={[styles.localName, isActive && styles.localNameActive]}>
                       {local.name}
                     </Text>
                     {local.description ? (
                       <Text style={styles.localDesc} numberOfLines={1}>{local.description}</Text>
-                    ) : (
-                      <Text style={styles.localCoords}>
-                        {local.x.toFixed(1)}, {local.y.toFixed(1)}, {local.z.toFixed(1)}
-                      </Text>
-                    )}
+                    ) : null}
+                    <Text style={styles.localCoords} numberOfLines={1}>
+                      {local.x.toFixed(1)}, {local.y.toFixed(1)}, {local.z.toFixed(1)}
+                      {"  ·  R "}
+                      {local.rx.toFixed(1)}°, {local.ry.toFixed(1)}°, {local.rz.toFixed(1)}°
+                    </Text>
                   </View>
 
                   {isActive && (

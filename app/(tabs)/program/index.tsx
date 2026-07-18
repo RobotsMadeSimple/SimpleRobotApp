@@ -17,7 +17,7 @@ import {
   View,
 } from "react-native";
 
-// â”€â”€ Status theming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Status theming ─────────────────────────────────────────────────────────────
 
 type StatusTheme = { bg: string; text: string; bar: string; dot: string };
 
@@ -32,7 +32,7 @@ const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
   Error:     { bg: "#fef2f2", text: "#dc2626", bar: "#ef4444", dot: "#ef4444" },
 };
 
-// â”€â”€ Action buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Action buttons ─────────────────────────────────────────────────────────────
 
 type ActionBtn = { label: string; bg: string; onPress: () => void };
 
@@ -71,7 +71,7 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   }
 }
 
-// â”€â”€ Running Program Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Running Program Card ───────────────────────────────────────────────────────
 
 function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, onSpeedPress }: {
   p: ProgramSummary;
@@ -109,7 +109,7 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
         onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(p.name)}`)}
         style={styles.runningCard}
       >
-        {/* Status bar â€” shows run state only */}
+        {/* Status bar — shows run state only */}
         <View style={[styles.statusBar, { backgroundColor: hasAlert ? alertColor : theme.bg }]}>
           <View style={[styles.statusDot, { backgroundColor: hasAlert ? '#fff' : theme.dot }]} />
           <Text style={[styles.statusText, { color: hasAlert ? '#fff' : theme.text }]} numberOfLines={1}>
@@ -123,7 +123,7 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
           )}
         </View>
 
-        {/* Alert strip â€” separate row below status bar, always fully visible */}
+        {/* Alert strip — separate row below status bar, always fully visible */}
         {hasAlert && (
           <View style={[styles.alertStripe, { backgroundColor: alertColor }]}>
             {isError
@@ -204,7 +204,7 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
   );
 }
 
-// â”€â”€ Nav Tile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Nav Tile ───────────────────────────────────────────────────────────────────
 
 function NavTile({
   icon,
@@ -237,7 +237,7 @@ function NavTile({
   );
 }
 
-// â”€â”€ Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Screen ─────────────────────────────────────────────────────────────────────
 
 export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
@@ -365,7 +365,7 @@ export default function ProgramScreen() {
   );
 }
 
-// â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   scroll:   { flex: 1, backgroundColor: "#f3f4f6" },
