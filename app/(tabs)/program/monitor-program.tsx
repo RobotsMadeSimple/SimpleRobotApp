@@ -32,6 +32,7 @@ import { AlertTriangle,
   XCircle } from "lucide-react-native";
 import { useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState } from "react";
 import {
@@ -47,6 +48,7 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { wide } from "@/src/components/ui/responsive";
+import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
@@ -189,6 +191,32 @@ export default function MonitorProgramScreen() {
 
   const builtProgram = builtPrograms.find((p) => p.name === programName) ?? null;
   const isBuilt      = builtProgram !== null;
+
+  // Toolpath of the CNC block currently executing — polled from the robot,
+  // which resolves the origin anchor and runtime variables when the block
+  // starts. Only shown while the block is actually running.
+  const [cncToolpath, setCncToolpath] = useState<{ programName: string; paths: number[][]; holes: { x: number; y: number }[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => robotClient.getCncToolpath()
+      .then(tp => { if (!cancelled) setCncToolpath(tp); })
+      .catch(() => {});
+    poll();
+    const t = setInterval(poll, 1000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  const plannedCnc = useMemo(() => {
+    if (!cncToolpath || cncToolpath.programName !== programName)
+      return { paths: [] as { x: number; y: number }[][], holes: [] as { x: number; y: number }[] };
+    const paths: { x: number; y: number }[][] = [];
+    for (const flat of cncToolpath.paths ?? []) {
+      const pts: { x: number; y: number }[] = [];
+      for (let i = 0; i + 1 < flat.length; i += 2) pts.push({ x: flat[i], y: flat[i + 1] });
+      if (pts.length >= 2) paths.push(pts);
+    }
+    return { paths, holes: cncToolpath.holes ?? [] };
+  }, [cncToolpath, programName]);
 
   const liveProgram = programSummaries.find((p) => p.name === programName) ?? null;
   const program: ProgramSummary | null =
@@ -641,6 +669,21 @@ export default function MonitorProgramScreen() {
         <View style={styles.gapBand} />
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>POSITION</Text>
+
+          {/* Live path map — position, motion target, fading trail, planned CNC toolpath */}
+          {s && (
+            <View style={{ marginBottom: 10 }}>
+              <RobotPathMap
+                x={s.x ?? 0}
+                y={s.y ?? 0}
+                targetX={s.targetX}
+                targetY={s.targetY}
+                moving={s.moving}
+                plannedPaths={plannedCnc.paths}
+                plannedHoles={plannedCnc.holes}
+              />
+            </View>
+          )}
 
           {/* Current coords */}
           <View style={styles.coordRow}>

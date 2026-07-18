@@ -724,6 +724,50 @@ export default function BuilderScreen() {
     router.push(`/(tabs)/program/monitor-program?name=${encodeURIComponent(name)}`);
   }
 
+  // ── CNC builder handoff ───────────────────────────────────────────────────
+  // The CNC builder edits the robot's saved copy of the program, so the
+  // program must be saved before opening it, and the generated toolpath must
+  // be pulled back into this screen's local state on return.
+
+  const pendingCncStepRef = useRef<string | null>(null);
+
+  // Re-entry guard — the pre-open save takes a moment, and each extra tap in
+  // that window would push another CNC builder onto the navigation stack.
+  // Released when this screen regains focus.
+  const openingCncRef = useRef(false);
+  useFocusEffect(useCallback(() => { openingCncRef.current = false; }, []));
+
+  async function openCncBuilder(stepId: string) {
+    if (openingCncRef.current) return;
+    openingCncRef.current = true;
+    if (isLocalMode) {
+      openingCncRef.current = false;
+      appAlert("Robot Program Required", "The CNC builder edits the program saved on the robot. Save this program to the robot first, then edit the robot copy.");
+      return;
+    }
+    if (!(await save())) {
+      openingCncRef.current = false;
+      return;
+    }
+    pendingCncStepRef.current = stepId;
+    router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName: programName.trim(), stepId } });
+  }
+
+  useFocusEffect(useCallback(() => {
+    const stepId = pendingCncStepRef.current;
+    if (!stepId || isLocalMode) return;
+    const prog = builtPrograms.find(p => p.name === programName.trim());
+    const savedStep = prog ? findStepById(prog.steps, stepId) : null;
+    if (!savedStep) return;
+    const next = applyCncFieldsById(steps, stepId, savedStep);
+    if (JSON.stringify(next) === JSON.stringify(steps)) return;
+    setSteps(next);
+    // The robot copy was saved just before the handoff, so after pulling the
+    // toolpath back the local state matches the robot again.
+    setSavedSnapshot(JSON.stringify({ name: programName.trim(), description, steps: next, variables }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builtPrograms, steps, programName, description, variables, isLocalMode]));
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (localLoading) {
@@ -1009,9 +1053,7 @@ export default function BuilderScreen() {
               onEnterRoutine={!isRoutineMode ? (routineName) => {
                 router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
               } : undefined}
-              onOpenCncBuilder={stepId => {
-                router.push({ pathname: '/(tabs)/program/cnc-builder', params: { programName, stepId } });
-              }}
+              onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
             />
           ))}
         </View>
@@ -1411,6 +1453,44 @@ export default function BuilderScreen() {
       </Modal>
     </View>
   );
+}
+
+// ── CNC handoff helpers ───────────────────────────────────────────────────────
+
+/** Find a step by id anywhere in the nested step tree. */
+function findStepById(steps: ProgramStep[], id: string): ProgramStep | null {
+  for (const s of steps) {
+    if (s.id === id) return s;
+    const nested = [
+      ...(s.loopSteps ?? []),
+      ...(s.ifSteps ?? []),
+      ...(s.elseSteps ?? []),
+      ...(s.cncProgramSteps ?? []),
+      ...((s.elseIfBranches ?? []).flatMap(b => b.steps ?? [])),
+    ];
+    const found = findStepById(nested, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Copy the CNC toolpath fields from `src` onto the step with `id`, anywhere in the tree. */
+function applyCncFieldsById(steps: ProgramStep[], id: string, src: ProgramStep): ProgramStep[] {
+  return steps.map(s => {
+    if (s.id === id)
+      return { ...s, cncDxfFile: src.cncDxfFile, cncSafeZ: src.cncSafeZ, cncSpec: src.cncSpec, cncProgramSteps: src.cncProgramSteps };
+    return {
+      ...s,
+      loopSteps:       s.loopSteps       ? applyCncFieldsById(s.loopSteps, id, src) : undefined,
+      ifSteps:         s.ifSteps         ? applyCncFieldsById(s.ifSteps, id, src) : undefined,
+      elseSteps:       s.elseSteps       ? applyCncFieldsById(s.elseSteps, id, src) : undefined,
+      cncProgramSteps: s.cncProgramSteps ? applyCncFieldsById(s.cncProgramSteps, id, src) : undefined,
+      elseIfBranches:  s.elseIfBranches  ? s.elseIfBranches.map(b => ({
+        ...b,
+        steps: applyCncFieldsById(b.steps ?? [], id, src),
+      })) : undefined,
+    };
+  });
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────

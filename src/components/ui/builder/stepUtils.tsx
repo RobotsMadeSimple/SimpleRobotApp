@@ -455,8 +455,82 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return parts.length ? parts.join('  ·  ') : null;
     }
     case "CncProgram": {
-      const n = Math.floor((step.cncProgramSteps ?? []).length / 2);
-      const parts = [`${n} hole${n !== 1 ? 's' : ''}`];
+      const spec = step.cncSpec;
+      if (spec) {
+        // Multi-row breakdown — StepRow renders each \n-separated line as a row.
+        const ex = spec.expressions ?? {};
+        const v = (key: string, num: number | null | undefined): string | undefined =>
+          ex[key] ?? (num != null ? String(num) : undefined);
+        const lines: string[] = [];
+
+        const h = spec.holes?.length ?? 0;
+        const c = spec.paths?.length ?? 0;
+        const head: string[] = [];
+        if (h > 0) head.push(`${h} hole${h !== 1 ? 's' : ''}`);
+        if (c > 0) head.push(`${c} contour${c !== 1 ? 's' : ''}`);
+        lines.push(head.length > 0 ? head.join(' · ') : 'empty');
+
+        if (spec.file) lines.push(spec.file);
+
+        const z: string[] = [`safe Z ${v('safeZ', spec.safeZ)}`];
+        if (c > 0) z.push(`active Z ${v('activeZ', spec.activeZ ?? 0)}`);
+        lines.push(z.join(' · '));
+
+        if (c > 0) {
+          const spd: string[] = [];
+          const a = v('activeSpeed', spec.activeSpeed);
+          const t = v('travelSpeed', spec.travelSpeed);
+          if (a) spd.push(`active ${a} mm/s`);
+          if (t) spd.push(`travel ${t} mm/s`);
+          if (spd.length > 0) lines.push(spd.join(' · '));
+
+          const pts = (spec.paths ?? []).reduce((n, p) => n + Math.floor((p?.length ?? 0) / 2), 0);
+          const path: string[] = [`${pts} pts`];
+          const br = v('blendRadius', spec.blendRadius);
+          if (br && br !== '0') path.push(`blend ${br} mm`);
+          if (spec.offsetMode && spec.offsetMode !== 'none')
+            path.push(`${spec.offsetMode} offset ${spec.offsetDistance ?? 0} mm`);
+          lines.push(path.join(' · '));
+
+          if (spec.originMode === 'current') {
+            const nudge = (spec.offsetX || spec.offsetY) ? ` +(${spec.offsetX ?? 0}, ${spec.offsetY ?? 0})` : '';
+            lines.push(`origin: robot position${nudge}`);
+          } else {
+            const sc = spec.scale != null && spec.scale !== 1 ? ` · ×${spec.scale}` : '';
+            lines.push(`origin (${spec.offsetX ?? 0}, ${spec.offsetY ?? 0})${sc}`);
+          }
+        }
+
+        if (h > 0) {
+          const drill = spec.holeOp === 'drill';
+          const th: string[] = [drill ? 'drill' : 'thread'];
+          const depth = v('holeDepth', spec.holeDepth);
+          if (depth) th.push(`depth ${depth} mm`);
+          if (!drill) {
+            if (ex.threadPitch) {
+              th.push(`pitch ${ex.threadPitch}`);
+            } else if (spec.threadPitch != null) {
+              const preset = THREAD_PRESETS.find(p => Math.abs(p.pitch - spec.threadPitch!) < 0.001);
+              th.push(preset ? preset.label : `${spec.threadPitch} mm/rev`);
+            }
+          }
+          if (spec.holePeck) th.push(`peck ${v('holePeckDepth', spec.holePeckDepth) ?? ''} mm`);
+          if (!drill && spec.threadReverseOut) th.push('rev out');
+          lines.push(th.join(' · '));
+        }
+
+        return lines.join('\n');
+      }
+
+      // Legacy blocks with baked steps
+      const parts: string[] = [];
+      const inner = step.cncProgramSteps ?? [];
+      const threads  = inner.filter(s => s.type === "ThreadMove").length;
+      const contours = inner.filter(s => s.name?.startsWith("Contour")).length;
+      if (threads > 0)       parts.push(`${threads} hole${threads !== 1 ? 's' : ''}`);
+      else if (contours > 0) parts.push(`${contours} contour${contours !== 1 ? 's' : ''}`, `${inner.length} steps`);
+      else if (inner.length) parts.push(`${inner.length} steps`);
+      else                   parts.push('empty');
       if (step.cncSafeZ != null) parts.push(`safe Z ${step.cncSafeZ} mm`);
       return parts.join('  ·  ');
     }
@@ -500,7 +574,7 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "WaitForBackground",label: "Wait for Background",   desc: "Block until a named background program finishes" },
   { type: "StopwatchControl", label: "Stopwatch",             desc: "Start, stop, or reset a stopwatch variable — value holds elapsed milliseconds" },
   { type: "SaveImage",        label: "Save Image",             desc: "Capture a camera snapshot and save to a file path — supports $variable interpolation including $time_ms" },
-  { type: "CncProgram",      label: "CNC Program",            desc: "Generate a CNC threading toolpath from a DXF file — select holes and produce MoveL + ThreadMove steps" },
+  { type: "CncProgram",      label: "CNC Program",            desc: "Generate a toolpath from a DXF or SVG file — thread selected holes, or follow contours as continuous blended moves" },
 ];
 
 export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;

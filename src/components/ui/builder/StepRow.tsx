@@ -266,9 +266,8 @@ export function StepRow({
               onPress={() => selectMode ? onToggleSelect?.() : onOpenCncBuilder(step.id)}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>
-                {(step.cncProgramSteps ?? []).length / 2 | 0} hole{(step.cncProgramSteps ?? []).length / 2 !== 1 ? "s" : ""}{step.cncDxfFile ? `  ·  ${step.cncDxfFile}` : ""}
-              </Text>
+              {/* Counts and file live in the detail rows above — this is just the door */}
+              <Text style={{ fontSize: 12, color: "#64748b" }}>Edit toolpath</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Open</Text>
                 <ArrowRight size={13} color={theme.iconColor} />

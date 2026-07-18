@@ -1214,6 +1214,15 @@ export class RobotConnectService {
     return this.sendCommand('StopVision', { id });
   }
 
+  /**
+   * Resolved XY toolpath of the CNC block currently executing on the robot —
+   * origin anchor and runtime variables applied. Null when no block is active.
+   */
+  public async getCncToolpath(): Promise<{ programName: string; paths: number[][]; holes: { x: number; y: number }[] } | null> {
+    const data: any = await this.sendCommand('GetCncToolpath', {});
+    return data?.toolpath ?? null;
+  }
+
   public async getVisionResult(id: string): Promise<VisionResult | null> {
     const data: any = await this.sendCommand('GetVisionResult', { id });
     if (!data?.result) return null;

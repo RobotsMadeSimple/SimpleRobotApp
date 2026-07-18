@@ -1,4 +1,4 @@
-﻿// â”€â”€ Nano IO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿// ── Nano IO ───────────────────────────────────────────────────────────────────
 
 export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured';
 
@@ -21,7 +21,7 @@ export type NanoState = {
 
 export type NeoPixelColor = { r: number; g: number; b: number };
 
-// â”€â”€ Aux Axis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Aux Axis ──────────────────────────────────────────────────────────────────
 
 export type AuxAxisChannelState = {
   axisIndex: number;
@@ -58,7 +58,7 @@ export function auxUnitLabel(axis: AuxAxisChannelState): string {
   return 'steps';
 }
 
-// â”€â”€ USB Cameras â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── USB Cameras ───────────────────────────────────────────────────────────────
 
 export type CameraState = {
   id: string;
@@ -72,7 +72,7 @@ export type CameraState = {
   supportedResolutions: { width: number; height: number }[];
 };
 
-// â”€â”€ USB Relay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── USB Relay ─────────────────────────────────────────────────────────────────
 
 export type UsbRelayState = {
   connected: boolean;
@@ -81,7 +81,7 @@ export type UsbRelayState = {
   names: string[];           // display names, index 0 = relay 1
 };
 
-// â”€â”€ Vision â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Vision ────────────────────────────────────────────────────────────────────
 
 export type VisionZoneShape = 'Rectangle' | 'Circle' | 'Polygon';
 
@@ -132,7 +132,7 @@ export type PolygonInspection = {
   sides: number;
   minArea: number;
   maxArea: number;
-  /** ApproxPolyDP accuracy factor â€” fraction of perimeter (0.01â€“0.1) */
+  /** ApproxPolyDP accuracy factor — fraction of perimeter (0.01–0.1) */
   epsilon: number;
   minThreshold: number;
   maxThreshold: number;
@@ -146,9 +146,9 @@ export type PolygonResult = {
   found: boolean;
   /** Orientation angle in degrees from MinAreaRect of the largest matching polygon */
   angle: number;
-  /** Normalized centroid X (0â€“1) of the largest matching polygon */
+  /** Normalized centroid X (0–1) of the largest matching polygon */
   centerX: number;
-  /** Normalized centroid Y (0â€“1) of the largest matching polygon */
+  /** Normalized centroid Y (0–1) of the largest matching polygon */
   centerY: number;
 };
 
@@ -199,26 +199,26 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
   };
 }
 
-// â”€â”€ Program builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Program builder ───────────────────────────────────────────────────────────
 
 export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius';
 
 export const THREAD_PRESETS: { label: string; pitch: number; group: 'metric' | 'imperial' }[] = [
   // Metric coarse
-  { label: 'M2 Ã— 0.4',    pitch: 0.400, group: 'metric' },
-  { label: 'M2.5 Ã— 0.45', pitch: 0.450, group: 'metric' },
-  { label: 'M3 Ã— 0.5',    pitch: 0.500, group: 'metric' },
-  { label: 'M3.5 Ã— 0.6',  pitch: 0.600, group: 'metric' },
-  { label: 'M4 Ã— 0.7',    pitch: 0.700, group: 'metric' },
-  { label: 'M5 Ã— 0.8',    pitch: 0.800, group: 'metric' },
-  { label: 'M6 Ã— 1.0',    pitch: 1.000, group: 'metric' },
-  { label: 'M8 Ã— 1.25',   pitch: 1.250, group: 'metric' },
-  { label: 'M10 Ã— 1.5',   pitch: 1.500, group: 'metric' },
-  { label: 'M12 Ã— 1.75',  pitch: 1.750, group: 'metric' },
-  { label: 'M14 Ã— 2.0',   pitch: 2.000, group: 'metric' },
-  { label: 'M16 Ã— 2.0',   pitch: 2.000, group: 'metric' },
-  { label: 'M20 Ã— 2.5',   pitch: 2.500, group: 'metric' },
-  { label: 'M24 Ã— 3.0',   pitch: 3.000, group: 'metric' },
+  { label: 'M2x0.4',    pitch: 0.400, group: 'metric' },
+  { label: 'M2.5x0.45', pitch: 0.450, group: 'metric' },
+  { label: 'M3x0.5',    pitch: 0.500, group: 'metric' },
+  { label: 'M3.5x0.6',  pitch: 0.600, group: 'metric' },
+  { label: 'M4x0.7',    pitch: 0.700, group: 'metric' },
+  { label: 'M5x0.8',    pitch: 0.800, group: 'metric' },
+  { label: 'M6x1.0',    pitch: 1.000, group: 'metric' },
+  { label: 'M8x1.25',   pitch: 1.250, group: 'metric' },
+  { label: 'M10x1.5',   pitch: 1.500, group: 'metric' },
+  { label: 'M12x1.75',  pitch: 1.750, group: 'metric' },
+  { label: 'M14x2.0',   pitch: 2.000, group: 'metric' },
+  { label: 'M16x2.0',   pitch: 2.000, group: 'metric' },
+  { label: 'M20x2.5',   pitch: 2.500, group: 'metric' },
+  { label: 'M24x3.0',   pitch: 3.000, group: 'metric' },
   // Imperial UNC
   { label: '#4-40',        pitch: 0.635, group: 'imperial' },
   { label: '#6-32',        pitch: 0.794, group: 'imperial' },
@@ -248,7 +248,7 @@ export type ColorEntry = {
   r: number;
   g: number;
   b: number;
-  /** 0â€“100: per-channel Â± tolerance * 2.55 in RGB space */
+  /** 0–100: per-channel ± tolerance * 2.55 in RGB space */
   tolerance: number;
 };
 
@@ -313,15 +313,15 @@ export type LineInspection = {
 };
 
 export type LineSegment = {
-  /** Normalized (0â€“1) start X */
+  /** Normalized (0–1) start X */
   x1: number;
-  /** Normalized (0â€“1) start Y */
+  /** Normalized (0–1) start Y */
   y1: number;
-  /** Normalized (0â€“1) end X */
+  /** Normalized (0–1) end X */
   x2: number;
-  /** Normalized (0â€“1) end Y */
+  /** Normalized (0–1) end Y */
   y2: number;
-  /** Undirected angle in degrees (0â€“180): 0=horizontal, 90=vertical */
+  /** Undirected angle in degrees (0–180): 0=horizontal, 90=vertical */
   angle: number;
   /** Pixel length of the detected segment */
   length: number;
@@ -428,22 +428,22 @@ export function defaultColorCoverageInspection(index: number): ColorCoverageInsp
 
 export const ARUCO_DICTIONARIES: { id: number; label: string }[] = [
   { id: -1, label: 'Auto Detect (All)' },
-  { id: 0,  label: '4Ã—4  (50 IDs)'   },
-  { id: 1,  label: '4Ã—4  (100 IDs)'  },
-  { id: 2,  label: '4Ã—4  (250 IDs)'  },
-  { id: 3,  label: '4Ã—4  (1000 IDs)' },
-  { id: 4,  label: '5Ã—5  (50 IDs)'   },
-  { id: 5,  label: '5Ã—5  (100 IDs)'  },
-  { id: 6,  label: '5Ã—5  (250 IDs)'  },
-  { id: 7,  label: '5Ã—5  (1000 IDs)' },
-  { id: 8,  label: '6Ã—6  (50 IDs)'   },
-  { id: 9,  label: '6Ã—6  (100 IDs)'  },
-  { id: 10, label: '6Ã—6  (250 IDs)'  },
-  { id: 11, label: '6Ã—6  (1000 IDs)' },
-  { id: 12, label: '7Ã—7  (50 IDs)'   },
-  { id: 13, label: '7Ã—7  (100 IDs)'  },
-  { id: 14, label: '7Ã—7  (250 IDs)'  },
-  { id: 15, label: '7Ã—7  (1000 IDs)' },
+  { id: 0,  label: '4x4  (50 IDs)'   },
+  { id: 1,  label: '4x4  (100 IDs)'  },
+  { id: 2,  label: '4x4  (250 IDs)'  },
+  { id: 3,  label: '4x4  (1000 IDs)' },
+  { id: 4,  label: '5x5  (50 IDs)'   },
+  { id: 5,  label: '5x5  (100 IDs)'  },
+  { id: 6,  label: '5x5  (250 IDs)'  },
+  { id: 7,  label: '5x5  (1000 IDs)' },
+  { id: 8,  label: '6x6  (50 IDs)'   },
+  { id: 9,  label: '6x6  (100 IDs)'  },
+  { id: 10, label: '6x6  (250 IDs)'  },
+  { id: 11, label: '6x6  (1000 IDs)' },
+  { id: 12, label: '7x7  (50 IDs)'   },
+  { id: 13, label: '7x7  (100 IDs)'  },
+  { id: 14, label: '7x7  (250 IDs)'  },
+  { id: 15, label: '7x7  (1000 IDs)' },
   { id: 16, label: 'ArUco Original'  },
 ];
 
@@ -526,13 +526,13 @@ export type ProgramVariable = {
   isGlobal?: boolean;
   /** When true, the current runtime value is shown on the monitor page while the program runs. */
   displayOnMonitor?: boolean;
-  /** When true, this variable is a stopwatch â€” its value holds elapsed milliseconds, updated every tick at runtime. */
+  /** When true, this variable is a stopwatch — its value holds elapsed milliseconds, updated every tick at runtime. */
   isStopwatch?: boolean;
   /** When true, the runtime value is saved to disk when the program finishes and restored on the next run. */
   isPersistent?: boolean;
   /** When true, this variable holds a string value (stored in stringValue). */
   isString?: boolean;
-  /** String variable initial/default value â€” only meaningful when isString is true. */
+  /** String variable initial/default value — only meaningful when isString is true. */
   stringValue?: string;
 };
 
@@ -569,7 +569,7 @@ export type ProgramStep = {
   toolOffsetRX?: number;
   toolOffsetRY?: number;
   toolOffsetRZ?: number;
-  // Per-axis absolute overrides â€” replace the calculated axis value (base + offset) (mm / deg)
+  // Per-axis absolute overrides — replace the calculated axis value (base + offset) (mm / deg)
   overrideX?: number;
   overrideY?: number;
   overrideZ?: number;
@@ -594,7 +594,7 @@ export type ProgramStep = {
   // SetVariable
   variableName?: string;
   variableExpr?: string;
-  // Variable expressions â€” keyed by camelCase field name, override literal numeric values at execution time
+  // Variable expressions — keyed by camelCase field name, override literal numeric values at execution time
   expressions?: Record<string, string>;
   gridPoint?: GridPoint;
   stackPoint?: StackPoint;
@@ -608,7 +608,7 @@ export type ProgramStep = {
   elseSteps?: ProgramStep[];
   // SetTool
   toolName?: string;
-  // SetLocal / ClearLocal â€” also used as per-step local override on move steps
+  // SetLocal / ClearLocal — also used as per-step local override on move steps
   localName?: string;
   // JumpL / JumpJ
   jumpZ?: number;
@@ -649,9 +649,9 @@ export type ProgramStep = {
   // AuxMove / AuxContinuous / AuxStop
   auxDeviceId?: string;
   auxAxisIndex?: number;
-  auxSteps?: number;        // signed â€” negative = reverse direction (raw steps)
+  auxSteps?: number;        // signed — negative = reverse direction (raw steps)
   auxDistance?: number;     // physical distance: mm (Linear) or degrees (Rotary)
-  auxUnit?: string;         // "mm" | "deg" â€” when set, auxDistance + physical velocity used
+  auxUnit?: string;         // "mm" | "deg" — when set, auxDistance + physical velocity used
   auxVelocity?: number;     // steps/sec OR physical unit/sec when auxUnit set
   auxAccel?: number;        // steps/secÂ² OR physical unit/secÂ² when auxUnit set
   auxDecel?: number;        // steps/secÂ² (AuxMove + AuxStop ramp-down)
@@ -665,10 +665,74 @@ export type ProgramStep = {
   threadPeck?: boolean;
   threadPeckDepth?: number;
   threadReverseOut?: boolean;
-  // CncProgram
+  // CncProgram — cncSpec is the current format (steps generated at runtime by
+  // the controller); cncProgramSteps holds baked steps from older versions.
   cncDxfFile?: string;
   cncSafeZ?: number;
   cncProgramSteps?: ProgramStep[];
+  cncSpec?: CncSpec;
+};
+
+/** Hole position for CNC threading (robot coordinates, mm). */
+export type CncHole = { x: number; y: number };
+
+/**
+ * CNC toolpath specification saved on a CncProgram step. Holes are threaded
+ * and contours followed from the same block; the controller expands this into
+ * steps at runtime so large toolpaths don't bloat the stored program. The
+ * selection indexes and placement settings restore the CNC builder UI.
+ */
+export type CncSpec = {
+  file?: string;
+  safeZ: number;
+  // Holes — drilled or threaded, per holeOp
+  holes?: CncHole[];
+  holeIndexes?: number[];
+  /** "thread" (default) taps each hole with the pitch below; "drill" plunges straight down. */
+  holeOp?: "drill" | "thread";
+  holeDepth?: number;
+  threadPitch?: number;
+  holePeck?: boolean;
+  holePeckDepth?: number;
+  threadReverseOut?: boolean;
+  // Contours — baked robot-space polylines ([x0,y0,x1,y1,…] per contour)
+  paths?: number[][];
+  contourIndexes?: number[];
+  scale?: number;
+  offsetX?: number;
+  offsetY?: number;
+  flipY?: boolean;
+  activeZ?: number;
+  activeSpeed?: number;
+  activeAccel?: number;
+  activeDecel?: number;
+  /** Dynamics for safe-Z travel between contours and the retract; plunge uses active dynamics. */
+  travelSpeed?: number;
+  travelAccel?: number;
+  travelDecel?: number;
+  blendRadius?: number;
+  detail?: number;
+  /** Max endpoint gap (mm) for chaining touching segments into one pass. */
+  joinTolerance?: number;
+  /** Tool-radius compensation applied when the paths were baked (app-side). */
+  offsetMode?: "none" | "outside" | "inside";
+  offsetDistance?: number;
+  /**
+   * "absolute" (default): baked coordinates used as-is. "current": the robot's
+   * position when the block starts becomes the origin — all X/Y/Z relative.
+   */
+  originMode?: "absolute" | "current";
+  /** Base-contour indexes run in reverse direction (baked into paths). */
+  contourReversed?: number[];
+  /** Preferred start point per base-contour index (closed loops; baked into paths). */
+  contourStarts?: Record<string, CncHole>;
+  /**
+   * $variable expressions for motion fields, keyed by spec field name (safeZ,
+   * activeZ, activeSpeed, activeAccel, activeDecel, travelSpeed, travelAccel,
+   * travelDecel, blendRadius, threadDepth, threadPitch). Evaluated on the
+   * robot at run time.
+   */
+  expressions?: Record<string, string>;
 };
 
 export type BuiltProgram = {
@@ -690,7 +754,7 @@ export type BackgroundProgramStatus = {
   currentStep: string;
 };
 
-// â”€â”€ Program cycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Program cycle ─────────────────────────────────────────────────────────────
 
 export type ProgramStatus =
   | 'Ready' | 'Starting' | 'Running' | 'Finishing'
@@ -710,14 +774,14 @@ export type ProgramSummary = {
   currentOffsetRX?: number; currentOffsetRY?: number; currentOffsetRZ?: number;
   currentToolOffsetX?: number;  currentToolOffsetY?: number;  currentToolOffsetZ?: number;
   currentToolOffsetRX?: number; currentToolOffsetRY?: number; currentToolOffsetRZ?: number;
-  /** Flag set by mobile app â€” external program reads and consumes this */
+  /** Flag set by mobile app — external program reads and consumes this */
   start: boolean;
   stop: boolean;
   reset: boolean;
   abort: boolean;
 };
 
-// â”€â”€ Robot info / status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Robot info / status ───────────────────────────────────────────────────────
 
 export type RobotInfo = {
   robotName: string;
