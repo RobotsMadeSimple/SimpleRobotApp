@@ -18,6 +18,14 @@ type Props = {
   onStart: () => void;
   onStop: () => void;
   size?: number;
+  /** Rest border + text colour (default neutral grey). */
+  color?: string;
+  /** Border colour while pressed (default blue). */
+  activeColor?: string;
+  /** Background colour while pressed (default light blue). */
+  activeBg?: string;
+  /** Background colour at rest (default transparent). */
+  restBg?: string;
 };
 
 export function JogButton({
@@ -27,6 +35,10 @@ export function JogButton({
   onStart,
   onStop,
   size = 70,
+  color = "#666666",
+  activeColor = "#2563eb",
+  activeBg = "#dbeafe",
+  restBg = "transparent",
 }: Props) {
   const isRow     = iconPosition === "left" || iconPosition === "right";
   const isReverse = iconPosition === "below" || iconPosition === "right";
@@ -45,8 +57,8 @@ export function JogButton({
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(pressed.value, [0, 1], ["transparent", "#dbeafe"]),
-    borderColor:     interpolateColor(pressed.value, [0, 1], ["#666666",     "#2563eb"]),
+    backgroundColor: interpolateColor(pressed.value, [0, 1], [restBg, activeBg]),
+    borderColor:     interpolateColor(pressed.value, [0, 1], [color,  activeColor]),
     transform: [{ scale: 1 - pressed.value * 0.06 }],
   }));
 
@@ -61,7 +73,7 @@ export function JogButton({
           ]}
         >
           {icon}
-          <Text style={[styles.text, { fontSize }]}>{label}</Text>
+          <Text style={[styles.text, { fontSize, color }]}>{label}</Text>
         </View>
       </Animated.View>
     </GestureDetector>
