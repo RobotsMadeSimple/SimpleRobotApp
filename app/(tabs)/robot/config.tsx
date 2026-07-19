@@ -7,6 +7,8 @@ import {
   MoveHorizontal,
   MoveVertical,
   RotateCcw,
+  Ruler,
+  ShieldAlert,
   Zap,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -14,6 +16,7 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -57,11 +60,21 @@ type RobotConfig = {
   cncXHomingDirection: number;
   cncYHomingDirection: number;
   cncZHomingDirection: number;
+  // Joint soft limits — null means the bound is unset (not enforced)
+  jointLimitsEnabled: boolean;
+  joint1Min: number | null;
+  joint1Max: number | null;
+  joint2Min: number | null;
+  joint2Max: number | null;
+  joint3Min: number | null;
+  joint3Max: number | null;
+  joint4Min: number | null;
+  joint4Max: number | null;
 };
 
 type EditingField = {
   label: string;
-  type: "number" | "direction" | "homing" | "cncAxis";
+  type: "number" | "direction" | "homing" | "cncAxis" | "jointLimit";
   numKey?: keyof RobotConfig;
   numText: string;
   unit?: string;
@@ -74,6 +87,11 @@ type EditingField = {
   cncMeasureKey?: keyof RobotConfig;
   cncMeasureText?: string;
   cncIsRotary?: boolean;
+  // jointLimit only
+  minKey?: keyof RobotConfig;
+  minText?: string;
+  maxKey?: keyof RobotConfig;
+  maxText?: string;
 };
 
 // ── Config row ────────────────────────────────────────────────────────────────
@@ -85,13 +103,15 @@ function ConfigRow({
   value,
   last = false,
   onPress,
+  right,
 }: {
   icon: React.ReactNode;
   tileBg?: string;
   label: string;
-  value: string;
+  value?: string;
   last?: boolean;
   onPress?: () => void;
+  right?: React.ReactNode;
 }) {
   return (
     <TouchableOpacity
@@ -104,7 +124,7 @@ function ConfigRow({
         {icon}
       </View>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>
+      {right ?? <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>}
     </TouchableOpacity>
   );
 }
@@ -151,6 +171,13 @@ export default function ConfigureRobot() {
 
   const isCNC = config?.robotType === "CNC4Axis";
 
+  async function toggleJointLimits() {
+    if (!config) return;
+    const next = !config.jointLimitsEnabled;
+    setConfig({ ...config, jointLimitsEnabled: next });
+    try { await robotClient.setRobotConfig({ jointLimitsEnabled: next }); } catch {}
+  }
+
   async function saveField() {
     if (!editing || !config) return;
     setSaving(true);
@@ -163,6 +190,17 @@ export default function ConfigureRobot() {
       if (editing.type === "cncAxis") {
         if (editing.cncStepsKey)   patch[editing.cncStepsKey]   = parseInt(editing.cncStepsText  ?? "1600") || 1600;
         if (editing.cncMeasureKey) patch[editing.cncMeasureKey] = parseFloat(editing.cncMeasureText ?? "5") || 5;
+      }
+      if (editing.type === "jointLimit") {
+        // Blank (or unparseable) clears the bound — send null so it becomes unset.
+        const parseBound = (t?: string) => {
+          const s = (t ?? "").trim();
+          if (s === "") return null;
+          const n = parseFloat(s);
+          return Number.isFinite(n) ? n : null;
+        };
+        if (editing.minKey) patch[editing.minKey] = parseBound(editing.minText);
+        if (editing.maxKey) patch[editing.maxKey] = parseBound(editing.maxText);
       }
       await robotClient.setRobotConfig(patch);
       setConfig({ ...config, ...patch });
@@ -420,6 +458,60 @@ export default function ConfigureRobot() {
           ))}
         </View>
 
+        {/* ── Joint Limits ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>JOINT LIMITS</Text>
+        </View>
+        <View style={styles.card}>
+          <ConfigRow
+            icon={<ShieldAlert size={16} color={config?.jointLimitsEnabled ? "#16a34a" : "#9ca3af"} />}
+            tileBg={config?.jointLimitsEnabled ? "#f0fdf4" : "#f3f4f6"}
+            label="Soft Limits"
+            right={
+              <Switch
+                value={!!config?.jointLimitsEnabled}
+                onValueChange={toggleJointLimits}
+                disabled={!config}
+                trackColor={{ true: "#16a34a", false: "#d1d5db" }}
+                thumbColor="#fff"
+              />
+            }
+          />
+          {((isCNC
+            ? [
+                { label: "X — Linear",  minKey: "joint1Min" as const, maxKey: "joint1Max" as const, unit: "mm" },
+                { label: "Y — Linear",  minKey: "joint2Min" as const, maxKey: "joint2Max" as const, unit: "mm" },
+                { label: "Z — Linear",  minKey: "joint3Min" as const, maxKey: "joint3Max" as const, unit: "mm" },
+                { label: "RZ — Rotary", minKey: "joint4Min" as const, maxKey: "joint4Max" as const, unit: "°"  },
+              ]
+            : [
+                { label: "J1 — Base Rotation", minKey: "joint1Min" as const, maxKey: "joint1Max" as const, unit: "°"  },
+                { label: "J2 — Radial Reach",  minKey: "joint2Min" as const, maxKey: "joint2Max" as const, unit: "mm" },
+                { label: "J3 — Vertical",      minKey: "joint3Min" as const, maxKey: "joint3Max" as const, unit: "mm" },
+                { label: "J4 — EOAT Rotation", minKey: "joint4Min" as const, maxKey: "joint4Max" as const, unit: "°"  },
+              ]) as { label: string; minKey: keyof RobotConfig; maxKey: keyof RobotConfig; unit: string }[])
+            .map(({ label, minKey, maxKey, unit }, idx, arr) => (
+              <ConfigRow
+                key={minKey}
+                icon={<Ruler size={16} color="#0891b2" />}
+                tileBg="#ecfeff"
+                label={label}
+                value={config
+                  ? (config[minKey] == null && config[maxKey] == null
+                      ? "Not set"
+                      : `${config[minKey] ?? "—"} … ${config[maxKey] ?? "—"} ${unit}`)
+                  : "—"}
+                last={idx === arr.length - 1}
+                onPress={config ? () => setEditing({
+                  label, type: "jointLimit",
+                  numText: "", dirValue: 1, unit,
+                  minKey, minText: config[minKey] == null ? "" : String(config[minKey]),
+                  maxKey, maxText: config[maxKey] == null ? "" : String(config[maxKey]),
+                }) : undefined}
+              />
+            ))}
+        </View>
+
         {/* ── Edit modal ── */}
         <Modal
           visible={editing !== null}
@@ -455,6 +547,31 @@ export default function ConfigureRobot() {
                     value={editing.dirValue}
                     onChange={v => setEditing(e => e ? { ...e, dirValue: v } : e)}
                   />
+                </>
+              )}
+
+              {editing?.type === "jointLimit" && (
+                <>
+                  <Text style={styles.editLabel}>MINIMUM {editing.unit ? `(${editing.unit})` : ""}</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editing.minText}
+                    onChangeText={v => setEditing(e => e ? { ...e, minText: v } : e)}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder="Unset"
+                    placeholderTextColor="#9ca3af"
+                    autoFocus
+                  />
+                  <Text style={styles.editLabel}>MAXIMUM {editing.unit ? `(${editing.unit})` : ""}</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editing.maxText}
+                    onChangeText={v => setEditing(e => e ? { ...e, maxText: v } : e)}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder="Unset"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <Text style={styles.limitHint}>Leave a field blank to disable that bound.</Text>
                 </>
               )}
 
@@ -627,6 +744,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#111827",
     backgroundColor: "#f9fafb",
+    marginBottom: 12,
+  },
+  limitHint: {
+    fontSize: 11,
+    color: "#9ca3af",
+    marginTop: -4,
     marginBottom: 12,
   },
 

@@ -933,6 +933,15 @@ export type RobotStatus = {
   isLinux: boolean,
   backgroundPrograms: BackgroundProgramStatus[],
   speedOverridePercent: number,
+
+  // Joint soft-limit fault state
+  faulted: boolean,
+  faultJoint: number,       // 0..3 joint index (0=J1, 1=J2, 2=J3, 3=J4), -1 = none
+  faultDirection: number,   // +1 = the "increase" button worsens it, -1 = the "decrease" button worsens it
+  faultMessage: string,
+  limitBypass: boolean,
+  jointLimitsEnabled: boolean,
+  robotType: string,        // "ASTRO" | "CNC4Axis" — drives joint labelling
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -998,5 +1007,12 @@ export function createDefaultStatus(): RobotStatus {
     isLinux: false,
     backgroundPrograms: [],
     speedOverridePercent: 100,
+    faulted: false,
+    faultJoint: -1,
+    faultDirection: 0,
+    faultMessage: "",
+    limitBypass: false,
+    jointLimitsEnabled: false,
+    robotType: "ASTRO",
   };
 }

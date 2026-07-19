@@ -15,6 +15,7 @@ import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import "@/global.css";
 import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
+import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
 import { RobotProvider } from "@/src/providers/RobotProvider";
 import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { StatusBar } from "expo-status-bar";
@@ -30,6 +31,7 @@ export default function Layout() {
               <StatusBar style="dark" translucent={false} />
               <TabLayout />
               <AppAlertHost />
+              <FaultRecoveryOverlay />
             </RobotProvider>
           </SafeAreaProvider>
         </GluestackUIProvider>

@@ -1032,6 +1032,15 @@ export class RobotConnectService {
     cncXHomingDirection: number;
     cncYHomingDirection: number;
     cncZHomingDirection: number;
+    jointLimitsEnabled: boolean;
+    joint1Min: number | null;
+    joint1Max: number | null;
+    joint2Min: number | null;
+    joint2Max: number | null;
+    joint3Min: number | null;
+    joint3Max: number | null;
+    joint4Min: number | null;
+    joint4Max: number | null;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -1069,8 +1078,29 @@ export class RobotConnectService {
     cncXHomingDirection?: number;
     cncYHomingDirection?: number;
     cncZHomingDirection?: number;
+    jointLimitsEnabled?: boolean;
+    joint1Min?: number | null;
+    joint1Max?: number | null;
+    joint2Min?: number | null;
+    joint2Max?: number | null;
+    joint3Min?: number | null;
+    joint3Max?: number | null;
+    joint4Min?: number | null;
+    joint4Max?: number | null;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
+  }
+
+  // ── Joint-limit fault recovery ─────────────────────────────────────────────
+
+  /** Acknowledge and clear a latched joint-limit fault (also exits bypass). */
+  public clearFault() {
+    return this.sendCommand("ClearFault");
+  }
+
+  /** Enter/exit recovery bypass so a faulted robot can be jogged back into range. */
+  public setLimitBypass(enable: boolean) {
+    return this.sendCommand("SetLimitBypass", { enable });
   }
 
   // ── Aux Axis ───────────────────────────────────────────────────────────────
