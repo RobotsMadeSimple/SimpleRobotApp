@@ -309,10 +309,11 @@ export default function JogScreen() {
         { label: "J4", value: s?.joint4Angle, unit: "°" },
       ]
     : [
-        { label: "X",  value: s?.x,  unit: "mm" },
-        { label: "Y",  value: s?.y,  unit: "mm" },
-        { label: "Z",  value: s?.z,  unit: "mm" },
-        { label: "RZ", value: s?.rz, unit: "°"  },
+        // Local-frame position — tracks the selected local (equals world when none)
+        { label: "X",  value: s?.localX,  unit: "mm" },
+        { label: "Y",  value: s?.localY,  unit: "mm" },
+        { label: "Z",  value: s?.localZ,  unit: "mm" },
+        { label: "RZ", value: s?.localRZ, unit: "°"  },
       ];
 
   return (
