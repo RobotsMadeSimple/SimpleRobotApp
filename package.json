@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "electron": "npx expo export --platform web && electron electron.js",
-    "electron:build": "npx expo export --platform web && npx esbuild electron.js --bundle --platform=node --outfile=electron-bundle.js --external:electron && electron-builder --win"
+    "electron:build": "npx expo export --platform web && npx esbuild electron.js --bundle --platform=node --outfile=electron-bundle.js --external:electron && electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.robotsmadesimple.app",
