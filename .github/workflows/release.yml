@@ -37,9 +37,10 @@ jobs:
           node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.version='$version';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
 
       - name: Build Electron installer
+        # --publish never (in the npm script) keeps electron-builder from touching
+        # the GitHub release; the "Upload to release" step below publishes the
+        # installer using the built-in GITHUB_TOKEN, so no PAT is needed here.
         run: npm run electron:build
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
 
       - name: Rename installer to fixed filename
         run: Get-ChildItem dist\*.exe | Select-Object -First 1 | Rename-Item -NewName "SimpleRobotApp-Setup.exe"
