@@ -876,6 +876,12 @@ export type RobotStatus = {
   ry: number,
   rz: number,
 
+  // TCP position expressed in the active local's frame (equals world when none)
+  localX: number,
+  localY: number,
+  localZ: number,
+  localRZ: number,
+
   targetX: number,
   targetY: number,
   targetZ: number,
@@ -956,6 +962,10 @@ export function createDefaultStatus(): RobotStatus {
     rx: 0,
     ry: 0,
     rz: 0,
+    localX: 0,
+    localY: 0,
+    localZ: 0,
+    localRZ: 0,
     targetX: 0,
     targetY: 0,
     targetZ: 0,
