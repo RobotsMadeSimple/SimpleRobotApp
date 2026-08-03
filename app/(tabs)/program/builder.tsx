@@ -19,7 +19,9 @@ import {
   Cpu,
   ImagePlus,
   Plus,
+  Repeat,
   Repeat2,
+  Scissors,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -49,6 +51,7 @@ import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
 import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
+import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 
@@ -219,17 +222,31 @@ export default function BuilderScreen() {
 
   // ── Clipboard ─────────────────────────────────────────────────────────────
 
-  const [clipboard, setClipboard] = useState<ProgramStep[]>([]);
+  // Shared across builder instances so a copy made inside a pushed routine
+  // survives backing out to the parent program (and pastes across programs).
+  const [clipboard, setClipboard] = useStepClipboard();
+
+  // A fully independent copy of a step (steps are always JSON-serialisable — they
+  // round-trip through the robot as JSON). Used so the clipboard never holds live
+  // references into the current `steps` state; sharing references let a later
+  // re-render/edit blank out the copy until the screen was remounted.
+  function deepCloneStep(step: ProgramStep): ProgramStep {
+    return JSON.parse(JSON.stringify(step));
+  }
+
+  // Recursively assign fresh ids to a step and everything nested inside it.
+  function reassignIds(step: ProgramStep): ProgramStep {
+    step.id = newId();
+    step.loopSteps?.forEach(reassignIds);
+    step.ifSteps?.forEach(reassignIds);
+    step.elseSteps?.forEach(reassignIds);
+    step.elseIfBranches?.forEach(b => { b.id = newId(); b.steps.forEach(reassignIds); });
+    return step;
+  }
 
   function cloneStepWithNewIds(step: ProgramStep): ProgramStep {
-    return {
-      ...step,
-      id: newId(),
-      loopSteps:      step.loopSteps?.map(cloneStepWithNewIds),
-      ifSteps:        step.ifSteps?.map(cloneStepWithNewIds),
-      elseSteps:      step.elseSteps?.map(cloneStepWithNewIds),
-      elseIfBranches: step.elseIfBranches?.map(b => ({ ...b, id: newId(), steps: b.steps.map(cloneStepWithNewIds) })),
-    };
+    // Deep clone first (full independence), then re-key in place on the throwaway.
+    return reassignIds(deepCloneStep(step));
   }
 
   function pasteStep(target: InsertTarget) {
@@ -276,7 +293,42 @@ export default function BuilderScreen() {
   function copySelected() {
     const sel = selectedInOrder();
     if (sel.length === 0) return;
-    setClipboard(sel);
+    // Store detached copies so the clipboard is immune to later edits/re-renders.
+    setClipboard(sel.map(deepCloneStep));
+    exitSelect();
+  }
+
+  // Cut = copy the selection to the clipboard, then remove it from the program.
+  // No confirmation: it's non-destructive (still on the clipboard to paste back).
+  function cutSelected() {
+    const sel = selectedInOrder();
+    if (sel.length === 0) return;
+    setClipboard(sel.map(deepCloneStep));
+    setSteps(prev => {
+      const scoped = getStepsAtScope(prev, scopeStackRef.current).filter(s => !selectedIds.includes(s.id));
+      return setStepsAtScope(prev, scopeStackRef.current, scoped);
+    });
+    exitSelect();
+  }
+
+  // Wrap the selected steps into a new Loop, in place. The selected steps are
+  // moved (ids preserved) into the loop's body; the loop takes the position of
+  // the first selected step.
+  function wrapSelectedInLoop() {
+    if (selectedIds.length === 0) return;
+    setSteps(prev => {
+      const scoped  = getStepsAtScope(prev, scopeStackRef.current);
+      const inner   = scoped.filter(s => selectedIds.includes(s.id));
+      const loop: ProgramStep = { ...defaultStep("Loop"), loopSteps: inner };
+      const firstIdx = scoped.findIndex(s => selectedIds.includes(s.id));
+      const rebuilt: ProgramStep[] = [];
+      scoped.forEach((s, i) => {
+        if (i === firstIdx) rebuilt.push(loop);
+        if (!selectedIds.includes(s.id)) rebuilt.push(s);
+      });
+      if (firstIdx < 0) rebuilt.push(loop);
+      return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
+    });
     exitSelect();
   }
 
@@ -1035,7 +1087,7 @@ export default function BuilderScreen() {
               isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
               isDragging={!!drag}
               onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
-              onCopy={() => setClipboard([step])}
+              onCopy={() => setClipboard([deepCloneStep(step)])}
               onDelete={() => appAlert("Delete Step", "Remove this step?", [
                 { text: "Cancel", style: "cancel" },
                 { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
@@ -1118,7 +1170,13 @@ export default function BuilderScreen() {
             <X size={20} color="#374151" />
           </TouchableOpacity>
           <Text style={styles.selectCount}>{selectedIds.length} selected</Text>
-          <View style={{ flex: 1 }} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.selectActions}
+            contentContainerStyle={styles.selectActionsContent}
+            keyboardShouldPersistTaps="handled"
+          >
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
             onPress={copySelected}
@@ -1127,6 +1185,24 @@ export default function BuilderScreen() {
           >
             <Copy size={16} color="#2563eb" />
             <Text style={styles.selectActionText}>Copy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={cutSelected}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            <Scissors size={16} color="#2563eb" />
+            <Text style={styles.selectActionText}>Cut</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={wrapSelectedInLoop}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            <Repeat size={16} color="#0891b2" />
+            <Text style={[styles.selectActionText, { color: "#0891b2" }]}>Loop</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
@@ -1145,6 +1221,7 @@ export default function BuilderScreen() {
           >
             <Trash2 size={16} color="#dc2626" />
           </TouchableOpacity>
+          </ScrollView>
         </View>
       )}
 
@@ -1540,6 +1617,8 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e7eb",
   },
   selectCount: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  selectActions: { flex: 1 },
+  selectActionsContent: { gap: 8, alignItems: "center", flexGrow: 1, justifyContent: "flex-end" },
   selectAction: {
     flexDirection: "row",
     alignItems: "center",
