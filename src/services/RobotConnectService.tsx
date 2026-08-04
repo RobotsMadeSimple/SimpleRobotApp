@@ -67,6 +67,7 @@ export class RobotConnectService {
   private builtPrograms:  BuiltProgram[]                = [];
   private nanoIO:         NanoState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
+  private lastRelayJson:  string                        = "";
   private auxAxis:        AuxDeviceState[]              = [];
   private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
@@ -218,6 +219,9 @@ export class RobotConnectService {
         if (!Array.isArray(data.backgroundPrograms)) {
           data.backgroundPrograms = [];
         }
+        // Relay board state now rides along in the status broadcast so relays
+        // changed by a running program update live (not just on page entry).
+        this.updateRelayFromStatus(data.relay);
         this.emitStatus(data);
         break;
       
@@ -283,6 +287,18 @@ export class RobotConnectService {
       this.cameras = [];
     }
     this.emitCameras();
+  }
+
+  // Apply the relay board state carried in the status broadcast (an object,
+  // unlike the JSON string GetIO returns). Only emits when it actually changed,
+  // so relay-page consumers don't re-render on every status tick.
+  private updateRelayFromStatus(relay: any) {
+    if (!relay || typeof relay !== "object") return;
+    const json = JSON.stringify(relay);
+    if (json === this.lastRelayJson) return;
+    this.lastRelayJson = json;
+    this.relayIO = relay as UsbRelayState;
+    this.emitRelayIO();
   }
 
   private decodeIO(data: any) {

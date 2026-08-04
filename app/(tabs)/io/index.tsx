@@ -122,6 +122,9 @@ export default function IoPage() {
           enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
         }));
       robotClient.getCameras().catch(() => {});
+      // Refresh Nano + relay state so the IO summary cards reflect outputs a
+      // running program changed, not the stale state from the last app action.
+      robotClient.getIO().catch(() => {});
     }, [])
   );
 
