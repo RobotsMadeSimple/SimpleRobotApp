@@ -15,13 +15,14 @@ import { ms } from "./builderStyles";
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
-export type VarKind = "number" | "boolean" | "list" | "points" | "string";
+export type VarKind = "number" | "boolean" | "list" | "points" | "string" | "image";
 
 export function varKind(v: ProgramVariable): VarKind {
   if (v.points != null) return "points";
   if (v.values != null && v.values.length > 0) return "list";
   if (v.isBoolean) return "boolean";
   if (v.isString) return "string";
+  if (v.isImage) return "image";
   return "number";
 }
 
@@ -34,6 +35,7 @@ export const VAR_KIND_META: Record<
   list:    { label: "LIST", color: "#7c3aed", bg: "#ede9fe", border: "#c4b5fd" },
   points:  { label: "PTS",  color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
   string:  { label: "STR",  color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
+  image:   { label: "IMG",  color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
 };
 
 export function VarPickerModal({

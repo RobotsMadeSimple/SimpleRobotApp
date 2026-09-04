@@ -28,6 +28,7 @@ import { AlertTriangle,
   Gauge,
   Layers,
   Play,
+  Square,
   Trash2,
   XCircle } from "lucide-react-native";
 import { useCallback,
@@ -189,8 +190,10 @@ export default function MonitorProgramScreen() {
   const allAxes = (isAstro ? ["X", "Y", "Z", "RZ"] : ["X", "Y", "Z", "RX", "RY", "RZ"]) as string[];
   const fmt    = (v?: number) => (v ?? 0).toFixed(1);
 
-  const builtProgram = builtPrograms.find((p) => p.name === programName) ?? null;
-  const isBuilt      = builtProgram !== null;
+  const builtProgram  = builtPrograms.find((p) => p.name === programName) ?? null;
+  const isBuilt       = builtProgram !== null;
+  const isBackground  = builtProgram?.isBackground ?? false;
+  const bgRunning     = (robotStatus.backgroundPrograms ?? []).find(b => b.name === programName) ?? null;
 
   // Toolpath of the CNC block currently executing — polled from the robot,
   // which resolves the origin anchor and runtime variables when the block
@@ -219,8 +222,14 @@ export default function MonitorProgramScreen() {
   }, [cncToolpath, programName]);
 
   const liveProgram = programSummaries.find((p) => p.name === programName) ?? null;
+
+  // For background programs, build a richer synthetic summary from the live bg status
+  const bgSynth: ProgramSummary | null = isBackground && builtProgram
+    ? { ...syntheticSummary(builtProgram), status: bgRunning ? 'Running' : 'Ready', currentStepDescription: bgRunning?.currentStep ?? '' }
+    : null;
+
   const program: ProgramSummary | null =
-    liveProgram ?? (builtProgram ? syntheticSummary(builtProgram) : null);
+    liveProgram ?? bgSynth ?? (builtProgram ? syntheticSummary(builtProgram) : null);
 
   // Guard against double-tap opening two builder screens
   const navigatingToEdit = useRef(false);
@@ -240,6 +249,7 @@ export default function MonitorProgramScreen() {
   const [deleting, setDeleting] = useState(false);
   const status = program?.status;
   useEffect(() => { setPending(null); }, [status]);
+  useEffect(() => { setPending(null); }, [!!bgRunning]);
   useEffect(() => {
     if (!pending) return;
     const t = setTimeout(() => setPending(null), 3000);
@@ -375,7 +385,7 @@ export default function MonitorProgramScreen() {
 
   // ── Variable snapshots ────────────────────────────────────────────────────
   const [varSnapshots, setVarSnapshots] = useState<ProgramVariableSnapshot[]>([]);
-  const hasMonitoredVars = (builtProgram?.variables ?? []).some(v => v.displayOnMonitor && v.points == null && v.values == null);
+  const hasMonitoredVars = (builtProgram?.variables ?? []).some(v => v.displayOnMonitor && v.points == null && v.values == null && !v.isImage);
 
   useFocusEffect(
     useCallback(() => {
@@ -522,12 +532,17 @@ export default function MonitorProgramScreen() {
                 {program.status}
               </Text>
             </View>
-            {isBuilt && (
+            {isBackground ? (
+              <View style={[styles.builtChip, styles.bgChip]}>
+                <Layers size={11} color="#16a34a" />
+                <Text style={[styles.builtChipText, { color: "#16a34a" }]}>BACKGROUND</Text>
+              </View>
+            ) : isBuilt ? (
               <View style={styles.builtChip}>
                 <Cpu size={11} color="#2563eb" />
                 <Text style={styles.builtChipText}>BUILT</Text>
               </View>
-            )}
+            ) : null}
           </View>
 
           {/* Image + name/description */}
@@ -591,7 +606,29 @@ export default function MonitorProgramScreen() {
           </View>
 
           {/* ── Action buttons ── */}
-          {showActions && (
+          {isBackground ? (
+            <View style={styles.inlineActions}>
+              {bgRunning ? (
+                <ActionButton
+                  label="Stop"
+                  icon={<Square size={14} color="#fff" fill="#fff" />}
+                  loading={pending === "Stop"}
+                  style={[styles.actionBtn, { backgroundColor: "#dc2626" }]}
+                  textStyle={styles.actionBtnText}
+                  onPress={() => { setPending("Stop"); robotClient.stopBackgroundProgram(programName).catch(() => {}); }}
+                />
+              ) : (
+                <ActionButton
+                  label="Start"
+                  icon={<Play size={15} color="#fff" />}
+                  loading={pending === "Start"}
+                  style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
+                  textStyle={styles.actionBtnText}
+                  onPress={() => { setPending("Start"); robotClient.startBackgroundProgram(programName).catch(() => {}); }}
+                />
+              )}
+            </View>
+          ) : showActions ? (
             <View style={styles.inlineActions}>
               {isRunnable ? (
                 <ActionButton
@@ -621,7 +658,7 @@ export default function MonitorProgramScreen() {
                 })
               )}
             </View>
-          )}
+          ) : null}
         </View>
 
         {/* ── Variables ── */}
@@ -648,113 +685,109 @@ export default function MonitorProgramScreen() {
           </>
         )}
 
-        {/* ── Speed Override ── */}
-        <View style={styles.gapBand} />
-        <TouchableOpacity style={styles.section} onPress={() => setSpeedModalOpen(true)} activeOpacity={0.7}>
-          {(() => {
-            const pct   = s?.speedOverridePercent ?? 100;
-            const color = pct > 100 ? "#dc2626" : pct < 50 ? "#d97706" : "#2563eb";
-            return (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <Gauge size={16} color={color} />
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Speed Override</Text>
-                <Text style={{ fontSize: 16, fontWeight: "700", color }}>{Math.round(pct)}%</Text>
-                <ChevronRight size={16} color="#d1d5db" />
+        {/* ── Speed Override + Position (foreground only) ── */}
+        {!isBackground && (
+          <>
+            <View style={styles.gapBand} />
+            <TouchableOpacity style={styles.section} onPress={() => setSpeedModalOpen(true)} activeOpacity={0.7}>
+              {(() => {
+                const pct   = s?.speedOverridePercent ?? 100;
+                const color = pct > 100 ? "#dc2626" : pct < 50 ? "#d97706" : "#2563eb";
+                return (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <Gauge size={16} color={color} />
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Speed Override</Text>
+                    <Text style={{ fontSize: 16, fontWeight: "700", color }}>{Math.round(pct)}%</Text>
+                    <ChevronRight size={16} color="#d1d5db" />
+                  </View>
+                );
+              })()}
+            </TouchableOpacity>
+
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>POSITION</Text>
+
+              {s && (
+                <View style={{ marginBottom: 10 }}>
+                  <RobotPathMap
+                    x={s.x ?? 0}
+                    y={s.y ?? 0}
+                    targetX={s.targetX}
+                    targetY={s.targetY}
+                    moving={s.moving}
+                    plannedPaths={plannedCnc.paths}
+                    plannedHoles={plannedCnc.holes}
+                  />
+                </View>
+              )}
+
+              <View style={styles.coordRow}>
+                {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
+                  <View key={axis} style={styles.coordCell}>
+                    <Text style={styles.coordLabel}>{axis}</Text>
+                    <Text style={styles.coordValue}>
+                      {fmt(s?.[axis.toLowerCase() as "x" | "y" | "z" | "rz"])}
+                    </Text>
+                  </View>
+                ))}
               </View>
-            );
-          })()}
-        </TouchableOpacity>
 
-        {/* ── Position ── */}
-        <View style={styles.gapBand} />
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>POSITION</Text>
+              <View style={[styles.coordRow, styles.coordRowTarget]}>
+                {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
+                  <View key={axis} style={styles.coordCell}>
+                    <Text style={styles.coordLabelTarget}>{axis}</Text>
+                    <Text style={styles.coordValueTarget}>
+                      {fmt(s?.[`target${axis[0]}${axis.slice(1).toLowerCase()}` as "targetX" | "targetY" | "targetZ" | "targetRz"])}
+                    </Text>
+                  </View>
+                ))}
+              </View>
 
-          {/* Live path map — position, motion target, fading trail, planned CNC toolpath */}
-          {s && (
-            <View style={{ marginBottom: 10 }}>
-              <RobotPathMap
-                x={s.x ?? 0}
-                y={s.y ?? 0}
-                targetX={s.targetX}
-                targetY={s.targetY}
-                moving={s.moving}
-                plannedPaths={plannedCnc.paths}
-                plannedHoles={plannedCnc.holes}
-              />
+              <View style={styles.posSubRow}>
+                <Text style={styles.posSubLabel}>POINT</Text>
+                <Text style={[styles.posSubValue, !program.currentPointName && styles.posSubPlaceholder]}>
+                  {program.currentPointName || "—"}
+                </Text>
+              </View>
+
+              <View style={styles.posSubRow}>
+                <Text style={styles.posSubLabel}>SPEED</Text>
+                <Text style={styles.posSubValue}>{fmt(s?.speedS)} mm/s</Text>
+                <Text style={styles.posSubDot}>·</Text>
+                <Text style={styles.posSubLabel}>ACCEL</Text>
+                <Text style={styles.posSubValue}>{fmt(s?.accelS)} mm/s²</Text>
+                <Text style={styles.posSubDot}>·</Text>
+                <Text style={styles.posSubLabel}>DECEL</Text>
+                <Text style={styles.posSubValue}>{fmt(s?.decelS)} mm/s²</Text>
+              </View>
+
+              <View style={styles.posSubRow}>
+                <Text style={styles.posSubLabel}>OFFSET</Text>
+                {allAxes.map((lbl) => {
+                  const v = program[`currentOffset${lbl}` as keyof typeof program] as number | undefined;
+                  return (
+                    <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
+                      {lbl} {v != null ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—"}{"  "}
+                    </Text>
+                  );
+                })}
+              </View>
+
+              <View style={styles.posSubRow}>
+                <Text style={styles.posSubLabel}>TOOL</Text>
+                {allAxes.map((lbl) => {
+                  const v = program[`currentToolOffset${lbl}` as keyof typeof program] as number | undefined;
+                  return (
+                    <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
+                      {lbl} {v != null ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—"}{"  "}
+                    </Text>
+                  );
+                })}
+              </View>
             </View>
-          )}
-
-          {/* Current coords */}
-          <View style={styles.coordRow}>
-            {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
-              <View key={axis} style={styles.coordCell}>
-                <Text style={styles.coordLabel}>{axis}</Text>
-                <Text style={styles.coordValue}>
-                  {fmt(s?.[axis.toLowerCase() as "x" | "y" | "z" | "rz"])}
-                </Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Target coords */}
-          <View style={[styles.coordRow, styles.coordRowTarget]}>
-            {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
-              <View key={axis} style={styles.coordCell}>
-                <Text style={styles.coordLabelTarget}>{axis}</Text>
-                <Text style={styles.coordValueTarget}>
-                  {fmt(s?.[`target${axis[0]}${axis.slice(1).toLowerCase()}` as "targetX" | "targetY" | "targetZ" | "targetRz"])}
-                </Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Point name */}
-          <View style={styles.posSubRow}>
-            <Text style={styles.posSubLabel}>POINT</Text>
-            <Text style={[styles.posSubValue, !program.currentPointName && styles.posSubPlaceholder]}>
-              {program.currentPointName || "—"}
-            </Text>
-          </View>
-
-          {/* Speeds */}
-          <View style={styles.posSubRow}>
-            <Text style={styles.posSubLabel}>SPEED</Text>
-            <Text style={styles.posSubValue}>{fmt(s?.speedS)} mm/s</Text>
-            <Text style={styles.posSubDot}>·</Text>
-            <Text style={styles.posSubLabel}>ACCEL</Text>
-            <Text style={styles.posSubValue}>{fmt(s?.accelS)} mm/s²</Text>
-            <Text style={styles.posSubDot}>·</Text>
-            <Text style={styles.posSubLabel}>DECEL</Text>
-            <Text style={styles.posSubValue}>{fmt(s?.decelS)} mm/s²</Text>
-          </View>
-
-          {/* Position offset */}
-          <View style={styles.posSubRow}>
-            <Text style={styles.posSubLabel}>OFFSET</Text>
-            {allAxes.map((lbl) => {
-              const v = program[`currentOffset${lbl}` as keyof typeof program] as number | undefined;
-              return (
-                <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
-                  {lbl} {v != null ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—"}{"  "}
-                </Text>
-              );
-            })}
-          </View>
-
-          {/* Tool offset */}
-          <View style={styles.posSubRow}>
-            <Text style={styles.posSubLabel}>TOOL</Text>
-            {allAxes.map((lbl) => {
-              const v = program[`currentToolOffset${lbl}` as keyof typeof program] as number | undefined;
-              return (
-                <Text key={lbl} style={[styles.posSubValue, v == null && styles.posSubPlaceholder]}>
-                  {lbl} {v != null ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—"}{"  "}
-                </Text>
-              );
-            })}
-          </View>
-        </View>
+          </>
+        )}
 
         {/* ── Program management (built only) ── */}
         {isBuilt && (
@@ -805,8 +838,8 @@ export default function MonitorProgramScreen() {
           </>
         )}
 
-        {/* ── Background Programs ── */}
-        {(robotStatus.backgroundPrograms ?? []).length > 0 && (
+        {/* ── Background Programs (not shown when viewing a background program) ── */}
+        {!isBackground && (robotStatus.backgroundPrograms ?? []).length > 0 && (
           <>
             <View style={styles.gapBand} />
             <View style={styles.section}>
@@ -954,6 +987,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 5,
   },
   builtChipText: { fontSize: 11, fontWeight: "700", color: "#2563eb", letterSpacing: 0.5 },
+  bgChip: { backgroundColor: "#dcfce7" },
 
   heroIdentity: { flexDirection: "row", gap: 16, alignItems: "center" },
   imageWrap: {

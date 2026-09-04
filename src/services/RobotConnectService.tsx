@@ -100,8 +100,15 @@ export class RobotConnectService {
     this.unsubscribe = subscribeRobot(robot => {
       if (!robot) return;
       this.url = `ws://${robot.ipAddress}:${robot.port}/control`;
-      console.log("Found Robot ip and port, updated the url point: ", this.url);
-    })
+    });
+
+    // Auto-reconnect to the last connected robot (persisted across page refreshes).
+    const persisted = getSelectedRobot();
+    if (persisted) {
+      this.url = `ws://${persisted.ipAddress}:${persisted.port}/control`;
+      this.reconnect = true;
+      this.connect();
+    }
   }
 
   connectTo(robot: RobotInfo) {

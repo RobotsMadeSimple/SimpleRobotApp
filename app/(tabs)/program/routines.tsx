@@ -1,166 +1,102 @@
-import { wide } from "@/src/components/ui/responsive";
-import {
-  NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { ProgramListLayout, SortKey, relativeTime } from "@/src/components/ui/ProgramListLayout";
+import { BuiltProgram } from "@/src/models/robotModels";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box,
-  Plus,
-  Repeat2,
-  Trash2 } from "lucide-react-native";
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Box, Repeat2 } from "lucide-react-native";
+import { useState } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function RoutinesScreen() {
   const allPrograms = useBuiltPrograms();
+  const [search, setSearch] = useState("");
+  const [sort, setSort]     = useState<SortKey>("name");
+
   const routines = allPrograms.filter(p => p.isRoutine);
+
+  const q = search.trim().toLowerCase();
+
+  const filtered = routines
+    .filter(r => !q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q))
+    .sort((a, b) =>
+      sort === "modified"
+        ? (b.lastUpdatedUnixMs ?? 0) - (a.lastUpdatedUnixMs ?? 0)
+        : a.name.localeCompare(b.name)
+    );
 
   function handleDelete(name: string) {
     appAlert("Delete Routine", `Delete "${name}"? This cannot be undone.`, [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}),
-      },
+      { text: "Delete", style: "destructive", onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}) },
     ]);
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <NotConnectedOverlay />
-      <SubPageHeader
-        title="Routines"
-        right={
-          <TouchableOpacity
-            onPress={() => router.push("/program/builder?isRoutine=1")}
-            style={styles.addBtn}
-          >
-            <Plus size={18} color="#fff" />
-          </TouchableOpacity>
-        }
-      />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.content, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
-        {routines.length === 0 ? (
-          <View style={styles.empty}>
-            <Box size={44} color="#d1d5db" />
-            <Text style={styles.emptyTitle}>No Routines</Text>
-            <Text style={styles.emptySubtitle}>
-              Routines are reusable step sequences that can be called from any program.
-            </Text>
-          </View>
-        ) : (
-          routines.map(r => (
-            <TouchableOpacity
-              key={r.name}
-              style={styles.card}
-              onPress={() => router.push(`/program/builder?name=${encodeURIComponent(r.name)}`)}
-              activeOpacity={0.75}
-            >
-              <View style={styles.cardIcon}>
-                <Repeat2 size={20} color="#7c3aed" />
-              </View>
-              <View style={styles.cardBody}>
-                <Text style={styles.cardName} numberOfLines={1}>{r.name}</Text>
-                {!!r.description && (
-                  <Text style={styles.cardDesc} numberOfLines={2}>{r.description}</Text>
-                )}
-                <Text style={styles.cardMeta}>{r.steps.length} step{r.steps.length !== 1 ? "s" : ""}</Text>
-              </View>
-              <DeleteIconButton onPress={() => handleDelete(r.name)} style={styles.deleteBtn} />
-            </TouchableOpacity>
-          ))
-        )}
-
-        {/* New Routine button */}
-        <TouchableOpacity
-          style={styles.addCard}
-          onPress={() => router.push("/program/builder?isRoutine=1")}
-          activeOpacity={0.7}
-        >
-          <Plus size={16} color="#7c3aed" />
-          <Text style={styles.addCardText}>New Routine</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
+    <ProgramListLayout
+      title="Routines"
+      accentColor="#7c3aed"
+      addLabel="New Routine"
+      onAdd={() => router.push("/program/builder?isRoutine=1")}
+      search={search}
+      onSearchChange={setSearch}
+      sort={sort}
+      onSortChange={setSort}
+      isEmpty={routines.length === 0}
+      hasResults={filtered.length > 0}
+      emptyIcon={<Box size={44} color="#d1d5db" />}
+      emptyTitle="No Routines"
+      emptySubtitle="Routines are reusable step sequences that can be called from any program."
+      topOverlay={<NotConnectedOverlay />}
+    >
+      {filtered.map(r => (
+        <RoutineRow key={r.name} routine={r} onDelete={() => handleDelete(r.name)} />
+      ))}
+    </ProgramListLayout>
   );
 }
 
-const styles = StyleSheet.create({
-  scroll:   { flex: 1, backgroundColor: "#f3f4f6" },
-  content:  { padding: 16, paddingBottom: 32, gap: 12 },
+function RoutineRow({ routine: r, onDelete }: { routine: BuiltProgram; onDelete: () => void }) {
+  const metaParts: string[] = [];
+  metaParts.push(`${r.steps.length} step${r.steps.length !== 1 ? "s" : ""}`);
+  if (r.lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(r.lastUpdatedUnixMs)}`);
 
+  return (
+    <TouchableOpacity
+      style={s.card}
+      onPress={() => router.push(`/program/builder?name=${encodeURIComponent(r.name)}`)}
+      activeOpacity={0.75}
+    >
+      <View style={s.cardIcon}>
+        <Repeat2 size={20} color="#7c3aed" />
+      </View>
+      <View style={s.cardBody}>
+        <Text style={s.cardName} numberOfLines={1}>{r.name}</Text>
+        {!!r.description && <Text style={s.cardDesc} numberOfLines={2}>{r.description}</Text>}
+        <Text style={s.cardMeta}>{metaParts.join("  ·  ")}</Text>
+      </View>
+      <DeleteIconButton onPress={onDelete} style={s.deleteBtn} />
+    </TouchableOpacity>
+  );
+}
+
+const s = StyleSheet.create({
   card: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    backgroundColor: "#fff", borderRadius: 14,
+    flexDirection: "row", alignItems: "center",
+    padding: 14, gap: 12,
+    shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
   cardIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#f5f3ff",
-    justifyContent: "center",
-    alignItems: "center",
+    width: 40, height: 40, borderRadius: 10,
+    backgroundColor: "#f5f3ff", justifyContent: "center", alignItems: "center",
   },
   cardBody: { flex: 1, gap: 2 },
   cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
   cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
   cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
   deleteBtn: { padding: 6 },
-
-  addBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "#7c3aed", justifyContent: "center", alignItems: "center",
-  },
-
-  addCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1.5,
-    borderColor: "#7c3aed",
-    borderRadius: 14,
-    paddingVertical: 14,
-    backgroundColor: "transparent",
-  },
-  addCardText: { fontSize: 14, fontWeight: "600", color: "#7c3aed" },
-
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 60,
-    paddingBottom: 24,
-    gap: 12,
-  },
-  emptyTitle: { fontSize: 18, fontWeight: "700", color: "#374151" },
-  emptySubtitle: {
-    fontSize: 13,
-    color: "#9ca3af",
-    textAlign: "center",
-    paddingHorizontal: 40,
-    lineHeight: 20,
-  },
 });

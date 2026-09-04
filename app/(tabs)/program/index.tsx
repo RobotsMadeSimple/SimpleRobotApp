@@ -4,9 +4,10 @@ import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { AlertTriangle, ChevronRight, Cpu, Gauge, Repeat2, ScanSearch, XCircle } from "lucide-react-native";
+import { AlertTriangle, ChevronRight, Cpu, Gauge, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -244,6 +245,7 @@ export default function ProgramScreen() {
   const builtPrograms    = useBuiltPrograms();
   const robotStatus      = useRobotStatus();
   const [visionCount,    setVisionCount]    = useState(0);
+  const [localCount,     setLocalCount]     = useState(0);
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
   const [showVision,     setShowVision]     = useState(false);
 
@@ -259,6 +261,14 @@ export default function ProgramScreen() {
     useCallback(() => {
       robotClient.getVisionPrograms()
         .then(({ programs }) => setVisionCount(programs.length))
+        .catch(() => {});
+    }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      LocalProgramService.getAll()
+        .then(programs => setLocalCount(programs.length))
         .catch(() => {});
     }, [])
   );
@@ -342,6 +352,18 @@ export default function ProgramScreen() {
         bg="#f5f3ff"
         onPress={() => router.navigate("/program/routines")}
       />
+
+      {localCount > 0 && (
+        <NavTile
+          icon={<Smartphone size={20} color="#ea580c" />}
+          label="Local Drafts"
+          count={localCount}
+          countLabel={localCount === 1 ? "draft" : "drafts"}
+          color="#ea580c"
+          bg="#fff7ed"
+          onPress={() => router.navigate("/(tabs)/program/phone-programs")}
+        />
+      )}
 
       {showVision && (
         <NavTile

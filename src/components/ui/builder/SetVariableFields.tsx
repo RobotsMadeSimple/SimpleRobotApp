@@ -88,7 +88,7 @@ export function SetVariableFields({
   variables: ProgramVariable[] | undefined;
   contextVariables?: ProgramVariable[];
   set: (p: Partial<ProgramStep>) => void;
-  onCreateVariable?: () => void;
+  onCreateVariable?: (defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image") => void;
 }) {
   const varList = (variables ?? []).map(v => v.name);
   const contextVarList = (contextVariables ?? []).map(v => v.name);

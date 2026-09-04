@@ -410,8 +410,11 @@ export default function BuilderScreen() {
 
   const [varModalOpen,   setVarModalOpen]   = useState(false);
   const [editingVar,     setEditingVar]     = useState<ProgramVariable | null>(null);
+  const [newVarDefault,  setNewVarDefault]  = useState<"number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image" | undefined>(undefined);
 
-  function openNewVar()  { setEditingVar(null); setVarModalOpen(true); }
+  function openNewVar(defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image") {
+    setEditingVar(null); setNewVarDefault(defaultType); setVarModalOpen(true);
+  }
   function openEditVar(v: ProgramVariable) { setEditingVar(v); setVarModalOpen(true); }
 
   function saveVar(v: ProgramVariable) {
@@ -702,7 +705,26 @@ export default function BuilderScreen() {
       }
       if (coverImage) await LocalProgramService.saveImage(name, coverImage);
     } else {
-      await robotClient.saveBuiltProgram(prog).catch(() => {});
+      try {
+        await robotClient.saveBuiltProgram(prog);
+      } catch {
+        appAlert(
+          "Save Failed",
+          "The program could not be saved to the robot — the controller may need to be restarted. Save a local draft so you don't lose your work?",
+          [
+            {
+              text: "Save Local Draft",
+              onPress: async () => {
+                await LocalProgramService.save(prog);
+                if (coverImage) await LocalProgramService.saveImage(name, coverImage).catch(() => {});
+                router.replace("/(tabs)/program/phone-programs");
+              },
+            },
+            { text: "Stay in Builder", style: "cancel" },
+          ]
+        );
+        return false;
+      }
       if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
     }
     setSavedSnapshot(JSON.stringify({ name, description: description.trim(), steps, variables }));
@@ -716,9 +738,11 @@ export default function BuilderScreen() {
     setSavingToRobot(true);
     try {
       const prog = buildProg();
-      await robotClient.saveBuiltProgram(prog).catch(() => {});
+      await robotClient.saveBuiltProgram(prog);
       if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
       appAlert("Saved to Robot", `"${name}" has been saved to the robot.`);
+    } catch {
+      appAlert("Save Failed", "The program could not be saved to the robot. Check that the controller is running and restart it if you updated the software.");
     } finally {
       setSavingToRobot(false);
     }
@@ -1049,7 +1073,7 @@ export default function BuilderScreen() {
         )}
         <TouchableOpacity
           style={[styles.varAddBtn, variables.length > 0 && styles.varAddBtnBorder]}
-          onPress={openNewVar} activeOpacity={0.7}
+          onPress={() => openNewVar()} activeOpacity={0.7}
         >
           <Plus size={13} color="#7c3aed" />
           <Text style={styles.varAddText}>Add Variable</Text>
@@ -1353,6 +1377,7 @@ export default function BuilderScreen() {
         onSave={updateStep}
         onClose={() => setConfigOpen(false)}
         onCreateVariable={openNewVar}
+        onSaveVariable={saveVar}
         onCreateRoutine={() => {
           if (editingStep) {
             setPendingRoutine({
@@ -1367,6 +1392,7 @@ export default function BuilderScreen() {
       <VariableEditModal
         visible={varModalOpen}
         variable={editingVar}
+        defaultType={editingVar == null ? newVarDefault : undefined}
         onSave={saveVar}
         onClose={() => setVarModalOpen(false)}
       />

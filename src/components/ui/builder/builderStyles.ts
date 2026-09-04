@@ -10,7 +10,7 @@ export const ms = StyleSheet.create({
     paddingTop: 52, paddingHorizontal: 24,
   },
   card: {
-    width: "100%", maxWidth: 360, maxHeight: "88%",
+    width: "100%", maxWidth: 480, maxHeight: "88%",
     backgroundColor: "#fff", borderRadius: 18,
     paddingTop: 20, paddingHorizontal: 20,
     shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 16, elevation: 10,
