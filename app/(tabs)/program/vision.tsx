@@ -1,29 +1,18 @@
-import { wide } from "@/src/components/ui/responsive";
-import {
-  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { ProgramListLayout, SortKey, relativeTime } from "@/src/components/ui/ProgramListLayout";
 import { VisionProgram } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router,
-  useFocusEffect } from "expo-router";
-import { Plus,
-  ScanSearch,
-  Trash2 } from "lucide-react-native";
-import { useCallback,
-  useState } from "react";
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { ScanSearch } from "lucide-react-native";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function VisionListScreen() {
   const [programs, setPrograms] = useState<VisionProgram[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState("");
+  const [sort, setSort]         = useState<SortKey>("name");
 
   const refresh = useCallback(async () => {
     try {
@@ -36,8 +25,6 @@ export default function VisionListScreen() {
     }
   }, []);
 
-  // Refresh on focus (not just mount) so edits made in the editor — renames,
-  // zone changes — are reflected here and passed fresh into the editor next time.
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   function createNew() {
@@ -61,87 +48,70 @@ export default function VisionListScreen() {
     ]);
   }
 
-  return (
-    <View style={styles.root}>
-      <SubPageHeader
-        title="Vision Programs"
-        right={
-          <TouchableOpacity onPress={createNew} style={styles.addBtn}>
-            <Plus size={18} color="#fff" />
-          </TouchableOpacity>
-        }
-      />
+  const q = search.trim().toLowerCase();
 
+  const filtered = programs
+    .filter(p => !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
+    .sort((a, b) =>
+      sort === "modified"
+        ? (b.lastUpdatedUnixMs ?? 0) - (a.lastUpdatedUnixMs ?? 0)
+        : a.name.localeCompare(b.name)
+    );
+
+  return (
+    <ProgramListLayout
+      title="Vision Programs"
+      accentColor="#2563eb"
+      addLabel="New Vision Program"
+      onAdd={createNew}
+      search={search}
+      onSearchChange={setSearch}
+      sort={sort}
+      onSortChange={setSort}
+      isEmpty={!loading && programs.length === 0}
+      hasResults={loading || filtered.length > 0}
+      emptyIcon={<ScanSearch size={44} color="#d1d5db" />}
+      emptyTitle="No Vision Programs"
+      emptySubtitle="Create a vision program below to get started."
+    >
       {loading ? (
-        <View style={styles.center}><ActivityIndicator /></View>
-      ) : programs.length === 0 ? (
-        <View style={styles.center}>
-          <ScanSearch size={40} color="#d1d5db" />
-          <Text style={styles.emptyText}>No vision programs yet</Text>
-          <TouchableOpacity style={styles.createBtn} onPress={createNew}>
-            <Text style={styles.createBtnText}>Create Vision Program</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView style={styles.scroll} contentContainerStyle={[styles.list, wide.content]}>
-          {programs.map(prog => (
-            <TouchableOpacity
-              key={prog.id}
-              style={styles.card}
-              activeOpacity={0.8}
-              onPress={() => router.navigate({
-                pathname: "/(tabs)/program/vision-editor",
-                params: { program: JSON.stringify(prog) },
-              })}
-            >
-              <View style={styles.cardIcon}>
-                <ScanSearch size={20} color="#2563eb" />
-              </View>
-              <View style={styles.cardBody}>
-                <Text style={styles.cardName}>{prog.name}</Text>
-                {!!prog.description && <Text style={styles.cardDesc} numberOfLines={1}>{prog.description}</Text>}
-                <View style={styles.cardMeta}>
-                  <Text style={styles.cardMetaText}>{prog.cameraId || "No camera"}</Text>
-                  <Text style={styles.cardMetaText}>·</Text>
-                  <Text style={styles.cardMetaText}>{prog.zones.length} zone{prog.zones.length !== 1 ? "s" : ""}</Text>
-                </View>
-              </View>
-              <DeleteIconButton onPress={() => confirmDelete(prog)} style={styles.iconBtn} />
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity style={styles.addCard} onPress={createNew} activeOpacity={0.7}>
-            <Plus size={16} color="#2563eb" />
-            <Text style={styles.addCardText}>New Vision Program</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      )}
-    </View>
+        <ActivityIndicator style={{ marginTop: 40 }} />
+      ) : filtered.map(prog => (
+        <VisionRow key={prog.id} prog={prog} onDelete={() => confirmDelete(prog)} />
+      ))}
+    </ProgramListLayout>
   );
 }
 
-const styles = StyleSheet.create({
-  root:  { flex: 1, backgroundColor: "#f3f4f6" },
+function VisionRow({ prog, onDelete }: { prog: VisionProgram; onDelete: () => void }) {
+  const metaParts: string[] = [];
+  metaParts.push(prog.cameraId || "No camera");
+  metaParts.push(`${prog.zones.length} zone${prog.zones.length !== 1 ? "s" : ""}`);
+  if (prog.lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(prog.lastUpdatedUnixMs)}`);
 
-  addBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "#2563eb", justifyContent: "center", alignItems: "center",
-  },
+  return (
+    <TouchableOpacity
+      style={s.card}
+      activeOpacity={0.8}
+      onPress={() => router.navigate({
+        pathname: "/(tabs)/program/vision-editor",
+        params: { program: JSON.stringify(prog) },
+      })}
+    >
+      <View style={s.cardIcon}>
+        <ScanSearch size={20} color="#2563eb" />
+      </View>
+      <View style={s.cardBody}>
+        <Text style={s.cardName}>{prog.name}</Text>
+        {!!prog.description && <Text style={s.cardDesc} numberOfLines={1}>{prog.description}</Text>}
+        <Text style={s.cardMeta}>{metaParts.join("  ·  ")}</Text>
+      </View>
+      <DeleteIconButton onPress={onDelete} style={s.iconBtn} />
+    </TouchableOpacity>
+  );
+}
 
-  center:        { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
-  emptyText:     { fontSize: 14, color: "#9ca3af", marginTop: 8 },
-  createBtn:     { backgroundColor: "#2563eb", borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10 },
-  createBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-
-  scroll: { flex: 1 },
-  list:   { padding: 16, paddingBottom: 32, gap: 10 },
-
-  addCard: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    borderWidth: 1.5, borderColor: "#2563eb", borderRadius: 14,
-    paddingVertical: 14, backgroundColor: "transparent",
-  },
-  addCardText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
-
+const s = StyleSheet.create({
   card: {
     backgroundColor: "#fff", borderRadius: 14,
     flexDirection: "row", alignItems: "center",
@@ -151,13 +121,11 @@ const styles = StyleSheet.create({
   },
   cardIcon: {
     width: 40, height: 40, borderRadius: 10,
-    backgroundColor: "#eff6ff",
-    justifyContent: "center", alignItems: "center",
+    backgroundColor: "#eff6ff", justifyContent: "center", alignItems: "center",
   },
-  cardBody:        { flex: 1 },
-  cardName:        { fontSize: 15, fontWeight: "700", color: "#111827" },
-  cardDesc:        { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  cardMeta:        { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 },
-  cardMetaText:    { fontSize: 12, color: "#9ca3af" },
-  iconBtn: { padding: 4 },
+  cardBody: { flex: 1 },
+  cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  cardDesc: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 4 },
+  iconBtn:  { padding: 4 },
 });

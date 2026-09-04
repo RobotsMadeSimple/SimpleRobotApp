@@ -1,16 +1,20 @@
 import {
   ArrowRight,
   Bookmark,
+  Camera,
   ChevronsRight,
   GitBranch,
   CornerUpLeft,
   Clock,
   Cpu,
   Gauge,
+  Globe,
   Grid3x3,
   Hash,
+  HelpCircle,
   Hourglass,
   ImagePlus,
+  Inbox,
   Layers,
   Timer,
   MessageSquare,
@@ -28,7 +32,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import React from "react";
-import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS } from "@/src/models/robotModels";
+import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -156,6 +160,21 @@ export function stepLabel(step: ProgramStep): string {
         : `Stopwatch ${step.stopwatchAction ?? "?"}`;
     case "CncProgram":
       return step.cncDxfFile ?? "(no DXF selected)";
+    case "HttpRequest": {
+      const host = step.jsonUrl ? (() => { try { return new URL(step.jsonUrl).host; } catch { return step.jsonUrl; } })() : "no URL";
+      const mode = step.jsonWaitForResponse === false ? "fire & continue" : "wait";
+      return `HTTP Request  →  ${host}  (${mode})`;
+    }
+    case "CaptureImage":
+      return step.captureImageVariableName
+        ? `Capture Image  →  $${step.captureImageVariableName}`
+        : "Capture Image";
+    case "HttpReceive":
+      return step.httpReceiveName
+        ? `HTTP Receive  ←  ${step.httpReceiveName}`
+        : "HTTP Receive";
+    case "Unknown":
+      return step.unknownStepType ? `Unknown (${step.unknownStepType})` : "Unknown Step";
     default:              return step.type;
   }
 }
@@ -197,6 +216,10 @@ export function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepTyp
     case "StopwatchControl":   return <Timer         size={size} color={color} />;
     case "ThreadMove":         return <RotateCw      size={size} color={color} />;
     case "CncProgram":         return <Cpu           size={size} color={color} />;
+    case "HttpRequest":       return <Globe         size={size} color={color} />;
+    case "CaptureImage":       return <Camera        size={size} color={color} />;
+    case "HttpReceive":        return <Inbox         size={size} color={color} />;
+    case "Unknown":            return <HelpCircle    size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
 }
@@ -237,6 +260,10 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   StopwatchControl: { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Stopwatch"          },
   ThreadMove:       { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Thread Move"        },
   CncProgram:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "CNC Program"         },
+  HttpRequest:     { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Request"        },
+  CaptureImage:     { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Capture Image"       },
+  HttpReceive:      { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Receive"        },
+  Unknown:          { accent: "#9ca3af", iconBg: "#f3f4f6", iconColor: "#6b7280", label: "Unknown Step"        },
 };
 
 // ── Move modifier formatting ──────────────────────────────────────────────────
@@ -534,6 +561,38 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.cncSafeZ != null) parts.push(`safe Z ${step.cncSafeZ} mm`);
       return parts.join('  ·  ');
     }
+    case "HttpRequest": {
+      const lines: string[] = [];
+      if (step.jsonUrl) lines.push(step.jsonUrl);
+      const out = step.jsonOutbound?.length ?? 0;
+      const inc = step.jsonInbound?.length ?? 0;
+      if (out > 0) lines.push(`${out} field${out !== 1 ? "s" : ""} outbound`);
+      if (inc > 0) lines.push(`${inc} variable${inc !== 1 ? "s" : ""} inbound`);
+      lines.push(step.jsonWaitForResponse === false ? "fire & continue" : "waits for response");
+      return lines.join("\n");
+    }
+
+    case "CaptureImage": {
+      const varName = step.captureImageVariableName;
+      const cam = step.captureImageCameraId;
+      const lines: string[] = [];
+      if (varName) lines.push(`→ $${varName}`);
+      if (cam) lines.push(`camera: ${cam}`);
+      return lines.length ? lines.join("\n") : null;
+    }
+    case "HttpReceive": {
+      const lines: string[] = [];
+      if (step.httpReceiveName) lines.push(`webhook: ${step.httpReceiveName}`);
+      const inc = step.httpReceiveInbound?.length ?? 0;
+      if (inc > 0) lines.push(`${inc} variable${inc !== 1 ? "s" : ""} inbound`);
+      const timeout = step.httpReceiveTimeoutMs;
+      if (timeout != null) lines.push(`timeout: ${timeout / 1000}s`);
+      return lines.length ? lines.join("\n") : null;
+    }
+    case "Unknown":
+      return step.unknownStepType
+        ? `Original type: "${step.unknownStepType}" — delete this step to fix the program`
+        : "Unrecognized step — delete this step to fix the program";
     default:
       return null;
   }
@@ -575,6 +634,9 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "StopwatchControl", label: "Stopwatch",             desc: "Start, stop, or reset a stopwatch variable — value holds elapsed milliseconds" },
   { type: "SaveImage",        label: "Save Image",             desc: "Capture a camera snapshot and save to a file path — supports $variable interpolation including $time_ms" },
   { type: "CncProgram",      label: "CNC Program",            desc: "Generate a toolpath from a DXF or SVG file — thread selected holes, or follow contours as continuous blended moves" },
+  { type: "HttpRequest",   label: "HTTP Request",           desc: "POST a JSON payload to a server and optionally load values from the response back into program variables" },
+  { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with JSON Exchange to send it to a server" },
+  { type: "HttpReceive",    label: "HTTP Receive",           desc: "Wait for an incoming HTTP POST to a named webhook endpoint — other robots or servers can trigger this step by POSTing to /webhook/{name}" },
 ];
 
 export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
@@ -594,6 +656,7 @@ export const STEP_CATEGORIES: { label: string; color: string; types: StepType[] 
   { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"] },
   { label: "Tool & Frame", color: "#7c3aed", types: ["SetTool", "SetLocal", "ClearLocal"] },
   { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
+  { label: "Network",      color: "#0f766e", types: ["HttpRequest", "CaptureImage", "HttpReceive"] },
   { label: "Background",   color: "#16a34a", types: ["StartBackground", "StopBackground", "WaitForBackground"] },
   { label: "Timing",       color: "#0891b2", types: ["StopwatchControl"] },
   { label: "CNC",          color: "#7c3aed", types: ["CncProgram"] },

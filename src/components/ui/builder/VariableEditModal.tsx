@@ -18,11 +18,13 @@ import { newId } from "./stepUtils";
 export function VariableEditModal({
   visible,
   variable,
+  defaultType,
   onSave,
   onClose,
 }: {
   visible: boolean;
   variable: ProgramVariable | null;
+  defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image";
   onSave: (v: ProgramVariable) => void;
   onClose: () => void;
 }) {
@@ -30,7 +32,7 @@ export function VariableEditModal({
   const [value,      setValue]      = useState("0");
   const [stringVal,  setStringVal]  = useState("");
   const [desc,       setDesc]       = useState("");
-  const [varType,    setVarType]    = useState<"number" | "boolean" | "list" | "points" | "stopwatch" | "string">("number");
+  const [varType,    setVarType]    = useState<"number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image">("number");
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [listValues, setListValues] = useState<string[]>(["0"]);
   const [isGlobal,          setIsGlobal]          = useState(false);
@@ -62,13 +64,16 @@ export function VariableEditModal({
         setVarType("string");
         setStringVal(variable.stringValue ?? "");
         setValue("0"); setListValues(["0"]);
+      } else if (variable.isImage) {
+        setVarType("image");
+        setValue("0"); setStringVal(""); setListValues(["0"]);
       } else {
         setVarType("number");
         setValue(String(variable.value));
         setStringVal(""); setListValues(["0"]);
       }
     } else {
-      setName(""); setValue("0"); setStringVal(""); setDesc(""); setVarType("number"); setListValues(["0"]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
+      setName(""); setValue("0"); setStringVal(""); setDesc(""); setVarType(defaultType ?? "number"); setListValues(["0"]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
     }
   }, [variable, visible]);
 
@@ -99,6 +104,8 @@ export function VariableEditModal({
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0891b2", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. Value is elapsed milliseconds.</Text>
     : varType === "string"
     ? <Text style={ms.hintText}>Use <Text style={{ color: "#ea580c", fontWeight: "600" }}>${name.trim() || "name"}</Text> in StatusUpdate messages or string expressions. Supports <Text style={{ fontWeight: "600" }}>$otherVar</Text> interpolation in values.</Text>
+    : varType === "image"
+    ? <Text style={ms.hintText}>Stores a camera frame as a base64 JPEG. Populated by a <Text style={{ fontWeight: "600" }}>CaptureImage</Text> step at runtime.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
   return (
@@ -136,6 +143,7 @@ export function VariableEditModal({
               { key: "number",    label: "Number",    color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
               { key: "boolean",   label: "Boolean",   color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
               { key: "string",    label: "String",    color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
+              { key: "image",     label: "Image",     color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
               { key: "list",      label: "List",      color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
               { key: "points",    label: "Points",    color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
               { key: "stopwatch", label: "Stopwatch", color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
@@ -261,6 +269,12 @@ export function VariableEditModal({
                 Use <Text style={{ fontWeight: "700" }}>${name.trim() || "name"}</Text> in expressions to read the elapsed time in ms.
               </Text>
             </View>
+          ) : varType === "image" ? (
+            <View style={{ backgroundColor: "#e0f2fe", borderRadius: 8, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#7dd3fc" }}>
+              <Text style={{ fontSize: 13, color: "#0369a1", lineHeight: 18 }}>
+                This variable stores a camera frame as a base64 JPEG string. It starts empty and is populated at runtime by a <Text style={{ fontWeight: "700" }}>Capture Image</Text> step.
+              </Text>
+            </View>
           ) : varType === "string" ? (
             <>
               <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
@@ -297,7 +311,7 @@ export function VariableEditModal({
             returnKeyType="done"
           />
 
-          {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string") && (
+          {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") && (
             <>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
@@ -360,9 +374,10 @@ export function VariableEditModal({
                   isStopwatch: varType === "stopwatch" ? true : undefined,
                   isString:    varType === "string"    ? true : undefined,
                   stringValue: varType === "string"    ? stringVal : undefined,
-                  isGlobal:        (varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string") ? (isGlobal        || undefined) : undefined,
-                  displayOnMonitor:(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string") ? (displayOnMonitor || undefined) : undefined,
-                  isPersistent:    (varType === "number" || varType === "boolean" || varType === "string") ? (isPersistent || undefined) : undefined,
+                  isImage:     varType === "image"     ? true : undefined,
+                  isGlobal:        (varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") ? (isGlobal        || undefined) : undefined,
+                  displayOnMonitor:(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") ? (displayOnMonitor || undefined) : undefined,
+                  isPersistent:    (varType === "number" || varType === "boolean" || varType === "string"    || varType === "image") ? (isPersistent || undefined) : undefined,
                   description: desc.trim() || undefined,
                 });
                 onClose();

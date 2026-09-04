@@ -10,8 +10,9 @@ import {
   TouchableOpacity,
   View,
   Image,
+  useWindowDimensions,
 } from "react-native";
-import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Plus, Radio, RotateCcw, RotateCw, X } from "lucide-react-native";
+import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, Minus, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -21,6 +22,8 @@ import {
   ConditionGroup,
   Grid,
   GridPoint,
+  JsonInboundMapping,
+  JsonKeyValue,
   PolygonVisionStepOutput,
   ProgramStep,
   ProgramVariable,
@@ -52,6 +55,7 @@ import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
 import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
+import { VariableEditModal } from "./VariableEditModal";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
 
@@ -66,6 +70,7 @@ export function StepConfigModal({
   onClose,
   onEnterRoutine,
   onCreateVariable,
+  onSaveVariable,
   onCreateRoutine,
 }: {
   visible: boolean;
@@ -77,7 +82,8 @@ export function StepConfigModal({
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
   onEnterRoutine?: (routineName: string) => void;
-  onCreateVariable?: () => void;
+  onCreateVariable?: (defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image") => void;
+  onSaveVariable?: (v: ProgramVariable) => void;
   onCreateRoutine?: () => void;
 }) {
   const points        = usePoints();
@@ -117,6 +123,13 @@ export function StepConfigModal({
   const [loopIndexVarPicker,    setLoopIndexVarPicker]    = useState(false);
   const [forEachSourcePicker,   setForEachSourcePicker]   = useState(false);
   const [forEachValuePicker,    setForEachValuePicker]    = useState(false);
+  const [jsonInboundPicker,  setJsonInboundPicker]  = useState<number | null>(null);
+  const [jsonOutboundPicker, setJsonOutboundPicker] = useState<number | null>(null);
+  const [captureVarCreateOpen, setCaptureVarCreateOpen] = useState(false);
+  const [httpReceiveInboundPicker, setHttpReceiveInboundPicker] = useState<number | null>(null);
+
+  const { width: windowWidth } = useWindowDimensions();
+  const cardWidth = Math.min(windowWidth - 48, 520);
 
   useEffect(() => {
     if (!visible) return;
@@ -149,6 +162,7 @@ export function StepConfigModal({
     setSubPage(null);
     setClearConfirm(null);
   }, [step]);
+
 
   if (!draft) return null;
 
@@ -2372,6 +2386,515 @@ export function StepConfigModal({
           />
         );
 
+      case "HttpRequest": {
+        const outbound = draft!.jsonOutbound ?? [];
+        const inbound  = draft!.jsonInbound  ?? [];
+        const accent   = "#0f766e";
+
+        const setOutbound = (rows: JsonKeyValue[])       => set({ jsonOutbound: rows.length ? rows : undefined });
+        const setInbound  = (rows: JsonInboundMapping[]) => set({ jsonInbound:  rows.length ? rows : undefined });
+
+        const numericVars = (variables ?? []).filter(v => v.points == null && v.values == null && !v.isString && !v.isImage);
+        const imageVars   = (variables ?? []).filter(v => v.isImage === true);
+        const allVars     = [...numericVars, ...imageVars];
+
+        return (
+          <>
+            <Text style={ms.hintText}>
+              POST a JSON body to a URL. Optionally map response fields back to program variables.
+            </Text>
+
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ENDPOINT URL</Text>
+            <TextInput
+              style={ms.input}
+              value={draft!.jsonUrl ?? ""}
+              onChangeText={v => set({ jsonUrl: v || undefined })}
+              placeholder="https://api.example.com/robot"
+              placeholderTextColor="#9ca3af"
+              autoCapitalize="none"
+              keyboardType="url"
+              returnKeyType="done"
+            />
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>TIMEOUT (ms)</Text>
+            <TextInput
+              style={ms.input}
+              value={draft!.jsonTimeoutMs != null ? String(draft!.jsonTimeoutMs) : ""}
+              onChangeText={v => set({ jsonTimeoutMs: v ? parseInt(v) || undefined : undefined })}
+              placeholder="10000"
+              placeholderTextColor="#9ca3af"
+              keyboardType="numeric"
+              returnKeyType="done"
+            />
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>RESPONSE MODE</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+              {([
+                { label: "Wait for response", value: true  },
+                { label: "Fire & continue",   value: false },
+              ] as const).map(opt => {
+                const active = (draft!.jsonWaitForResponse ?? true) === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={String(opt.value)}
+                    style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center",
+                      borderWidth: 1.5, borderColor: active ? accent : "#e5e7eb",
+                      backgroundColor: active ? "#f0fdfa" : "#f9fafb" }]}
+                    onPress={() => set({ jsonWaitForResponse: opt.value })}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: "700",
+                      color: active ? accent : "#6b7280" }}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* ── Outbound mapping ── */}
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 20, marginBottom: 6 }}>
+              <Globe size={13} color={accent} style={{ marginRight: 5 }} />
+              <Text style={[ms.fieldLabel, { marginTop: 0, color: accent }]}>OUTBOUND FIELDS</Text>
+            </View>
+            <Text style={[ms.hintText, { marginBottom: 8 }]}>
+              Each row becomes a JSON key. Value is a variable or expression (e.g. <Text style={{ fontFamily: "monospace" }}>$count * 2</Text>).
+            </Text>
+            {/* JSON block */}
+            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+              borderLeftWidth: 3, borderLeftColor: accent,
+              backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
+              <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
+                fontSize: 15, color: "#64748b" }}>{"{"}</Text>
+              {outbound.length === 0 && (
+                <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
+                  color: "#9ca3af", fontStyle: "italic" }}>
+                  // no fields yet
+                </Text>
+              )}
+              {outbound.map((row, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center",
+                  paddingLeft: 26, paddingRight: 6, paddingVertical: 5 }}>
+                  <Text style={{ fontSize: 14, color: accent }}>"</Text>
+                  <TextInput
+                    style={{ flex: 1, fontSize: 14, color: "#0f172a", paddingHorizontal: 1,
+                      paddingVertical: 2, minWidth: 20 }}
+                    value={row.key}
+                    onChangeText={v => {
+                      const next = [...outbound];
+                      next[i] = { ...row, key: v };
+                      setOutbound(next);
+                    }}
+                    placeholder="key"
+                    placeholderTextColor="#9ca3af"
+                    returnKeyType="next"
+                    autoCapitalize="none"
+                  />
+                  <Text style={{ fontSize: 14, color: accent }}>"</Text>
+                  <Text style={{ fontSize: 14, color: "#64748b", marginHorizontal: 5 }}>:</Text>
+                  {row.imageVar ? (
+                    <TouchableOpacity
+                      style={{ flex: 2, flexDirection: "row", alignItems: "center", gap: 4, minWidth: 30 }}
+                      onPress={() => setJsonOutboundPicker(i)}
+                      activeOpacity={0.75}
+                    >
+                      <Camera size={12} color={accent} />
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: "#7c3aed" }}
+                        numberOfLines={1}>${row.imageVar}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <>
+                      <TextInput
+                        style={{ flex: 2, fontSize: 14, color: "#7c3aed", paddingHorizontal: 1,
+                          paddingVertical: 2, minWidth: 30 }}
+                        value={row.expr}
+                        onChangeText={v => {
+                          const next = [...outbound];
+                          next[i] = { ...row, expr: v };
+                          setOutbound(next);
+                        }}
+                        placeholder="$var or expr"
+                        placeholderTextColor="#9ca3af"
+                        returnKeyType="done"
+                        autoCapitalize="none"
+                      />
+                      <TouchableOpacity onPress={() => setJsonOutboundPicker(i)}
+                        hitSlop={8} style={{ padding: 5 }} activeOpacity={0.7}>
+                        <Search size={13} color="#94a3b8" />
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  {i < outbound.length - 1 && (
+                    <Text style={{ fontSize: 14, color: "#94a3b8", marginRight: 2 }}>,</Text>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => setOutbound(outbound.filter((_, j) => j !== i))}
+                    hitSlop={8} style={{ padding: 5 }}>
+                    <Minus size={13} color="#dc2626" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 5,
+                  paddingLeft: 26, paddingTop: 4, paddingBottom: 8 }}
+                onPress={() => setOutbound([...outbound, { key: "", expr: "" }])}
+                activeOpacity={0.7}
+              >
+                <Plus size={12} color="#9ca3af" />
+                <Text style={{ fontSize: 12, color: "#9ca3af" }}>add field</Text>
+              </TouchableOpacity>
+              <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
+                fontSize: 15, color: "#64748b" }}>{"}"}</Text>
+            </View>
+
+            {/* ── Inbound mapping ── */}
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 20, marginBottom: 6 }}>
+              <Globe size={13} color="#2563eb" style={{ marginRight: 5 }} />
+              <Text style={[ms.fieldLabel, { marginTop: 0, color: "#2563eb" }]}>INBOUND VARIABLES</Text>
+            </View>
+            <Text style={[ms.hintText, { marginBottom: 8 }]}>
+              Map response JSON keys to program variables. Leave empty to ignore the response.
+            </Text>
+            {/* JSON block */}
+            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+              borderLeftWidth: 3, borderLeftColor: "#2563eb",
+              backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
+              <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
+                fontSize: 15, color: "#64748b" }}>{"{"}</Text>
+              {inbound.length === 0 && (
+                <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
+                  color: "#9ca3af", fontStyle: "italic" }}>
+                  // no mappings yet
+                </Text>
+              )}
+              {inbound.map((row, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center",
+                  paddingLeft: 26, paddingRight: 6, paddingVertical: 5 }}>
+                  <Text style={{ fontSize: 14, color: "#2563eb" }}>"</Text>
+                  <TextInput
+                    style={{ flex: 1, fontSize: 14, color: "#0f172a", paddingHorizontal: 1,
+                      paddingVertical: 2, minWidth: 20 }}
+                    value={row.key}
+                    onChangeText={v => {
+                      const next = [...inbound];
+                      next[i] = { ...row, key: v };
+                      setInbound(next);
+                    }}
+                    placeholder="key"
+                    placeholderTextColor="#9ca3af"
+                    returnKeyType="done"
+                    autoCapitalize="none"
+                  />
+                  <Text style={{ fontSize: 14, color: "#2563eb" }}>"</Text>
+                  <ArrowRight size={16} color="#2563eb" style={{ marginHorizontal: 6 }} />
+                  <TouchableOpacity
+                    style={{ flex: 2, flexDirection: "row", alignItems: "center", gap: 5,
+                      minWidth: 30 }}
+                    onPress={() => setJsonInboundPicker(i)}
+                    activeOpacity={0.75}
+                  >
+                    <Search size={12} color={row.variableName ? "#2563eb" : "#94a3b8"} />
+                    <Text style={{ flex: 1, fontSize: 14,
+                      fontWeight: row.variableName ? "700" : "400",
+                      color: row.variableName ? "#7c3aed" : "#9ca3af" }} numberOfLines={1}>
+                      {row.variableName ? `$${row.variableName}` : "search variables…"}
+                    </Text>
+                  </TouchableOpacity>
+                  {i < inbound.length - 1 && (
+                    <Text style={{ fontSize: 14, color: "#94a3b8", marginRight: 2 }}>,</Text>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => setInbound(inbound.filter((_, j) => j !== i))}
+                    hitSlop={8} style={{ padding: 5 }}>
+                    <Minus size={13} color="#dc2626" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 5,
+                  paddingLeft: 26, paddingTop: 4, paddingBottom: 8 }}
+                onPress={() => setInbound([...inbound, { key: "", variableName: "" }])}
+                activeOpacity={0.7}
+              >
+                <Plus size={12} color="#9ca3af" />
+                <Text style={{ fontSize: 12, color: "#9ca3af" }}>add mapping</Text>
+              </TouchableOpacity>
+              <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
+                fontSize: 15, color: "#64748b" }}>{"}"}</Text>
+            </View>
+
+            {/* Variable picker for inbound rows — numeric + image */}
+            <VarPickerModal
+              visible={jsonInboundPicker !== null}
+              title="Select Variable"
+              variables={allVars}
+              selected={jsonInboundPicker !== null ? inbound[jsonInboundPicker]?.variableName : undefined}
+              showNone
+              onSelect={v => {
+                if (jsonInboundPicker === null) return;
+                const next = [...inbound];
+                next[jsonInboundPicker] = { ...next[jsonInboundPicker], variableName: v?.name ?? "" };
+                setInbound(next);
+                setJsonInboundPicker(null);
+              }}
+              onClose={() => setJsonInboundPicker(null)}
+            />
+            {/* Variable picker for outbound rows — numeric inserts into expr, image sets imageVar */}
+            <VarPickerModal
+              visible={jsonOutboundPicker !== null}
+              title="Select Variable"
+              variables={allVars}
+              selected={jsonOutboundPicker !== null ? (outbound[jsonOutboundPicker]?.imageVar ?? undefined) : undefined}
+              onSelect={v => {
+                if (jsonOutboundPicker === null || !v) return;
+                const next = [...outbound];
+                if (v.isImage) {
+                  next[jsonOutboundPicker] = { ...next[jsonOutboundPicker], imageVar: v.name, expr: "" };
+                } else {
+                  const cur = (next[jsonOutboundPicker].imageVar ? "" : next[jsonOutboundPicker].expr.trimEnd());
+                  next[jsonOutboundPicker] = { ...next[jsonOutboundPicker],
+                    imageVar: undefined, expr: cur ? `${cur} $${v.name}` : `$${v.name}` };
+                }
+                setOutbound(next);
+                setJsonOutboundPicker(null);
+              }}
+              onClose={() => setJsonOutboundPicker(null)}
+            />
+          </>
+        );
+      }
+
+      case "CaptureImage": {
+        const accentImg = "#0891b2";
+        const imageVarsForCapture = (variables ?? []).filter(v => v.isImage === true);
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Grab the current frame from a camera and store it as a base64 JPEG in an image variable.
+              Use a <Text style={{ fontWeight: "700" }}>JSON Exchange</Text> step after this to send it to a server.
+            </Text>
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>CAMERA</Text>
+            {cameraDevices.length === 0 ? (
+              <Text style={ms.emptyHint}>No cameras configured. Add cameras in the Camera settings.</Text>
+            ) : (
+              cameraDevices.map((cam, i) => {
+                const active = (draft!.captureImageCameraId ?? "") === cam.id;
+                return (
+                  <TouchableOpacity
+                    key={cam.id}
+                    style={[ms.row, i < cameraDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                    onPress={() => set({ captureImageCameraId: cam.id })}
+                    activeOpacity={0.7}
+                  >
+                    <Camera size={14} color={active ? accentImg : "#6b7280"} />
+                    <Text style={[ms.rowLabel, { flex: 1 }, active && { color: accentImg }]}>{cam.name}</Text>
+                    {active && <Check size={14} color={accentImg} />}
+                  </TouchableOpacity>
+                );
+              })
+            )}
+
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, marginBottom: 0 }}>
+              <Text style={ms.fieldLabel}>IMAGE VARIABLE</Text>
+              <TouchableOpacity
+                onPress={() => setCaptureVarCreateOpen(true)}
+                hitSlop={8} activeOpacity={0.7}
+                style={{ flexDirection: "row", alignItems: "center", gap: 4,
+                  backgroundColor: "#e0f2fe", borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4,
+                  borderWidth: 1, borderColor: "#7dd3fc" }}
+              >
+                <Plus size={12} color={accentImg} />
+                <Text style={{ fontSize: 12, fontWeight: "600", color: accentImg }}>New</Text>
+              </TouchableOpacity>
+            </View>
+            {imageVarsForCapture.length === 0 ? (
+              <Text style={ms.emptyHint}>
+                No image variables yet — tap <Text style={{ fontWeight: "700" }}>New</Text> to create one.
+              </Text>
+            ) : (
+              imageVarsForCapture.map((v, i) => {
+                const active = draft!.captureImageVariableName === v.name;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[ms.row, i < imageVarsForCapture.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                    onPress={() => set({ captureImageVariableName: v.name })}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                      {active && <View style={ms.radioDot} />}
+                    </View>
+                    <View style={ms.rowText}>
+                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
+                      {v.description ? <Text style={ms.rowDesc}>{v.description}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </>
+        );
+      }
+
+      case "HttpReceive": {
+        const accentRcv = "#0f766e";
+        const rcvInbound = draft!.httpReceiveInbound ?? [];
+        const numericVarsRcv = (variables ?? []).filter(v => v.points == null && v.values == null && !v.isString && !v.isImage);
+        const setRcvInbound = (rows: JsonInboundMapping[]) =>
+          set({ httpReceiveInbound: rows.length ? rows : undefined });
+        const webhookUrl = robot?.ipAddress
+          ? `http://${robot.ipAddress}:${robot.port ?? 9000}/webhook/${draft!.httpReceiveName || "<name>"}`
+          : `/webhook/${draft!.httpReceiveName || "<name>"}`;
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Wait for an HTTP POST to a named webhook endpoint. Other robots or external servers can trigger
+              this step by POSTing JSON to the URL shown below.
+            </Text>
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>WEBHOOK NAME</Text>
+            <TextInput
+              style={[ms.input, { marginTop: 6 }]}
+              value={draft!.httpReceiveName ?? ""}
+              onChangeText={v => set({ httpReceiveName: v || undefined })}
+              placeholder="e.g. part-ready"
+              placeholderTextColor="#9ca3af"
+              autoCapitalize="none"
+              returnKeyType="done"
+            />
+            {draft!.httpReceiveName ? (
+              <View style={{ backgroundColor: "#f0fdf4", borderRadius: 8, borderWidth: 1,
+                borderColor: "#bbf7d0", padding: 10, marginTop: 8 }}>
+                <Text style={{ fontSize: 11, color: "#15803d", fontWeight: "600", marginBottom: 2 }}>
+                  POST endpoint
+                </Text>
+                <Text style={{ fontSize: 12, color: "#166534", fontFamily: "monospace" }} selectable>
+                  {webhookUrl}
+                </Text>
+              </View>
+            ) : null}
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>TIMEOUT (ms)</Text>
+            <TextInput
+              style={[ms.input, { marginTop: 6 }]}
+              value={draft!.httpReceiveTimeoutMs != null ? String(draft!.httpReceiveTimeoutMs) : ""}
+              onChangeText={v => {
+                const n = parseInt(v, 10);
+                set({ httpReceiveTimeoutMs: isNaN(n) ? undefined : n });
+              }}
+              placeholder="30000 (default)"
+              placeholderTextColor="#9ca3af"
+              keyboardType="number-pad"
+              returnKeyType="done"
+            />
+
+            {/* Inbound mapping */}
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 20, marginBottom: 6 }}>
+              <Globe size={13} color={accentRcv} style={{ marginRight: 5 }} />
+              <Text style={[ms.fieldLabel, { marginTop: 0, color: accentRcv }]}>INBOUND VARIABLES</Text>
+            </View>
+            <Text style={[ms.hintText, { marginBottom: 8 }]}>
+              Map incoming JSON keys to program variables.
+            </Text>
+            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+              borderLeftWidth: 3, borderLeftColor: accentRcv,
+              backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
+              <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
+                fontSize: 15, color: "#64748b" }}>{"{"}</Text>
+              {rcvInbound.length === 0 && (
+                <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
+                  color: "#9ca3af", fontStyle: "italic" }}>
+                  // no mappings yet
+                </Text>
+              )}
+              {rcvInbound.map((row, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center",
+                  paddingLeft: 26, paddingRight: 6, paddingVertical: 5 }}>
+                  <Text style={{ fontSize: 14, color: accentRcv }}>"</Text>
+                  <TextInput
+                    style={{ flex: 1, fontSize: 14, color: "#0f172a", paddingHorizontal: 1,
+                      paddingVertical: 2, minWidth: 20 }}
+                    value={row.key}
+                    onChangeText={v => {
+                      const next = [...rcvInbound];
+                      next[i] = { ...row, key: v };
+                      setRcvInbound(next);
+                    }}
+                    placeholder="key"
+                    placeholderTextColor="#9ca3af"
+                    returnKeyType="done"
+                    autoCapitalize="none"
+                  />
+                  <Text style={{ fontSize: 14, color: accentRcv }}>"</Text>
+                  <ArrowRight size={16} color={accentRcv} style={{ marginHorizontal: 6 }} />
+                  <TouchableOpacity
+                    style={{ flex: 2, flexDirection: "row", alignItems: "center", gap: 5, minWidth: 30 }}
+                    onPress={() => setHttpReceiveInboundPicker(i)}
+                    activeOpacity={0.75}
+                  >
+                    <Search size={12} color={row.variableName ? accentRcv : "#94a3b8"} />
+                    <Text style={{ flex: 1, fontSize: 14,
+                      fontWeight: row.variableName ? "700" : "400",
+                      color: row.variableName ? "#7c3aed" : "#9ca3af" }} numberOfLines={1}>
+                      {row.variableName ? `$${row.variableName}` : "search variables…"}
+                    </Text>
+                  </TouchableOpacity>
+                  {i < rcvInbound.length - 1 && (
+                    <Text style={{ fontSize: 14, color: "#94a3b8", marginRight: 2 }}>,</Text>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => setRcvInbound(rcvInbound.filter((_, j) => j !== i))}
+                    hitSlop={8} style={{ padding: 5 }}>
+                    <Minus size={13} color="#dc2626" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 5,
+                  paddingLeft: 26, paddingTop: 4, paddingBottom: 8 }}
+                onPress={() => setRcvInbound([...rcvInbound, { key: "", variableName: "" }])}
+                activeOpacity={0.7}
+              >
+                <Plus size={12} color="#9ca3af" />
+                <Text style={{ fontSize: 12, color: "#9ca3af" }}>add mapping</Text>
+              </TouchableOpacity>
+              <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
+                fontSize: 15, color: "#64748b" }}>{"}"}</Text>
+            </View>
+
+            <VarPickerModal
+              visible={httpReceiveInboundPicker !== null}
+              title="Select Variable"
+              variables={numericVarsRcv}
+              selected={httpReceiveInboundPicker !== null ? rcvInbound[httpReceiveInboundPicker]?.variableName : undefined}
+              showNone
+              onSelect={v => {
+                if (httpReceiveInboundPicker === null) return;
+                const next = [...rcvInbound];
+                next[httpReceiveInboundPicker] = { ...next[httpReceiveInboundPicker], variableName: v?.name ?? "" };
+                setRcvInbound(next);
+                setHttpReceiveInboundPicker(null);
+              }}
+              onClose={() => setHttpReceiveInboundPicker(null)}
+            />
+          </>
+        );
+      }
+
+      case "Unknown":
+        return (
+          <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: 8, marginTop: 8 }}>
+            <Text style={{ fontSize: 14, color: "#92400e", fontWeight: "600", marginBottom: 6 }}>
+              Unrecognized Step Type
+            </Text>
+            <Text style={{ fontSize: 13, color: "#78350f", lineHeight: 19 }}>
+              {draft!.unknownStepType
+                ? `This step was saved with type "${draft!.unknownStepType}", which is no longer recognized.`
+                : "This step has an unrecognized type and cannot be configured."}
+              {"\n\n"}Delete this step to fix the program. The robot will skip it during execution.
+            </Text>
+          </View>
+        );
+
       default:
         return null;
     }
@@ -2436,7 +2959,7 @@ export function StepConfigModal({
               ScrollView owns its gestures cleanly — a Pressable wrapping the
               ScrollView blocks scrolling when a drag starts on a focused input. */}
           <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? setSubPage(null) : onClose()} />
-          <View style={ms.card}>
+          <View style={[ms.card, { maxWidth: cardWidth }]}>
             {/* Header */}
             <View style={ms.header}>
               {subPage ? (
@@ -2721,6 +3244,17 @@ export function StepConfigModal({
         const cur = (draft[msgField] ?? '').trimEnd();
         set({ [msgField]: (cur ? cur + ' ' : '') + '$' + v.name });
       }}
+    />
+    <VariableEditModal
+      visible={captureVarCreateOpen}
+      variable={null}
+      defaultType="image"
+      onSave={v => {
+        onSaveVariable?.(v);
+        set({ captureImageVariableName: v.name });
+        setCaptureVarCreateOpen(false);
+      }}
+      onClose={() => setCaptureVarCreateOpen(false)}
     />
     </>
   );

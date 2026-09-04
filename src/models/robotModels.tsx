@@ -201,7 +201,11 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
+
+export type JsonKeyValue       = { key: string; expr: string; imageVar?: string };
+export type JsonInboundMapping = { key: string; variableName: string };
+export type JsonImageMapping   = { key: string; variableName: string };
 
 export const THREAD_PRESETS: { label: string; pitch: number; group: 'metric' | 'imperial' }[] = [
   // Metric coarse
@@ -534,6 +538,8 @@ export type ProgramVariable = {
   isString?: boolean;
   /** String variable initial/default value — only meaningful when isString is true. */
   stringValue?: string;
+  /** When true, this variable stores a camera frame as a base64 JPEG string — populated at runtime by CaptureImage steps. */
+  isImage?: boolean;
 };
 
 export type ProgramVariableSnapshot = {
@@ -671,6 +677,22 @@ export type ProgramStep = {
   cncSafeZ?: number;
   cncProgramSteps?: ProgramStep[];
   cncSpec?: CncSpec;
+  // HttpRequest
+  jsonUrl?: string;
+  jsonWaitForResponse?: boolean;
+  jsonTimeoutMs?: number;
+  jsonOutbound?: JsonKeyValue[];
+  jsonInbound?: JsonInboundMapping[];
+  jsonImageOutbound?: JsonImageMapping[];
+  // CaptureImage
+  captureImageVariableName?: string;
+  captureImageCameraId?: string;
+  // HttpReceive
+  httpReceiveName?: string;
+  httpReceiveTimeoutMs?: number;
+  httpReceiveInbound?: JsonInboundMapping[];
+  // Unknown — preserved original type name for display and recovery
+  unknownStepType?: string;
 };
 
 /** Hole position for CNC threading (robot coordinates, mm). */
