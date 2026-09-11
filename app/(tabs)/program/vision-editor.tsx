@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
     height: 220,
     shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
   },
-  feedPlaceholder:     { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center" },
+  feedPlaceholder:     { ...StyleSheet.absoluteFill, justifyContent: "center", alignItems: "center" },
   feedPlaceholderText: { color: "#6b7280", fontSize: 13 },
 
   runBtn: {

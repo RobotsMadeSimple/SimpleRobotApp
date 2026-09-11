@@ -49,13 +49,19 @@
         }
       ],
       [
-        "expo-build-properties", {
+        "expo-build-properties",
+        {
           "android": {
             "usesCleartextTraffic": true,
             "enableMultidex": true
           }
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

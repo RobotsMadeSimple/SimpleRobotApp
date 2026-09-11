@@ -3,8 +3,7 @@ import JogPad from "@/src/components/ui/JogPad";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useFocusEffect } from "@react-navigation/native";
-import { router, Tabs } from "expo-router";
+import { router, Tabs, useFocusEffect } from "expo-router";
 import {
   ArrowRight,
   ChevronDown,

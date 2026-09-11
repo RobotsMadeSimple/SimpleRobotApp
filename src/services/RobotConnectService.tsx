@@ -171,8 +171,12 @@ export class RobotConnectService {
       }).catch(() => {});
     };
 
-    this.ws.onclose = () => {
-      console.log("[RobotWS] Disconnected");
+    this.ws.onclose = (event: any) => {
+      // React Native dispatches a bare Event for `error` with no detail, then
+      // forwards the native failure text here as `reason`. This is the only
+      // place the actual cause (refused, unreachable, ...) is visible.
+      const reason = event?.reason;
+      console.log("[RobotWS] Disconnected from", this.url, reason ? `— ${reason}` : "");
       this.emitStatus({ connected: false });
 
       this.cleanup();
@@ -182,8 +186,9 @@ export class RobotConnectService {
       }
     };
 
-    this.ws.onerror = (err) => {
-      console.warn("[RobotWS] Error", err);
+    this.ws.onerror = () => {
+      // Deliberately quiet — the close handler above always follows and is the
+      // one that carries the reason.
     };
 
     this.ws.onmessage = (event) => {

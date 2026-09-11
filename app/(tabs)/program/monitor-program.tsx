@@ -15,9 +15,9 @@ import { useBuiltPrograms,
   useRobotStatus,
   useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useFocusEffect } from "@react-navigation/native";
 import { router,
   Tabs,
+  useFocusEffect,
   useLocalSearchParams } from "expo-router";
 import { AlertTriangle,
   Box,
