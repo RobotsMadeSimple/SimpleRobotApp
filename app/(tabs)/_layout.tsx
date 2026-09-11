@@ -28,7 +28,7 @@ export default function Layout() {
         <GluestackUIProvider mode="light">
           <SafeAreaProvider>
             <RobotProvider>
-              <StatusBar style="dark" translucent={false} />
+              <StatusBar style="dark" />
               <TabLayout />
               <AppAlertHost />
               <FaultRecoveryOverlay />
