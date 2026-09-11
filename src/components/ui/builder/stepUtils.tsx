@@ -635,7 +635,7 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SaveImage",        label: "Save Image",             desc: "Capture a camera snapshot and save to a file path — supports $variable interpolation including $time_ms" },
   { type: "CncProgram",      label: "CNC Program",            desc: "Generate a toolpath from a DXF or SVG file — thread selected holes, or follow contours as continuous blended moves" },
   { type: "HttpRequest",   label: "HTTP Request",           desc: "POST a JSON payload to a server and optionally load values from the response back into program variables" },
-  { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with JSON Exchange to send it to a server" },
+  { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with HTTP Request to send it to a server" },
   { type: "HttpReceive",    label: "HTTP Receive",           desc: "Wait for an incoming HTTP POST to a named webhook endpoint — other robots or servers can trigger this step by POSTing to /webhook/{name}" },
 ];
 
@@ -652,11 +652,11 @@ export const STEP_CATEGORIES: { label: string; color: string; types: StepType[] 
   { label: "I/O",          color: "#ea580c", types: ["SetOutput"] },
   { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius"] },
   { label: "Variables",    color: "#7c3aed", types: ["SetVariable"] },
-  { label: "Vision",       color: "#0891b2", types: ["RunVision", "SaveImage"] },
+  { label: "Vision",       color: "#0891b2", types: ["RunVision", "CaptureImage", "SaveImage"] },
   { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"] },
   { label: "Tool & Frame", color: "#7c3aed", types: ["SetTool", "SetLocal", "ClearLocal"] },
   { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
-  { label: "Network",      color: "#0f766e", types: ["HttpRequest", "CaptureImage", "HttpReceive"] },
+  { label: "Network",      color: "#0f766e", types: ["HttpRequest", "HttpReceive"] },
   { label: "Background",   color: "#16a34a", types: ["StartBackground", "StopBackground", "WaitForBackground"] },
   { label: "Timing",       color: "#0891b2", types: ["StopwatchControl"] },
   { label: "CNC",          color: "#7c3aed", types: ["CncProgram"] },

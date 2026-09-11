@@ -2669,7 +2669,7 @@ export function StepConfigModal({
           <>
             <Text style={ms.hintText}>
               Grab the current frame from a camera and store it as a base64 JPEG in an image variable.
-              Use a <Text style={{ fontWeight: "700" }}>JSON Exchange</Text> step after this to send it to a server.
+              Use an <Text style={{ fontWeight: "700" }}>HTTP Request</Text> step after this to send it to a server.
             </Text>
 
             <Text style={[ms.fieldLabel, { marginTop: 14 }]}>CAMERA</Text>
