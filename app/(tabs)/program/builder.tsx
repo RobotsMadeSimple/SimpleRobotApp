@@ -751,10 +751,26 @@ export default function BuilderScreen() {
   const [saving, setSaving]             = useState(false);
   const [savingToRobot, setSavingToRobot] = useState(false);
 
+  // A brand-new program arrives here with no `name` param, so this is the only
+  // save that can be the first one. Land the user on the monitor page for it
+  // rather than the list. Local drafts and routines aren't monitorable — the
+  // monitor resolves programs out of the robot repository.
+  const isFirstSave = !editName && !isLocalMode && !isRoutineMode;
+
   async function handleSave() {
     if (saving) return;
     setSaving(true);
-    try { if (await save()) router.back(); }
+    try {
+      if (!(await save())) return;
+      if (isFirstSave) {
+        // Kick the repository refresh off but don't await it — the monitor
+        // resolves the program itself if it arrives before the fetch lands.
+        robotClient.getBuiltPrograms().catch(() => {});
+        router.replace(`/(tabs)/program/monitor-program?name=${encodeURIComponent(programName.trim())}`);
+        return;
+      }
+      router.back();
+    }
     finally { setSaving(false); }
   }
 

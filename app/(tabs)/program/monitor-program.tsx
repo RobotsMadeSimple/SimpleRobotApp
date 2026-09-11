@@ -241,6 +241,18 @@ export default function MonitorProgramScreen() {
     router.push(`/program/builder?name=${encodeURIComponent(programName)}`);
   }
 
+  // Arriving straight from the builder after a first save, the repository can
+  // still predate the program we were asked to show. Pull it once rather than
+  // sitting on "Program not found" until the next status poll corrects it.
+  const [resolving, setResolving] = useState(false);
+  useEffect(() => {
+    if (program || !programName) return;
+    setResolving(true);
+    robotClient.getBuiltPrograms()
+      .catch(() => {})
+      .finally(() => setResolving(false));
+  }, [programName, program]);
+
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
 
   // Spinner while an action is being applied — cleared when the status changes
@@ -429,9 +441,21 @@ export default function MonitorProgramScreen() {
     }
   }, [program?.status]);
 
+  // Progress bar — set directly so it always matches the text, no animation lag.
+  // Lives above the early returns below so the hook order stays stable whether
+  // or not the program has resolved yet.
+  const pct =
+    program && program.maxStepCount > 0
+      ? Math.round((program.currentStepNumber / program.maxStepCount) * 100)
+      : 0;
+  const progressAnim = useRef(new Animated.Value(pct)).current;
+  useEffect(() => {
+    progressAnim.setValue(pct);
+  }, [pct]);
+
   // ── Loading / not-found states ─────────────────────────────────────────────
 
-  if (!program && !builtProgramsLoaded) {
+  if (!program && (!builtProgramsLoaded || resolving)) {
     return (
       <View style={styles.root}>
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
@@ -476,18 +500,8 @@ export default function MonitorProgramScreen() {
   );
 
   const theme = STATUS_THEME[program.status] ?? STATUS_THEME.Ready;
-  const pct =
-    program.maxStepCount > 0
-      ? Math.round((program.currentStepNumber / program.maxStepCount) * 100)
-      : 0;
   const buttons = isRunnable ? [] : getButtons(program, isBuilt);
   const showActions = buttons.length > 0 || isRunnable;
-
-  // Progress bar — set directly so it always matches the text, no animation lag
-  const progressAnim = useRef(new Animated.Value(pct)).current;
-  useEffect(() => {
-    progressAnim.setValue(pct);
-  }, [pct]);
 
   // Alert banner derived values
   const hasAlert   = !!(pinnedError || pinnedWarning);
