@@ -12,6 +12,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# local tooling
+.claude/
+
 # Native
 .kotlin/
 *.orig.*
@@ -446,12 +449,7 @@ MigrationBackup/
 FodyWeavers.xsd
 
 # VS Code files for those working on multiple tools
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-!.vscode/*.code-snippets
+.vscode/
 
 # Local History for Visual Studio Code
 .history/
