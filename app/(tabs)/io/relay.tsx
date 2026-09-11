@@ -4,8 +4,7 @@ import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Settings2 } from "lucide-react-native";
-import { router } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 

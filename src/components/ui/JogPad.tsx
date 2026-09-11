@@ -1,5 +1,5 @@
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { CartesianJogPanel, CartesianAxis } from "@/src/components/ui/jog/CartesianJogPanel";
