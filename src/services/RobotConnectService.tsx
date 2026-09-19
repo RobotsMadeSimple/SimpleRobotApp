@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CameraState, Grid, Local, NanoState, NeoPixelColor, Point, ProgramStatus, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CameraState, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -975,9 +975,29 @@ export class RobotConnectService {
     return this.sendCommand("StopBackgroundProgram", { name });
   }
 
-  public async getProgramVariables(name: string): Promise<{ name: string; value: number; isBoolean: boolean }[]> {
+  /**
+   * One poll's worth of monitored state: scalar values, plus display images as name and
+   * revision. Both come back together because they are one round-trip on the controller
+   * and the monitor wants them on the same tick.
+   *
+   * `images` carries no bytes — fetch those with getProgramVariableImage when a revision
+   * changes. Older controllers omit the key entirely, which reads as no images.
+   */
+  public async getProgramVariables(name: string): Promise<{
+    variables: ProgramVariableSnapshot[];
+    images: ProgramImageSnapshot[];
+  }> {
     const data = await this.sendCommand("GetProgramVariables", { name }) as any;
-    try { return Array.isArray(data?.variables) ? data.variables : []; } catch { return []; }
+    return {
+      variables: Array.isArray(data?.variables) ? data.variables : [],
+      images:    Array.isArray(data?.images)    ? data.images    : [],
+    };
+  }
+
+  /** The base64 bytes of one display image variable. "" when there is nothing to show. */
+  public async getProgramVariableImage(name: string, variable: string): Promise<string> {
+    const data = await this.sendCommand("GetProgramVariableImage", { name, variable }) as any;
+    return typeof data?.image === "string" ? data.image : "";
   }
 
   // ── STB4100 (Robot IO Board) ───────────────────────────────────────────────

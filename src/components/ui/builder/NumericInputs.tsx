@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -7,7 +7,7 @@ import {
   View,
 } from "react-native";
 import { X } from "lucide-react-native";
-import { ProgramVariable } from "@/src/models/robotModels";
+import { ProgramVariable, hasScalarElements, variableList } from "@/src/models/robotModels";
 import { VarPickerModal } from "./VarPicker";
 
 // ── Numeric inputs ────────────────────────────────────────────────────────────
@@ -138,6 +138,18 @@ export function SignedNumberInput({
   );
 }
 
+/** Default chips for ExpressionInput — the four arithmetic operators. */
+export const ARITHMETIC_OPS: [string, string][] = [["×", "*"], ["+", "+"], ["-", "-"], ["÷", "/"]];
+
+/**
+ * Chips for a field whose answer is a true/false. `and` and `or` are spelled as words
+ * because that is how they read in the resulting expression, and `!=` is offered rather
+ * than `==` alone because "is not" is the comparison people reach for and the hardest to
+ * find on a phone keyboard.
+ */
+export const COMPARISON_OPS: [string, string][] =
+  [[">", ">"], ["<", "<"], ["==", "=="], ["!=", "!="], ["and", "and"], ["or", "or"]];
+
 /**
  * Numeric field that also accepts math expressions referencing program variables.
  *
@@ -158,6 +170,7 @@ export function ExpressionInput({
   allowUndefined,
   autoFocus,
   variables,
+  ops = ARITHMETIC_OPS,
 }: {
   fieldKey: string;
   value: number | undefined;
@@ -169,6 +182,13 @@ export function ExpressionInput({
   allowUndefined?: boolean;
   autoFocus?: boolean;
   variables?: ProgramVariable[];
+  /**
+   * The one-tap operator chips, as [label, inserted text]. Defaults to arithmetic, which
+   * is what a field expecting a distance or a speed wants. A field whose answer is a
+   * true/false wants COMPARISON_OPS instead — typing `>` on a phone keyboard is a trip
+   * through the symbol layer.
+   */
+  ops?: [string, string][];
 }) {
   const currentExpr = expressions?.[fieldKey];
   const [text, setText] = useState(currentExpr ?? (value != null ? String(value) : ""));
@@ -182,9 +202,16 @@ export function ExpressionInput({
     setText(currentExpr ?? (value != null ? String(value) : ""));
   }, [currentExpr, value]);
 
-  // Text contains variable references or operators → treat as expression
+  // Text contains variable references, braces or operators → treat as expression.
+  // Braces are optional here — the evaluator ignores them — but accepting them keeps
+  // "{$i + 1}" working in a numeric field for anyone used to the template syntax.
+  //
+  // Comparison and logic count too. Without them "1 > 0" would fail this test, and
+  // parseFloat would quietly accept the leading "1" and drop the rest.
   const isExpr = (t: string) =>
-    /[$+*\/\(\)]/.test(t) || (t.includes("-") && !/^-?\d*\.?\d*$/.test(t.trim()));
+    /[${}+*\/\(\)<>=!&|]/.test(t) ||
+    /\b(?:and|or|not)\b/i.test(t) ||
+    (t.includes("-") && !/^-?\d*\.?\d*$/.test(t.trim()));
 
   function commit(raw: string) {
     const t = raw.trim();
@@ -218,9 +245,15 @@ export function ExpressionInput({
   }
 
   function insertVar(v: ProgramVariable) {
-    const token = v.points != null ? `$${v.name}[0].x`
-                : v.values && v.values.length > 0 ? `$${v.name}[0]`
-                : `$${v.name}`;
+    // A list needs an index to reach a number, and what comes after the index depends on
+    // the element type — nothing for the scalar types, an axis for a point. For a record
+    // there is no fixed field set, so borrow the first field of the first element and
+    // leave a placeholder when the list is empty.
+    const list  = variableList(v);
+    const token = !list                                   ? `$${v.name}`
+                : hasScalarElements(list.elementType)     ? `$${v.name}[0]`
+                : list.elementType === "Point"            ? `$${v.name}[0].x`
+                : `$${v.name}[0].${Object.keys(list.items[0] ?? {})[0] ?? "field"}`;
     const ref = text.trim();
     const next = ref ? `${ref} ${token}` : token;
     setText(next);
@@ -271,7 +304,7 @@ export function ExpressionInput({
       </View>
       {hasVars && (
         <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
-          {([["×","*"],["+","+"],["-","-"],["÷","/"]] as [string,string][]).map(([label, op]) => (
+          {ops.map(([label, op]) => (
             <TouchableOpacity
               key={op}
               onPress={() => insertOp(op)}
@@ -298,6 +331,143 @@ export function ExpressionInput({
           selected={undefined}
           title="Insert Variable"
           onSelect={v => { if (v) insertVar(v); }}
+        />
+      )}
+    </View>
+  );
+}
+
+/**
+ * Flags a braced group whose contents reference a name without its `$`.
+ *
+ * The controller leaves such a group in the text verbatim rather than
+ * substituting it, because to the expression evaluator a bare word is not a
+ * lookup — it is the value 0, which would quietly produce a wrong answer. This
+ * surfaces the mistake at edit time. Words after a dot are components (`.z`,
+ * `.length`), and the evaluator's own keywords — the true/false literals and the
+ * word-spelled operators — stand alone, so all of those are left alone.
+ *
+ * Returns the offending group (e.g. `"{index}"`) or null.
+ */
+const EXPR_KEYWORD = /^(?:true|false|and|or|not)$/i;
+
+export function braceMissingSigil(text: string): string | null {
+  for (const m of text.match(/\{[^{}]*\}/g) ?? []) {
+    const body = m.slice(1, -1).trim();
+    if (!body) continue;
+    const leftover = body.replace(/\$\w+/g, " ").replace(/\.\w+/g, " ").match(/[A-Za-z_]\w*/g) ?? [];
+    if (leftover.some(w => !EXPR_KEYWORD.test(w))) return m;
+  }
+  return null;
+}
+
+/**
+ * Text field whose contents are interpolated at runtime — status messages, save
+ * paths, point names. Shares the variable picker, purple highlighting and clear
+ * button with ExpressionInput so every field that takes variables behaves alike.
+ *
+ * Braces are optional. `$name` on its own is enough; `{$name}` is only needed
+ * where a reference butts against neighbouring text (`{$prefix}{$i}`) or wraps a
+ * whole expression (`bin{$i + 1}`). Picker insertions always use the braced form
+ * since it is the one that is correct in every position.
+ */
+export function TemplateInput({
+  value,
+  onChange,
+  variables,
+  style,
+  placeholder,
+  accent = "#7c3aed",
+  quickTokens,
+  autoFocus,
+  autoCapitalize = "none",
+  insertToken = v => `{$${v.name}}`,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  variables?: ProgramVariable[];
+  style?: any;
+  placeholder?: string;
+  /** Tint for the text and insert chip — lets a screen keep its own accent. */
+  accent?: string;
+  /** Extra one-tap tokens appended as-is, e.g. `$time_ms`. */
+  quickTokens?: string[];
+  autoFocus?: boolean;
+  /** Defaults to "none", which suits paths and identifiers. Prose wants "sentences". */
+  autoCapitalize?: "none" | "sentences";
+  /**
+   * Text a picked variable contributes. The braced default is correct in any
+   * position; override where a kind needs indexing, e.g. points as `$name[0]`.
+   */
+  insertToken?: (v: ProgramVariable) => string;
+}) {
+  const [varPickerOpen, setVarPickerOpen] = useState(false);
+  const inputRef = useRef<any>(null);
+
+  const hasVars  = (variables?.length ?? 0) > 0;
+  const hasRef   = /[${]/.test(value);
+  const warning  = useMemo(() => braceMissingSigil(value), [value]);
+
+  function append(token: string) {
+    onChange(value + token);
+    inputRef.current?.focus();
+  }
+
+  return (
+    <View>
+      <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
+        <TextInput
+          ref={inputRef}
+          style={{ flex: 1, fontSize: 14, color: hasRef ? accent : "#111827" }}
+          value={value}
+          onChangeText={onChange}
+          placeholder={placeholder}
+          placeholderTextColor="#9ca3af"
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCapitalize === "sentences"}
+          autoFocus={autoFocus}
+          returnKeyType="done"
+        />
+        {value.length > 0 && (
+          <TouchableOpacity onPress={() => onChange("")} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
+            <X size={13} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {(hasVars || quickTokens?.length) && (
+        <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
+          {hasVars && (
+            <TouchableOpacity
+              onPress={() => setVarPickerOpen(true)}
+              activeOpacity={0.7}
+              style={[exprStyles.opChip, { backgroundColor: "#ede9fe", borderColor: "#c4b5fd" }]}
+            >
+              <Text style={[exprStyles.opChipText, { color: "#7c3aed", fontSize: 13 }]}>$var</Text>
+            </TouchableOpacity>
+          )}
+          {(quickTokens ?? []).map(t => (
+            <TouchableOpacity key={t} onPress={() => append(t)} activeOpacity={0.7} style={exprStyles.opChip}>
+              <Text style={[exprStyles.opChipText, { fontSize: 13 }]}>{t}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {warning && (
+        <Text style={{ fontSize: 11, color: "#b45309", marginTop: 6 }}>
+          {warning} is missing its $ — it will be left as written, not substituted.
+        </Text>
+      )}
+
+      {hasVars && (
+        <VarPickerModal
+          visible={varPickerOpen}
+          onClose={() => setVarPickerOpen(false)}
+          variables={variables!}
+          selected={undefined}
+          title="Insert Variable"
+          onSelect={v => { if (v) append(insertToken(v)); }}
         />
       )}
     </View>

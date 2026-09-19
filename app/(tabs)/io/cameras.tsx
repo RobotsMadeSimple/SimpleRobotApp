@@ -3,7 +3,7 @@ import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraState } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
-import { WebView } from "react-native-webview";
+import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Camera,
@@ -116,12 +116,9 @@ function CameraWebSocketFeed({ cameraId, onTap }: { cameraId: string; onTap?: ()
   }
 
   return (
-    <WebView
-      source={{ html: makeCameraHtml(wsUrl, false) }}
+    <VisionCanvas
+      html={makeCameraHtml(wsUrl, false)}
       style={styles.cameraFeed}
-      scrollEnabled={false}
-      originWhitelist={['*']}
-      javaScriptEnabled
       onMessage={(e) => { if (e.nativeEvent.data === 'tap') onTap?.(); }}
     />
   );
@@ -141,12 +138,9 @@ function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClo
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <WebView
-          source={{ html: makeCameraHtml(wsUrl, true) }}
+        <VisionCanvas
+          html={makeCameraHtml(wsUrl, true)}
           style={{ flex: 1 }}
-          scrollEnabled={false}
-          originWhitelist={['*']}
-          javaScriptEnabled
         />
         <TouchableOpacity style={styles.fullscreenClose} onPress={onClose} activeOpacity={0.8}>
           <X size={18} color="#fff" />

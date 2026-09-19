@@ -1,13 +1,11 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Text,
-  TextInput,
   TouchableOpacity,
-  View,
 } from "react-native";
 import { Camera, Check } from "lucide-react-native";
 import { CameraState, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
-import { VarPickerModal } from "./VarPicker";
+import { TemplateInput } from "./NumericInputs";
 import { ms } from "./builderStyles";
 
 // ── SaveImageFields ───────────────────────────────────────────────────────────
@@ -23,13 +21,7 @@ export function SaveImageFields({
   cameras: CameraState[];
   set: (p: Partial<ProgramStep>) => void;
 }) {
-  const [varPickerOpen, setVarPickerOpen] = useState(false);
   const accent = "#0891b2";
-
-  function insertPathToken(token: string) {
-    const cur = draft.saveImagePath ?? "";
-    set({ saveImagePath: cur ? `${cur}${token}` : token });
-  }
 
   return (
     <>
@@ -61,52 +53,18 @@ export function SaveImageFields({
       )}
 
       <Text style={[ms.fieldLabel, { marginTop: 14 }]}>SAVE PATH</Text>
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        <TextInput
-          value={draft.saveImagePath ?? ""}
-          onChangeText={v => set({ saveImagePath: v })}
-          placeholder="captures/$time_ms.jpg"
-          placeholderTextColor="#9ca3af"
-          style={[ms.input, { flex: 1, color: "#0891b2" }]}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {(variables ?? []).length > 0 && (
-          <TouchableOpacity
-            style={{ backgroundColor: "#e0f2fe", borderWidth: 1, borderColor: "#7dd3fc", borderRadius: 9, paddingHorizontal: 10, justifyContent: "center", marginTop: 6 }}
-            onPress={() => setVarPickerOpen(true)}
-            activeOpacity={0.75}
-          >
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#0891b2" }}>$var</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <Text style={{ fontSize: 11, color: "#9ca3af" }}>Quick insert:</Text>
-        <TouchableOpacity
-          style={{ backgroundColor: "#ede9fe", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: "#c4b5fd" }}
-          onPress={() => insertPathToken("$time_ms")}
-          activeOpacity={0.7}
-        >
-          <Text style={{ fontSize: 12, color: "#7c3aed", fontWeight: "600" }}>$time_ms</Text>
-        </TouchableOpacity>
-      </View>
-      <Text style={[ms.hintText, { marginTop: 4 }]}>
+      <TemplateInput
+        value={draft.saveImagePath ?? ""}
+        onChange={v => set({ saveImagePath: v })}
+        placeholder="captures/$time_ms.jpg"
+        style={ms.input}
+        accent={accent}
+        variables={variables}
+        quickTokens={["$time_ms"]}
+      />
+      <Text style={[ms.hintText, { marginTop: 8 }]}>
         Relative paths are from the app directory. Folders are created automatically.
       </Text>
-
-      <VarPickerModal
-        visible={varPickerOpen}
-        onClose={() => setVarPickerOpen(false)}
-        variables={variables ?? []}
-        selected={undefined}
-        title="Insert Variable"
-        onSelect={v => {
-          if (v) insertPathToken(`$${v.name}`);
-          setVarPickerOpen(false);
-        }}
-      />
     </>
   );
 }

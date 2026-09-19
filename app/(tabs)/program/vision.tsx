@@ -1,5 +1,5 @@
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { ProgramListLayout, SortKey, relativeTime } from "@/src/components/ui/ProgramListLayout";
+import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
 import { VisionProgram } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useFocusEffect } from "expo-router";
@@ -12,7 +12,7 @@ export default function VisionListScreen() {
   const [programs, setPrograms] = useState<VisionProgram[]>([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
-  const [sort, setSort]         = useState<SortKey>("name");
+  const [sort, setSort]         = useState<SortState>(defaultSort());
 
   const refresh = useCallback(async () => {
     try {
@@ -52,11 +52,7 @@ export default function VisionListScreen() {
 
   const filtered = programs
     .filter(p => !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
-    .sort((a, b) =>
-      sort === "modified"
-        ? (b.lastUpdatedUnixMs ?? 0) - (a.lastUpdatedUnixMs ?? 0)
-        : a.name.localeCompare(b.name)
-    );
+    .sort(bySort<VisionProgram>(sort, p => p.name, p => p.lastUpdatedUnixMs ?? 0));
 
   return (
     <ProgramListLayout

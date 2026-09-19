@@ -1,7 +1,7 @@
 import React from "react";
 import { ActivityIndicator, Modal, Text, TouchableOpacity, View } from "react-native";
 import { makeColorPickHtml } from "@/src/vision/visionHtml";
-import { WebView } from "react-native-webview";
+import { VisionCanvas } from "@/src/vision/VisionCanvas";
 
 export function ColorPickModal({ visible, snapshotUri, onPick, onClose }: {
   visible: boolean;
@@ -23,7 +23,7 @@ export function ColorPickModal({ visible, snapshotUri, onPick, onClose }: {
         </View>
         <View style={{ flex: 1 }}>
           {html ? (
-            <WebView source={{ html }} scrollEnabled={false} originWhitelist={['*']} javaScriptEnabled
+            <VisionCanvas html={html} style={{ flex: 1 }}
               onMessage={e => {
                 try {
                   const msg = JSON.parse(e.nativeEvent.data);

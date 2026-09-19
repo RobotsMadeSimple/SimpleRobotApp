@@ -67,6 +67,8 @@ export function stepLabel(step: ProgramStep): string {
         ? `${step.type}  →  Stack Point`
         : step.varPointName
         ? `${step.type}  →  $${step.varPointName}[${step.varPointIndex ?? "0"}]`
+        : step.pointNameExpr
+        ? `${step.type}  →  ${step.pointNameExpr}`
         : `${step.type}  →  ${step.pointName ?? "Current Position"}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
@@ -319,6 +321,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const target = step.gridPoint ? "grid point"
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
+        : step.pointNameExpr ? step.pointNameExpr
         : (step.pointName ?? "current pos");
       const lines = [`→ ${target}`];
       const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
@@ -338,6 +341,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const target = step.gridPoint ? "grid point"
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
+        : step.pointNameExpr ? step.pointNameExpr
         : (step.pointName ?? "current pos");
       const lines = [`→ ${target}`];
       if (step.jumpZStart != null || step.jumpZEnd != null) {

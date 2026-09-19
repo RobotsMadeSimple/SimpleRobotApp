@@ -10,16 +10,26 @@ import {
   View,
 } from "react-native";
 import { ChevronDown, X } from "lucide-react-native";
-import { ProgramVariable } from "@/src/models/robotModels";
+import { ProgramVariable, variableList } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
-export type VarKind = "number" | "boolean" | "list" | "points" | "string" | "image";
+export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "objects" | "string" | "image";
 
+/**
+ * The chip a variable wears. Lists are one type now, so the kind comes from the element
+ * type — which is also what decides how the variable is indexed in an expression, and so
+ * is the distinction worth showing.
+ */
 export function varKind(v: ProgramVariable): VarKind {
-  if (v.points != null) return "points";
-  if (v.values != null && v.values.length > 0) return "list";
+  const list = variableList(v);
+  if (list) {
+    if (list.elementType === "Point")   return "points";
+    if (list.elementType === "Record")  return "objects";
+    if (list.elementType === "Boolean") return "flags";
+    return "list";
+  }
   if (v.isBoolean) return "boolean";
   if (v.isString) return "string";
   if (v.isImage) return "image";
@@ -33,10 +43,34 @@ export const VAR_KIND_META: Record<
   number:  { label: "NUM",  color: "#7c3aed", bg: "#ede9fe", border: "#c4b5fd" },
   boolean: { label: "BOOL", color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
   list:    { label: "LIST", color: "#7c3aed", bg: "#ede9fe", border: "#c4b5fd" },
+  // Distinct from BOOL so a list of flags is not mistaken for a single one — the two
+  // differ by needing an index, which is exactly the mistake the chip should prevent.
+  flags:   { label: "FLAGS", color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
   points:  { label: "PTS",  color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
+  objects: { label: "OBJ",  color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
   string:  { label: "STR",  color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
   image:   { label: "IMG",  color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
 };
+
+/**
+ * `$name` plus its type chip — the standard presentation for a variable inside a
+ * selectable row. Shared so every variable list highlights identically.
+ */
+export function VarRowLabel({ variable, active }: { variable: ProgramVariable; active?: boolean }) {
+  const meta = VAR_KIND_META[varKind(variable)];
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${variable.name}</Text>
+      <View style={{ backgroundColor: meta.bg, borderRadius: 4,
+        paddingHorizontal: 5, paddingVertical: 1,
+        borderWidth: 1, borderColor: meta.border }}>
+        <Text style={{ fontSize: 9, fontWeight: "700", color: meta.color, letterSpacing: 0.3 }}>
+          {meta.label}
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 export function VarPickerModal({
   visible,
@@ -172,8 +206,6 @@ export function VarPickerModal({
 
             {filtered.map((v, i) => {
               const active = selected === v.name;
-              const kind   = varKind(v);
-              const meta   = VAR_KIND_META[kind];
               return (
                 <TouchableOpacity
                   key={v.id}
@@ -185,16 +217,7 @@ export function VarPickerModal({
                     {active && <View style={ms.radioDot} />}
                   </View>
                   <View style={ms.rowText}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
-                      <View style={{ backgroundColor: meta.bg, borderRadius: 4,
-                        paddingHorizontal: 5, paddingVertical: 1,
-                        borderWidth: 1, borderColor: meta.border }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: meta.color, letterSpacing: 0.3 }}>
-                          {meta.label}
-                        </Text>
-                      </View>
-                    </View>
+                    <VarRowLabel variable={v} active={active} />
                     {v.description ? <Text style={ms.rowDesc} numberOfLines={1}>{v.description}</Text> : null}
                   </View>
                 </TouchableOpacity>
@@ -210,8 +233,6 @@ export function VarPickerModal({
                 </View>
                 {filteredContext.map((v, i) => {
                   const active = selected === v.name;
-                  const kind   = varKind(v);
-                  const meta   = VAR_KIND_META[kind];
                   return (
                     <TouchableOpacity
                       key={v.id}
@@ -223,16 +244,7 @@ export function VarPickerModal({
                         {active && <View style={ms.radioDot} />}
                       </View>
                       <View style={ms.rowText}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                          <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
-                          <View style={{ backgroundColor: meta.bg, borderRadius: 4,
-                            paddingHorizontal: 5, paddingVertical: 1,
-                            borderWidth: 1, borderColor: meta.border }}>
-                            <Text style={{ fontSize: 9, fontWeight: "700", color: meta.color, letterSpacing: 0.3 }}>
-                              {meta.label}
-                            </Text>
-                          </View>
-                        </View>
+                        <VarRowLabel variable={v} active={active} />
                         {v.description ? <Text style={ms.rowDesc} numberOfLines={1}>{v.description}</Text> : null}
                       </View>
                     </TouchableOpacity>

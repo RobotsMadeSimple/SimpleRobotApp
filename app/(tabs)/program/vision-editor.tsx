@@ -15,6 +15,7 @@ import {
   VisionResult,
   VisionZone,
   VisionZoneGeometry,
+  VisionZoneGrid,
   defaultArucoInspection,
   defaultBarcodeInspection,
   defaultBlobParams,
@@ -32,6 +33,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Grid3x3,
   Hexagon,
   Minus,
   Palette,
@@ -60,7 +62,7 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { wide, usePaneLayout } from "@/src/components/ui/responsive";
-import { WebView } from "react-native-webview";
+import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
 import { ZoneDrawModal } from "@/src/components/ui/vision-editor/ZoneDrawModal";
 import { InspectionTypePicker, InspItem } from "@/src/components/ui/vision-editor/InspectionTypePicker";
@@ -216,25 +218,36 @@ export default function VisionEditorScreen() {
     } catch { setSnapshotUri(null); }
   }, [program.cameraId, grabFeedSnapshot]);
 
+  // Seeds the draw modal so an existing zone can be adjusted instead of redrawn.
+  // Held steady while the modal is open — program.zones only changes on save, which
+  // closes it, so the canvas is never reloaded out from under an in-progress edit.
+  const editingZone = useMemo(
+    () => (editingZoneId ? program.zones.find(z => z.id === editingZoneId) ?? null : null),
+    [editingZoneId, program.zones]
+  );
+
   function openZoneModal(editId?: string) {
     setEditingZoneId(editId ?? null);
     setZoneModalOpen(true);
     fetchSnapshot();
   }
 
-  function onZoneDrawDone(geometry: VisionZoneGeometry) {
+  // Geometry and grid are edited together in the modal, so they come back together — a
+  // lattice only means anything against the shape it was laid over.
+  function onZoneDrawDone(geometry: VisionZoneGeometry, grid: VisionZoneGrid | undefined) {
     setZoneModalOpen(false);
     let updated: VisionProgram;
     if (editingZoneId) {
       updated = {
         ...program, name,
-        zones: program.zones.map(z => z.id === editingZoneId ? { ...z, geometry } : z),
+        zones: program.zones.map(z => z.id === editingZoneId ? { ...z, geometry, grid } : z),
       };
     } else {
       const newZone: VisionZone = {
         id: `zone_${Date.now()}`,
         name: `Zone ${program.zones.length + 1}`,
         geometry,
+        grid,
       };
       updated = { ...program, name, zones: [...program.zones, newZone] };
     }
@@ -418,15 +431,11 @@ export default function VisionEditorScreen() {
 
       {/* Camera feed */}
       <View style={styles.feedCard} pointerEvents="none">
-        <WebView
+        <VisionCanvas
           ref={feedWebViewRef}
-          source={{ html: FEED_HTML }}
+          html={FEED_HTML}
           style={{ flex: 1, backgroundColor: "#111" }}
-          scrollEnabled={false}
-          originWhitelist={["*"]}
-          javaScriptEnabled
           focusable={false}
-          accessible={false}
           onLoad={injectFeedUrl}
           onMessage={onFeedMessage}
         />
@@ -485,24 +494,27 @@ export default function VisionEditorScreen() {
 
       {program.zones.map(zone => (
         <View key={zone.id} style={styles.zoneCard}>
-          <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
-          <TextInput
-            style={styles.zoneNameInput}
-            value={zone.name}
-            onChangeText={t => updateZone({ ...zone, name: t })}
-          />
-          <Text style={styles.shapeBadge}>{zone.geometry.shape}</Text>
-          <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
-            <Pencil size={14} color="#6b7280" />
-          </TouchableOpacity>
-          <DeleteIconButton
-            size={14}
-            style={styles.iconBtn}
-            onPress={() => appAlert('Delete Zone', `Delete "${zone.name}"?`, [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
-            ])}
-          />
+          <View style={styles.zoneCardRow}>
+            <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
+            <TextInput
+              style={styles.zoneNameInput}
+              value={zone.name}
+              onChangeText={t => updateZone({ ...zone, name: t })}
+            />
+            <Text style={styles.shapeBadge}>{zone.geometry.shape}</Text>
+            <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
+              <Pencil size={14} color="#6b7280" />
+            </TouchableOpacity>
+            <DeleteIconButton
+              size={14}
+              style={styles.iconBtn}
+              onPress={() => appAlert('Delete Zone', `Delete "${zone.name}"?`, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: () => deleteZone(zone.id) },
+              ])}
+            />
+          </View>
+          <ZoneGridRow zone={zone} onChange={updateZone} />
         </View>
       ))}
 
@@ -673,6 +685,8 @@ export default function VisionEditorScreen() {
         snapshotUri={snapshotUri}
         zones={program.zones}
         editingZoneId={editingZoneId}
+        initialGeometry={editingZone?.geometry ?? null}
+        initialGrid={editingZone?.grid ?? null}
         onDone={onZoneDrawDone}
         onCancel={() => setZoneModalOpen(false)}
       />
@@ -773,6 +787,65 @@ export default function VisionEditorScreen() {
   );
 }
 
+// ── Zone grid controls ─────────────────────────────────────────────────────────
+
+const MAX_GRID = 16;
+
+/**
+ * Row/column controls for a zone's inspection grid. Off by default; turning it on gives a
+ * 2×2 and the lattice appears over the zone in the draw view and on the annotated feed.
+ *
+ * Only color coverage inspections measure per cell today — the hint says so, because a
+ * grid that silently does nothing on a blob inspection is worse than no grid at all.
+ */
+function ZoneGridRow({ zone, onChange }: { zone: VisionZone; onChange: (z: VisionZone) => void }) {
+  const grid = zone.grid;
+  const on   = !!grid && grid.rows * grid.cols > 1;
+
+  function setGrid(next: VisionZoneGrid | undefined) {
+    onChange({ ...zone, grid: next });
+  }
+
+  function step(axis: keyof VisionZoneGrid, delta: number) {
+    const current = grid ?? { rows: 1, cols: 1 };
+    const value   = Math.max(1, Math.min(MAX_GRID, current[axis] + delta));
+    setGrid({ ...current, [axis]: value });
+  }
+
+  return (
+    <View style={styles.gridRow}>
+      <TouchableOpacity
+        style={[styles.gridToggle, on && styles.gridToggleOn]}
+        onPress={() => setGrid(on ? undefined : { rows: 2, cols: 2 })}
+        activeOpacity={0.75}
+      >
+        <Grid3x3 size={13} color={on ? "#0891b2" : "#9ca3af"} />
+        <Text style={[styles.gridToggleText, on && styles.gridToggleTextOn]}>GRID</Text>
+      </TouchableOpacity>
+
+      {!on ? (
+        <Text style={styles.gridHint}>Off — color inspections measure the whole zone</Text>
+      ) : (
+        <>
+          <View style={{ flex: 1 }} />
+          {(['rows', 'cols'] as const).map(axis => (
+            <View key={axis} style={styles.gridStepper}>
+              <Text style={styles.gridStepperLabel}>{axis === 'rows' ? 'R' : 'C'}</Text>
+              <TouchableOpacity style={styles.gridStepBtn} onPress={() => step(axis, -1)} hitSlop={6}>
+                <Minus size={12} color="#6b7280" />
+              </TouchableOpacity>
+              <Text style={styles.gridStepValue}>{grid![axis]}</Text>
+              <TouchableOpacity style={styles.gridStepBtn} onPress={() => step(axis, 1)} hitSlop={6}>
+                <Plus size={12} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -833,12 +906,30 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13, color: "#9ca3af", textAlign: "center" },
 
   zoneCard: {
-    flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: "#fff", borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 11,
     shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
   },
+  zoneCardRow:   { flexDirection: "row", alignItems: "center", gap: 8 },
   zoneNameInput: { flex: 1, fontSize: 14, fontWeight: "600", color: "#111827" },
+
+  gridRow:        { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
+  gridToggle: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5,
+    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+  },
+  gridToggleOn:      { borderColor: "#22d3ee", backgroundColor: "#ecfeff" },
+  gridToggleText:    { fontSize: 11, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.4 },
+  gridToggleTextOn:  { color: "#0891b2" },
+  gridHint:          { flex: 1, fontSize: 11, color: "#9ca3af" },
+  gridStepper:       { flexDirection: "row", alignItems: "center", gap: 2 },
+  gridStepperLabel:  { fontSize: 11, fontWeight: "700", color: "#6b7280", marginRight: 2 },
+  gridStepBtn: {
+    width: 24, height: 24, borderRadius: 6, justifyContent: "center", alignItems: "center",
+    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+  },
+  gridStepValue: { fontSize: 13, fontWeight: "700", color: "#111827", minWidth: 20, textAlign: "center" },
   shapeBadge:    { fontSize: 11, color: "#9ca3af", backgroundColor: "#f3f4f6", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   iconBtn:       { padding: 4 },
 

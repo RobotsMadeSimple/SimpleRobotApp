@@ -1,6 +1,6 @@
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { ProgramListLayout, SortKey, relativeTime } from "@/src/components/ui/ProgramListLayout";
-import { BuiltProgram, ProgramSummary } from "@/src/models/robotModels";
+import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
+import { BuiltProgram, ProgramSummary, imageDataUri } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -51,7 +51,7 @@ function ProgramRow({
       <View style={s.cardThumb}>
         {image ? (
           <Image
-            source={{ uri: `data:image/png;base64,${image}` }}
+            source={{ uri: imageDataUri(image)! }}
             style={s.thumbImage}
             resizeMode="cover"
           />
@@ -127,23 +127,19 @@ function matchesSearch(name: string, description: string, q: string) {
   return name.toLowerCase().includes(q) || description.toLowerCase().includes(q);
 }
 
-function sortRegular(cards: RegularCard[], sort: SortKey): RegularCard[] {
-  return [...cards].sort((a, b) => {
-    if (sort === "modified") {
-      const ta = a.isBuilt ? (a.bp.lastUpdatedUnixMs ?? 0) : 0;
-      const tb = b.isBuilt ? (b.bp.lastUpdatedUnixMs ?? 0) : 0;
-      return tb - ta;
-    }
-    return a.summary.name.localeCompare(b.summary.name);
-  });
+function sortRegular(cards: RegularCard[], sort: SortState): RegularCard[] {
+  // A card that only exists on the robot has no saved timestamp, so it sorts as 0 —
+  // last under "newest first", first under "oldest first". Same as before direction
+  // was selectable, where it could only ever land at the bottom.
+  return [...cards].sort(bySort<RegularCard>(
+    sort,
+    c => c.summary.name,
+    c => (c.isBuilt ? (c.bp.lastUpdatedUnixMs ?? 0) : 0),
+  ));
 }
 
-function sortBuilt(programs: BuiltProgram[], sort: SortKey): BuiltProgram[] {
-  return [...programs].sort((a, b) =>
-    sort === "modified"
-      ? (b.lastUpdatedUnixMs ?? 0) - (a.lastUpdatedUnixMs ?? 0)
-      : a.name.localeCompare(b.name)
-  );
+function sortBuilt(programs: BuiltProgram[], sort: SortState): BuiltProgram[] {
+  return [...programs].sort(bySort<BuiltProgram>(sort, p => p.name, p => p.lastUpdatedUnixMs ?? 0));
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -154,7 +150,7 @@ export default function RobotProgramsScreen() {
   const robotStatus      = useRobotStatus();
   const [images, setImages] = useState<Record<string, string | null>>({});
   const [search, setSearch] = useState("");
-  const [sort, setSort]     = useState<SortKey>("name");
+  const [sort, setSort]     = useState<SortState>(defaultSort());
 
   useEffect(() => robotClient.onProgramImages(setImages), []);
 

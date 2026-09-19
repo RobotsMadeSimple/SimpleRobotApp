@@ -1,6 +1,6 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { wide } from "@/src/components/ui/responsive";
-import { Plus, Search, X } from "lucide-react-native";
+import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search, X } from "lucide-react-native";
 import { ReactNode } from "react";
 import {
   ScrollView,
@@ -14,6 +14,48 @@ import {
 // ── Shared types & helpers ────────────────────────────────────────────────────
 
 export type SortKey = "name" | "modified";
+export type SortDir = "asc" | "desc";
+export type SortState = { key: SortKey; dir: SortDir };
+
+/**
+ * The direction a key starts in when you first pick it. Names read best A→Z, while
+ * "modified" is nearly always asking "what did I touch last", so it opens newest-first.
+ * These are also the directions the old fixed-direction chips used, so the default view
+ * of every list is unchanged.
+ */
+const DEFAULT_DIR: Record<SortKey, SortDir> = { name: "asc", modified: "desc" };
+
+export const defaultSort = (key: SortKey = "name"): SortState => ({ key, dir: DEFAULT_DIR[key] });
+
+/**
+ * Tapping a sort option: a different key switches to it in its natural direction, the
+ * key already in use flips instead. Exported so the chips and any keyboard path agree.
+ */
+export function nextSort(current: SortState, key: SortKey): SortState {
+  return current.key === key
+    ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+    : { key, dir: DEFAULT_DIR[key] };
+}
+
+/**
+ * The comparator every program list sorts with. Direction is applied here, once, rather
+ * than being baked into each screen's comparator — that is what let the old chips drift
+ * into hardcoding "modified" as descending with no way to say otherwise.
+ *
+ * Accessors are passed in because the lists hold different card shapes.
+ */
+export function bySort<T>(
+  sort: SortState,
+  name: (item: T) => string,
+  modified: (item: T) => number,
+): (a: T, b: T) => number {
+  return (a, b) => {
+    const base = sort.key === "name"
+      ? name(a).localeCompare(name(b))
+      : modified(a) - modified(b);
+    return sort.dir === "asc" ? base : -base;
+  };
+}
 
 export function relativeTime(ms: number): string {
   const d    = new Date(ms);
@@ -37,8 +79,8 @@ interface Props {
   onAdd: () => void;
   search: string;
   onSearchChange: (q: string) => void;
-  sort: SortKey;
-  onSortChange: (s: SortKey) => void;
+  sort: SortState;
+  onSortChange: (s: SortState) => void;
   /** True when there is no data at all (before filtering) — shows the empty state. */
   isEmpty: boolean;
   /** True when filtered results exist — shows children. False shows the "no results" state. */
@@ -93,18 +135,33 @@ export function ProgramListLayout({
         </View>
 
         <View style={s.sortRow}>
-          {(["name", "modified"] as SortKey[]).map(key => (
-            <TouchableOpacity
-              key={key}
-              style={[s.sortChip, sort === key && { backgroundColor: activeChipBg }]}
-              onPress={() => onSortChange(key)}
-              activeOpacity={0.7}
-            >
-              <Text style={[s.sortChipText, sort === key && { color: accentColor }]}>
-                {key === "name" ? "Name" : "Modified"}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          <ArrowUpDown size={13} color="#9ca3af" />
+          <Text style={s.sortLabel}>SORT</Text>
+          {(["name", "modified"] as SortKey[]).map(key => {
+            const active = sort.key === key;
+            // An inactive chip previews the direction it would land in, so the arrow is
+            // always there. That keeps the chip from resizing as the selection moves and
+            // makes the second tap — the one that flips it — discoverable.
+            const dir   = active ? sort.dir : DEFAULT_DIR[key];
+            const Arrow = dir === "asc" ? ArrowUp : ArrowDown;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[s.sortChip, active && { backgroundColor: activeChipBg }]}
+                onPress={() => onSortChange(nextSort(sort, key))}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Sort by ${key === "name" ? "name" : "last modified"}, ${
+                  dir === "asc" ? "ascending" : "descending"}${active ? "" : " — currently off"}`}
+              >
+                <Text style={[s.sortChipText, active && { color: accentColor }]}>
+                  {key === "name" ? "Name" : "Modified"}
+                </Text>
+                <Arrow size={12} strokeWidth={2.5} color={active ? accentColor : "#d1d5db"} />
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -176,8 +233,13 @@ const s = StyleSheet.create({
     color: "#111827",
     paddingVertical: 0,
   },
-  sortRow:      { flexDirection: "row", gap: 6 },
-  sortChip:     { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: "#f3f4f6" },
+  sortRow:      { flexDirection: "row", alignItems: "center", gap: 6 },
+  sortLabel:    { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5, marginRight: 1 },
+  sortChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingLeft: 12, paddingRight: 9, paddingVertical: 5,
+    borderRadius: 20, backgroundColor: "#f3f4f6",
+  },
   sortChipText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
 
   addCard: {

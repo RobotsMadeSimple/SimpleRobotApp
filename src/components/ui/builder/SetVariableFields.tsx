@@ -9,8 +9,9 @@ import {
   View,
 } from "react-native";
 import { Check, ChevronDown, Plus } from "lucide-react-native";
-import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { isListVariable, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { VarPickerModal } from "./VarPicker";
+import type { VarType } from "./VariableEditModal";
 import { ms, svs } from "./builderStyles";
 
 // ── SetVariable helpers ───────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ export function SetVariableFields({
   variables: ProgramVariable[] | undefined;
   contextVariables?: ProgramVariable[];
   set: (p: Partial<ProgramStep>) => void;
-  onCreateVariable?: (defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image") => void;
+  onCreateVariable?: (defaultType?: VarType) => void;
 }) {
   const varList = (variables ?? []).map(v => v.name);
   const contextVarList = (contextVariables ?? []).map(v => v.name);
@@ -195,7 +196,7 @@ export function SetVariableFields({
               autoCapitalize="none"
               autoFocus={!!draft.variableName}
             />
-            {(variables ?? []).filter(v => !v.isString && !v.points && !v.values).length > 0 && (
+            {(variables ?? []).filter(v => !v.isString && !isListVariable(v)).length > 0 && (
               <TouchableOpacity
                 style={{ backgroundColor: "#fff7ed", borderWidth: 1, borderColor: "#fed7aa", borderRadius: 9, paddingHorizontal: 10, justifyContent: "center", marginTop: 6 }}
                 onPress={() => setStrVarPickerOpen(true)}
@@ -296,8 +297,8 @@ export function SetVariableFields({
       <VarPickerModal
         visible={strVarPickerOpen}
         onClose={() => setStrVarPickerOpen(false)}
-        variables={(variables ?? []).filter(v => !v.points && !v.values)}
-        contextVariables={(contextVariables ?? []).filter(v => !v.points && !v.values)}
+        variables={(variables ?? []).filter(v => !isListVariable(v))}
+        contextVariables={(contextVariables ?? []).filter(v => !isListVariable(v))}
         contextLabel="Caller Variables"
         selected={undefined}
         title="Insert Variable"

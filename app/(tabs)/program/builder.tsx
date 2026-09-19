@@ -6,7 +6,7 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ProgramStep, ProgramVariable, StepType } from "@/src/models/robotModels";
+import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, imageDataUri, variableList } from "@/src/models/robotModels";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
@@ -49,11 +49,52 @@ import {
 import { StepConfigModal } from "@/src/components/ui/builder/StepConfigModal";
 import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
-import { VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
+import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
 import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
 import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
+
+/**
+ * Lists are one variable type now, so the chip on a variable row names the element type
+ * instead — which is the part that actually changes how the variable is used.
+ */
+const LIST_CHIP: Record<ListElementType, { label: string; color: string; bg: string; border: string }> = {
+  Number:  { label: "LIST",    color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
+  Boolean: { label: "FLAGS",   color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+  Point:   { label: "POINTS",  color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
+  Record:  { label: "OBJECTS", color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
+};
+
+function describeList(list: { elementType: ListElementType; items: unknown[] }): string {
+  const n = list.items.length;
+  // Point and record lists are normally filled by RunVision at runtime, so an empty one
+  // is the expected state rather than something the user forgot to populate.
+  if (list.elementType === "Point")   return `List of points — ${n} item${n === 1 ? "" : "s"}, populated by RunVision`;
+  if (list.elementType === "Record")  return `List of objects — ${n} item${n === 1 ? "" : "s"}, populated by RunVision`;
+  if (list.elementType === "Boolean") return `List of booleans — ${n} item${n === 1 ? "" : "s"}`;
+  return `List of numbers — ${n} item${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * The initial-value line under a variable's name, for the scalar types that can carry an
+ * expression.
+ *
+ * An expression is shown verbatim rather than reduced to the number it last evaluated to.
+ * That number is only the editor's cached fallback — showing it would read as a fixed
+ * starting value and hide the fact that this variable is computed at all.
+ */
+function InitialValue({ v }: { v: ProgramVariable }) {
+  const expr = v.valueExpression?.trim();
+  return (
+    <Text style={styles.varDesc}>
+      {v.isBoolean ? "Boolean — initial: " : "Initial: "}
+      {expr
+        ? <Text style={{ color: "#7c3aed", fontWeight: "700" }}>{expr}</Text>
+        : v.isBoolean ? (v.value !== 0 ? "True" : "False") : String(v.value)}
+    </Text>
+  );
+}
 
 export default function BuilderScreen() {
   const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
@@ -410,9 +451,9 @@ export default function BuilderScreen() {
 
   const [varModalOpen,   setVarModalOpen]   = useState(false);
   const [editingVar,     setEditingVar]     = useState<ProgramVariable | null>(null);
-  const [newVarDefault,  setNewVarDefault]  = useState<"number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image" | undefined>(undefined);
+  const [newVarDefault,  setNewVarDefault]  = useState<VarType | undefined>(undefined);
 
-  function openNewVar(defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image") {
+  function openNewVar(defaultType?: VarType) {
     setEditingVar(null); setNewVarDefault(defaultType); setVarModalOpen(true);
   }
   function openEditVar(v: ProgramVariable) { setEditingVar(v); setVarModalOpen(true); }
@@ -596,7 +637,7 @@ export default function BuilderScreen() {
       statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
       routineName: undefined, routineId: undefined,
       visionProgramId: undefined, visionProgramName: undefined, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: undefined,
-      varPointName: undefined, varPointIndex: undefined,
+      varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined,
       variableName: undefined, variableExpr: undefined,
       expressions: undefined,
       labelId: type === "Label" ? newId() : undefined,
@@ -933,7 +974,7 @@ export default function BuilderScreen() {
             <View style={styles.imagePreviewWrap}>
               {coverImage ? (
                 <Image
-                  source={{ uri: `data:image/jpeg;base64,${coverImage}` }}
+                  source={{ uri: imageDataUri(coverImage)! }}
                   style={styles.imagePreview}
                 />
               ) : (
@@ -1026,21 +1067,39 @@ export default function BuilderScreen() {
             No variables yet. Tap + to define reusable values you can reference in any numeric field.
           </Text>
         ) : (
-          variables.map((v, i) => (
+          variables.map((v, i) => {
+            const vList = variableList(v);
+            // Coerced to a real boolean: an empty-string expression would otherwise fall
+            // through as "" and React Native throws on a bare string outside a <Text>.
+            const hasExpr = !!v.valueExpression?.trim();
+            return (
             <React.Fragment key={v.id}>
               {i > 0 && <View style={styles.varSep} />}
               <TouchableOpacity style={styles.varRow} onPress={() => openEditVar(v)} activeOpacity={0.7}>
                 <View style={styles.varInfo}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                     <Text style={styles.varName}>${v.name}</Text>
-                    {v.points != null && (
-                      <View style={{ backgroundColor: "#ecfeff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>POINTS</Text>
+                    {/* One chip for every list, labelled by what its elements are —
+                        that is what decides how the variable is indexed. */}
+                    {vList && (
+                      <View style={{ backgroundColor: LIST_CHIP[vList.elementType].bg, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: LIST_CHIP[vList.elementType].border }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: LIST_CHIP[vList.elementType].color, letterSpacing: 0.3 }}>
+                          {LIST_CHIP[vList.elementType].label}
+                        </Text>
                       </View>
                     )}
                     {v.isBoolean && (
                       <View style={{ backgroundColor: "#f0fdf4", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bbf7d0" }}>
                         <Text style={{ fontSize: 9, fontWeight: "700", color: "#16a34a", letterSpacing: 0.3 }}>BOOL</Text>
+                      </View>
+                    )}
+                    {/* Marks a computed starting value. It lives up here with the chips
+                        rather than only in the line below because a variable with a
+                        description shows that instead of its initial value — and "this
+                        one is computed" is worth knowing either way. */}
+                    {hasExpr && (
+                      <View style={{ backgroundColor: "#f5f3ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#ddd6fe" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", fontStyle: "italic", color: "#7c3aed", letterSpacing: 0.3 }}>fx</Text>
                       </View>
                     )}
                     {v.isGlobal && (
@@ -1066,14 +1125,18 @@ export default function BuilderScreen() {
                   </View>
                   {v.description ? (
                     <Text style={styles.varDesc}>{v.description}</Text>
-                  ) : v.points != null ? (
-                    <Text style={styles.varDesc}>Vector6[ ] — populated by RunVision</Text>
+                  ) : vList ? (
+                    <Text style={styles.varDesc}>{describeList(vList)}</Text>
                   ) : v.isBoolean ? (
-                    <Text style={styles.varDesc}>Boolean — initial: {v.value !== 0 ? "True" : "False"}</Text>
+                    <InitialValue v={v} />
                   ) : v.isStopwatch ? (
                     <Text style={styles.varDesc}>Stopwatch — elapsed ms</Text>
+                  ) : v.isString ? (
+                    <Text style={styles.varDesc}>String — initial: {v.stringValue ? `"${v.stringValue}"` : "empty"}</Text>
+                  ) : v.isImage ? (
+                    <Text style={styles.varDesc}>Image — from CaptureImage or an HTTP response</Text>
                   ) : (
-                    <Text style={styles.varDesc}>Initial: {v.value}</Text>
+                    <InitialValue v={v} />
                   )}
                 </View>
                 <DeleteIconButton
@@ -1085,7 +1148,8 @@ export default function BuilderScreen() {
                 />
               </TouchableOpacity>
             </React.Fragment>
-          ))
+            );
+          })
         )}
         <TouchableOpacity
           style={[styles.varAddBtn, variables.length > 0 && styles.varAddBtnBorder]}
@@ -1409,6 +1473,7 @@ export default function BuilderScreen() {
         visible={varModalOpen}
         variable={editingVar}
         defaultType={editingVar == null ? newVarDefault : undefined}
+        variables={variables}
         onSave={saveVar}
         onClose={() => setVarModalOpen(false)}
       />
