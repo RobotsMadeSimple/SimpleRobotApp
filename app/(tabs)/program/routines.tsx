@@ -1,6 +1,6 @@
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { ProgramListLayout, SortKey, relativeTime } from "@/src/components/ui/ProgramListLayout";
+import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
 import { BuiltProgram } from "@/src/models/robotModels";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -13,7 +13,7 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 export default function RoutinesScreen() {
   const allPrograms = useBuiltPrograms();
   const [search, setSearch] = useState("");
-  const [sort, setSort]     = useState<SortKey>("name");
+  const [sort, setSort]     = useState<SortState>(defaultSort());
 
   const routines = allPrograms.filter(p => p.isRoutine);
 
@@ -21,11 +21,7 @@ export default function RoutinesScreen() {
 
   const filtered = routines
     .filter(r => !q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q))
-    .sort((a, b) =>
-      sort === "modified"
-        ? (b.lastUpdatedUnixMs ?? 0) - (a.lastUpdatedUnixMs ?? 0)
-        : a.name.localeCompare(b.name)
-    );
+    .sort(bySort<BuiltProgram>(sort, r => r.name, r => r.lastUpdatedUnixMs ?? 0));
 
   function handleDelete(name: string) {
     appAlert("Delete Routine", `Delete "${name}"? This cannot be undone.`, [

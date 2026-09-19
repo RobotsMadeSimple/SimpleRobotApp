@@ -33,7 +33,7 @@ import {
 import { FEED_HTML } from "@/src/vision/visionHtml";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
-import { WebView } from "react-native-webview";
+import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import { ves } from "./visionEditorStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
@@ -376,13 +376,10 @@ export function InspectionConfigModal({
   const feedSection = (
     <>
         <View style={ws.feedCard}>
-            <WebView
+            <VisionCanvas
               ref={debugWebviewRef}
-              source={{ html: FEED_HTML }}
+              html={FEED_HTML}
               style={{ flex: 1, backgroundColor: '#0d1117' }}
-              scrollEnabled={false}
-              originWhitelist={['*']}
-              javaScriptEnabled
               onLoad={() => {
                 if (feedUrl)
                   debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);

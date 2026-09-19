@@ -89,6 +89,15 @@ export type VisionZoneGeometry = {
   shape: VisionZoneShape;
   // Rectangle
   x: number; y: number; width: number; height: number;
+  /**
+   * Rectangle tilt in degrees, clockwise, about the rectangle's own centre.
+   *
+   * Optional rather than required because zones saved before rotation existed carry no such
+   * field, and absent has to read as 0 — declaring it required would have TypeScript promise
+   * a number that older programs do not actually have. Circles and polygons ignore it.
+   * Applied in pixel space; see the note on the controller's VisionZoneGeometry.
+   */
+  rotation?: number;
   // Circle
   cx: number; cy: number; radius: number;
   // Polygon
@@ -110,10 +119,23 @@ export type BlobDetectionParams = {
   blobColor: number; // 0=dark, 255=light
 };
 
+/**
+ * Splits a zone into a rows×cols lattice over its bounding box, so an inspection pointing
+ * at the zone is measured once per cell instead of once overall. Cells are clipped to the
+ * zone shape. Absent, or 1×1, means no grid.
+ *
+ * Only color coverage inspections read this today; the other inspection types ignore it.
+ */
+export type VisionZoneGrid = {
+  rows: number;
+  cols: number;
+};
+
 export type VisionZone = {
   id: string;
   name: string;
   geometry: VisionZoneGeometry;
+  grid?: VisionZoneGrid;
 };
 
 export type BlobInspection = {
@@ -193,7 +215,7 @@ export function defaultBlobParams(): BlobDetectionParams {
 export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
   return {
     shape,
-    x: 0.1, y: 0.1, width: 0.8, height: 0.8,
+    x: 0.1, y: 0.1, width: 0.8, height: 0.8, rotation: 0,
     cx: 0.5, cy: 0.5, radius: 0.3,
     points: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
   };
@@ -203,7 +225,13 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
 
-export type JsonKeyValue       = { key: string; expr: string; imageVar?: string };
+/**
+ * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
+ * JSON array, an image variable sent as a base64 string, or an expression evaluated to a
+ * number. `listVar` wins over `imageVar`, which wins over `expr` — matching the controller.
+ */
+export type JsonKeyValue       = { key: string; expr: string; imageVar?: string; listVar?: string };
+/** A response key mapped onto a variable. A list variable here is rewritten from a JSON array. */
 export type JsonInboundMapping = { key: string; variableName: string };
 export type JsonImageMapping   = { key: string; variableName: string };
 
@@ -268,17 +296,40 @@ export type ColorCoverageInspection = {
   maxCoverage: number | null;
 };
 
+/** One cell of a gridded color coverage inspection, measured on its own. */
+export type ColorCellResult = {
+  row: number;
+  col: number;
+  /** Row-major position in the grid: row * cols + col. */
+  index: number;
+  coverage: number;
+  passed: boolean;
+};
+
 export type ColorCoverageResult = {
   inspectionId: string;
   name: string;
+  /** Coverage over the whole zone, gridded or not. */
   coverage: number;
+  /** Whole-zone min/max test — except on a gridded zone, where it means every cell passed. */
   passed: boolean;
+  /** One entry per cell, row-major. Absent when the zone has no grid. */
+  cells?: ColorCellResult[];
+  /** How many cells passed. Absent when the zone has no grid. */
+  cellsPassed?: number;
 };
 
 export type ColorVisionStepOutput = {
   inspectionId: string;
   coverageVar?: string;
   passedVar?: string;
+  /**
+   * Object-list variable filled with one record per grid cell — fields row, col, index,
+   * coverage, passed. Only meaningful when the inspection's zone has a grid.
+   */
+  cellsVar?: string;
+  /** Scalar variable filled with the number of cells that passed. */
+  cellsPassedVar?: string;
 };
 
 export type PolygonVisionStepOutput = {
@@ -516,13 +567,95 @@ export type ElseIfBranch = {
   steps: ProgramStep[];
 };
 
+/**
+ * One record in an object-list variable: named numeric fields. Numbers only — booleans are
+ * 0/1 — because expressions evaluate to numbers, so a string field would have nothing to
+ * evaluate to.
+ */
+export type ObjectRecord = Record<string, number>;
+
+/**
+ * What one element of a list variable is shaped like.
+ *
+ * All of them are stored as ObjectRecord — a Number or Boolean under the reserved `value`
+ * key, a Point under x/y/z/rx/ry/rz — because a record is already a bag of named numbers
+ * and the rest are special cases of it. The element type is still needed because the
+ * *syntax* and the rendering differ: only Number and Boolean lists answer a bare `$v[0]`,
+ * only a Point list has a defined axis order for positional `$v[0][2]`, and only a Boolean
+ * list reads back as True/False rather than 1/0.
+ *
+ * Mirrors ListElementType in the controller's Models.cs, and goes over the wire as this
+ * string. Neither side is covered by the golden-JSON drift guard, which is program steps
+ * only, so the two definitions have to be kept in step by hand.
+ */
+export type ListElementType = 'Number' | 'Boolean' | 'Point' | 'Record';
+
+/** The key a Number- or Boolean-element list stores its scalar under. Mirrors ObjectRecord.ScalarKey. */
+export const LIST_SCALAR_KEY = 'value';
+
+/** Axis order for positional access on a Point list — `$pts[0][2]` is z. */
+export const POINT_AXES = ['x', 'y', 'z', 'rx', 'ry', 'rz'] as const;
+
+/**
+ * Element types whose element *is* the value, so `$v[0]` resolves without an accessor
+ * and the variable editor can offer a row per element. Mirrors ListVar.HasScalarElements.
+ */
+export const hasScalarElements = (t: ListElementType): boolean =>
+  t === 'Number' || t === 'Boolean';
+
+export const numberItem = (v: number): ObjectRecord => ({ [LIST_SCALAR_KEY]: v });
+
+/** A boolean element is stored as the 0/1 a record can hold, same as the controller. */
+export const booleanItem = (v: boolean): ObjectRecord => ({ [LIST_SCALAR_KEY]: v ? 1 : 0 });
+
+export const pointItem = (p: Vector6Val): ObjectRecord => ({
+  x: p.x, y: p.y, z: p.z, rx: p.rx, ry: p.ry, rz: p.rz,
+});
+
+export const itemScalar = (r: ObjectRecord): number => r[LIST_SCALAR_KEY] ?? 0;
+
+export const itemBool = (r: ObjectRecord): boolean => itemScalar(r) !== 0;
+
+export const itemPoint = (r: ObjectRecord): Vector6Val => ({
+  x: r.x ?? 0, y: r.y ?? 0, z: r.z ?? 0, rx: r.rx ?? 0, ry: r.ry ?? 0, rz: r.rz ?? 0,
+});
+
 export type ProgramVariable = {
   id: string;
   name: string;
   value: number;
+  /**
+   * An expression evaluated at program start to produce the initial value, used instead
+   * of `value` when set. Number and Boolean scalars only — a boolean takes the usual
+   * non-zero-is-true reading, so `$count > 5` works.
+   *
+   * `value` is still written alongside it, holding the last result the editor could
+   * compute, so a controller that does not understand this field — or an expression that
+   * fails at runtime — falls back to a sensible number rather than 0.
+   */
+  valueExpression?: string;
+  /**
+   * When set, this is a list variable. Every element is a record of named numbers: a
+   * Number or Boolean element keeps its scalar under `value` (a boolean as 0/1), a Point
+   * element under x/y/z/rx/ry/rz. `elementType` says which. Read it through
+   * `variableList()` rather than directly, so the legacy fields below are folded in too.
+   */
+  items?: ObjectRecord[];
+  /** Shape of each element in `items`. Absent reads as 'Record'. */
+  elementType?: ListElementType;
+
+  // ── Legacy list fields ──────────────────────────────────────────────────────
+  // Read-only. Kept so programs saved before the list types were unified still load;
+  // nothing writes them any more, and a program re-saved by a current build carries
+  // `items` instead.
+
+  /** @deprecated Superseded by `items` with elementType 'Number'. */
   values?: number[];
-  /** When set, this is a Vector6 array variable populated at runtime by RunVision steps. */
+  /** @deprecated Superseded by `items` with elementType 'Point'. */
   points?: Vector6Val[];
+  /** @deprecated Superseded by `items` with elementType 'Record'. */
+  objects?: ObjectRecord[];
+
   description?: string;
   /** When true, this variable is displayed as True/False (stored as 1/0). */
   isBoolean?: boolean;
@@ -538,8 +671,54 @@ export type ProgramVariable = {
   isString?: boolean;
   /** String variable initial/default value — only meaningful when isString is true. */
   stringValue?: string;
-  /** When true, this variable stores a camera frame as a base64 JPEG string — populated at runtime by CaptureImage steps. */
+  /**
+   * When true, this variable stores encoded image bytes as a base64 string. CaptureImage
+   * writes a camera JPEG; an HttpRequest inbound mapping writes whatever the server sent,
+   * which is often a PNG. Use `imageDataUri` rather than assuming a format.
+   */
   isImage?: boolean;
+};
+
+/**
+ * A variable's list elements, folding in the legacy `values` / `points` / `objects` fields
+ * so programs saved before the list types were unified still read. Returns null when the
+ * variable is not a list at all.
+ *
+ * `items` is consulted first, so a program carrying both — written by a current build,
+ * then edited by an older one — resolves to the current field rather than silently
+ * reverting. Mirrors ProgramVariable.ToListVar() in the controller.
+ */
+export function variableList(
+  v: ProgramVariable,
+): { elementType: ListElementType; items: ObjectRecord[] } | null {
+  if (v.items)  return { elementType: v.elementType ?? 'Record', items: v.items };
+  if (v.points) return { elementType: 'Point',  items: v.points.map(pointItem) };
+  if (v.objects) return { elementType: 'Record', items: v.objects };
+  // An empty legacy number list was indistinguishable from a scalar and was treated as
+  // one. Preserved deliberately: changing it would turn some saved scalars into lists.
+  if (v.values && v.values.length > 0)
+    return { elementType: 'Number', items: v.values.map(numberItem) };
+  return null;
+}
+
+/** True when the variable is a list of any element type. */
+export const isListVariable = (v: ProgramVariable): boolean => variableList(v) !== null;
+
+/** A list of poses — the only kind usable as a move target or a RunVision points output. */
+export const isPointListVariable = (v: ProgramVariable): boolean =>
+  variableList(v)?.elementType === 'Point';
+
+/** A list of open-ended records — what a gridded vision zone fills. */
+export const isRecordListVariable = (v: ProgramVariable): boolean =>
+  variableList(v)?.elementType === 'Record';
+
+/**
+ * A list whose elements are values rather than structures — Number or Boolean. These are
+ * the ones authored by hand and the only ones a forEach can hand to a value variable.
+ */
+export const isScalarListVariable = (v: ProgramVariable): boolean => {
+  const list = variableList(v);
+  return list != null && hasScalarElements(list.elementType);
 };
 
 export type ProgramVariableSnapshot = {
@@ -547,6 +726,45 @@ export type ProgramVariableSnapshot = {
   value: number;
   isBoolean: boolean;
 };
+
+/**
+ * One display image variable, as reported alongside the variable snapshot.
+ *
+ * The bytes are not here — the controller sends name and revision only, and the image is
+ * fetched with getProgramVariableImage when the revision changes. The variable poll runs
+ * several times a second and a base64 camera frame is a few hundred kilobytes, so
+ * inlining one would mean re-sending a picture that had not changed, over and over.
+ *
+ * Revision 0 means the variable is declared but nothing has been written to it yet.
+ * Compare revisions for inequality rather than for increase: a program restarted in a
+ * fresh executor begins counting again, so the number can legitimately go down.
+ */
+export type ProgramImageSnapshot = {
+  name: string;
+  revision: number;
+};
+
+/**
+ * A base64 image as a data URI, with the mime read off the first bytes.
+ *
+ * Image variables do not record their format — CaptureImage puts a camera JPEG in one and
+ * an HttpRequest inbound mapping puts whatever the server sent, so the same variable can
+ * hold either. Base64 encodes three bytes to four characters from the start, which makes
+ * the leading characters a stable signature: a PNG always begins `iVBORw0K` and a JPEG
+ * always begins `/9j/`.
+ *
+ * Returns null for empty input, so a caller can tell "nothing written yet" from an image.
+ */
+export function imageDataUri(base64: string | undefined | null): string | null {
+  if (!base64) return null;
+  const mime = base64.startsWith('iVBORw0K') ? 'image/png'
+             : base64.startsWith('R0lGOD')   ? 'image/gif'
+             : base64.startsWith('UklGR')    ? 'image/webp'
+             // JPEG last as the default: it is what CaptureImage writes, and it is what
+             // every call site assumed before there was anything else to hold.
+             : 'image/jpeg';
+  return `data:${mime};base64,${base64}`;
+}
 
 export type ProgramStep = {
   id: string;
@@ -629,9 +847,21 @@ export type ProgramStep = {
   colorOutputs?: ColorVisionStepOutput[];
   polygonOutputs?: PolygonVisionStepOutput[];
   arucoOutputs?: ArucoVisionStepOutput[];
-  // Variable point target for move steps (overrides pointName when set)
+  /**
+   * Superseded by pointNameExpr, which expresses the same thing as "$name[index]".
+   * Still read so programs saved before the merge keep running; the builder rewrites
+   * them to pointNameExpr on save and no longer writes these.
+   */
   varPointName?: string;
   varPointIndex?: string;
+  /**
+   * Variable point target for move steps (overrides pointName when set). Resolved two
+   * ways: an expression that is only an indexed points variable ("$pts[$i]") yields
+   * those coordinates directly, anything else is interpolated to text naming a saved
+   * point ("$target", "{$binPrefix}{$index}"). Either way it is re-resolved on every
+   * execution, so assigning the variables it references retargets the move.
+   */
+  pointNameExpr?: string;
   // StartBackground / StopBackground / WaitForBackground
   backgroundProgramName?: string;
   backgroundProgramId?: string;

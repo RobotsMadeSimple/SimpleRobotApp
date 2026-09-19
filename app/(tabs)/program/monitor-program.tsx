@@ -8,7 +8,7 @@ import { BuiltProgram,
   ProgramStep,
   ProgramSummary,
   ProgramVariableSnapshot,
-  VisionResult } from "@/src/models/robotModels";
+  VisionResult, imageDataUri, isListVariable } from "@/src/models/robotModels";
 import { useBuiltPrograms,
   useBuiltProgramsLoaded,
   useProgramSummaries,
@@ -47,6 +47,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+// Only for the image variables, which are the one picture here that changes while you
+// are looking at it. React Native's own Image blanks and then fades in on every source
+// change, which on a board updating each ply reads as a flicker rather than a move.
+import { Image as ExpoImage } from "expo-image";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
@@ -397,23 +401,71 @@ export default function MonitorProgramScreen() {
 
   // ── Variable snapshots ────────────────────────────────────────────────────
   const [varSnapshots, setVarSnapshots] = useState<ProgramVariableSnapshot[]>([]);
-  const hasMonitoredVars = (builtProgram?.variables ?? []).some(v => v.displayOnMonitor && v.points == null && v.values == null && !v.isImage);
+  // Image bytes by variable name, kept out of state until they change — see the poll.
+  const [imageData, setImageData] = useState<Record<string, string>>({});
+  const imageRevs = useRef<Record<string, number>>({});
+
+  const hasMonitoredVars = (builtProgram?.variables ?? []).some(v => v.displayOnMonitor && !isListVariable(v) && !v.isImage);
+  // Names rather than the variables themselves, and memoised on the joined string, so the
+  // poll effect does not restart every render on a fresh array identity.
+  const monitoredImages = useMemo(
+    () => (builtProgram?.variables ?? []).filter(v => v.displayOnMonitor && v.isImage).map(v => v.name),
+    [builtProgram?.variables],
+  );
+  const monitoredImageKey = monitoredImages.join(' ');
 
   useFocusEffect(
     useCallback(() => {
-      if (!programName || !hasMonitoredVars) return;
+      if (!programName || (!hasMonitoredVars && !monitoredImageKey)) return;
       let cancelled = false;
 
       const fetch = () => {
         robotClient.getProgramVariables(programName)
-          .then(vars => { if (!cancelled) setVarSnapshots(vars); })
+          .then(({ variables, images }) => {
+            if (cancelled) return;
+            setVarSnapshots(variables);
+            for (const img of images) {
+              // Revision 0 is "declared, never written" — there is nothing to ask for.
+              if (img.revision === 0) continue;
+              // Inequality, not increase: a re-run gets a fresh executor whose counter
+              // starts again, so the revision can legitimately go backwards and that
+              // still means the picture changed.
+              if (imageRevs.current[img.name] === img.revision) continue;
+              imageRevs.current[img.name] = img.revision;
+              robotClient.getProgramVariableImage(programName, img.name)
+                .then(data => {
+                  if (!cancelled && data) setImageData(prev => ({ ...prev, [img.name]: data }));
+                })
+                // Forget the revision so the next tick asks again rather than sitting on
+                // a picture that never arrived.
+                .catch(() => { delete imageRevs.current[img.name]; });
+            }
+          })
           .catch(() => {});
       };
 
       fetch();
       const interval = setInterval(fetch, 300);
       return () => { cancelled = true; clearInterval(interval); };
-    }, [programName, hasMonitoredVars])
+    }, [programName, hasMonitoredVars, monitoredImageKey])
+  );
+
+  // A different program's images are not this one's. Clearing on the name rather than in
+  // the poll's cleanup keeps the last frame on screen when the page merely loses focus.
+  useEffect(() => {
+    imageRevs.current = {};
+    setImageData({});
+  }, [programName]);
+
+  // The variable poll re-renders this page every 300ms. Built inline, the data URI would
+  // be a new string on each of those renders for a picture that had not changed, and
+  // handing an image a new source is how you get it to reload and flicker. imageData only
+  // gets a new identity when a revision actually moved, so this holds still between moves.
+  const imageUris = useMemo(
+    () => Object.fromEntries(
+      Object.entries(imageData).map(([name, data]) => [name, imageDataUri(data)]),
+    ),
+    [imageData],
   );
 
   // ── Persistent alert banner ────────────────────────────────────────────────
@@ -564,7 +616,7 @@ export default function MonitorProgramScreen() {
             <View style={[styles.imageWrap, { borderColor: theme.bar + "33" }]}>
               {image ? (
                 <Image
-                  source={{ uri: `data:image/png;base64,${image}` }}
+                  source={{ uri: imageDataUri(image)! }}
                   style={styles.image}
                   resizeMode="cover"
                 />
@@ -695,6 +747,49 @@ export default function MonitorProgramScreen() {
                   );
                 })}
               </View>
+            </View>
+          </>
+        )}
+
+        {/* ── Image variables ── */}
+        {monitoredImages.length > 0 && (
+          <>
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>IMAGES</Text>
+              {monitoredImages.map(name => {
+                // The mime was read off the bytes when this was built: CaptureImage
+                // writes JPEG, an HTTP inbound mapping writes whatever the server sent.
+                const uri = imageUris[name];
+                return (
+                  <View key={name} style={styles.imgCell}>
+                    <Text style={styles.varCellName} numberOfLines={1}>${name}</Text>
+                    {uri ? (
+                      <ExpoImage
+                        source={{ uri }}
+                        style={styles.varImage}
+                        contentFit="contain"
+                        // No crossfade. expo-image holds the frame it already has until
+                        // the next one has decoded, so at 0 the board simply changes --
+                        // no blank, no fade. Anything above 0 animates a board that is
+                        // meant to be read, not watched.
+                        transition={0}
+                        // Every frame is a one-off: the picture arrives as bytes we
+                        // already hold and is superseded on the next move. Caching them
+                        // would just accumulate a copy of every ply of the game.
+                        cachePolicy="none"
+                      />
+                    ) : (
+                      // Declared but nothing written yet. The placeholder holds the same
+                      // space the picture will take, so the page does not jump when the
+                      // first frame lands.
+                      <View style={styles.varImageEmpty}>
+                        <Text style={styles.varImageEmptyText}>No image yet</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           </>
         )}
@@ -891,10 +986,14 @@ export default function MonitorProgramScreen() {
                   <View key={id} style={styles.snapshotItem}>
                     <Text style={styles.snapshotName}>{name}</Text>
                     {dataUri ? (
-                      <Image
+                      // Also a live frame, replaced on every poll, so the same no-fade
+                      // treatment as the image variables above.
+                      <ExpoImage
                         source={{ uri: dataUri }}
                         style={styles.snapshotImage}
-                        resizeMode="contain"
+                        contentFit="contain"
+                        transition={0}
+                        cachePolicy="none"
                       />
                     ) : (
                       <View style={styles.snapshotPlaceholder}>
@@ -1093,6 +1192,20 @@ const styles = StyleSheet.create({
   },
   varCellName:  { fontSize: 11, fontWeight: "600", color: "#6b7280" },
   varCellValue: { fontSize: 18, fontWeight: "700", color: "#111827" },
+
+  imgCell: { marginTop: 8, gap: 4 },
+  // Square, because the thing most likely to end up here is a camera frame or a board
+  // and neither wants cropping. contentFit="contain" does the rest.
+  varImage: {
+    width: "100%", aspectRatio: 1, borderRadius: 10,
+    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+  },
+  varImageEmpty: {
+    width: "100%", aspectRatio: 1, borderRadius: 10,
+    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+    alignItems: "center", justifyContent: "center",
+  },
+  varImageEmptyText: { fontSize: 12, color: "#9ca3af" },
 
   // ── Management (edit / delete) ─────────────────────────────────────────────
   managementRow: { flexDirection: "row", gap: 10 },

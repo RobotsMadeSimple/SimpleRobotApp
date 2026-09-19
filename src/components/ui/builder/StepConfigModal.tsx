@@ -12,7 +12,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, Minus, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
+import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -34,6 +34,10 @@ import {
   VisionStepOutput,
   auxStepsPerUnit,
   auxUnitLabel,
+  isListVariable,
+  isPointListVariable,
+  isRecordListVariable,
+  isScalarListVariable,
 } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
@@ -50,12 +54,12 @@ import {
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { ms } from "./builderStyles";
-import { ExpressionInput } from "./NumericInputs";
+import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
 import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
-import { VariableEditModal } from "./VariableEditModal";
+import { VarType, VariableEditModal } from "./VariableEditModal";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
 
@@ -82,7 +86,7 @@ export function StepConfigModal({
   onSave: (updated: ProgramStep) => void;
   onClose: () => void;
   onEnterRoutine?: (routineName: string) => void;
-  onCreateVariable?: (defaultType?: "number" | "boolean" | "list" | "points" | "stopwatch" | "string" | "image") => void;
+  onCreateVariable?: (defaultType?: VarType) => void;
   onSaveVariable?: (v: ProgramVariable) => void;
   onCreateRoutine?: () => void;
 }) {
@@ -103,7 +107,7 @@ export function StepConfigModal({
   const [subPage, setSubPage]       = useState<SubPage>(null);
   // Which modifier row is currently showing its inline "clear?" confirmation.
   const [clearConfirm, setClearConfirm] = useState<SubPage>(null);
-  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint' | 'varPoint'>('savedPoint');
+  const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint' | 'variable'>('savedPoint');
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
   const [stackPickerOpen, setStackPickerOpen] = useState(false);
   const [ioConfig, setIoConfig]       = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
@@ -114,11 +118,10 @@ export function StepConfigModal({
   const [zonePickerOpen, setZonePickerOpen] = useState(false);
   const [zoneVarPickerOpen, setZoneVarPickerOpen] = useState(false);
   const [visionPicker, setVisionPicker]   = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
-  const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' } | null>(null);
+  const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' | 'cellsVar' | 'cellsPassedVar' } | null>(null);
   const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
   const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
   const [threadPresetPickerOpen, setThreadPresetPickerOpen] = useState(false);
-  const [statusVarPickerOpen, setStatusVarPickerOpen] = useState(false);
   const [waitTimeoutVarPicker,  setWaitTimeoutVarPicker]  = useState(false);
   const [loopIndexVarPicker,    setLoopIndexVarPicker]    = useState(false);
   const [forEachSourcePicker,   setForEachSourcePicker]   = useState(false);
@@ -151,9 +154,18 @@ export function StepConfigModal({
 
   useEffect(() => {
     if (step) {
-      setDraft({ ...step });
+      // varPointName/varPointIndex were a separate tab before point targets merged into
+      // one expression. Fold them into the equivalent pointNameExpr so the merged field
+      // shows them; the rewrite only persists if the user saves.
+      const migrated = step.varPointName
+        ? { ...step,
+            pointNameExpr: `$${step.varPointName}[${step.varPointIndex ?? "0"}]`,
+            varPointName: undefined,
+            varPointIndex: undefined }
+        : { ...step };
+      setDraft(migrated);
       setPulseMs(step.pulseMs !== undefined && step.pulseMs > 0 ? String(step.pulseMs) : "");
-      setGridPointMode(step.varPointName ? 'varPoint' : step.gridPoint != null ? 'gridPoint' : step.stackPoint != null ? 'stackPoint' : 'savedPoint');
+      setGridPointMode(migrated.pointNameExpr ? 'variable' : step.gridPoint != null ? 'gridPoint' : step.stackPoint != null ? 'stackPoint' : 'savedPoint');
     } else {
       setDraft(null);
       setPulseMs("");
@@ -263,8 +275,8 @@ export function StepConfigModal({
         return (
           <>
             {/* Mode tabs */}
-            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
-              {(['savedPoint', 'gridPoint', 'stackPoint', 'varPoint'] as const).map(mode => (
+            <View style={{ flexDirection: 'row', gap: 4, marginBottom: 12 }}>
+              {(['savedPoint', 'gridPoint', 'stackPoint', 'variable'] as const).map(mode => (
                 <TouchableOpacity
                   key={mode}
                   style={[
@@ -275,23 +287,23 @@ export function StepConfigModal({
                   onPress={() => {
                     setGridPointMode(mode);
                     if (mode === 'savedPoint') {
-                      set({ gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined });
+                      set({ gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined });
                     } else if (mode === 'gridPoint') {
                       if (!draft!.gridPoint) {
-                        set({ pointName: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                        set({ pointName: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
                       }
                     } else if (mode === 'stackPoint') {
                       if (!draft!.stackPoint) {
-                        set({ pointName: undefined, gridPoint: undefined, varPointName: undefined, varPointIndex: undefined, stackPoint: { stackId: '', index: 0 } });
+                        set({ pointName: undefined, gridPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined, stackPoint: { stackId: '', index: 0 } });
                       }
                     } else {
-                      set({ pointName: undefined, gridPoint: undefined, stackPoint: undefined });
+                      set({ pointName: undefined, gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined });
                     }
                   }}
                   activeOpacity={0.7}
                 >
                   <Text style={{ fontSize: 11, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
-                    {mode === 'savedPoint' ? 'Point' : mode === 'gridPoint' ? 'Grid' : mode === 'stackPoint' ? 'Stack' : 'Var'}
+                    {mode === 'savedPoint' ? 'Point' : mode === 'gridPoint' ? 'Grid' : mode === 'stackPoint' ? 'Stack' : 'Variable'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -527,44 +539,42 @@ export function StepConfigModal({
               </>
             ) : (
               (() => {
-                const ptVars = (variables ?? []).filter(v => v.points != null);
+                // Images are the one kind that can't contribute to a target.
+                const targetVars = (variables ?? []).filter(v => !v.isImage);
+                const expr       = draft!.pointNameExpr ?? "";
+                // Mirrors the executor: an indexed points variable on its own is already a
+                // coordinate; everything else resolves to text naming a saved point.
+                const ptMatch    = /^\{?\s*\$(\w+)\s*\[([^\]]*)\]\s*\}?$/.exec(expr.trim());
+                const asPoints   = ptMatch && targetVars.some(v => isPointListVariable(v) && v.name === ptMatch[1]);
                 return (
                   <>
-                    <Text style={ms.fieldLabel}>VARIABLE</Text>
-                    {ptVars.length === 0 && (
-                      <Text style={ms.emptyHint}>No Points variables yet. Create one in the Variables section and a RunVision step will populate it at runtime.</Text>
-                    )}
-                    {ptVars.map((v, i) => {
-                      const active = draft!.varPointName === v.name;
-                      return (
-                        <TouchableOpacity
-                          key={v.id}
-                          style={[ms.row, i < ptVars.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                          onPress={() => set({ varPointName: v.name })}
-                          activeOpacity={0.7}
-                        >
-                          <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                            {active && <View style={ms.radioDot} />}
-                          </View>
-                          <View style={ms.rowText}>
-                            <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
-                            {!!v.description && <Text style={ms.rowDesc}>{v.description}</Text>}
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                    <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INDEX EXPRESSION</Text>
-                    <TextInput
+                    <Text style={ms.fieldLabel}>POINT EXPRESSION</Text>
+                    <TemplateInput
                       style={ms.input}
-                      value={draft!.varPointIndex ?? ""}
-                      onChangeText={v => set({ varPointIndex: v || undefined })}
-                      placeholder="0  or  $counter"
-                      placeholderTextColor="#9ca3af"
-                      autoCapitalize="none"
-                      returnKeyType="done"
+                      value={expr}
+                      onChange={v => set({ pointNameExpr: v || undefined })}
+                      placeholder="$target  ·  $pointsList[$index]  ·  {$binPrefix}{$index}"
+                      variables={targetVars}
+                      insertToken={v => isPointListVariable(v) ? `$${v.name}[0]` : `{$${v.name}}`}
                     />
-                    <Text style={ms.hintText}>
-                      Which element from the array to move to. Use a number or a scalar variable like $counter.
+
+                    {expr.trim().length > 0 && (
+                      <Text style={[ms.hintText, { marginTop: 8, fontWeight: "700", color: asPoints ? "#0891b2" : "#7c3aed" }]}>
+                        {asPoints
+                          ? `Coordinates from element ${ptMatch![2].trim() || "0"} of $${ptMatch![1]}.`
+                          : "Resolves to text, then matched against your saved points by name."}
+                      </Text>
+                    )}
+
+                    <Text style={[ms.hintText, { marginTop: 8 }]}>
+                      Re-resolved every time the step runs, so assigning the variables retargets the move.
+                      A <Text style={{ fontWeight: "700" }}>Points</Text> variable indexed on its own —{" "}
+                      <Text style={{ fontWeight: "700" }}>{"$pointsList[$index]"}</Text> — moves straight to those
+                      coordinates. Anything else builds a saved point&apos;s <Text style={{ fontWeight: "700" }}>name</Text>:{" "}
+                      a <Text style={{ fontWeight: "700" }}>String</Text> variable like{" "}
+                      <Text style={{ fontWeight: "700" }}>$target</Text>, or pieces joined with braces, as{" "}
+                      <Text style={{ fontWeight: "700" }}>{"bin{$i + 1}"}</Text> → <Text style={{ fontWeight: "700" }}>bin3</Text>.
+                      The program errors if a name doesn&apos;t match a saved point.
                     </Text>
                   </>
                 );
@@ -735,6 +745,10 @@ export function StepConfigModal({
           ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
           : draft!.stackPoint
           ? `Stack → ${stacks.find(s => s.id === draft!.stackPoint!.stackId)?.name ?? 'Unknown'}`
+          : draft!.varPointName
+          ? `$${draft!.varPointName}[${draft!.varPointIndex ?? "0"}]`
+          : draft!.pointNameExpr
+          ? `→ ${draft!.pointNameExpr}`
           : (draft!.pointName ?? "Current Position");
         return (
           <>
@@ -786,6 +800,10 @@ export function StepConfigModal({
           ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
           : draft!.stackPoint
           ? `Stack → ${stacks.find(s => s.id === draft!.stackPoint!.stackId)?.name ?? 'Unknown'}`
+          : draft!.varPointName
+          ? `$${draft!.varPointName}[${draft!.varPointIndex ?? "0"}]`
+          : draft!.pointNameExpr
+          ? `→ ${draft!.pointNameExpr}`
           : (draft!.pointName ?? "Current Position");
         const jumpHeightLabel = (() => {
           if (draft!.jumpZStart != null || draft!.jumpZEnd != null) {
@@ -1008,7 +1026,7 @@ export function StepConfigModal({
       case "Wait": {
         const waitMode  = draft!.waitMode ?? 'duration';
         const waitCond  = draft!.waitCondition ?? { combinator: 'ALL' as const, items: [] };
-        const scalarVars = (variables ?? []).filter(v => !v.values && !v.points && !v.isStopwatch);
+        const scalarVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isStopwatch);
         return (
           <>
             <Text style={ms.fieldLabel}>MODE</Text>
@@ -1084,8 +1102,12 @@ export function StepConfigModal({
 
       case "Loop": {
         const loopMode = draft!.loopMode ?? 'count';
-        const listPointVars  = (variables ?? []).filter(v => v.values || v.points);
-        const scalarVarsLoop = (variables ?? []).filter(v => !v.values && !v.points && !v.isStopwatch);
+        const loopSourceVars = (variables ?? []).filter(isListVariable);
+        const scalarVarsLoop = (variables ?? []).filter(v => !isListVariable(v) && !v.isStopwatch);
+        // Number and boolean elements are values in their own right, so the executor can hand
+        // one to the value variable. Anything else only gets the index — see the hint below.
+        const forEachSourceIsScalar = loopSourceVars.some(
+          v => v.name === draft!.forEachVariableName && isScalarListVariable(v));
         const whileCond = draft!.loopWhileCondition ?? { combinator: 'ALL' as const, items: [] };
         return (
           <>
@@ -1142,8 +1164,8 @@ export function StepConfigModal({
             ) : (
               <>
                 <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ITERATE OVER</Text>
-                {listPointVars.length === 0
-                  ? <Text style={ms.emptyHint}>No list or points variables defined yet.</Text>
+                {loopSourceVars.length === 0
+                  ? <Text style={ms.emptyHint}>No list variables defined yet.</Text>
                   : (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
@@ -1151,7 +1173,7 @@ export function StepConfigModal({
                         style={[ms.input, { flex: 1, justifyContent: "center" }]}
                         onPress={() => setForEachSourcePicker(true)} activeOpacity={0.7}>
                         <Text style={{ color: draft!.forEachVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
-                          {draft!.forEachVariableName ?? "select list or points variable"}
+                          {draft!.forEachVariableName ?? "select a list variable"}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -1160,7 +1182,7 @@ export function StepConfigModal({
                 <VarPickerModal
                   visible={forEachSourcePicker}
                   onClose={() => setForEachSourcePicker(false)}
-                  variables={listPointVars}
+                  variables={loopSourceVars}
                   selected={draft!.forEachVariableName}
                   onSelect={v => { set({ forEachVariableName: v?.name }); setForEachSourcePicker(false); }}
                   title="Source Variable"
@@ -1169,7 +1191,13 @@ export function StepConfigModal({
                 {scalarVarsLoop.length > 0 && (
                   <>
                     <Text style={[ms.fieldLabel, { marginTop: 14 }]}>VALUE VARIABLE  (optional)</Text>
-                    <Text style={ms.hintText}>Receives the current element (list) or index (points) each iteration.</Text>
+                    {/* Mirrors the executor: only an element that is itself a value can be
+                        handed over, so on a point or record list this receives the index. */}
+                    <Text style={ms.hintText}>
+                      {forEachSourceIsScalar
+                        ? "Receives the current element each iteration."
+                        : "Receives the current index each iteration — a point or object element is not a number, so read it with $name[$i].field."}
+                    </Text>
                     <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
                       <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
                       <TouchableOpacity
@@ -1285,19 +1313,15 @@ export function StepConfigModal({
               })}
             </View>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MESSAGE</Text>
-            <TextInput style={ms.input} value={msgValue}
-              onChangeText={v => set({ [msgField]: v || undefined })}
+            <TemplateInput
+              style={ms.input}
+              value={msgValue}
+              onChange={v => set({ [msgField]: v || undefined })}
               placeholder={hasVars ? "e.g. Processing item $i of $total…" : "e.g. Picking part from tray…"}
-              placeholderTextColor="#c4c4c4" returnKeyType="done" autoFocus />
-            {hasVars && (
-              <TouchableOpacity
-                onPress={() => setStatusVarPickerOpen(true)}
-                activeOpacity={0.7}
-                style={{ marginTop: 6, alignSelf: 'flex-start', backgroundColor: '#ede9fe', borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#7c3aed' }}>+ insert variable</Text>
-              </TouchableOpacity>
-            )}
+              variables={variables}
+              autoCapitalize="sentences"
+              autoFocus
+            />
             <Text style={[ms.hintText, { marginTop: 8 }]}>
               {hasVars ? "Use $varName to embed variable values." : "Appears in the monitor while this step runs."}
             </Text>
@@ -1466,10 +1490,19 @@ export function StepConfigModal({
               <>
                 <Text style={[ms.fieldLabel, { marginTop: 16 }]}>COLOR OUTPUTS</Text>
                 {colorInspections.filter(i => i.enabled).map(insp => {
-                  const out = getColorOutput(insp.id);
+                  const out  = getColorOutput(insp.id);
+                  // A gridded zone measures each cell separately, so it has two more
+                  // outputs worth assigning. Hidden otherwise — they would always be empty.
+                  const grid = (selectedVP?.zones ?? []).find(z => z.id === insp.zoneId)?.grid;
+                  const gridded = !!grid && grid.rows * grid.cols > 1;
                   return (
                     <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fdf4ff", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#e9d5ff" }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>{insp.name}</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>
+                        {insp.name}
+                        {gridded && (
+                          <Text style={{ fontWeight: "400", color: "#9ca3af" }}>  ({grid!.rows}×{grid!.cols} grid)</Text>
+                        )}
+                      </Text>
                       <VarSelectorButton
                         label="COVERAGE %"
                         value={out?.coverageVar}
@@ -1479,12 +1512,33 @@ export function StepConfigModal({
                         onPress={() => setColorPicker({ inspId: insp.id, field: 'coverageVar' })}
                       />
                       <VarSelectorButton
-                        label="PASSED"
+                        label={gridded ? "PASSED (ALL CELLS)" : "PASSED"}
                         value={out?.passedVar}
                         accent="#16a34a"
                         placeholder="None — tap to assign"
                         onPress={() => setColorPicker({ inspId: insp.id, field: 'passedVar' })}
                       />
+                      {gridded && (
+                        <>
+                          <VarSelectorButton
+                            label="CELLS (OBJECT LIST)"
+                            value={out?.cellsVar}
+                            accent="#0891b2"
+                            placeholder="None — tap to assign"
+                            onPress={() => setColorPicker({ inspId: insp.id, field: 'cellsVar' })}
+                          />
+                          <VarSelectorButton
+                            label="CELLS PASSED"
+                            value={out?.cellsPassedVar}
+                            accent="#16a34a"
+                            placeholder="None — tap to assign"
+                            onPress={() => setColorPicker({ inspId: insp.id, field: 'cellsPassedVar' })}
+                          />
+                          <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+                            Read a cell with $name[i].coverage, .passed, .row, .col or .index.
+                          </Text>
+                        </>
+                      )}
                     </View>
                   );
                 })}
@@ -2394,9 +2448,13 @@ export function StepConfigModal({
         const setOutbound = (rows: JsonKeyValue[])       => set({ jsonOutbound: rows.length ? rows : undefined });
         const setInbound  = (rows: JsonInboundMapping[]) => set({ jsonInbound:  rows.length ? rows : undefined });
 
-        const numericVars = (variables ?? []).filter(v => v.points == null && v.values == null && !v.isString && !v.isImage);
+        const numericVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage);
         const imageVars   = (variables ?? []).filter(v => v.isImage === true);
-        const allVars     = [...numericVars, ...imageVars];
+        // A list travels as a JSON array in either direction, so one 32-element board is
+        // one field rather than 32. Ordered after the scalars because picking a scalar is
+        // still the common case.
+        const listVars    = (variables ?? []).filter(v => isListVariable(v));
+        const allVars     = [...numericVars, ...listVars, ...imageVars];
 
         return (
           <>
@@ -2457,6 +2515,7 @@ export function StepConfigModal({
             </View>
             <Text style={[ms.hintText, { marginBottom: 8 }]}>
               Each row becomes a JSON key. Value is a variable or expression (e.g. <Text style={{ fontFamily: "monospace" }}>$count * 2</Text>).
+              Pick a list variable to send the whole list as a JSON array.
             </Text>
             {/* JSON block */}
             <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
@@ -2490,15 +2549,20 @@ export function StepConfigModal({
                   />
                   <Text style={{ fontSize: 14, color: accent }}>"</Text>
                   <Text style={{ fontSize: 14, color: "#64748b", marginHorizontal: 5 }}>:</Text>
-                  {row.imageVar ? (
+                  {row.listVar || row.imageVar ? (
+                    // A whole-variable row has nothing to type into — the value is the
+                    // variable itself, so the field is a chip that reopens the picker.
                     <TouchableOpacity
                       style={{ flex: 2, flexDirection: "row", alignItems: "center", gap: 4, minWidth: 30 }}
                       onPress={() => setJsonOutboundPicker(i)}
                       activeOpacity={0.75}
                     >
-                      <Camera size={12} color={accent} />
+                      {row.listVar ? <List size={12} color={accent} /> : <Camera size={12} color={accent} />}
                       <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: "#7c3aed" }}
-                        numberOfLines={1}>${row.imageVar}</Text>
+                        numberOfLines={1}>${row.listVar ?? row.imageVar}</Text>
+                      {row.listVar && (
+                        <Text style={{ fontSize: 11, color: "#94a3b8" }}>[ ]</Text>
+                      )}
                     </TouchableOpacity>
                   ) : (
                     <>
@@ -2552,6 +2616,7 @@ export function StepConfigModal({
             </View>
             <Text style={[ms.hintText, { marginBottom: 8 }]}>
               Map response JSON keys to program variables. Leave empty to ignore the response.
+              A JSON array mapped onto a list variable replaces the list; read its length with <Text style={{ fontFamily: "monospace" }}>$name.length</Text>.
             </Text>
             {/* JSON block */}
             <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
@@ -2621,7 +2686,7 @@ export function StepConfigModal({
                 fontSize: 15, color: "#64748b" }}>{"}"}</Text>
             </View>
 
-            {/* Variable picker for inbound rows — numeric + image */}
+            {/* Variable picker for inbound rows — numeric, list and image */}
             <VarPickerModal
               visible={jsonInboundPicker !== null}
               title="Select Variable"
@@ -2637,21 +2702,29 @@ export function StepConfigModal({
               }}
               onClose={() => setJsonInboundPicker(null)}
             />
-            {/* Variable picker for outbound rows — numeric inserts into expr, image sets imageVar */}
+            {/* Variable picker for outbound rows — a list or image replaces the row's value
+                outright, a scalar appends into the expression being typed. */}
             <VarPickerModal
               visible={jsonOutboundPicker !== null}
               title="Select Variable"
               variables={allVars}
-              selected={jsonOutboundPicker !== null ? (outbound[jsonOutboundPicker]?.imageVar ?? undefined) : undefined}
+              selected={jsonOutboundPicker !== null
+                ? (outbound[jsonOutboundPicker]?.listVar ?? outbound[jsonOutboundPicker]?.imageVar ?? undefined)
+                : undefined}
               onSelect={v => {
                 if (jsonOutboundPicker === null || !v) return;
                 const next = [...outbound];
-                if (v.isImage) {
-                  next[jsonOutboundPicker] = { ...next[jsonOutboundPicker], imageVar: v.name, expr: "" };
+                const row  = next[jsonOutboundPicker];
+                if (isListVariable(v)) {
+                  next[jsonOutboundPicker] = { ...row, listVar: v.name, imageVar: undefined, expr: "" };
+                } else if (v.isImage) {
+                  next[jsonOutboundPicker] = { ...row, imageVar: v.name, listVar: undefined, expr: "" };
                 } else {
-                  const cur = (next[jsonOutboundPicker].imageVar ? "" : next[jsonOutboundPicker].expr.trimEnd());
-                  next[jsonOutboundPicker] = { ...next[jsonOutboundPicker],
-                    imageVar: undefined, expr: cur ? `${cur} $${v.name}` : `$${v.name}` };
+                  // Appending only makes sense if an expression was already being built.
+                  // Coming from a list or image row there is nothing to append to.
+                  const cur = (row.listVar || row.imageVar) ? "" : row.expr.trimEnd();
+                  next[jsonOutboundPicker] = { ...row, imageVar: undefined, listVar: undefined,
+                    expr: cur ? `${cur} $${v.name}` : `$${v.name}` };
                 }
                 setOutbound(next);
                 setJsonOutboundPicker(null);
@@ -2738,7 +2811,7 @@ export function StepConfigModal({
       case "HttpReceive": {
         const accentRcv = "#0f766e";
         const rcvInbound = draft!.httpReceiveInbound ?? [];
-        const numericVarsRcv = (variables ?? []).filter(v => v.points == null && v.values == null && !v.isString && !v.isImage);
+        const numericVarsRcv = (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage);
         const setRcvInbound = (rows: JsonInboundMapping[]) =>
           set({ httpReceiveInbound: rows.length ? rows : undefined });
         const webhookUrl = robot?.ipAddress
@@ -2911,17 +2984,23 @@ export function StepConfigModal({
   const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable"
                   || draft.type === "Label"      || draft.type === "GoToLabel";
 
-  // Color inspection picker
-  const colorPickerVars = colorPicker
-    ? (variables ?? []).filter(v => v.points == null && v.values == null)
-    : [];
+  // Color inspection picker. cellsVar holds a list of records rather than a number, so it
+  // offers object variables and the other fields exclude them.
+  const colorPickerVars = !colorPicker
+    ? []
+    : colorPicker.field === 'cellsVar'
+      ? (variables ?? []).filter(v => isRecordListVariable(v))
+      : (variables ?? []).filter(v => !isListVariable(v));
   const colorPickerSelected = colorPicker
     ? (draft?.colorOutputs ?? []).find(o => o.inspectionId === colorPicker.inspId)?.[colorPicker.field]
     : undefined;
-  const colorPickerTitle = colorPicker?.field === 'passedVar' ? 'Passed Variable' : 'Coverage Variable';
+  const colorPickerTitle = colorPicker
+    ? ({ coverageVar: 'Coverage Variable', passedVar: 'Passed Variable',
+         cellsVar: 'Cells Variable', cellsPassedVar: 'Cells Passed Variable' }[colorPicker.field])
+    : '';
 
   // Polygon inspection picker
-  const polygonPickerVars     = polygonPicker ? (variables ?? []).filter(v => v.points == null && v.values == null) : [];
+  const polygonPickerVars     = polygonPicker ? (variables ?? []).filter(v => !isListVariable(v)) : [];
   const polygonPickerSelected = polygonPicker
     ? (draft?.polygonOutputs ?? []).find(o => o.inspectionId === polygonPicker.inspId)?.[polygonPicker.field]
     : undefined;
@@ -2930,7 +3009,7 @@ export function StepConfigModal({
     : '';
 
   // ArUco inspection picker
-  const arucoPickerVars     = arucoPicker ? (variables ?? []).filter(v => v.points == null && v.values == null) : [];
+  const arucoPickerVars     = arucoPicker ? (variables ?? []).filter(v => !isListVariable(v)) : [];
   const arucoPickerSelected = arucoPicker
     ? (draft?.arucoOutputs ?? []).find(o => o.inspectionId === arucoPicker.inspId)?.[arucoPicker.field]
     : undefined;
@@ -2941,8 +3020,8 @@ export function StepConfigModal({
   // Derive picker variable list from the active field
   const pickerVars = visionPicker
     ? visionPicker.field === 'pointsVar'
-      ? (variables ?? []).filter(v => v.points != null)
-      : (variables ?? []).filter(v => v.points == null && v.values == null)
+      ? (variables ?? []).filter(v => isPointListVariable(v))
+      : (variables ?? []).filter(v => !isListVariable(v))
     : [];
   const pickerSelected = visionPicker
     ? (draft?.visionOutputs ?? []).find(o => o.inspectionId === visionPicker.inspId)?.[visionPicker.field]
@@ -2994,10 +3073,16 @@ export function StepConfigModal({
                   {isMove && (
                     <>
                       <Text style={ms.fieldLabel}>STATUS DESCRIPTION  (optional)</Text>
-                      <TextInput style={[ms.input, { marginBottom: 14 }]}
-                        value={draft!.statusMessage ?? ""} onChangeText={v => set({ statusMessage: v || undefined })}
-                        placeholder="Shown in monitor while this step runs" placeholderTextColor="#c4c4c4"
-                        returnKeyType="next" />
+                      <View style={{ marginBottom: 14 }}>
+                        <TemplateInput
+                          style={ms.input}
+                          value={draft!.statusMessage ?? ""}
+                          onChange={v => set({ statusMessage: v || undefined })}
+                          placeholder="Shown in monitor while this step runs"
+                          variables={variables}
+                          autoCapitalize="sentences"
+                        />
+                      </View>
                     </>
                   )}
 
@@ -3147,7 +3232,7 @@ export function StepConfigModal({
     <VarPickerModal
       visible={zoneVarPickerOpen}
       onClose={() => setZoneVarPickerOpen(false)}
-      variables={(variables ?? []).filter(v => !v.points && !v.values)}
+      variables={(variables ?? []).filter(v => !isListVariable(v))}
       selected={draft?.visionZoneVar}
       title="Zone Variable"
       showNone
@@ -3226,23 +3311,6 @@ export function StepConfigModal({
           ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
           : [...outputs, { inspectionId: inspId, ...patch }];
         set({ arucoOutputs: next });
-      }}
-    />
-    <VarPickerModal
-      visible={statusVarPickerOpen}
-      onClose={() => setStatusVarPickerOpen(false)}
-      variables={variables ?? []}
-      selected={undefined}
-      title="Insert Variable"
-      onSelect={v => {
-        if (!v || !draft) return;
-        const severity: 'Info' | 'Warning' | 'Error' =
-          draft.statusSeverity ?? (draft.statusWarning ? 'Warning' : draft.statusError ? 'Error' : 'Info');
-        const msgField =
-          severity === 'Warning' ? 'statusWarning' :
-          severity === 'Error'   ? 'statusError'   : 'statusMessage';
-        const cur = (draft[msgField] ?? '').trimEnd();
-        set({ [msgField]: (cur ? cur + ' ' : '') + '$' + v.name });
       }}
     />
     <VariableEditModal

@@ -1,10 +1,27 @@
-import { VisionZone, VisionZoneShape } from "@/src/models/robotModels";
+import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from "@/src/models/robotModels";
 
+/**
+ * Zone draw/edit canvas.
+ *
+ * There is always at most one *working geometry*. Until it exists you are drawing:
+ * drag out a rectangle or circle, or tap out polygon points. Once it exists you are
+ * editing: drag a handle to reshape, drag the interior to move. Nothing is committed
+ * back to the program until the host taps Save, so Cancel is always a clean exit.
+ *
+ * `initialGeometry` seeds the working geometry, which is what makes "edit the zone I
+ * already have" work rather than forcing a redraw from scratch. `initialGrid` is drawn
+ * over it but not owned here — the host keeps that and pushes updates in via setGrid.
+ *
+ * Pointer events rather than touch events: the app also runs on web and Electron,
+ * where touch events never fire and the editor would otherwise be dead to a mouse.
+ */
 export function makeZoneDrawHtml(
   imageUri: string,
   zones: VisionZone[],
   editingZoneId: string | null,
-  activeShape: VisionZoneShape
+  activeShape: VisionZoneShape,
+  initialGeometry?: VisionZoneGeometry | null,
+  initialGrid?: VisionZoneGrid | null
 ): string {
   return `<!DOCTYPE html><html>
 <head>
@@ -22,8 +39,14 @@ var c=document.getElementById('c'),ctx=c.getContext('2d');
 var zones=${JSON.stringify(zones)};
 var editingId=${JSON.stringify(editingZoneId)};
 var drawShape=${JSON.stringify(activeShape)};
-var polyPts=[];
-var dragging=false,sx=0,sy=0,cx2=0,cy2=0;
+var grid=${JSON.stringify(initialGrid ?? null)};
+var geom=${JSON.stringify(initialGeometry ?? null)};
+var editing=!!geom;
+var polyPts=[];   // screen-space points, polygon draw phase only
+var drag=null;
+var HIT=26;       // finger-sized handle hit radius
+var ROT_ARM=34;   // how far the rotation grip stands off the top edge
+var ORANGE='#f97316';
 
 var img=new Image();
 img.onload=function(){resize();render();};
@@ -36,9 +59,33 @@ function resize(){
 }
 window.addEventListener('resize',function(){resize();render();});
 
-window.setShape=function(s){
-  drawShape=s;polyPts=[];dragging=false;render();
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'polypts',count:0}));}catch(e){}
+function post(){
+  try{window.ReactNativeWebView.postMessage(JSON.stringify({
+    type:'state',geometry:geom,editing:editing,pts:polyPts.length
+  }));}catch(e){}
+}
+
+function reset(){polyPts=[];drag=null;geom=null;editing=false;}
+
+window.setShape=function(s){drawShape=s;reset();render();post();};
+window.clearShape=function(){reset();render();post();};
+window.undoPoint=function(){if(polyPts.length){polyPts.pop();render();post();}};
+
+// The grid is owned by the host — the canvas only draws it, so the steppers in the
+// toolbar stay the single source of truth and there is nothing here to merge back.
+window.setGrid=function(g){grid=g;render();};
+
+// Lets the host put a rectangle back to square without hunting for 0 with the grip.
+window.setRotation=function(d){
+  if(geom&&geom.shape==='Rectangle'){geom.rotation=d;render();post();}
+};
+
+window.closePolygon=function(){
+  if(polyPts.length<3) return;
+  var r=imgRect();
+  geom={shape:'Polygon',x:0,y:0,width:1,height:1,rotation:0,cx:0.5,cy:0.5,radius:0.25,
+        points:polyPts.map(function(p){return[clamp01((p[0]-r.x)/r.w),clamp01((p[1]-r.y)/r.h)];})};
+  polyPts=[];editing=true;drag=null;render();post();
 };
 
 function imgRect(){
@@ -49,7 +96,149 @@ function imgRect(){
   return{x:(cw-w)/2,y:(ch-h)/2,w:w,h:h};
 }
 function toNorm(px,py){var r=imgRect();return{x:(px-r.x)/r.w,y:(py-r.y)/r.h};}
+function toScr(nx,ny){var r=imgRect();return{x:r.x+nx*r.w,y:r.y+ny*r.h};}
 function clamp01(v){return Math.max(0,Math.min(1,v));}
+
+// ── Rotated rectangles ───────────────────────────────────────────────────────
+//
+// Rotation is degrees clockwise about the rectangle's own centre, and is applied in
+// screen space rather than the 0-1 space the geometry is stored in: there x and y are
+// scaled by different factors, and rotating inside a non-uniform scale shears the
+// rectangle instead of turning it. Screen space is a uniform scale of the image, so an
+// angle means the same thing here as it does on the controller.
+
+function rot(g){return (g&&g.shape==='Rectangle'&&g.rotation)?g.rotation:0;}
+
+// The rectangle's local axes: u runs along its width, v along its height.
+function axes(g){
+  var a=rot(g)*Math.PI/180;
+  return{ux:Math.cos(a),uy:Math.sin(a),vx:-Math.sin(a),vy:Math.cos(a)};
+}
+
+// Corners of a box stated in the rectangle's own frame (offsets from its centre),
+// rotated and placed back on that centre. The rectangle and each of its grid cells are
+// both boxes in that frame, so they turn through one function and cannot drift apart.
+function localQuad(cx,cy,x0,y0,x1,y1,deg){
+  var a=deg*Math.PI/180,cs=Math.cos(a),sn=Math.sin(a);
+  function P(lx,ly){return{x:cx+lx*cs-ly*sn,y:cy+lx*sn+ly*cs};}
+  return[P(x0,y0),P(x1,y0),P(x1,y1),P(x0,y1)];
+}
+
+// Screen-space centre and half-extents of a rectangle geometry.
+function rectFrame(g){
+  var r=imgRect(),hw=g.width*r.w/2,hh=g.height*r.h/2;
+  return{cx:r.x+g.x*r.w+hw,cy:r.y+g.y*r.h+hh,hw:hw,hh:hh};
+}
+
+// Corners in screen pixels, clockwise from top-left.
+function rectCorners(g){
+  var f=rectFrame(g);
+  return localQuad(f.cx,f.cy,-f.hw,-f.hh,f.hw,f.hh,rot(g));
+}
+
+function cellQuad(g,rows,cols,row,col){
+  var f=rectFrame(g);
+  return localQuad(f.cx,f.cy,
+    -f.hw+2*f.hw*col/cols,     -f.hh+2*f.hh*row/rows,
+    -f.hw+2*f.hw*(col+1)/cols, -f.hh+2*f.hh*(row+1)/rows, rot(g));
+}
+
+function quadBounds(q){
+  var xs=q.map(function(p){return p.x;}),ys=q.map(function(p){return p.y;});
+  var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs);
+  var y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
+  return{x:x0,y:y0,w:x1-x0,h:y1-y0};
+}
+
+function traceQuad(q){
+  ctx.beginPath();ctx.moveTo(q[0].x,q[0].y);
+  for(var i=1;i<q.length;i++) ctx.lineTo(q[i].x,q[i].y);
+  ctx.closePath();
+}
+
+// Wrapped to (-180,180] and nudged onto 15-degree marks when already within 3 degrees,
+// so square and diagonal placements are easy to land and 0 is easy to get back to.
+function snapAngle(deg){
+  deg=((deg+180)%360+360)%360-180;
+  var near=Math.round(deg/15)*15;
+  return Math.abs(deg-near)<=3?near:Math.round(deg*10)/10;
+}
+
+// ── Handles ──────────────────────────────────────────────────────────────────
+
+function handles(){
+  if(!geom) return [];
+  var r=imgRect();
+  if(geom.shape==='Rectangle'){
+    var q=rectCorners(geom);
+    var ax=axes(geom);
+    // The rotation grip is held off the top edge along the rectangle's own "up", so it
+    // keeps the same place relative to the shape as the shape turns.
+    var mid={x:(q[0].x+q[1].x)/2,y:(q[0].y+q[1].y)/2};
+    return[{id:'nw',x:q[0].x,y:q[0].y},{id:'ne',x:q[1].x,y:q[1].y},
+           {id:'se',x:q[2].x,y:q[2].y},{id:'sw',x:q[3].x,y:q[3].y},
+           {id:'rotate',x:mid.x-ax.vx*ROT_ARM,y:mid.y-ax.vy*ROT_ARM}];
+  }
+  if(geom.shape==='Circle'){
+    var p=toScr(geom.cx,geom.cy),rad=geom.radius*Math.min(r.w,r.h);
+    return[{id:'center',x:p.x,y:p.y},{id:'radius',x:p.x+rad,y:p.y}];
+  }
+  if(geom.shape==='Polygon'){
+    return geom.points.map(function(p,i){return{id:i,x:r.x+p[0]*r.w,y:r.y+p[1]*r.h};});
+  }
+  return[];
+}
+
+// A fixed finger-sized grab radius swallows a small zone whole - every interior
+// point lands within reach of some corner, and the shape can never be picked up and
+// moved. Shrinking it for small shapes keeps a central region that falls through to
+// a body drag, at the cost of a fiddlier grab on a zone that is tiny anyway.
+function hitRadius(){
+  var b=zoneBounds(geom);
+  return Math.max(6,Math.min(HIT,Math.min(b.w,b.h)/3));
+}
+
+// Nearest handle within the grab radius, so overlapping handles (a small circle's
+// centre and radius grip) resolve to whichever the finger is actually closer to.
+function hitHandle(x,y){
+  var hs=handles(),best=null,bd=Infinity,hr=hitRadius();
+  for(var i=0;i<hs.length;i++){
+    // The rotation grip stands outside the shape, so it never competes with a body
+    // drag and can keep a full finger-sized target even on a zone that is tiny.
+    var rad=hs[i].id==='rotate'?HIT:hr;
+    var dx=hs[i].x-x,dy=hs[i].y-y,d=dx*dx+dy*dy;
+    if(d<=rad*rad&&d<bd){bd=d;best=hs[i];}
+  }
+  return best;
+}
+
+function inside(x,y){
+  if(!geom) return false;
+  var r=imgRect();
+  if(geom.shape==='Rectangle'){
+    // Project onto the rectangle's own axes — once untilted it is a plain box test,
+    // and at 0 degrees this reduces exactly to the axis-aligned comparison.
+    var f=rectFrame(geom),ax=axes(geom);
+    var dx=x-f.cx,dy=y-f.cy;
+    return Math.abs(dx*ax.ux+dy*ax.uy)<=f.hw && Math.abs(dx*ax.vx+dy*ax.vy)<=f.hh;
+  }
+  if(geom.shape==='Circle'){
+    var p=toScr(geom.cx,geom.cy),rad=geom.radius*Math.min(r.w,r.h);
+    return (x-p.x)*(x-p.x)+(y-p.y)*(y-p.y)<=rad*rad;
+  }
+  if(geom.shape==='Polygon'&&geom.points.length>=3){
+    var pts=geom.points.map(function(q){return[r.x+q[0]*r.w,r.y+q[1]*r.h];});
+    var hit=false;
+    for(var i=0,j=pts.length-1;i<pts.length;j=i++){
+      if((pts[i][1]>y)!==(pts[j][1]>y)&&
+         x<(pts[j][0]-pts[i][0])*(y-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0]) hit=!hit;
+    }
+    return hit;
+  }
+  return false;
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
 
 function render(){
   c.width=c.width;
@@ -59,56 +248,92 @@ function render(){
   }else{
     ctx.fillStyle='#1f2937';ctx.fillRect(0,0,c.width,c.height);
   }
+  // The zone being edited is represented by the working geometry, so drawing it
+  // from the saved list too would ghost the pre-edit shape underneath.
   zones.forEach(function(z){
-    var isEditing=z.id===editingId;
-    ctx.strokeStyle=isEditing?'rgba(250,204,21,0.5)':'rgba(34,211,238,0.75)';
-    ctx.fillStyle=isEditing?'rgba(250,204,21,0.07)':'rgba(34,211,238,0.07)';
+    if(z.id===editingId) return;
+    ctx.strokeStyle='rgba(34,211,238,0.75)';
+    ctx.fillStyle='rgba(34,211,238,0.07)';
     ctx.lineWidth=2;
-    if(isEditing) ctx.setLineDash([6,4]);
-    drawZone(z.geometry,z.name,ctx.strokeStyle);
-    ctx.setLineDash([]);
+    drawZone(z.geometry,z.name,ctx.strokeStyle,z.grid);
   });
-  var orange='#f97316';
-  ctx.strokeStyle=orange;ctx.lineWidth=2.5;ctx.fillStyle='rgba(249,115,22,0.1)';
-  if(drawShape==='Rectangle'&&dragging){
-    ctx.setLineDash([6,3]);
-    var x1=Math.min(sx,cx2),y1=Math.min(sy,cy2),x2=Math.max(sx,cx2),y2=Math.max(sy,cy2);
-    ctx.fillRect(x1,y1,x2-x1,y2-y1);ctx.strokeRect(x1,y1,x2-x1,y2-y1);
-    ctx.setLineDash([]);
+
+  ctx.strokeStyle=ORANGE;ctx.lineWidth=2.5;ctx.fillStyle='rgba(249,115,22,0.1)';
+
+  if(geom){
+    drawZone(geom,'',ORANGE,grid);
+    drawHandles();
   }
-  if(drawShape==='Circle'&&dragging){
+
+  if(drag&&drag.kind==='new'){
     ctx.setLineDash([6,3]);
-    var rad=Math.sqrt((cx2-sx)*(cx2-sx)+(cy2-sy)*(cy2-sy));
-    ctx.beginPath();ctx.arc(sx,sy,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  if(drawShape==='Polygon'&&polyPts.length>0){
-    ctx.setLineDash([5,3]);
-    ctx.beginPath();ctx.moveTo(polyPts[0][0],polyPts[0][1]);
-    for(var i=1;i<polyPts.length;i++) ctx.lineTo(polyPts[i][0],polyPts[i][1]);
-    if(dragging) ctx.lineTo(cx2,cy2);
-    ctx.stroke();ctx.setLineDash([]);
-    polyPts.forEach(function(p){
-      ctx.fillStyle=orange;
-      ctx.beginPath();ctx.arc(p[0],p[1],5,0,2*Math.PI);ctx.fill();
-    });
-    if(polyPts.length>=3){
-      ctx.globalAlpha=0.35;ctx.beginPath();
-      ctx.moveTo(polyPts[polyPts.length-1][0],polyPts[polyPts.length-1][1]);
-      ctx.lineTo(polyPts[0][0],polyPts[0][1]);
-      ctx.setLineDash([3,3]);ctx.strokeStyle=orange;ctx.stroke();
-      ctx.setLineDash([]);ctx.globalAlpha=1;
+    if(drawShape==='Rectangle'){
+      var x1=Math.min(drag.sx,drag.cx),y1=Math.min(drag.sy,drag.cy);
+      var x2=Math.max(drag.sx,drag.cx),y2=Math.max(drag.sy,drag.cy);
+      ctx.fillRect(x1,y1,x2-x1,y2-y1);ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+    }else if(drawShape==='Circle'){
+      var rad=Math.sqrt((drag.cx-drag.sx)*(drag.cx-drag.sx)+(drag.cy-drag.sy)*(drag.cy-drag.sy));
+      ctx.beginPath();ctx.arc(drag.sx,drag.sy,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
     }
+    ctx.setLineDash([]);
+  }
+
+  if(!editing&&drawShape==='Polygon'&&polyPts.length>0) drawPolyDraft();
+}
+
+function drawPolyDraft(){
+  ctx.setLineDash([5,3]);
+  ctx.beginPath();ctx.moveTo(polyPts[0][0],polyPts[0][1]);
+  for(var i=1;i<polyPts.length;i++) ctx.lineTo(polyPts[i][0],polyPts[i][1]);
+  if(drag&&drag.kind==='polyhover') ctx.lineTo(drag.cx,drag.cy);
+  ctx.stroke();ctx.setLineDash([]);
+  polyPts.forEach(function(p){
+    ctx.fillStyle=ORANGE;
+    ctx.beginPath();ctx.arc(p[0],p[1],5,0,2*Math.PI);ctx.fill();
+  });
+  if(polyPts.length>=3){
+    ctx.globalAlpha=0.35;ctx.beginPath();
+    ctx.moveTo(polyPts[polyPts.length-1][0],polyPts[polyPts.length-1][1]);
+    ctx.lineTo(polyPts[0][0],polyPts[0][1]);
+    ctx.setLineDash([3,3]);ctx.strokeStyle=ORANGE;ctx.stroke();
+    ctx.setLineDash([]);ctx.globalAlpha=1;
   }
 }
 
-function drawZone(g,label,color){
+function drawHandles(){
+  var hs=handles(),grip=null;
+  hs.forEach(function(h){if(h.id==='rotate')grip=h;});
+
+  if(grip){
+    // Stem back to the top edge, so the grip reads as attached to the rectangle
+    // rather than as a stray dot floating next to it.
+    var q=rectCorners(geom);
+    ctx.beginPath();
+    ctx.moveTo((q[0].x+q[1].x)/2,(q[0].y+q[1].y)/2);
+    ctx.lineTo(grip.x,grip.y);
+    ctx.strokeStyle=ORANGE;ctx.lineWidth=2;ctx.stroke();
+  }
+
+  hs.forEach(function(h){
+    var filled=(h.id==='center'||h.id==='rotate');
+    ctx.beginPath();ctx.arc(h.x,h.y,7,0,2*Math.PI);
+    ctx.fillStyle=filled?ORANGE:'#fff';
+    ctx.fill();
+    ctx.lineWidth=2.5;ctx.strokeStyle=filled?'#fff':ORANGE;
+    ctx.stroke();
+  });
+}
+
+function drawZone(g,label,color,grid){
   var r=imgRect();ctx.save();
   if(g.shape==='Rectangle'){
-    var x=r.x+g.x*r.w,y=r.y+g.y*r.h,w=g.width*r.w,h=g.height*r.h;
-    ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
+    var q=rectCorners(g);
+    traceQuad(q);ctx.fill();ctx.stroke();
+    // Anchor the label on whichever corner sits highest — on a tilt there is no
+    // reliable top-left, and the label would otherwise land across the shape.
+    var top=q.slice().sort(function(m,n){return m.y-n.y;})[0];
     ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
-    ctx.fillText(label,x+4,y>16?y-4:y+14);
+    ctx.fillText(label,top.x+4,top.y>16?top.y-4:top.y+14);
   }else if(g.shape==='Circle'){
     var px=r.x+g.cx*r.w,py=r.y+g.cy*r.h,rad=g.radius*Math.min(r.w,r.h);
     ctx.beginPath();ctx.arc(px,py,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
@@ -122,63 +347,207 @@ function drawZone(g,label,color){
     ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
     ctx.fillText(label,r.x+g.points[0][0]*r.w+4,r.y+g.points[0][1]*r.h-4);
   }
+  if(grid&&grid.rows*grid.cols>1) drawGrid(g,grid,color);
   ctx.restore();
 }
 
-function getTouchXY(e){
-  var t=e.touches&&e.touches.length?e.touches[0]:e.changedTouches[0];
-  return{x:t.clientX,y:t.clientY};
+// Screen-space bounding box of a zone — the rectangle its grid is laid out over.
+// Mirrors VisionProcessor.ZoneBounds on the controller.
+function zoneBounds(g){
+  var r=imgRect();
+  if(g.shape==='Rectangle'&&rot(g)) return quadBounds(rectCorners(g));
+  if(g.shape==='Circle'){
+    var rad=g.radius*Math.min(r.w,r.h);
+    return{x:r.x+g.cx*r.w-rad,y:r.y+g.cy*r.h-rad,w:rad*2,h:rad*2};
+  }
+  if(g.shape==='Polygon'&&g.points.length>=3){
+    var xs=g.points.map(function(p){return p[0];}),ys=g.points.map(function(p){return p[1];});
+    var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs);
+    var y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
+    return{x:r.x+x0*r.w,y:r.y+y0*r.h,w:(x1-x0)*r.w,h:(y1-y0)*r.h};
+  }
+  return{x:r.x+g.x*r.w,y:r.y+g.y*r.h,w:g.width*r.w,h:g.height*r.h};
 }
 
-c.addEventListener('touchstart',function(e){
-  e.preventDefault();
-  var p=getTouchXY(e);
-  cx2=p.x;cy2=p.y;
-  if(drawShape==='Polygon'){
-    polyPts.push([p.x,p.y]);render();
-    try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'polypts',count:polyPts.length}));}catch(e){}
+function drawGrid(g,grid,color){
+  ctx.save();
+  ctx.strokeStyle=color;ctx.globalAlpha=0.6;ctx.lineWidth=1;ctx.setLineDash([4,3]);
+
+  if(g.shape==='Rectangle'&&rot(g)){
+    // Cell by cell, because the lattice turns with the rectangle. The straight-line
+    // version below only describes the grid while the box is square to the image.
+    for(var rI=0;rI<grid.rows;rI++)
+      for(var cI=0;cI<grid.cols;cI++){
+        traceQuad(cellQuad(g,grid.rows,grid.cols,rI,cI));
+        ctx.stroke();
+      }
+    ctx.restore();return;
+  }
+
+  var b=zoneBounds(g);
+  // Interior lines only — the zone outline already draws the perimeter.
+  for(var i=1;i<grid.cols;i++){
+    var x=b.x+b.w*i/grid.cols;
+    ctx.beginPath();ctx.moveTo(x,b.y);ctx.lineTo(x,b.y+b.h);ctx.stroke();
+  }
+  for(var j=1;j<grid.rows;j++){
+    var y=b.y+b.h*j/grid.rows;
+    ctx.beginPath();ctx.moveTo(b.x,y);ctx.lineTo(b.x+b.w,y);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ── Interaction ──────────────────────────────────────────────────────────────
+
+function onDown(p){
+  // With a shape on the canvas, a stray tap outside it must not start a new one -
+  // that is what Clear is for. Only handles and the interior respond.
+  if(editing&&geom){
+    var h=hitHandle(p.x,p.y);
+    if(h){startHandleDrag(h);return;}
+    if(inside(p.x,p.y)){
+      drag={kind:'body',px:p.x,py:p.y,orig:JSON.parse(JSON.stringify(geom))};
+      return;
+    }
     return;
   }
-  sx=p.x;sy=p.y;dragging=true;render();
-},{passive:false});
-
-c.addEventListener('touchmove',function(e){
-  e.preventDefault();
-  var p=getTouchXY(e);cx2=p.x;cy2=p.y;
-  if(dragging||drawShape==='Polygon') render();
-},{passive:false});
-
-c.addEventListener('touchend',function(e){
-  e.preventDefault();
-  if(drawShape==='Polygon'||!dragging) return;
-  dragging=false;
-  var r=imgRect(),geom;
-  if(drawShape==='Rectangle'){
-    var n1=toNorm(Math.min(sx,cx2),Math.min(sy,cy2));
-    var n2=toNorm(Math.max(sx,cx2),Math.max(sy,cy2));
-    var rw=clamp01(n2.x-n1.x),rh=clamp01(n2.y-n1.y);
-    if(rw<0.01||rh<0.01){render();return;}
-    geom={shape:'Rectangle',x:clamp01(n1.x),y:clamp01(n1.y),width:rw,height:rh,cx:0.5,cy:0.5,radius:0.25,points:[]};
-  }else if(drawShape==='Circle'){
-    var nc=toNorm(sx,sy);
-    var rad=Math.sqrt((cx2-sx)*(cx2-sx)+(cy2-sy)*(cy2-sy));
-    var nr=rad/Math.min(r.w,r.h);
-    if(nr<0.01){render();return;}
-    geom={shape:'Circle',x:0,y:0,width:1,height:1,cx:clamp01(nc.x),cy:clamp01(nc.y),radius:Math.max(0.01,nr),points:[]};
+  if(drawShape==='Polygon'){
+    polyPts.push([p.x,p.y]);
+    drag={kind:'polyhover',cx:p.x,cy:p.y};
+    render();post();
+    return;
   }
-  if(geom) try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'zone',geometry:geom}));}catch(err){}
+  drag={kind:'new',sx:p.x,sy:p.y,cx:p.x,cy:p.y};
   render();
+}
+
+function startHandleDrag(h){
+  if(h.id==='rotate'){
+    drag={kind:'rotate'};
+  }else if(geom.shape==='Rectangle'){
+    // Anchor the opposite corner and rebuild the rect from it each move. Dragging
+    // past the anchor then just flips the rect instead of collapsing it.
+    // Corners run clockwise from top-left, so the opposite of each is two along.
+    var q=rectCorners(geom);
+    var opp={nw:q[2],ne:q[3],se:q[0],sw:q[1]}[h.id];
+    drag={kind:'rectcorner',fx:opp.x,fy:opp.y};
+  }else if(geom.shape==='Circle'){
+    drag={kind:h.id==='center'?'circlemove':'circleradius'};
+  }else{
+    drag={kind:'vertex',idx:h.id};
+  }
+}
+
+function onMove(p){
+  if(!drag) return;
+  var r=imgRect();
+  if(drag.kind==='new'||drag.kind==='polyhover'){
+    drag.cx=p.x;drag.cy=p.y;
+  }else if(drag.kind==='rectcorner'){
+    // Measure the new box along the rectangle's own axes rather than the screen's, so
+    // a tilted rectangle resizes along its edges and keeps its angle. At 0 degrees the
+    // axes are the screen's and this reduces to the plain min/max corner rebuild.
+    // Only the dragged corner is clamped; the anchor is already inside the frame.
+    var px=Math.max(r.x,Math.min(r.x+r.w,p.x)),py=Math.max(r.y,Math.min(r.y+r.h,p.y));
+    var ax=axes(geom),dx=px-drag.fx,dy=py-drag.fy;
+    var lw=dx*ax.ux+dy*ax.uy, lh=dx*ax.vx+dy*ax.vy;
+    var mid=toNorm(drag.fx+(ax.ux*lw+ax.vx*lh)/2, drag.fy+(ax.uy*lw+ax.vy*lh)/2);
+    geom.width =Math.max(0.01,Math.abs(lw)/r.w);
+    geom.height=Math.max(0.01,Math.abs(lh)/r.h);
+    geom.x=mid.x-geom.width/2;
+    geom.y=mid.y-geom.height/2;
+  }else if(drag.kind==='rotate'){
+    var f=rectFrame(geom);
+    // The grip is held off the top edge, so the angle it reports runs a quarter turn
+    // ahead of the rectangle's own.
+    geom.rotation=snapAngle(Math.atan2(p.y-f.cy,p.x-f.cx)*180/Math.PI+90);
+  }else if(drag.kind==='circlemove'){
+    var n=toNorm(p.x,p.y);geom.cx=clamp01(n.x);geom.cy=clamp01(n.y);
+  }else if(drag.kind==='circleradius'){
+    var ctr=toScr(geom.cx,geom.cy);
+    var rad=Math.sqrt((p.x-ctr.x)*(p.x-ctr.x)+(p.y-ctr.y)*(p.y-ctr.y));
+    geom.radius=Math.max(0.01,rad/Math.min(r.w,r.h));
+  }else if(drag.kind==='vertex'){
+    var nv=toNorm(p.x,p.y);
+    geom.points[drag.idx]=[clamp01(nv.x),clamp01(nv.y)];
+  }else if(drag.kind==='body'){
+    moveBody(p);
+  }
+  render();
+}
+
+// Move keeps the shape rigid: the delta is clamped so the whole outline stays in
+// frame, rather than clamping each point and deforming it against the edge.
+function moveBody(p){
+  var r=imgRect(),o=drag.orig;
+  var dx=(p.x-drag.px)/r.w,dy=(p.y-drag.py)/r.h;
+  if(geom.shape==='Rectangle'&&rot(o)){
+    // A tilted rectangle reaches past its own width and height, so the delta is bounded
+    // by its actual footprint — bounding it by the stated size lets a corner off-frame.
+    var cn=rectCorners(o).map(function(pt){return toNorm(pt.x,pt.y);});
+    var cxs=cn.map(function(pt){return pt.x;}),cys=cn.map(function(pt){return pt.y;});
+    dx=Math.max(-Math.min.apply(null,cxs),Math.min(1-Math.max.apply(null,cxs),dx));
+    dy=Math.max(-Math.min.apply(null,cys),Math.min(1-Math.max.apply(null,cys),dy));
+    geom.x=o.x+dx;geom.y=o.y+dy;
+  }else if(geom.shape==='Rectangle'){
+    geom.x=Math.max(0,Math.min(1-o.width,o.x+dx));
+    geom.y=Math.max(0,Math.min(1-o.height,o.y+dy));
+  }else if(geom.shape==='Circle'){
+    geom.cx=clamp01(o.cx+dx);geom.cy=clamp01(o.cy+dy);
+  }else{
+    var xs=o.points.map(function(q){return q[0];}),ys=o.points.map(function(q){return q[1];});
+    dx=Math.max(-Math.min.apply(null,xs),Math.min(1-Math.max.apply(null,xs),dx));
+    dy=Math.max(-Math.min.apply(null,ys),Math.min(1-Math.max.apply(null,ys),dy));
+    geom.points=o.points.map(function(q){return[q[0]+dx,q[1]+dy];});
+  }
+}
+
+function onUp(){
+  if(!drag) return;
+  if(drag.kind==='polyhover'){drag=null;render();return;}
+  if(drag.kind==='new'){
+    var r=imgRect(),built=null;
+    if(drawShape==='Rectangle'){
+      var n1=toNorm(Math.min(drag.sx,drag.cx),Math.min(drag.sy,drag.cy));
+      var n2=toNorm(Math.max(drag.sx,drag.cx),Math.max(drag.sy,drag.cy));
+      var rw=clamp01(n2.x)-clamp01(n1.x),rh=clamp01(n2.y)-clamp01(n1.y);
+      if(rw>=0.01&&rh>=0.01)
+        built={shape:'Rectangle',x:clamp01(n1.x),y:clamp01(n1.y),width:rw,height:rh,
+               rotation:0,cx:0.5,cy:0.5,radius:0.25,points:[]};
+    }else if(drawShape==='Circle'){
+      var nc=toNorm(drag.sx,drag.sy);
+      var rad=Math.sqrt((drag.cx-drag.sx)*(drag.cx-drag.sx)+(drag.cy-drag.sy)*(drag.cy-drag.sy));
+      var nr=rad/Math.min(r.w,r.h);
+      if(nr>=0.01)
+        built={shape:'Circle',x:0,y:0,width:1,height:1,rotation:0,
+               cx:clamp01(nc.x),cy:clamp01(nc.y),radius:nr,points:[]};
+    }
+    drag=null;
+    // Too small to be a deliberate drag (usually a tap) - leave the canvas empty
+    // rather than creating a zone the user has to notice and undo.
+    if(built){geom=built;editing=true;}
+    render();post();
+    return;
+  }
+  drag=null;render();post();
+}
+
+c.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  try{c.setPointerCapture(e.pointerId);}catch(err){}
+  onDown({x:e.clientX,y:e.clientY});
 },{passive:false});
 
-window.finishPolygon=function(){
-  if(polyPts.length<3) return;
-  var r=imgRect();
-  var pts=polyPts.map(function(p){return[clamp01((p[0]-r.x)/r.w),clamp01((p[1]-r.y)/r.h)];});
-  var geom={shape:'Polygon',x:0,y:0,width:1,height:1,cx:0.5,cy:0.5,radius:0.25,points:pts};
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'zone',geometry:geom}));}catch(err){}
-  polyPts=[];dragging=false;render();
-  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'polypts',count:0}));}catch(err){}
-};
+c.addEventListener('pointermove',function(e){
+  if(!drag) return;
+  e.preventDefault();
+  onMove({x:e.clientX,y:e.clientY});
+},{passive:false});
+
+c.addEventListener('pointerup',function(e){e.preventDefault();onUp();},{passive:false});
+c.addEventListener('pointercancel',function(){onUp();},{passive:false});
+
+post();
 <\/script>
 </body></html>`;
 }
