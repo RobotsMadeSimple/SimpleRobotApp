@@ -67,52 +67,74 @@ const TWO_COL_MIN    = 810; // config (+ points) | pad + STOP/Teach
 const RAIL_ESTIMATE = 216;
 
 // ── Picker modal ──────────────────────────────────────────────────────────────
+// Generalized beyond a flat string list so mode/speed pickers can carry a
+// one-line description per row and an InfoTip beside the modal title (the
+// narrow grid tiles relocate their InfoTips here — see JOG_MODE_INFO/SPEED_INFO).
+type PickerOption = { value: string; label?: string; description?: string };
+
+function normalizePickerOption(opt: string | PickerOption): PickerOption {
+  return typeof opt === "string" ? { value: opt } : opt;
+}
+
 function PickerModal({
   visible,
   title,
+  titleInfo,
   options,
   value,
   onSelect,
   onClose,
+  footnote,
   viewLabel,
   viewRoute,
 }: {
   visible: boolean;
   title: string;
-  options: string[];
+  /** Shown as an InfoTip (ⓘ) beside the title — relocated field-level InfoTips land here. */
+  titleInfo?: string;
+  options: (string | PickerOption)[];
   value: string;
   onSelect: (v: string) => void;
   onClose: () => void;
+  /** Small note below the option list (e.g. a mode-dependent caveat). */
+  footnote?: string;
   viewLabel?: string;
   viewRoute?: string;
 }) {
+  const normalized = options.map(normalizePickerOption);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={styles.pickerOverlay} onPress={onClose} activeOpacity={1}>
         <TouchableOpacity style={styles.pickerCard} onPress={() => {}} activeOpacity={1}>
           <View style={styles.dialogHeader}>
-            <Text style={styles.dialogTitle}>{title}</Text>
+            <View style={styles.dialogTitleRow}>
+              <Text style={styles.dialogTitle}>{title}</Text>
+              {titleInfo && <InfoTip text={titleInfo} />}
+            </View>
             <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
               <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {options.map((opt, i) => {
-              const active = opt === value;
-              const isLast = i === options.length - 1;
+            {normalized.map((opt, i) => {
+              const active = opt.value === value;
+              const isLast = i === normalized.length - 1;
               return (
-                <View key={opt}>
+                <View key={opt.value}>
                   <RadioRow
-                    title={opt}
+                    title={opt.label ?? opt.value}
+                    subtitle={opt.description}
                     selected={active}
-                    onPress={() => { onSelect(opt); onClose(); }}
+                    onPress={() => { onSelect(opt.value); onClose(); }}
                   />
                   {!isLast && <Divider />}
                 </View>
               );
             })}
           </ScrollView>
+
+          {footnote && <Text style={styles.pickerFootnote}>{footnote}</Text>}
 
           {viewLabel && viewRoute && (
             <TouchableOpacity
@@ -174,6 +196,57 @@ function Selector({
         viewRoute={viewRoute}
       />
     </View>
+  );
+}
+
+// ── Grid selector tile (narrow layout) ─────────────────────────────────────────
+// Compact 2×2 replacement for the config card's SegmentedControl/ChipGroup/
+// Selector row on narrow screens: caption + current value + chevron, tap opens
+// the same PickerModal machinery as the LOCAL/TOOL Selector above.
+function GridSelectorTile({
+  label,
+  value,
+  options,
+  onSelect,
+  titleInfo,
+  footnote,
+  viewLabel,
+  viewRoute,
+}: {
+  label: string;
+  value: string;
+  options: (string | PickerOption)[];
+  onSelect: (v: string) => void;
+  titleInfo?: string;
+  footnote?: string;
+  viewLabel?: string;
+  viewRoute?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Card onPress={() => setOpen(true)} style={styles.gridTile}>
+        <Text style={styles.selectorLabel}>{label}</Text>
+        <View style={styles.gridTileValueRow}>
+          <Text style={styles.gridTileValue} numberOfLines={1}>{value}</Text>
+          <ChevronDown size={14} color={colors.textFaint} />
+        </View>
+      </Card>
+
+      <PickerModal
+        visible={open}
+        title={label}
+        titleInfo={titleInfo}
+        options={options}
+        value={value}
+        onSelect={onSelect}
+        onClose={() => setOpen(false)}
+        footnote={footnote}
+        viewLabel={viewLabel}
+        viewRoute={viewRoute}
+      />
+    </>
   );
 }
 
@@ -285,6 +358,37 @@ function TeachModal({ onClose }: { onClose: () => void }) {
     </TouchableOpacity>
   );
 }
+
+// ── Jog mode / speed copy (narrow grid tiles) ──────────────────────────────────
+// Same wording as the InfoTips that sit above the SegmentedControl/ChipGroup in
+// the wide config card — relocated verbatim into the modal title's InfoTip so
+// none of the explanatory text is lost, plus a distilled one-line description
+// per row and a footnote for the Tool-mode step caveat.
+const JOG_MODE_INFO =
+  "XYZ jogs along the room/local axes. Tool jogs along the tool tip's own axes " +
+  "(e.g. it always plunges straight into the tip). Joint moves a single robot " +
+  "joint at a time.";
+const SPEED_INFO =
+  "Slow/Normal/Fast jog continuously while held, at the speeds set on Robot › " +
+  "Configure. The 0.1/1/10 mm chips take one precise step per tap in XYZ and " +
+  "Joint mode — in Tool mode they instead jog continuously at a very slow speed.";
+const SPEED_FOOTNOTE =
+  "In Tool mode, the 0.1/1/10 mm steps jog continuously at a very slow speed instead of stepping.";
+
+const jogModeTileOptions: PickerOption[] = [
+  { value: "XYZ",   description: "Room/local axes" },
+  { value: "Tool",  description: "Tool-tip's own axes" },
+  { value: "Joint", description: "Single joint at a time" },
+];
+
+const speedTileOptions: PickerOption[] = [
+  { value: "0.1mm",  description: "One precise step per tap" },
+  { value: "1mm",    description: "One precise step per tap" },
+  { value: "10mm",   description: "One precise step per tap" },
+  { value: "Slow",   description: "Jogs continuously while held" },
+  { value: "Normal", description: "Jogs continuously while held" },
+  { value: "Fast",   description: "Jogs continuously while held" },
+];
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function JogScreen() {
@@ -465,6 +569,45 @@ export default function JogScreen() {
     </Card>
   );
 
+  // Narrow-only replacement for configCard: a compact 2×2 grid of selector
+  // tiles, each opening the same PickerModal a tap on a Selector would. State,
+  // handlers and option sets are shared with the wide config card above.
+  const configGrid = (
+    <View style={styles.configGrid}>
+      <GridSelectorTile
+        label="JOG MODE"
+        value={mode}
+        options={jogModeTileOptions}
+        onSelect={setMode}
+        titleInfo={JOG_MODE_INFO}
+      />
+      <GridSelectorTile
+        label="SPEED"
+        value={selectedSpeed}
+        options={speedTileOptions}
+        onSelect={setSelectedSpeed}
+        titleInfo={SPEED_INFO}
+        footnote={SPEED_FOOTNOTE}
+      />
+      <GridSelectorTile
+        label="LOCAL"
+        value={local}
+        options={localOptions}
+        onSelect={setLocal}
+        viewLabel="View Locals"
+        viewRoute="/space/locals"
+      />
+      <GridSelectorTile
+        label="TOOL"
+        value={tool || "None"}
+        options={["None", ...tools.map(t => t.name)]}
+        onSelect={setTool}
+        viewLabel="View Tools"
+        viewRoute="/space/tools"
+      />
+    </View>
+  );
+
   // CNC-style DRO — the axis list replaces the old 4-across coordinate strip.
   const dro = (
     <PositionReadout axes={coords} size={wideLayout ? "lg" : "md"} />
@@ -632,7 +775,7 @@ export default function JogScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {configCard}
+            {configGrid}
             {dro}
             {pointsCollapsible}
           </ScrollView>
@@ -861,6 +1004,34 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
 
+  // ── Grid selector tile (narrow config grid) ───────────────────────────────
+  configGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+
+  gridTile: {
+    flexBasis: "48%",
+    flexGrow: 1,
+    minHeight: 44,
+    gap: 4,
+    justifyContent: "center",
+  },
+
+  gridTileValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  gridTileValue: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.text,
+  },
+
   // ── Picker modal ──────────────────────────────────────────────────────────
   pickerOverlay: {
     flex: 1,
@@ -895,6 +1066,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: colors.accent,
+  },
+
+  pickerFootnote: {
+    ...type.caption,
+    marginTop: spacing.sm + 2,
+    lineHeight: 16,
   },
 
   // ── JogPad ────────────────────────────────────────────────────────────────
