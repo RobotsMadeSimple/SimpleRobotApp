@@ -10,7 +10,7 @@ import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
 import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { STEP_THEME, StepIcon, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
+import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
 
 // ── Insert divider ────────────────────────────────────────────────────────────
@@ -149,6 +149,10 @@ export function StepRow({
                      || step.type === "Label"      || step.type === "GoToLabel";
   const innerSteps    = step.loopSteps ?? [];
   const theme         = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  // The 4px rail carries the block's *category* colour, so a program reads as
+  // bands of Motion / Logic / I-O at a glance; the icon tile and type label keep
+  // the step's own theme so individual steps stay distinguishable within a band.
+  const category      = categoryForStep(step.type);
   const detail        = stepDetail(step);
   const detailLines   = detail ? detail.split("\n") : [];
 
@@ -161,7 +165,7 @@ export function StepRow({
         isDropBelow    && sharedStyles.dropTargetItemBottom,
       ]}
     >
-      <View style={[sharedStyles.stepCard, { borderLeftColor: theme.accent }, selected && sharedStyles.stepCardSelected]}>
+      <View style={[sharedStyles.stepCard, { borderLeftColor: category.color }, selected && sharedStyles.stepCardSelected]}>
 
         {/* Card header row */}
         <TouchableOpacity

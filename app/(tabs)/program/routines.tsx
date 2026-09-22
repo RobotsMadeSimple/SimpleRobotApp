@@ -5,11 +5,11 @@ import { BuiltProgram } from "@/src/models/robotModels";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Repeat2 } from "lucide-react-native";
+import { Box, Clock, Layers, Repeat2 } from "lucide-react-native";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { Card, IconTile, accents, colors, spacing } from "@/src/components/ui/kit";
+import { Card, IconTile, InfoTip, SectionHeader, StatTile, accents, colors, spacing } from "@/src/components/ui/kit";
 
 // Routines' brand tint, via the kit's purple accent family (kept consistent
 // with the same purple used for on-device/local programs elsewhere).
@@ -35,9 +35,33 @@ export default function RoutinesScreen() {
     ]);
   }
 
+  // Everything below is already in the built-program list the provider holds —
+  // no extra controller queries.
+  const totalSteps  = routines.reduce((n, r) => n + r.steps.length, 0);
+  const lastTouched = routines.reduce((ms, r) => Math.max(ms, r.lastUpdatedUnixMs ?? 0), 0);
+
+  const aside = routines.length > 0 ? (
+    <>
+      <SectionHeader title="Summary" icon={Layers} />
+      <StatTile
+        label="Routines"
+        value={routines.length}
+        icon={Repeat2}
+        tint={[accents.purple, accents.purpleSoft]}
+        hint={filtered.length !== routines.length ? `${filtered.length} shown` : undefined}
+      />
+      <StatTile label="Steps total" value={totalSteps} icon={Box} />
+      {lastTouched > 0 && (
+        <StatTile label="Last edited" value={relativeTime(lastTouched)} icon={Clock} />
+      )}
+    </>
+  ) : null;
+
   return (
     <ProgramListLayout
       title="Routines"
+      subtitle="Reusable step sequences any program can call"
+      crumbs={[{ label: "Program", href: "/program" }, { label: "Routines" }]}
       accentColor={ROUTINE_TINT}
       addLabel="New Routine"
       onAdd={() => router.push("/program/builder?isRoutine=1")}
@@ -51,7 +75,12 @@ export default function RoutinesScreen() {
       emptyTitle="No Routines"
       emptySubtitle="Routines are reusable step sequences that can be called from any program."
       topOverlay={<NotConnectedOverlay />}
+      aside={aside}
     >
+      <SectionHeader
+        title="Routines"
+        right={<InfoTip text="A routine is a named block of steps stored on the robot. Programs run it with a Call Routine step, so editing the routine once updates every program that calls it." />}
+      />
       {filtered.map(r => (
         <RoutineRow key={r.name} routine={r} onDelete={() => handleDelete(r.name)} />
       ))}

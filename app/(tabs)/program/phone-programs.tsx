@@ -1,10 +1,10 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram } from "@/src/models/robotModels";
 import { useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { FileJson,
+import { Box,
+  FileJson,
   Plus,
   Repeat2,
   Smartphone,
@@ -16,11 +16,11 @@ import { useCallback,
 import {
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { Button, Card, EmptyState, Screen, accents, colors, radii, spacing } from "@/src/components/ui/kit";
+import { useIsWide } from "@/src/components/ui/responsive";
+import { Button, Card, EmptyState, InfoTip, PageHeader, Screen, SectionHeader, StatTile, accents, colors, radii, spacing } from "@/src/components/ui/kit";
 
 // Local/phone feature tint — base color via the kit's purple accent family
 // (used consistently for on-device/routine content across the program
@@ -39,6 +39,9 @@ function LocalProgramCard({
   connected: boolean;
   onRefresh: () => void;
 }) {
+  // Three actions share one row; on a phone the full "Send to Robot" label
+  // would truncate, so it shortens rather than clipping mid-word.
+  const isWide = useIsWide();
   async function handleSendToRobot() {
     try {
       await robotClient.saveBuiltProgram(program);
@@ -100,7 +103,7 @@ function LocalProgramCard({
       <View style={styles.cardActions}>
         {connected && (
           <Button
-            label="Send to Robot"
+            label={isWide ? "Send to Robot" : "Send"}
             icon={<Upload size={13} color={colors.success} />}
             variant="secondary"
             size="sm"
@@ -174,43 +177,89 @@ export default function PhoneProgramsScreen() {
     }
   }
 
+  const isWide = useIsWide();
+
+  // Everything shown here is already loaded from on-device storage.
+  const routineCount = programs.filter(p => p.isRoutine).length;
+  const stepTotal    = programs.reduce((n, p) => n + p.steps.length, 0);
+
+  const importBtn = (
+    <Button
+      label="Import"
+      icon={<FileJson size={14} color={LOCAL_TINT.color} />}
+      variant="ghost"
+      size="sm"
+      style={{ backgroundColor: LOCAL_TINT.bg }}
+      textStyle={{ color: LOCAL_TINT.color }}
+      onPress={handleImport}
+    />
+  );
+
+  const addCta = (
+    <Button
+      variant="dashed"
+      label="New Local Program"
+      icon={<Plus size={16} color={LOCAL_TINT.color} />}
+      style={[styles.addCard, { borderColor: LOCAL_TINT.color }]}
+      textStyle={{ color: LOCAL_TINT.color }}
+      onPress={() => router.push("/program/builder?source=local")}
+    />
+  );
+
+  const list = programs.length === 0 ? (
+    <EmptyState
+      icon={<Smartphone size={32} color={colors.textFaint} />}
+      title="No Local Programs"
+      subtitle="Create a program below or import a .json file to get started."
+    />
+  ) : (
+    programs.map(p => (
+      <LocalProgramCard key={p.name} program={p} connected={connected} onRefresh={refresh} />
+    ))
+  );
+
+  const aside = programs.length === 0 ? null : (
+    <>
+      <SectionHeader title="On This Device" icon={Smartphone} />
+      <StatTile
+        label="Drafts"
+        value={programs.length}
+        icon={Smartphone}
+        tint={[LOCAL_TINT.color, LOCAL_TINT.bg]}
+      />
+      {routineCount > 0 && <StatTile label="Routines" value={routineCount} icon={Repeat2} />}
+      <StatTile label="Steps total" value={stepTotal} icon={Box} />
+    </>
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SubPageHeader
-        title="On Phone"
+      <PageHeader
+        title="Local Programs"
+        subtitle="Drafts saved on this device — send them to the robot when ready"
+        crumbs={[{ label: "Program", href: "/program" }, { label: "Local Programs" }]}
         right={
-          <Button
-            label="Import"
-            icon={<FileJson size={14} color={LOCAL_TINT.color} />}
-            variant="ghost"
-            size="sm"
-            style={{ backgroundColor: LOCAL_TINT.bg }}
-            textStyle={{ color: LOCAL_TINT.color }}
-            onPress={handleImport}
-          />
+          <View style={styles.headerActions}>
+            <InfoTip text="Local programs live on this phone only. Use Send to Robot to store a copy on the controller — the robot can only run programs it holds." />
+            {importBtn}
+          </View>
         }
       />
       <Screen>
-        {programs.length === 0 ? (
-          <EmptyState
-            icon={<Smartphone size={32} color={colors.textFaint} />}
-            title="No Local Programs"
-            subtitle="Create a program below or import a .json file to get started."
-          />
+        {isWide && aside ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideMain}>
+              {list}
+              {addCta}
+            </View>
+            <View style={styles.wideAside}>{aside}</View>
+          </View>
         ) : (
-          programs.map(p => (
-            <LocalProgramCard key={p.name} program={p} connected={connected} onRefresh={refresh} />
-          ))
+          <>
+            {list}
+            {addCta}
+          </>
         )}
-
-        <TouchableOpacity
-          style={[styles.addCard, { borderColor: LOCAL_TINT.color }]}
-          onPress={() => router.push("/program/builder?source=local")}
-          activeOpacity={0.7}
-        >
-          <Plus size={16} color={LOCAL_TINT.color} />
-          <Text style={[styles.addCardText, { color: LOCAL_TINT.color }]}>New Local Program</Text>
-        </TouchableOpacity>
       </Screen>
     </View>
   );
@@ -219,6 +268,7 @@ export default function PhoneProgramsScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   card: {
     overflow: "hidden",
     borderLeftWidth: 3,
@@ -260,14 +310,13 @@ const styles = StyleSheet.create({
   actionBtn: { flex: 1 },
 
   addCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
     borderWidth: 1.5,
     borderRadius: radii.lg,
     paddingVertical: spacing.md + 2,
-    backgroundColor: "transparent",
   },
-  addCardText: { fontSize: 14, fontWeight: "600" },
+
+  // Wide: cards on the left, on-device summary on the right.
+  wideRow:   { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
+  wideMain:  { flex: 1, gap: spacing.md, minWidth: 0 },
+  wideAside: { width: 300, gap: spacing.md },
 });

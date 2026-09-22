@@ -5,8 +5,11 @@ import {
   Card,
   colors,
   Divider,
+  InfoTip,
   ListRow,
   radii,
+  PageHeader,
+  PositionReadout,
   Screen,
   SectionHeader,
   shadows,
@@ -19,6 +22,8 @@ import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
+  Activity,
+  AlertTriangle,
   Cpu,
   Gamepad2,
   HomeIcon,
@@ -64,11 +69,12 @@ export default function Control() {
   type PendingAction = { label: string; sub: string; icon: React.ReactNode; run: () => void } | null;
   const [confirm, setConfirm] = useState<PendingAction>(null);
 
+  // CNC-style DRO axis list — same readout in both layouts (see PositionReadout).
   const coords = [
-    { label: "X",  value: s?.x  },
-    { label: "Y",  value: s?.y  },
-    { label: "Z",  value: s?.z  },
-    { label: "RZ", value: s?.rz },
+    { label: "X",  value: fmt(s?.x),  unit: "mm" },
+    { label: "Y",  value: fmt(s?.y),  unit: "mm" },
+    { label: "Z",  value: fmt(s?.z),  unit: "mm" },
+    { label: "RZ", value: fmt(s?.rz), unit: "°"  },
   ];
 
   const actions = [
@@ -94,44 +100,56 @@ export default function Control() {
   ];
 
   const posSection = (
-    <Card>
-      <View style={styles.coordRow}>
-        {coords.map(({ label, value }) => (
-          <View key={label} style={styles.coordCell}>
-            <Text style={styles.coordLabel}>{label}</Text>
-            <Text style={styles.coordValue}>{fmt(value)}</Text>
-          </View>
-        ))}
-      </View>
+    <>
+      <SectionHeader
+        title="Status"
+        icon={Activity}
+        right={
+          <InfoTip text="World-frame X/Y/Z/RZ position. Badges below show whether the robot is homed, moving, faulted, or has a driver connected — switch to Jog & Teach to move in the active Local or Tool frame instead." />
+        }
+      />
+      <Card padded={false}>
+        <PositionReadout axes={coords} card={false} />
 
-      <View style={styles.badgeRow}>
-        <StatusPill
-          label={s?.wasHomed ? "Homed" : "Not Homed"}
-          tone={s?.wasHomed ? "success" : "neutral"}
-          dot
-        />
+        <Divider />
 
-        <StatusPill
-          label={s?.moving ? "Moving" : "Idle"}
-          tone={s?.moving ? "accent" : "neutral"}
-          dot
-        />
-
-        <StatusPill
-          label={s?.driverConnected ? "Driver" : "No Driver"}
-          tone={s?.driverConnected ? "success" : "neutral"}
-          icon={<Cpu size={11} color={s?.driverConnected ? colors.success : colors.textMuted} />}
-        />
-
-        {s?.driverConnected && (
+        <View style={styles.badgeRow}>
           <StatusPill
-            label={s?.driverOk ? "Driver OK" : "Fault"}
-            tone={s?.driverOk ? "success" : "danger"}
+            label={s?.wasHomed ? "Homed" : "Not Homed"}
+            tone={s?.wasHomed ? "success" : "neutral"}
             dot
           />
-        )}
-      </View>
-    </Card>
+
+          {s?.faulted && (
+            <StatusPill
+              label="Fault"
+              tone="danger"
+              icon={<AlertTriangle size={11} color={colors.danger} />}
+            />
+          )}
+
+          <StatusPill
+            label={s?.moving ? "Moving" : "Idle"}
+            tone={s?.moving ? "accent" : "neutral"}
+            dot
+          />
+
+          <StatusPill
+            label={s?.driverConnected ? "Driver" : "No Driver"}
+            tone={s?.driverConnected ? "success" : "neutral"}
+            icon={<Cpu size={11} color={s?.driverConnected ? colors.success : colors.textMuted} />}
+          />
+
+          {s?.driverConnected && (
+            <StatusPill
+              label={s?.driverOk ? "Driver OK" : "Fault"}
+              tone={s?.driverOk ? "success" : "danger"}
+              dot
+            />
+          )}
+        </View>
+      </Card>
+    </>
   );
 
   const actionsSection = (
@@ -158,6 +176,7 @@ export default function Control() {
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
+      <PageHeader title="Control" subtitle="Move the robot and run manual actions" />
 
       <Screen>
         {isWide ? (
@@ -231,40 +250,19 @@ const styles = StyleSheet.create({
 
   // Wide: live position/status on a narrow left column, actions on the wider right.
   wideRow:      { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
-  wideLeftCol:  { width: 360 },
+  wideLeftCol:  { width: 360, gap: spacing.md },
   wideRightCol: { flex: 1, gap: spacing.md },
 
   // ── Position card ────────────────────────────────────────────────────────
-  coordRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: spacing.md + 2,
-  },
-
-  coordCell: {
-    alignItems: "center",
-    flex: 1,
-  },
-
-  coordLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.textFaint,
-    letterSpacing: 0.5,
-    marginBottom: spacing.xs,
-  },
-
-  coordValue: {
-    ...type.mono,
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.text,
-  },
-
+  // The X/Y/Z/RZ readout is the kit's CNC-style PositionReadout (DRO list), so
+  // the card is unpadded and only the status pills carry their own padding.
   badgeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
+    paddingHorizontal: spacing.lg - 2,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg - 2,
   },
 
   // ── Section headings ─────────────────────────────────────────────────────

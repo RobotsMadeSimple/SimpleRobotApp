@@ -1,11 +1,21 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react-native";
 import React from "react";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
-import { Card, colors, Divider, Screen, SectionHeader } from "@/src/components/ui/kit";
+import {
+  Card,
+  colors,
+  Divider,
+  PageHeader,
+  Screen,
+  SectionHeader,
+  spacing,
+  StatTile,
+  StatusPill,
+} from "@/src/components/ui/kit";
 
 export default function StbPage() {
   const status = useRobotStatus();
@@ -24,14 +34,30 @@ export default function StbPage() {
     { label: "Output 4", value: status.output4, idx: 4 },
   ];
 
+  const activeInputs  = inputs.filter(i => i.value).length;
+  const activeOutputs = outputs.filter(o => o.value).length;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SubPageHeader
+      <PageHeader
         title="STB4100"
-        subtitle={`STB4100 · USB HID · ${status.driverConnected ? "Connected" : "Offline"}`}
+        subtitle="Robot's built-in I/O board · USB HID"
+        right={
+          <StatusPill
+            label={status.driverConnected ? "Connected" : "Offline"}
+            tone={status.driverConnected ? "success" : "danger"}
+            dot
+          />
+        }
       />
       <Screen>
-        <SectionHeader title="Inputs" />
+        <View style={styles.statRow}>
+          <StatTile label="Inputs Active" value={`${activeInputs}/${inputs.length}`} icon={ArrowDownToLine} style={styles.statTile} />
+          <StatTile label="Outputs On" value={`${activeOutputs}/${outputs.length}`} icon={ArrowUpFromLine}
+                    tint={[colors.accent, colors.accentSoft]} style={styles.statTile} />
+        </View>
+
+        <SectionHeader title="Inputs" icon={ArrowDownToLine} />
         <Card padded={false}>
           {inputs.map((inp, i) => (
             <React.Fragment key={inp.label}>
@@ -46,7 +72,7 @@ export default function StbPage() {
           ))}
         </Card>
 
-        <SectionHeader title="Outputs" />
+        <SectionHeader title="Outputs" icon={ArrowUpFromLine} />
         <Card padded={false}>
           {outputs.map((out, i) => (
             <React.Fragment key={out.label}>
@@ -65,3 +91,8 @@ export default function StbPage() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  statRow:  { flexDirection: "row", gap: spacing.md },
+  statTile: { flex: 1 },
+});

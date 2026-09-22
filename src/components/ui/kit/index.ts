@@ -13,4 +13,9 @@ export { Divider } from "./Divider";
 export { SegmentedControl } from "./SegmentedControl";
 export { Chip, ChipGroup } from "./Chip";
 export { RadioRow } from "./RadioRow";
+export { PageHeader, type Crumb } from "./PageHeader";
+export { ROUTE_LABELS, labelForSegment } from "./routeLabels";
+export { HintBanner, InfoTip } from "./Hints";
+export { StatTile } from "./StatTile";
+export { PositionReadout, type ReadoutAxis } from "./PositionReadout";
 

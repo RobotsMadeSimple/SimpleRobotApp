@@ -1,4 +1,4 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   accents,
@@ -6,7 +6,9 @@ import {
   Card,
   colors,
   Divider,
+  InfoTip,
   Input,
+  PageHeader,
   radii,
   RadioRow,
   Screen,
@@ -101,6 +103,7 @@ export default function StackEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const stacks = useStacks();
   const points = usePoints();
+  const isWide = useIsWide();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (stacks.find(s => s.id === id) ?? null);
@@ -137,8 +140,15 @@ export default function StackEditPage() {
       style={s.page}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <SubPageHeader
+      <PageHeader
         title={isNew ? "New Stack" : "Edit Stack"}
+        subtitle="A 1D array of positions stepped from a base point"
+        crumbs={[
+          { label: "Space", href: "/space" },
+          { label: "Stacks", href: "/space/stacks" },
+          { label: isNew ? "New Stack" : "Edit Stack" },
+        ]}
+        backTo="/space/stacks"
         right={
           <Button
             label="Save"
@@ -151,61 +161,102 @@ export default function StackEditPage() {
       />
 
       <Screen>
-
-        {/* ── Name ── */}
-        <SectionHeader title="Name" />
-        <Card>
-          <Input
-            value={draft.name}
-            onChangeText={v => set({ name: v })}
-            placeholder="e.g. Tube Rack A"
-            autoCapitalize="words"
-            returnKeyType="next"
-            style={s.nameInput}
-          />
-        </Card>
-
-        {/* ── Base Point ── */}
-        <SectionHeader title="Base point" />
-        <Card padded={false}>
-          <AnimatedPressable style={s.pickerRow} onPress={() => setPointPickerOpen(true)}>
-            <Text style={[s.pickerRowText, !draft.basePointName && s.pickerRowPlaceholder]}>
-              {draft.basePointName || "Select point…"}
-            </Text>
-            <ChevronRight size={16} color={colors.textFaint} />
-          </AnimatedPressable>
-        </Card>
-
-        {/* ── Step Offset ── */}
-        <SectionHeader title="Step offset  (mm per index step)" />
-        <Card>
-          <View style={s.axisRow}>
-            {(["X", "Y", "Z"] as const).map(axis => (
-              <View key={axis} style={s.axisCol}>
-                <Text style={s.axisLabel}>{axis}</Text>
-                <SignedNumberInput
-                  value={draft[`offset${axis}` as "offsetX"]}
-                  onChange={v => set({ [`offset${axis}`]: v } as any)}
+        {(() => {
+          const nameSection = (
+            <>
+              <SectionHeader title="Name" />
+              <Card>
+                <Input
+                  value={draft.name}
+                  onChangeText={v => set({ name: v })}
+                  placeholder="e.g. Tube Rack A"
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  style={s.nameInput}
                 />
+              </Card>
+            </>
+          );
+
+          const baseSection = (
+            <>
+              <SectionHeader title="Base point" />
+              <Card padded={false}>
+                <AnimatedPressable style={s.pickerRow} onPress={() => setPointPickerOpen(true)}>
+                  <Text style={[s.pickerRowText, !draft.basePointName && s.pickerRowPlaceholder]}>
+                    {draft.basePointName || "Select point…"}
+                  </Text>
+                  <ChevronRight size={16} color={colors.textFaint} />
+                </AnimatedPressable>
+              </Card>
+            </>
+          );
+
+          const offsetSection = (
+            <>
+              <SectionHeader title="Step offset  (mm per index step)" />
+              <Card>
+                <View style={s.axisRow}>
+                  {(["X", "Y", "Z"] as const).map(axis => (
+                    <View key={axis} style={s.axisCol}>
+                      <Text style={s.axisLabel}>{axis}</Text>
+                      <SignedNumberInput
+                        value={draft[`offset${axis}` as "offsetX"]}
+                        onChange={v => set({ [`offset${axis}`]: v } as any)}
+                      />
+                    </View>
+                  ))}
+                </View>
+              </Card>
+            </>
+          );
+
+          const maxCountSection = (
+            <>
+              <SectionHeader
+                title="Max count  (optional — enables round-robin)"
+                right={<InfoTip text="When set, indices at or beyond the max count wrap back to the start via modulo, so a program can cycle through the same slots repeatedly." />}
+              />
+              <Card>
+                <View style={s.countRow}>
+                  <OptionalCountInput
+                    value={draft.maxCount}
+                    onChange={v => set({ maxCount: v })}
+                  />
+                </View>
+                <Text style={s.hint}>
+                  When set, indices ≥ max count wrap around via modulo.
+                </Text>
+              </Card>
+            </>
+          );
+
+          if (isWide) {
+            // Wide: identity/base info on the left, step geometry on the right —
+            // avoids one long skinny column of stacked cards.
+            return (
+              <View style={s.wideRow}>
+                <View style={s.wideCol}>
+                  {nameSection}
+                  {baseSection}
+                </View>
+                <View style={s.wideCol}>
+                  {offsetSection}
+                  {maxCountSection}
+                </View>
               </View>
-            ))}
-          </View>
-        </Card>
+            );
+          }
 
-        {/* ── Max Count ── */}
-        <SectionHeader title="Max count  (optional — enables round-robin)" />
-        <Card>
-          <View style={s.countRow}>
-            <OptionalCountInput
-              value={draft.maxCount}
-              onChange={v => set({ maxCount: v })}
-            />
-          </View>
-          <Text style={s.hint}>
-            When set, indices ≥ max count wrap around via modulo.
-          </Text>
-        </Card>
-
+          return (
+            <>
+              {nameSection}
+              {baseSection}
+              {offsetSection}
+              {maxCountSection}
+            </>
+          );
+        })()}
       </Screen>
 
       {/* ── Base point picker ── */}
@@ -260,6 +311,11 @@ const s = StyleSheet.create({
   // Stacks use accents.purple for their primary action, unlike the default
   // kit Button primary (accent blue), to match the app-wide Stacks color coding.
   saveBtn: { backgroundColor: accents.purple },
+
+  // Wide: two columns instead of one long stack of cards. Each column keeps
+  // its own vertical rhythm since Screen's `gap` only spaces its direct child.
+  wideRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
+  wideCol: { flex: 1, gap: spacing.md },
 
   nameInput: { borderWidth: 0, backgroundColor: "transparent", paddingHorizontal: 0 },
 

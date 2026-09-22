@@ -33,7 +33,7 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
         <View style={styles.info}>
           <Text style={[type.title, styles.title]} numberOfLines={1}>{robot.robotName}</Text>
           <Text style={styles.type} numberOfLines={1}>{robot.robotType}</Text>
-          <Text style={[type.subtitle, styles.subtext]} numberOfLines={1}>
+          <Text style={[type.mono, styles.subtext]} numberOfLines={1}>
             {robot.ipAddress}:{robot.port}
           </Text>
         </View>

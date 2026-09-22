@@ -1,11 +1,10 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
 import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { Button, colors, Divider, FormRow, Input, radii, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
+import { Button, colors, Divider, EmptyState, FormRow, InfoTip, Input, PageHeader, radii, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
 import { useFocusEffect } from "expo-router";
 import {
   MapPin,
@@ -468,7 +467,11 @@ export default function PointsPage() {
       stickyHeaderIndices={[0]}
       contentContainerStyle={[styles.list, wideContent]}
       ListEmptyComponent={
-        <Text style={styles.empty}>No points available</Text>
+        <EmptyState
+          icon={<MapPin size={28} color={colors.textFaint} />}
+          title="No points saved yet"
+          subtitle="Jog the robot to a position, then save it as a point from Jog & Teach."
+        />
       }
     />
   );
@@ -476,7 +479,15 @@ export default function PointsPage() {
   return (
     <View style={styles.page}>
       <NotConnectedOverlay />
-      <SubPageHeader title="Points" />
+      <PageHeader
+        title="Points"
+        subtitle="Move to, edit, or delete saved robot positions"
+        right={
+          <InfoTip
+            text={`Tap a point on the map or in the list to line/joint move the robot there, edit its coordinates, or delete it. ${Platform.OS === "web" ? "Scroll to zoom, drag to pan" : "Pinch to zoom, drag to pan"} the map.`}
+          />
+        }
+      />
 
       {isWide ? (
         /* ── Wide layout: map fills the left half, speed + table on the right ── */
@@ -806,12 +817,6 @@ const styles = StyleSheet.create({
     textAlign: "left",
     paddingLeft: spacing.xs + 2,
   },
-  empty: {
-    textAlign: "center",
-    marginTop: spacing.xxl + spacing.sm,
-    color: colors.textFaint,
-  },
-
   // ── Point options dialog ─────────────────────────────────────────────────
   overlay: {
     flex: 1,

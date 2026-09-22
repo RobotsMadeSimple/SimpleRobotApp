@@ -38,6 +38,14 @@ export function AppAlertHost() {
   const [queue, setQueue] = useState<AlertRequest[]>([]);
   const current = queue[0] ?? null;
 
+  // The Modal keeps rendering its children during the fade-out animation after
+  // the queue empties. Without retaining the last request, that closing frame
+  // renders a blank alert with the default lone "OK" button — a phantom modal
+  // that flashes and self-dismisses. Render from the retained copy instead.
+  const lastShown = React.useRef<AlertRequest | null>(null);
+  if (current) lastShown.current = current;
+  const shown = current ?? lastShown.current;
+
   useEffect(() => {
     enqueue = req => setQueue(q => [...q, req]);
     return () => { enqueue = null; };
@@ -48,8 +56,8 @@ export function AppAlertHost() {
     btn?.onPress?.();
   }
 
-  const buttons: AlertButton[] = current?.buttons && current.buttons.length > 0
-    ? current.buttons
+  const buttons: AlertButton[] = shown?.buttons && shown.buttons.length > 0
+    ? shown.buttons
     : [{ text: "OK", style: "default" }];
 
   const hasDestructive = buttons.some(b => b.style === "destructive");
@@ -72,8 +80,8 @@ export function AppAlertHost() {
               : <Info size={22} color={colors.accent} />}
           </View>
 
-          <Text style={styles.title}>{current?.title}</Text>
-          {!!current?.message && <Text style={styles.message}>{current.message}</Text>}
+          <Text style={styles.title}>{shown?.title}</Text>
+          {!!shown?.message && <Text style={styles.message}>{shown.message}</Text>}
 
           <View style={[styles.actions, stacked && styles.actionsStacked]}>
             {buttons.map((btn, i) => {
@@ -169,6 +177,7 @@ const styles = StyleSheet.create({
     gap: 6,
     borderRadius: 11,
     paddingVertical: spacing.md,
+    minHeight: 48,
   },
   btnStacked: {
     flex: 0,

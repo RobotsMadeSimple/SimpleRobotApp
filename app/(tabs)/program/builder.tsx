@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { appAlert } from "@/src/components/ui/AppAlert";
@@ -54,7 +53,7 @@ import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, Drag
 import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
-import { accents, colors, radii, shadows, spacing } from "@/src/components/ui/kit";
+import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
 /**
  * Lists are one variable type now, so the chip on a variable row names the element type
@@ -839,6 +838,23 @@ export default function BuilderScreen() {
     exitBuilder();
   }
 
+  // Guarded crumb navigation for the wide header — ancestor crumbs (Program,
+  // Programs/Local Programs/Routines) must go through the same unsaved-changes
+  // prompt as the Exit button rather than navigating straight away.
+  function guardedNavigate(href: string) {
+    if (selectMode) exitSelect();
+    if (!isDirty) { router.navigate(href as never); return; }
+    appAlert(
+      "Unsaved Changes",
+      "You have unsaved changes. Leave without saving?",
+      [
+        { text: "Save & Leave", onPress: async () => { if (await save()) router.navigate(href as never); } },
+        { text: "Discard",      style: "destructive", onPress: () => router.navigate(href as never) },
+        { text: "Cancel",       style: "cancel" },
+      ]
+    );
+  }
+
   // Keep a stable ref so the BackHandler effect can always call the latest version.
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
@@ -907,7 +923,11 @@ export default function BuilderScreen() {
   if (localLoading) {
     return (
       <View style={styles.container}>
-        <SubPageHeader title="Loading…" onBack={handleBack} />
+        <PageHeader
+          title="Loading…"
+          subtitle="Reading the local program from this device"
+          crumbs={[{ label: "Program", href: "/program" }, { label: "Local Programs", href: "/(tabs)/program/phone-programs" }, { label: "Loading…" }]}
+        />
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <Text style={{ fontSize: 14, color: colors.textFaint }}>Loading local program…</Text>
         </View>
@@ -1061,7 +1081,12 @@ export default function BuilderScreen() {
 
   const variablesSection = (
     <>
-      <Text style={styles.sectionLabel}>VARIABLES</Text>
+      <View style={styles.sectionLabelRow}>
+        <Text style={styles.sectionLabel}>VARIABLES</Text>
+        {variables.length > 0 && <Text style={styles.sectionCount}>{variables.length}</Text>}
+        <View style={{ flex: 1 }} />
+        <InfoTip text="Variables hold values the program can read and change while it runs. Reference one from any numeric field, and tick 'show on monitor' to watch it live." />
+      </View>
       <View style={styles.variablesCard}>
         {variables.length === 0 ? (
           <Text style={styles.varEmptyText}>
@@ -1168,7 +1193,12 @@ export default function BuilderScreen() {
       {currentSteps.length === 0 ? (
         <View style={styles.emptySteps}>
           <Cpu size={32} color={colors.borderStrong} />
-          <Text style={styles.emptyStepsText}>{inScope ? "No steps in this scope" : "No steps yet"}</Text>
+          <Text style={styles.emptyStepsText}>{inScope ? "No steps in this block" : "No steps yet"}</Text>
+          <Text style={styles.emptyStepsHint}>
+            {inScope
+              ? "Add the steps that should run inside this block."
+              : "Add your first block — moves, logic, I/O and vision are all in the picker."}
+          </Text>
         </View>
       ) : (
         <View style={styles.stepsList}>
@@ -1239,8 +1269,17 @@ export default function BuilderScreen() {
 
   // On wide screens the save actions live in the header instead of a bottom
   // bar — the bar's floating buttons can clip off-screen at some widths.
+  // Exit is here too: the wide header has no back arrow, and leaving the
+  // builder must still go through the unsaved-changes prompt.
   const headerActions = isWide ? (
     <View style={{ flexDirection: "row", gap: spacing.sm }}>
+      <ActionButton
+        label={inScope ? "Leave Block" : "Exit"}
+        icon={<ArrowLeft size={14} color={colors.textSecondary} />}
+        style={styles.headerExitBtn}
+        textStyle={styles.headerExitText}
+        onPress={inScope ? popScope : exitBuilder}
+      />
       {isLocalMode && connected && (
         <ActionButton
           label="Save to Robot"
@@ -1264,9 +1303,53 @@ export default function BuilderScreen() {
     </View>
   ) : undefined;
 
+  // ── Header ────────────────────────────────────────────────────────────────
+  // PageHeader owns chrome both wide and narrow. Narrow's back press runs
+  // `handleBack` (pop a scope, or prompt on unsaved changes) via onBack; wide's
+  // ancestor crumbs run `guardedNavigate` via onNavigate — both routes through
+  // the same unsaved-changes prompt as the header's Exit button.
+
+  const rootStepCount = steps.length;
+  const headerSubtitle = inScope
+    ? `${currentSteps.length} step${currentSteps.length !== 1 ? "s" : ""} in this block`
+    : `${programName.trim() ? programName.trim() : "Untitled"} · ${rootStepCount} step${rootStepCount !== 1 ? "s" : ""}` +
+      `${variables.length > 0 ? ` · ${variables.length} variable${variables.length !== 1 ? "s" : ""}` : ""}` +
+      `${isDirty ? " · unsaved changes" : ""}`;
+
+  const headerCrumbs = [
+    { label: "Program", href: "/program" },
+    ...(isRoutineMode
+      ? [{ label: "Routines", href: "/program/routines" }]
+      : isLocalMode
+        ? [{ label: "Local Programs", href: "/(tabs)/program/phone-programs" }]
+        : [{ label: "Programs", href: "/(tabs)/program/robot-programs" }]),
+    { label: builderTitle },
+  ];
+
+  // Narrow's back affordance should read "Back" (a single scope pop) rather
+  // than jump straight to the parent list name when inside a nested block.
+  const narrowCrumbs = inScope
+    ? [{ label: "Back" }, { label: builderTitle }]
+    : headerCrumbs;
+
   return (
     <View style={styles.container}>
-      <SubPageHeader title={builderTitle} onBack={isWide ? exitBuilder : handleBack} right={headerActions} />
+      {isWide ? (
+        <PageHeader
+          title={builderTitle}
+          subtitle={headerSubtitle}
+          crumbs={headerCrumbs}
+          right={headerActions}
+          onNavigate={guardedNavigate}
+        />
+      ) : (
+        <PageHeader
+          title={builderTitle}
+          subtitle={headerSubtitle}
+          crumbs={narrowCrumbs}
+          onBack={handleBack}
+        />
+      )}
 
       {/* Multi-select toolbar */}
       {selectMode && (
@@ -1362,7 +1445,14 @@ export default function BuilderScreen() {
                 onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
                 scrollEventThrottle={16}
               >
-                {!inScope && <Text style={styles.sectionLabel}>STEPS</Text>}
+                {!inScope && (
+                  <View style={styles.sectionLabelRow}>
+                    <Text style={styles.sectionLabel}>STEPS</Text>
+                    <Text style={styles.sectionCount}>{currentSteps.length}</Text>
+                    <View style={{ flex: 1 }} />
+                    <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, wrap them in a loop, or save them as a routine." />
+                  </View>
+                )}
                 {stepsSection}
               </ScrollView>
             </View>
@@ -1412,7 +1502,12 @@ export default function BuilderScreen() {
         {variablesSection}
 
         {/* Steps (root level) */}
-        <Text style={styles.sectionLabel}>STEPS</Text>
+        <View style={styles.sectionLabelRow}>
+          <Text style={styles.sectionLabel}>STEPS</Text>
+          <Text style={styles.sectionCount}>{currentSteps.length}</Text>
+          <View style={{ flex: 1 }} />
+          <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, wrap them in a loop, or save them as a routine." />
+        </View>
         {stepsSection}
       </ScrollView>
 
@@ -1781,6 +1876,19 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.8,
   },
+  sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  headerExitBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  headerExitText: { color: colors.textSecondary, fontSize: 13, fontWeight: "600" },
+  sectionCount: {
+    fontSize: 11, fontWeight: "700", color: colors.textFaint,
+    backgroundColor: colors.surface, borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm, paddingVertical: 1,
+  },
 
   emptySteps: {
     backgroundColor: colors.surface, borderRadius: radii.lg, paddingVertical: spacing.xxl,
@@ -1788,6 +1896,10 @@ const styles = StyleSheet.create({
     ...shadows.soft,
   },
   emptyStepsText: { fontSize: 14, color: colors.textFaint },
+  emptyStepsHint: {
+    fontSize: 12.5, color: colors.textFaint, textAlign: "center",
+    paddingHorizontal: spacing.xl, lineHeight: 17, opacity: 0.85,
+  },
 
   // ── Variables card ──────────────────────────────────────────────────────────
 

@@ -5,7 +5,7 @@ import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/pro
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
-import { AlertTriangle, Cpu, Gauge, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -18,9 +18,12 @@ import {
   Button,
   ButtonVariant,
   EmptyState,
+  InfoTip,
   ListRow,
+  PageHeader,
   Screen,
   SectionHeader,
+  StatTile,
   accents,
   colors,
   radii,
@@ -296,6 +299,30 @@ export default function ProgramScreen() {
     programSummaries.filter(p => !builtNames.has(p.name)).length;
   const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
 
+  const activeCount = programSummaries.filter(
+    p => p.status === "Running" || p.status === "Starting" || p.status === "Finishing"
+  ).length;
+
+  const statRow = (
+    <View style={styles.statRow}>
+      <StatTile
+        label="Running"
+        value={activeCount}
+        icon={PlayCircle}
+        tint={activeCount > 0 ? [colors.success, colors.successSoft] : undefined}
+        style={styles.statTile}
+      />
+      <StatTile label="Programs" value={robotProgramCount} icon={Cpu} style={styles.statTile} />
+      <StatTile
+        label="Routines"
+        value={routineCount}
+        icon={Repeat2}
+        tint={[ROUTINE_TINT.color, ROUTINE_TINT.bg]}
+        style={styles.statTile}
+      />
+    </View>
+  );
+
   const runningSection = (
     <>
       {/* Now Running / Last Ran */}
@@ -310,7 +337,11 @@ export default function ProgramScreen() {
           onSpeedPress={() => setSpeedModalOpen(true)}
         />
       ) : (
-        <EmptyState title="No program has been run yet" />
+        <EmptyState
+          icon={<PlayCircle size={32} color={colors.textFaint} />}
+          title="No program has been run yet"
+          subtitle="Pick a program below and start it — its live step, progress and alerts appear here."
+        />
       )}
     </>
   );
@@ -318,7 +349,13 @@ export default function ProgramScreen() {
   const navSection = (
     <>
       {/* Nav tiles */}
-      <SectionHeader title="Programs" />
+      <SectionHeader
+        title="Programs"
+        icon={Box}
+        right={
+          <InfoTip text="A program is a full sequence the robot runs on its own. A routine is a reusable block of steps that programs call with a Call Routine step. Local Programs are drafts kept only on this device, not on the robot." />
+        }
+      />
 
       <ListRow
         title="Programs"
@@ -338,8 +375,8 @@ export default function ProgramScreen() {
 
       {localCount > 0 && (
         <ListRow
-          title="Local Drafts"
-          subtitle={`${localCount} ${localCount === 1 ? "draft" : "drafts"}`}
+          title="Local Programs"
+          subtitle={`${localCount} ${localCount === 1 ? "draft on this device" : "drafts on this device"}`}
           icon={<Smartphone size={20} color={LOCAL_TINT.color} />}
           iconColor={LOCAL_TINT.bg}
           onPress={() => router.navigate("/(tabs)/program/phone-programs")}
@@ -359,8 +396,10 @@ export default function ProgramScreen() {
   );
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader title="Program" subtitle="Build, run, and monitor robot programs" />
       <Screen>
+        {statRow}
         {isWide ? (
           // Wide: the running program on the left, the page selectors on the right.
           <View style={styles.wideRow}>
@@ -387,6 +426,9 @@ export default function ProgramScreen() {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  statRow:  { flexDirection: "row", gap: spacing.md },
+  statTile: { flex: 1, minWidth: 0 },
+
   // Wide: running program on a narrow left column, page selectors on the wider right.
   wideRow:      { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
   wideLeftCol:  { width: 360, gap: spacing.md },

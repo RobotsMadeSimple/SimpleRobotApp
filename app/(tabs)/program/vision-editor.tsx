@@ -1,5 +1,3 @@
-import {
-  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
@@ -60,7 +58,7 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { accents, colors, spacing, radii, shadows } from "@/src/components/ui/kit";
+import { accents, colors, spacing, radii, shadows, InfoTip, PageHeader, StatusPill } from "@/src/components/ui/kit";
 import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
@@ -517,7 +515,7 @@ export default function VisionEditorScreen() {
       <View style={styles.detailsDivider} />
       <TouchableOpacity style={styles.detailsRow} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
         <Text style={styles.rowLabel}>Camera</Text>
-        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? "#22c55e" : colors.borderStrong }]} />
+        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? colors.success : colors.borderStrong }]} />
         <Text style={styles.cameraValue} numberOfLines={1}>
           {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
         </Text>
@@ -570,7 +568,12 @@ export default function VisionEditorScreen() {
   const editorSection = (
     <>
       {/* ── Zones ──────────────────────────────────────────────────────────── */}
-      <Text style={styles.sectionLabel}>ZONES</Text>
+      <View style={styles.sectionLabelRow}>
+        <Text style={styles.sectionLabel}>ZONES</Text>
+        <Text style={styles.sectionCount}>{program.zones.length}</Text>
+        <View style={{ flex: 1 }} />
+        <InfoTip text="A zone is a shape drawn over the camera image — rectangle, circle, polygon or grid. Inspections only look inside the zone they are attached to." />
+      </View>
 
       {program.zones.length === 0 && (
         <View style={styles.emptyCard}>
@@ -646,7 +649,12 @@ export default function VisionEditorScreen() {
           fuchsia (#d946ef) has no matching kit token and stays literal, see report. */}
 
       {/* ── Inspections ──────────────────────────────────────────────────── */}
-      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>INSPECTIONS</Text>
+      <View style={[styles.sectionLabelRow, { marginTop: 8 }]}>
+        <Text style={styles.sectionLabel}>INSPECTIONS</Text>
+        <Text style={styles.sectionCount}>{program.inspections.length}</Text>
+        <View style={{ flex: 1 }} />
+        <InfoTip text="An inspection is one measurement — blob count, colour coverage, a barcode, an ArUco tag, a line or a polygon match. Its result is what a Run Vision step reads back into program variables." />
+      </View>
 
       {allInspections.length === 0 && (
         <View style={styles.emptyCard}>
@@ -776,8 +784,15 @@ export default function VisionEditorScreen() {
           renders as a full-screen subpage in its place. */}
       {configModal === null && (
       <>
-      <SubPageHeader
-        title={name}
+      <PageHeader
+        title={name || "Vision Program"}
+        subtitle={`${program.zones.length} zone${program.zones.length !== 1 ? "s" : ""} · ${program.inspections.length} inspection${program.inspections.length !== 1 ? "s" : ""}${selectedCam ? ` · ${selectedCam.name || selectedCam.id}` : ""}${isRunning ? " · live" : ""}`}
+        crumbs={[
+          { label: "Program", href: "/program" },
+          { label: "Vision", href: "/(tabs)/program/vision" },
+          { label: name || "Vision Program" },
+        ]}
+        backTo="/(tabs)/program/vision"
         right={
           saveStatus === 'saving' ? (
             <View style={styles.saveStatusRow}>
@@ -789,7 +804,13 @@ export default function VisionEditorScreen() {
               <Check size={14} color={colors.success} />
               <Text style={[styles.saveStatusText, { color: colors.success }]}>Saved</Text>
             </View>
-          ) : null
+          ) : (
+            <StatusPill
+              label={isRunning ? "Live" : "Stopped"}
+              tone={isRunning ? "success" : "neutral"}
+              dot
+            />
+          )
         }
       />
 
@@ -1003,6 +1024,12 @@ const styles = StyleSheet.create({
   runBtnText:  { color: colors.onAccent, fontSize: 14, fontWeight: "700" },
 
   sectionLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 2 },
+  sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  sectionCount: {
+    fontSize: 11, fontWeight: "700", color: colors.textFaint,
+    backgroundColor: colors.surface, borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm, paddingVertical: 1, marginBottom: 2,
+  },
 
   emptyCard: {
     backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.lg, alignItems: "center",

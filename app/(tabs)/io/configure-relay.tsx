@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -12,7 +11,18 @@ import {
   View,
 } from "react-native";
 
-import { accents, Button, colors, Input, radii, Screen, spacing } from "@/src/components/ui/kit";
+import {
+  accents,
+  Button,
+  colors,
+  InfoTip,
+  Input,
+  PageHeader,
+  radii,
+  Screen,
+  SectionHeader,
+  spacing,
+} from "@/src/components/ui/kit";
 
 const RELAY_COUNT = 4;
 
@@ -65,9 +75,14 @@ export default function ConfigureRelayPage() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <SubPageHeader
+        <PageHeader
           title="Configure Relay Board"
           subtitle="DCTTECH 4-Channel USB HID"
+          crumbs={[
+            { label: "I/O", href: "/io" },
+            { label: "USB Relay Board", href: "/(tabs)/io/relay" },
+            { label: "Configure Relay" },
+          ]}
           right={
             <Button
               variant="primary"
@@ -83,6 +98,10 @@ export default function ConfigureRelayPage() {
         />
 
         <Screen>
+          <SectionHeader
+            title="Channels"
+            right={<InfoTip text="Names appear throughout the app wherever this relay is used, so rename each channel to match what it switches (e.g. “Conveyor” or “Cabinet Light”)." />}
+          />
           {Array.from({ length: RELAY_COUNT }, (_, i) => {
             const isDirty = edits[i] !== names[i];
             return (

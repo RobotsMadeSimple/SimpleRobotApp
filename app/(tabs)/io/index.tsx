@@ -14,6 +14,8 @@ import {
   Gauge,
   Plus,
   Radio,
+  Wifi,
+  WifiOff,
   X,
   } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
@@ -36,12 +38,15 @@ import {
   Button,
   colors,
   Divider,
+  InfoTip,
   ListRow,
   radii,
+  PageHeader,
   Screen,
   SectionHeader,
   shadows,
   spacing,
+  StatTile,
   StatusPill,
   type,
 } from "@/src/components/ui/kit";
@@ -240,12 +245,39 @@ export default function IoPage() {
     t => !ioConfig?.[t.field as keyof IOConfig] || t.field === "enableCameras"
   );
 
+  // Devices online/offline summary — STB4100 is always present; the rest only
+  // count once their device type is enabled, mirroring the cards rendered below.
+  const connectionFlags = ioConfig ? [
+    status.driverConnected,
+    ...(ioConfig.enableNanoCards ? nanos.map(n => n.connected) : []),
+    ...(ioConfig.enableRelayCard ? [relay?.connected ?? false] : []),
+    ...(ioConfig.enableAuxAxis ? auxDevices.map(d => d.connected) : []),
+    ...(ioConfig.enableCameras ? cameras.map(c => c.connected) : []),
+  ] : [];
+  const totalDevices   = connectionFlags.length;
+  const onlineDevices  = connectionFlags.filter(Boolean).length;
+  const offlineDevices = totalDevices - onlineDevices;
+
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
+      <PageHeader title="I/O" subtitle="Connected devices, pins, and peripherals" />
 
       <Screen>
-        <SectionHeader title="Devices" />
+        {ioConfig && (
+          <View style={styles.statRow}>
+            <StatTile label="Devices" value={totalDevices} icon={CircuitBoard} style={styles.statTile} />
+            <StatTile label="Online" value={onlineDevices} icon={Wifi}
+                      tint={[colors.success, colors.successSoft]} style={styles.statTile} />
+            <StatTile label="Offline" value={offlineDevices} icon={WifiOff}
+                      tint={[colors.danger, colors.dangerSoft]} style={styles.statTile} />
+          </View>
+        )}
+
+        <SectionHeader
+          title="Devices"
+          right={<InfoTip text="STB4100 is the robot's built-in I/O board and is always available. Add Nano boards, a relay board, aux stepper axes, or cameras for extra I/O — each becomes its own card below." />}
+        />
 
         {/* STB4100 — always visible, 1 card */}
         <DeviceNavCard
@@ -376,6 +408,9 @@ export default function IoPage() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+
+  statRow:  { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  statTile: { flex: 1, minWidth: 130 },
 
   rowAccessories: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   deleteBtn: { padding: spacing.xs + 2, marginLeft: 0 },

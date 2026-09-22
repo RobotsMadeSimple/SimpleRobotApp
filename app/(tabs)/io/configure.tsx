@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoPinState, PinType } from "@/src/models/robotModels";
@@ -20,8 +19,18 @@ import {
   View,
 } from "react-native";
 
-import { useWideContent } from "@/src/components/ui/responsive";
-import { accents, Button, colors, Input, radii, shadows, spacing } from "@/src/components/ui/kit";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import {
+  accents,
+  Button,
+  colors,
+  InfoTip,
+  Input,
+  PageHeader,
+  radii,
+  shadows,
+  spacing,
+} from "@/src/components/ui/kit";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Arduino Nano pin definitions — D0-D13, A0-A5
@@ -198,11 +207,26 @@ function PinRow({
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
+function ColumnHeaders({ style }: { style?: any }) {
+  return (
+    <View style={[styles.colHeaders, style]}>
+      <Text style={[styles.colHeader, { width: 44 }]}>PIN</Text>
+      <Text style={[styles.colHeader, { width: 52 }]}>TYPE</Text>
+      <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
+      <InfoTip
+        size={12}
+        text="Input reads a sensor or switch. Output can be toggled on/off from the IO pages. Neopixel drives an addressable LED strip and needs a pixel count. Unconfigured pins are left alone."
+      />
+    </View>
+  );
+}
+
 export default function ConfigurePage() {
   const { nanoId } = useLocalSearchParams<{ nanoId: string }>();
   const nanos       = useNanoIO();
   const nano        = nanos.find(n => n.id === nanoId);
   const wideContent = useWideContent();
+  const isWide      = useIsWide();
 
   // Build initial edit state from the current nanoIO snapshot
   const initialEdits = useMemo<PinEdit[]>(() => {
@@ -287,9 +311,14 @@ export default function ConfigurePage() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.container}>
-        <SubPageHeader
+        <PageHeader
           title="Configure Pins"
           subtitle={nano.name}
+          crumbs={[
+            { label: "I/O", href: "/io" },
+            { label: nano.name, href: `/(tabs)/io/nanos?nanoId=${encodeURIComponent(nano.id)}` },
+            { label: "Configure Pins" },
+          ]}
           right={
             <Button
               variant="primary"
@@ -304,12 +333,8 @@ export default function ConfigurePage() {
           }
         />
 
-        {/* ── Column headers ── */}
-        <View style={[styles.colHeaders, wideContent]}>
-          <Text style={[styles.colHeader, { width: 44 }]}>PIN</Text>
-          <Text style={[styles.colHeader, { width: 52 }]}>TYPE</Text>
-          <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
-        </View>
+        {/* ── Column headers (narrow: one shared header; wide: one per column) ── */}
+        {!isWide && <ColumnHeaders style={wideContent} />}
 
         {/* ── Pin list ── */}
         <ScrollView
@@ -318,14 +343,34 @@ export default function ConfigurePage() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {NANO_PINS.map(def => (
-            <PinRow
-              key={def.pin}
-              def={def}
-              edit={edits.find(e => e.pin === def.pin)!}
-              onChange={partial => updatePin(def.pin, partial)}
-            />
-          ))}
+          {isWide ? (
+            <View style={styles.pinColumnsRow}>
+              {[NANO_PINS.slice(0, Math.ceil(NANO_PINS.length / 2)), NANO_PINS.slice(Math.ceil(NANO_PINS.length / 2))].map(
+                (colPins, ci) => (
+                  <View key={ci} style={styles.pinColumn}>
+                    <ColumnHeaders />
+                    {colPins.map(def => (
+                      <PinRow
+                        key={def.pin}
+                        def={def}
+                        edit={edits.find(e => e.pin === def.pin)!}
+                        onChange={partial => updatePin(def.pin, partial)}
+                      />
+                    ))}
+                  </View>
+                )
+              )}
+            </View>
+          ) : (
+            NANO_PINS.map(def => (
+              <PinRow
+                key={def.pin}
+                def={def}
+                edit={edits.find(e => e.pin === def.pin)!}
+                onChange={partial => updatePin(def.pin, partial)}
+              />
+            ))
+          )}
         </ScrollView>
       </View>
     </KeyboardAvoidingView>
@@ -341,6 +386,7 @@ const styles = StyleSheet.create({
 
   centred: { flex: 1, justifyContent: "center", alignItems: "center" },
   notFound: { fontSize: 15, color: colors.textMuted },
+
 
   // ── Column headers ─────────────────────────────────────────────────────────
   colHeaders: {
@@ -364,6 +410,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
     gap: spacing.xs + 2,
   },
+
+  // Wide: two side-by-side pin columns instead of one long list.
+  pinColumnsRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
+  pinColumn:     { flex: 1, minWidth: 0, gap: spacing.xs + 2 },
 
   // ── Pin row ────────────────────────────────────────────────────────────────
   pinRow: {

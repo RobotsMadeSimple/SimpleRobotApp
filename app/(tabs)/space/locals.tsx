@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
@@ -9,8 +8,11 @@ import {
   Divider,
   EmptyState,
   FormRow,
+  InfoTip,
   Input,
+  PageHeader,
   radii,
+  RadioRow,
   Screen,
   SectionHeader,
   shadows,
@@ -256,32 +258,32 @@ export default function LocalsPage() {
 
   return (
     <View style={styles.container}>
-      <SubPageHeader title="Locals" />
+      <PageHeader title="Locals" subtitle="Local coordinate frames offset where point coordinates are measured from" />
 
       <Screen>
-        <SectionHeader title="Saved locals" />
+        <SectionHeader
+          title="Saved locals"
+          icon={Grid3x3}
+          right={<InfoTip text="A local applies an offset and rotation to the coordinates the robot works in. Activate one to shift the origin your saved points are measured from; choose No Local to move in world coordinates." />}
+        />
 
         {/* No-local row — always at top */}
         <Card padded={false}>
-          <AnimatedPressable
-            style={styles.localRow}
+          <RadioRow
+            title="No Local"
+            subtitleNode={<Text style={styles.localCoords}>World origin (0, 0, 0)</Text>}
+            selected={activeLocal === ""}
             onPress={() => robotClient.setActiveLocal("None")}
-          >
-            <View style={[styles.activeTile, activeLocal === "" && styles.activeTileOn]}>
-              {activeLocal === "" && <View style={styles.radioDot} />}
-            </View>
-            <View style={styles.localInfo}>
-              <Text style={[styles.localName, activeLocal === "" && styles.localNameActive]}>
-                No Local
-              </Text>
-              <Text style={styles.localCoords}>World origin (0, 0, 0)</Text>
-            </View>
-            {activeLocal === "" && (
-              <View style={styles.activeChip}>
-                <Text style={styles.activeChipText}>Active</Text>
-              </View>
-            )}
-          </AnimatedPressable>
+            tint={accents.purple}
+            style={styles.radioRowPad}
+            right={
+              activeLocal === "" ? (
+                <View style={styles.activeChip}>
+                  <Text style={styles.activeChipText}>Active</Text>
+                </View>
+              ) : undefined
+            }
+          />
         </Card>
 
         {/* Empty state */}
@@ -301,48 +303,46 @@ export default function LocalsPage() {
               const isLast   = i === locals.length - 1;
               return (
                 <View key={local.name}>
-                  <AnimatedPressable
-                    style={[styles.localRow, isActive && styles.localRowActive]}
-                    onPress={() => toggleActiveLocal(local.name)}
-                  >
-                    {/* Radio button */}
-                    <View style={[styles.activeTile, isActive && styles.activeTileOn]}>
-                      {isActive && <View style={styles.radioDot} />}
-                    </View>
-
-                    {/* Name + coords (position and rotation) */}
-                    <View style={styles.localInfo}>
-                      <Text style={[styles.localName, isActive && styles.localNameActive]}>
-                        {local.name}
-                      </Text>
-                      {local.description ? (
-                        <Text style={styles.localDesc} numberOfLines={1}>{local.description}</Text>
-                      ) : null}
-                      <Text style={styles.localCoords} numberOfLines={1}>
-                        {local.x.toFixed(1)}, {local.y.toFixed(1)}, {local.z.toFixed(1)}
-                        {"  ·  R "}
-                        {local.rx.toFixed(1)}°, {local.ry.toFixed(1)}°, {local.rz.toFixed(1)}°
-                      </Text>
-                    </View>
-
-                    {isActive && (
-                      <View style={styles.activeChip}>
-                        <Text style={styles.activeChipText}>Active</Text>
+                  <RadioRow
+                    title={local.name}
+                    subtitleNode={
+                      <View>
+                        {local.description ? (
+                          <Text style={styles.localDesc} numberOfLines={1}>{local.description}</Text>
+                        ) : null}
+                        <Text style={styles.localCoords} numberOfLines={1}>
+                          {local.x.toFixed(1)}, {local.y.toFixed(1)}, {local.z.toFixed(1)}
+                          {"  ·  R "}
+                          {local.rx.toFixed(1)}°, {local.ry.toFixed(1)}°, {local.rz.toFixed(1)}°
+                        </Text>
                       </View>
-                    )}
+                    }
+                    selected={isActive}
+                    onPress={() => toggleActiveLocal(local.name)}
+                    tint={accents.purple}
+                    style={[isActive && styles.localRowActive, styles.radioRowPad]}
+                    right={
+                      <View style={styles.rowActions}>
+                        {isActive && (
+                          <View style={styles.activeChip}>
+                            <Text style={styles.activeChipText}>Active</Text>
+                          </View>
+                        )}
 
-                    {/* Edit */}
-                    <Pressable
-                      style={styles.iconBtn}
-                      onPress={() => openEdit(local.name)}
-                      hitSlop={8}
-                    >
-                      <Edit2 size={16} color={colors.textMuted} />
-                    </Pressable>
+                        {/* Edit */}
+                        <Pressable
+                          style={styles.iconBtn}
+                          onPress={() => openEdit(local.name)}
+                          hitSlop={8}
+                        >
+                          <Edit2 size={16} color={colors.textMuted} />
+                        </Pressable>
 
-                    {/* Delete */}
-                    <DeleteIconButton style={styles.iconBtn} onPress={() => confirmDelete(local.name)} />
-                  </AnimatedPressable>
+                        {/* Delete */}
+                        <DeleteIconButton style={styles.iconBtn} onPress={() => confirmDelete(local.name)} />
+                      </View>
+                    }
+                  />
                   {!isLast && <Divider />}
                 </View>
               );
@@ -398,48 +398,18 @@ const styles = StyleSheet.create({
   addCard: { borderColor: accents.purple },
   addCardText: { color: accents.purple },
 
-  localRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  radioRowPad: {
     paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.md + 1,
-    gap: spacing.sm + 2,
   },
   localRowActive: {
     backgroundColor: accents.purpleSoft,
   },
-
-  activeTile: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: colors.borderStrong,
-    justifyContent: "center",
+  rowActions: {
+    flexDirection: "row",
     alignItems: "center",
-  },
-  activeTileOn: {
-    borderColor: accents.purple,
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: accents.purple,
+    gap: spacing.sm + 2,
   },
 
-  localInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  localName: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.text,
-  },
-  localNameActive: {
-    color: accents.purple,
-  },
   localDesc: {
     fontSize: 12,
     color: colors.textFaint,
@@ -448,6 +418,7 @@ const styles = StyleSheet.create({
     ...type.mono,
     fontSize: 12,
     color: colors.textFaint,
+    marginTop: 2,
   },
 
   activeChip: {

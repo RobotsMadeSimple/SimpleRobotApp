@@ -1,7 +1,7 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { ios } from "@/src/components/ui/io/ioShared";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AuxAxisChannelState, AuxDeviceState, auxUnitLabel } from "@/src/models/robotModels";
 import {
@@ -31,13 +31,17 @@ import {
   Divider,
   EmptyState,
   FormRow,
+  InfoTip,
   Input,
+  PageHeader,
   radii,
   Screen,
   SectionHeader,
   SegmentedControl,
   shadows,
   spacing,
+  StatTile,
+  StatusPill,
   type,
 } from "@/src/components/ui/kit";
 
@@ -138,7 +142,10 @@ function AuxAxisConfigModal({
       <View style={styles.modalBackdrop}>
         <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Axis {axis.axisIndex} Configuration</Text>
+            <View style={styles.modalTitleRow}>
+              <Text style={styles.modalTitle}>Axis {axis.axisIndex} Configuration</Text>
+              <InfoTip text="Steps per revolution should match your stepper driver's microstepping setting. Gear ratio and mm per revolution convert motor turns into real-world degrees or millimeters for jog and position readouts." />
+            </View>
             <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
               <Text style={styles.modalCloseText}>✕</Text>
             </TouchableOpacity>
@@ -229,7 +236,7 @@ function AuxAxisConfigModal({
 
 // ── AuxDeviceDetail ───────────────────────────────────────────────────────────
 
-function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
+function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: boolean }) {
   const [configAxis, setConfigAxis] = useState<AuxAxisChannelState | null>(null);
 
   // Optimistic override for the enable toggle. The Switch is otherwise driven
@@ -263,8 +270,11 @@ function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
         />
       )}
 
-      <View>
-        <SectionHeader title="Motor Drivers" />
+      <View style={{ gap: spacing.md }}>
+        <SectionHeader
+          title="Motor Drivers"
+          right={<InfoTip text="Enabling motor drivers powers the stepper output for every axis on this device. Axes won't move while disabled, and the switch is locked out until the device is connected." />}
+        />
         <Card>
           <FormRow label="Motor Drivers" hint={shownEnabled ? "Enabled" : "Disabled"} inline>
             <Switch
@@ -278,43 +288,66 @@ function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
         </Card>
       </View>
 
-      <View>
-        <SectionHeader title="Axes" />
-        <Card padded={false}>
-          {device.axes.map((axis, i) => {
+      <View style={{ gap: spacing.md }}>
+        <SectionHeader
+          title="Axes"
+          right={<InfoTip text="Each axis is an independent stepper channel. Hold the arrows to jog; tap the gear to set its axis type, steps per revolution, gear ratio, and direction." />}
+        />
+        {(() => {
+          const axisRows = device.axes.map((axis, i) => {
             const unitLabel = auxUnitLabel(axis);
+            const row = (
+              <View style={styles.axisRow}>
+                <View style={styles.axisIndexBadge}>
+                  <Text style={styles.axisIndexText}>{axis.axisIndex}</Text>
+                </View>
+                <View style={ios.rowInfo}>
+                  <Text style={ios.rowLabel} numberOfLines={1}>
+                    {axis.name || `Axis ${axis.axisIndex}`}
+                  </Text>
+                  <Text style={ios.rowSub}>{axis.axisType ? unitLabel : "Hold to jog"}</Text>
+                </View>
+                <AnimatedPressable
+                  style={styles.axisConfigBtn}
+                  onPress={() => setConfigAxis(axis)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Settings2 size={16} color={colors.textFaint} />
+                </AnimatedPressable>
+                <View style={styles.jogRow}>
+                  <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={-1} />
+                  <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={1} />
+                </View>
+              </View>
+            );
+            // Wide: each axis gets its own card in a 2-column grid instead of
+            // one long stacked list. Narrow: unchanged flat rows in one Card.
+            if (isWide) {
+              return (
+                <View key={axis.axisIndex} style={styles.axisGridItem}>
+                  <Card padded={false}>{row}</Card>
+                </View>
+              );
+            }
             return (
               <React.Fragment key={axis.axisIndex}>
-                <View style={styles.axisRow}>
-                  <View style={styles.axisIndexBadge}>
-                    <Text style={styles.axisIndexText}>{axis.axisIndex}</Text>
-                  </View>
-                  <View style={ios.rowInfo}>
-                    <Text style={ios.rowLabel} numberOfLines={1}>
-                      {axis.name || `Axis ${axis.axisIndex}`}
-                    </Text>
-                    <Text style={ios.rowSub}>{axis.axisType ? unitLabel : "Hold to jog"}</Text>
-                  </View>
-                  <AnimatedPressable
-                    style={styles.axisConfigBtn}
-                    onPress={() => setConfigAxis(axis)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Settings2 size={16} color={colors.textFaint} />
-                  </AnimatedPressable>
-                  <View style={styles.jogRow}>
-                    <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={-1} />
-                    <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={1} />
-                  </View>
-                </View>
+                {row}
                 {i < device.axes.length - 1 && <Divider inset />}
               </React.Fragment>
             );
-          })}
-          {device.axes.length === 0 && (
-            <Text style={ios.emptyCard}>No axes configured.</Text>
-          )}
-        </Card>
+          });
+
+          if (device.axes.length === 0) {
+            return (
+              <Card padded={false}>
+                <Text style={ios.emptyCard}>No axes configured.</Text>
+              </Card>
+            );
+          }
+          return isWide
+            ? <View style={styles.axisGrid}>{axisRows}</View>
+            : <Card padded={false}>{axisRows}</Card>;
+        })()}
       </View>
     </>
   );
@@ -325,6 +358,7 @@ function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
 export default function AuxPage() {
   const { deviceId } = useLocalSearchParams<{ deviceId?: string }>();
   const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
+  const isWide = useIsWide();
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
@@ -336,20 +370,39 @@ export default function AuxPage() {
   }, []);
 
   const device = deviceId ? (auxDevices.find(d => d.deviceId === deviceId) ?? null) : null;
+  const configuredAxes = device?.axes.filter(a => !!a.axisType).length ?? 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SubPageHeader
+      <PageHeader
         title={device ? device.deviceName : "Aux Stepper"}
-        subtitle={
-          device
-            ? `${device.deviceId}${device.portName ? ` · ${device.portName}` : ""} · ${device.connected ? "Connected" : "Offline"}`
-            : "Device not found"
+        subtitle={device ? "External stepper driver" : "Device not found"}
+        right={
+          device ? (
+            <View style={styles.headerActions}>
+              <StatusPill
+                label={device.connected ? "Connected" : "Offline"}
+                tone={device.connected ? "success" : "danger"}
+                dot
+              />
+            </View>
+          ) : undefined
         }
       />
       <Screen>
         {device ? (
-          <AuxDeviceDetail device={device} />
+          <>
+            <View style={styles.statRow}>
+              <StatTile label="Axes" value={device.axes.length} icon={Gauge}
+                        tint={[AUX_TINT, AUX_TINT_SOFT]} style={styles.statTile} />
+              <StatTile label="Configured" value={`${configuredAxes}/${device.axes.length}`}
+                        style={styles.statTile} />
+              <StatTile label="Motors" value={device.motorEnabled ? "Enabled" : "Disabled"}
+                        tint={device.motorEnabled ? [colors.success, colors.successSoft] : undefined}
+                        style={styles.statTile} />
+            </View>
+            <AuxDeviceDetail device={device} isWide={isWide} />
+          </>
         ) : (
           <EmptyState
             icon={<Gauge size={28} color={colors.textFaint} />}
@@ -384,6 +437,14 @@ const styles = StyleSheet.create({
   jogRow:        { flexDirection: "row", gap: spacing.sm },
   axisConfigBtn: { padding: spacing.xs, marginRight: 2 },
 
+  // Wide: axes grid — 2 columns of small cards instead of one long list.
+  axisGrid:     { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  axisGridItem: { flexBasis: "48%", flexGrow: 1, minWidth: 320 },
+
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  statRow:       { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  statTile:      { flex: 1, minWidth: 130 },
+
   modalBackdrop: {
     flex: 1, backgroundColor: colors.overlay,
     justifyContent: "flex-end",
@@ -398,6 +459,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center",
     justifyContent: "space-between", marginBottom: spacing.lg,
   },
+  modalTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 },
   modalTitle:     type.title,
   modalCloseBtn:  { padding: spacing.xs },
   modalCloseText: { fontSize: 18, color: colors.textMuted },

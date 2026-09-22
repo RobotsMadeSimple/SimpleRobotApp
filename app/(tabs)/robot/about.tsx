@@ -27,16 +27,19 @@ import {
   colors,
   Divider,
   Input,
+  InfoTip,
   ListRow,
+  PageHeader,
   radii,
   Screen,
   SectionHeader,
   shadows,
   spacing,
+  StatTile,
   StatusPill,
   type,
 } from "@/src/components/ui/kit";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
 import { ActivityIndicator, Animated, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -344,14 +347,20 @@ export default function AboutRobot() {
     } finally { setSaving(false); }
   }
 
+  // Hooks must run unconditionally every render, so this is read before the
+  // `!robot` guard below even though only the guard's branch needs it.
+  const isWide = useIsWide();
+
   if (!robot) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.centerText}>No robot selected</Text>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <PageHeader title="About" subtitle="No robot selected" />
+        <View style={styles.center}>
+          <Text style={styles.centerText}>No robot selected</Text>
+        </View>
       </View>
     );
   }
-
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
   const isHoming = status.homingState !== "WaitingForStart";
   const controllerVersion = status.version && status.version !== "0.0.0" ? `v${status.version}` : "—";
@@ -365,54 +374,45 @@ export default function AboutRobot() {
   const electronIsUpToDate = electronLatestVersion !== null && electronLatestVersion === evCurrent;
   const electronHasUpdate  = electronLatestVersion !== null && electronLatestVersion !== evCurrent;
 
-  return (
-    <View style={styles.root}>
-      <SubPageHeader title="About Robot" />
-      <Screen>
-        {/* Hero card */}
-        <Card style={styles.heroCard}>
-          <View style={styles.heroImageWrapper}>
-            <Image source={imageSource} style={styles.heroImage} resizeMode="contain" />
-          </View>
-          <Text style={styles.heroName}>{robot.robotName || "Unknown Robot"}</Text>
-          {!!robot.robotType && (
-            <View style={styles.typeBadge}>
-              <Text style={styles.typeText}>{robot.robotType}</Text>
-            </View>
-          )}
-        </Card>
+  const identitySection = (
+    <>
+      <SectionHeader
+        title="Identity"
+        right={
+          <TouchableOpacity onPress={openEdit} style={styles.editButton}>
+            <Pencil size={14} color={colors.accent} />
+            <Text style={styles.editButtonText}>Edit</Text>
+          </TouchableOpacity>
+        }
+      />
+      <Card>
+        <Row icon={<Tag size={18} color={colors.accent} />} tileBg={colors.accentSoft} label="Name" value={robot.robotName || "—"} />
+        <Divider inset />
+        <Row icon={<Cpu size={18} color={accents.purple} />} tileBg={accents.purpleSoft} label="Type" value={robot.robotType || "—"} />
+        <Divider inset />
+        <Row icon={<Hash size={18} color={colors.textMuted} />} tileBg={colors.surfaceMuted} label="Serial Number" value={robot.serialNumber || "—"} />
+      </Card>
 
-        {/* Identity */}
-        <SectionHeader
-          title="Identity"
-          right={
-            <TouchableOpacity onPress={openEdit} style={styles.editButton}>
-              <Pencil size={14} color={colors.accent} />
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
-          }
-        />
-        <Card>
-          <Row icon={<Tag size={18} color={colors.accent} />} tileBg={colors.accentSoft} label="Name" value={robot.robotName || "—"} />
-          <Divider inset />
-          <Row icon={<Cpu size={18} color={accents.purple} />} tileBg={accents.purpleSoft} label="Type" value={robot.robotType || "—"} />
-          <Divider inset />
-          <Row icon={<Hash size={18} color={colors.textMuted} />} tileBg={colors.surfaceMuted} label="Serial Number" value={robot.serialNumber || "—"} />
-        </Card>
+      <SectionHeader title="Network" icon={Network} />
+      <Card>
+        <Row icon={<Network size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="IP Address" value={robot.ipAddress || "—"} />
+        <Divider inset />
+        <Row icon={<Server size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Port" value={robot.port} />
+        <Divider inset />
+        <Row icon={<Zap size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Endpoint" value={robot.controlEndpoint} />
+      </Card>
+    </>
+  );
 
-        {/* Network */}
-        <SectionHeader title="Network" />
-        <Card>
-          <Row icon={<Network size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="IP Address" value={robot.ipAddress || "—"} />
-          <Divider inset />
-          <Row icon={<Server size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Port" value={robot.port} />
-          <Divider inset />
-          <Row icon={<Zap size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Endpoint" value={robot.controlEndpoint} />
-        </Card>
-
-        {/* Live status */}
-        <SectionHeader title="Live Status" />
-        <Card>
+  const liveStatusSection = (
+    <>
+      <SectionHeader
+        title="Live Status"
+        right={
+          <InfoTip text="Homing State shows which step of the homing sequence the controller is on — 'Idle' means it isn't homing right now. Homed stays No until a homing cycle finishes, so the controller knows the robot's true position." />
+        }
+      />
+      <Card>
           <Row
             icon={status.connected ? <Wifi size={18} color={colors.success} /> : <WifiOff size={18} color={colors.danger} />}
             tileBg={status.connected ? colors.successSoft : colors.dangerSoft}
@@ -448,9 +448,16 @@ export default function AboutRobot() {
             value={isHoming ? status.homingState : "Idle"}
           />
         </Card>
+    </>
+  );
 
+  const softwareSection = (
+    <>
         {/* Software */}
-        <SectionHeader title="Software" />
+        <SectionHeader
+          title="Software"
+          right={<InfoTip text="Controller and app versions update independently. Remote controller updates only work when the controller runs Linux — Windows controllers must be updated manually." />}
+        />
         <Card>
           <Row
             icon={<Download size={18} color={colors.accent} />}
@@ -589,9 +596,75 @@ export default function AboutRobot() {
           icon={<RefreshCw size={15} color={colors.danger} />}
           onPress={() => setRestartVisible(true)}
         />
+    </>
+  );
 
-        {/* ── Modals ── */}
+  return (
+    <View style={styles.root}>
+      <PageHeader title="About" subtitle="Serial number, firmware and diagnostics" />
+      <Screen>
+        {/* Hero card */}
+        <Card style={styles.heroCard}>
+          <View style={styles.heroImageWrapper}>
+            <Image source={imageSource} style={styles.heroImage} resizeMode="contain" />
+          </View>
+          <Text style={styles.heroName}>{robot.robotName || "Unknown Robot"}</Text>
+          {!!robot.robotType && (
+            <View style={styles.typeBadge}>
+              <Text style={styles.typeText}>{robot.robotType}</Text>
+            </View>
+          )}
+        </Card>
 
+        <View style={styles.statRow}>
+          <StatTile
+            label="Status"
+            value={status.connected ? "Connected" : "Offline"}
+            icon={status.connected ? Wifi : WifiOff}
+            tint={status.connected ? [colors.success, colors.successSoft] : [colors.danger, colors.dangerSoft]}
+            style={styles.statTile}
+          />
+          <StatTile
+            label="Homed"
+            value={status.wasHomed ? "Yes" : "No"}
+            icon={Activity}
+            tint={status.wasHomed ? [colors.success, colors.successSoft] : [accents.orange, accents.orangeSoft]}
+            style={styles.statTile}
+          />
+          <StatTile
+            label="Firmware"
+            value={controllerVersion}
+            icon={Download}
+            mono
+            style={styles.statTile}
+          />
+          <StatTile
+            label="Platform"
+            value={isLinux ? "Linux" : "Windows"}
+            icon={Server}
+            style={styles.statTile}
+          />
+        </View>
+
+        {isWide ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideLeftCol}>{identitySection}</View>
+            <View style={styles.wideRightCol}>
+              {liveStatusSection}
+              {softwareSection}
+            </View>
+          </View>
+        ) : (
+          <>
+            {identitySection}
+            {liveStatusSection}
+            {softwareSection}
+          </>
+        )}
+      </Screen>
+
+      {/* ── Modals ── */}
+      <>
         <Modal visible={updating} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
@@ -668,7 +741,7 @@ export default function AboutRobot() {
             </View>
           </View>
         </Modal>
-      </Screen>
+      </>
 
       {/* Toast */}
       {toast && (
@@ -700,6 +773,20 @@ const styles = StyleSheet.create({
 
   editButton:     { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   editButtonText: { fontSize: 12, fontWeight: "600", color: colors.accent },
+
+  statRow:  { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  statTile: { flex: 1, minWidth: 130 },
+
+  // ── Wide two-column layout ──────────────────────────────────────────────────
+  // Identity/network (static info) in a fixed left column, live status +
+  // software/app updates in the wider right one.
+  wideRow: {
+    flexDirection: "row",
+    gap: spacing.lg,
+    alignItems: "flex-start",
+  },
+  wideLeftCol:  { width: 360, gap: spacing.md },
+  wideRightCol: { flex: 1, gap: spacing.md },
 
   rowValue: { ...type.body, color: colors.textMuted, maxWidth: "45%", textAlign: "right" },
 

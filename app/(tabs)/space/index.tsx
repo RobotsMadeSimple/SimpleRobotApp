@@ -1,9 +1,9 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { accents, Card, colors, Divider, ListRow, radii, Screen, SectionHeader, shadows, spacing, type } from "@/src/components/ui/kit";
+import { accents, Card, colors, Divider, ListRow, PageHeader, PositionReadout, Screen, SectionHeader, spacing, StatTile } from "@/src/components/ui/kit";
 import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
-import { StyleSheet, Text, View } from "react-native";
+import { Crosshair, Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
+import { StyleSheet, View } from "react-native";
 
 const MENU_ITEMS = [
   {
@@ -48,13 +48,6 @@ const MENU_ITEMS = [
   },
 ];
 
-const SUMMARY_ITEMS = [
-  { label: "Points",  color: colors.success, bgColor: colors.successSoft },
-  { label: "Tools",   color: colors.accent,  bgColor: colors.accentSoft },
-  { label: "Grids",   color: colors.warning, bgColor: colors.warningSoft },
-  { label: "Stacks",  color: accents.purple, bgColor: accents.purpleSoft },
-];
-
 export default function SpacePage() {
   const status = useRobotStatus();
   const points = usePoints();
@@ -64,41 +57,35 @@ export default function SpacePage() {
 
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
-  const coords = [
-    { label: "X",  value: status.x  },
-    { label: "Y",  value: status.y  },
-    { label: "Z",  value: status.z  },
-    { label: "RZ", value: status.rz },
+  const positionAxes = [
+    { label: "X",  value: fmt(status.x),  unit: "mm" },
+    { label: "Y",  value: fmt(status.y),  unit: "mm" },
+    { label: "Z",  value: fmt(status.z),  unit: "mm" },
+    { label: "RZ", value: fmt(status.rz), unit: "°"  },
   ];
 
-  const counts = [points.length, tools.length, grids.length, stacks.length];
+  const summaryTiles = [
+    { label: "Points", value: points.length, icon: MapPin,     tint: [colors.success, colors.successSoft] as [string, string] },
+    { label: "Tools",  value: tools.length,  icon: Wrench,     tint: [colors.accent,  colors.accentSoft]  as [string, string] },
+    { label: "Grids",  value: grids.length,  icon: LayoutGrid, tint: [colors.warning, colors.warningSoft] as [string, string] },
+    { label: "Stacks", value: stacks.length, icon: Layers,     tint: [accents.purple, accents.purpleSoft] as [string, string] },
+  ];
 
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
+      <PageHeader title="Space" subtitle="Points, tools, grids, and workspace setup" />
 
       <Screen>
         {/* ── Current position ── */}
-        <SectionHeader title="Current position" />
-        <Card>
-          <View style={styles.coordRow}>
-            {coords.map(({ label, value }) => (
-              <View key={label} style={styles.coordCell}>
-                <Text style={styles.coordLabel}>{label}</Text>
-                <Text style={styles.coordValue}>{fmt(value)}</Text>
-              </View>
-            ))}
-          </View>
-        </Card>
+        <SectionHeader title="Current position" icon={Crosshair} />
+        <PositionReadout axes={positionAxes} />
 
         {/* ── Workspace summary ── */}
-        <SectionHeader title="Workspace" style={styles.summaryHeader} />
-        <View style={styles.summaryRow}>
-          {SUMMARY_ITEMS.map(({ label, color, bgColor }, i) => (
-            <View key={label} style={[styles.summaryCard, { borderTopColor: color, borderTopWidth: 3 }]}>
-              <Text style={[styles.summaryCount, { color }]}>{counts[i]}</Text>
-              <Text style={styles.summaryLabel}>{label}</Text>
-            </View>
+        <SectionHeader title="Workspace" icon={LayoutGrid} style={styles.summaryHeader} />
+        <View style={styles.tileRow}>
+          {summaryTiles.map(({ label, value, icon, tint }) => (
+            <StatTile key={label} label={label} value={value} icon={icon} tint={tint} style={styles.tile} />
           ))}
         </View>
 
@@ -136,52 +123,15 @@ const styles = StyleSheet.create({
 
   summaryHeader: { marginTop: spacing.sm },
 
-  // ── Position ──────────────────────────────────────────────────────────────
-  coordRow: {
+  // ── Stat tile rows ────────────────────────────────────────────────────────
+  // flexWrap so 4 tiles wrap to 2×2 on narrow phones instead of overflowing.
+  tileRow: {
     flexDirection: "row",
-    paddingVertical: spacing.sm,
-  },
-  coordCell: {
-    flex: 1,
-    alignItems: "center",
-  },
-  coordLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.textFaint,
-    letterSpacing: 0.5,
-    marginBottom: spacing.xs,
-  },
-  coordValue: {
-    ...type.mono,
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.text,
-  },
-
-  // ── Summary tiles ─────────────────────────────────────────────────────────
-  summaryRow: {
-    flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm + 2,
   },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md + 2,
-    alignItems: "center",
-    gap: spacing.xs,
-    ...shadows.soft,
-  },
-  summaryCount: {
-    fontSize: 28,
-    fontWeight: "800",
-    lineHeight: 32,
-  },
-  summaryLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.textFaint,
-    letterSpacing: 0.4,
+  tile: {
+    flexGrow: 1,
+    flexBasis: 130,
   },
 });

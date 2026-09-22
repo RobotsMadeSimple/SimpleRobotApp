@@ -8,8 +8,12 @@ import {
   ChipGroup,
   colors,
   Divider,
+  EmptyState,
   FormRow,
+  InfoTip,
   Input,
+  PageHeader,
+  PositionReadout,
   RadioRow,
   radii,
   SegmentedControl,
@@ -18,32 +22,49 @@ import {
   type,
 } from "@/src/components/ui/kit";
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { Point } from "@/src/models/robotModels";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, Tabs, useFocusEffect } from "expo-router";
 import {
   ArrowRight,
   ChevronDown,
+  ChevronRight,
   Grid2X2,
+  MapPin,
   MousePointerClick,
+  Navigation,
   OctagonX,
   Plus,
+  RotateCw,
   Search,
   Wrench,
   X,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
+  LayoutChangeEvent,
   Modal,
-  PanResponder,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
+
+// ── Layout breakpoints (measured on the content area, not the window) ─────────
+// The jog pad sizes itself to ~405px, so the column that hosts it is fixed at
+// PAD_COL_WIDTH and the config / points columns take the remaining width. The
+// thresholds below are the narrowest widths at which each arrangement still has
+// real gutters rather than a squeeze.
+const PAD_COL_WIDTH = 440;
+const THREE_COL_MIN = 1140; // config | pad + STOP/Teach | points
+const TWO_COL_MIN    = 810; // config (+ points) | pad + STOP/Teach
+/** Rough NavRail width, used only to seed the layout before onLayout measures. */
+const RAIL_ESTIMATE = 216;
 
 // ── Picker modal ──────────────────────────────────────────────────────────────
 function PickerModal({
@@ -183,9 +204,14 @@ function TeachModal({ onClose }: { onClose: () => void }) {
     <TouchableOpacity style={styles.overlay} onPress={onClose} activeOpacity={1}>
       <TouchableOpacity style={styles.dialog} onPress={() => {}} activeOpacity={1}>
         <View style={styles.dialogHeader}>
-          <Text style={styles.dialogTitle}>
-            {mode === "list" ? "Teach Point" : "New Point"}
-          </Text>
+          <View style={styles.dialogTitleRow}>
+            <Text style={styles.dialogTitle}>
+              {mode === "list" ? "Teach Point" : "New Point"}
+            </Text>
+            {mode === "list" && (
+              <InfoTip text="Tap a saved point to overwrite it with the robot's current position — the point's stored coordinates are replaced and this cannot be undone. Use New Point to save the current position under a new name instead." />
+            )}
+          </View>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.7}>
             <X size={18} color={colors.textFaint} />
           </TouchableOpacity>
@@ -269,11 +295,25 @@ export default function JogScreen() {
 
   const tools      = useTools();
   const locals     = useLocals();
+  const points     = usePoints();
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
   const wideContent = useWideContent();
-  // Two columns on tablets, foldables and desktop (the split breakpoint and up).
-  const twoColumn = useIsWide();
+  const { width: windowWidth } = useWindowDimensions();
+  const isWide = useIsWide();
+
+  // Lay out against the real content width (the NavRail eats ~216px of the
+  // window on wide screens), seeded from the window so the first frame is right.
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+  const paneWidth = measuredWidth || (isWide ? windowWidth - RAIL_ESTIMATE : windowWidth);
+  const threeColumn = paneWidth >= THREE_COL_MIN;
+  const twoColumn   = !threeColumn && paneWidth >= TWO_COL_MIN;
+  const wideLayout  = threeColumn || twoColumn;
+
+  const onContentLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setMeasuredWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  }, []);
 
   const [tool, setToolLocal] = useState(activeTool || "None");
 
@@ -314,34 +354,89 @@ export default function JogScreen() {
 
   const coords = mode === "Joint"
     ? [
-        { label: "J1", value: s?.joint1Angle, unit: "°" },
-        { label: "J2", value: s?.joint2X,     unit: "mm" },
-        { label: "J3", value: s?.joint2Z,     unit: "mm" },
-        { label: "J4", value: s?.joint4Angle, unit: "°" },
+        { label: "J1", value: fmt(s?.joint1Angle), unit: "°"  },
+        { label: "J2", value: fmt(s?.joint2X),     unit: "mm" },
+        { label: "J3", value: fmt(s?.joint2Z),     unit: "mm" },
+        { label: "J4", value: fmt(s?.joint4Angle), unit: "°"  },
       ]
     : [
         // Local-frame position — tracks the selected local (equals world when none)
-        { label: "X",  value: s?.localX,  unit: "mm" },
-        { label: "Y",  value: s?.localY,  unit: "mm" },
-        { label: "Z",  value: s?.localZ,  unit: "mm" },
-        { label: "RZ", value: s?.localRZ, unit: "°"  },
+        { label: "X",  value: fmt(s?.localX),  unit: "mm" },
+        { label: "Y",  value: fmt(s?.localY),  unit: "mm" },
+        { label: "Z",  value: fmt(s?.localZ),  unit: "mm" },
+        { label: "RZ", value: fmt(s?.localRZ), unit: "°"  },
       ];
 
-  // The three pieces the layout arranges. Defined once so the single-column and
-  // two-column layouts place the same controls without duplicating them.
+  // ── Move-to-point (mechanics mirrored from Space › Points) ──────────────────
+  const [pointSearch, setPointSearch]     = useState("");
+  const [pointsOpen, setPointsOpen]       = useState(false);
+  const [moveTarget, setMoveTarget]       = useState<Point | null>(null);
+  const [moveSpeed, setMoveSpeed]         = useState<"Slow" | "Normal" | "Fast">("Normal");
+  const [movingFromPage, setMovingFromPage] = useState(false);
+  const [movingToName, setMovingToName]   = useState<string | null>(null);
+  const [alreadyHere, setAlreadyHere]     = useState<string | null>(null);
+
+  const AT_THRESHOLD = 0.5;
+
+  function isAtPoint(p: Point) {
+    return (
+      Math.abs((s?.x ?? 0) - p.x) < AT_THRESHOLD &&
+      Math.abs((s?.y ?? 0) - p.y) < AT_THRESHOLD &&
+      Math.abs((s?.z ?? 0) - p.z) < AT_THRESHOLD
+    );
+  }
+
+  // Clear the "moving" overlay as soon as the robot reports it stopped.
+  useEffect(() => {
+    if (movingFromPage && !status.moving) {
+      setMovingFromPage(false);
+      setMovingToName(null);
+    }
+  }, [status.moving]);
+
+  /** Same commands Space › Points sends: MoveL / MoveJ by point name + speed. */
+  function moveToPoint(command: "MoveL" | "MoveJ") {
+    const p = moveTarget;
+    if (!p) return;
+    if (isAtPoint(p)) { setMoveTarget(null); setAlreadyHere(p.name); return; }
+    setMovingToName(p.name);
+    robotClient.sendCommand(command, { name: p.name, speed: jogSpeeds?.[moveSpeed] });
+    setMoveTarget(null);
+    setMovingFromPage(true);
+  }
+
+  const filteredPoints = points.filter((p) =>
+    p.name.toLowerCase().includes(pointSearch.trim().toLowerCase())
+  );
+
+  // The pieces the layout arranges. Defined once so every layout places the same
+  // controls without duplicating them.
   const configCard = (
     <Card>
-
-      {/* Position strip */}
-      <View style={styles.coordRow}>
-        {coords.map(({ label, value, unit }) => (
-          <View key={label} style={styles.coordCell}>
-            <Text style={styles.coordLabel}>{label}</Text>
-            <Text style={styles.coordValue}>{fmt(value)}</Text>
-            <Text style={styles.coordUnit}>{unit}</Text>
-          </View>
-        ))}
+      {/* Jog mode */}
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.selectorLabel}>JOG MODE</Text>
+        <InfoTip text="XYZ jogs along the room/local axes. Tool jogs along the tool tip's own axes (e.g. it always plunges straight into the tip). Joint moves a single robot joint at a time." />
       </View>
+      <SegmentedControl options={jogModes} value={mode} onChange={setMode} />
+
+      <Divider style={styles.cardSeparator} />
+
+      {/* Speed */}
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.selectorLabel}>SPEED</Text>
+        <InfoTip text="Slow/Normal/Fast jog continuously while held, at the speeds set on Robot › Configure. The 0.1/1/10 mm chips take one precise step per tap in XYZ and Joint mode — in Tool mode they instead jog continuously at a very slow speed." />
+      </View>
+      <ChipGroup>
+        {speedOptions.map((spd) => (
+          <Chip
+            key={spd}
+            label={spd}
+            selected={selectedSpeed === spd}
+            onPress={() => setSelectedSpeed(spd)}
+          />
+        ))}
+      </ChipGroup>
 
       <Divider style={styles.cardSeparator} />
 
@@ -367,27 +462,12 @@ export default function JogScreen() {
           viewRoute="/space/tools"
         />
       </View>
-
-      <Divider style={styles.cardSeparator} />
-
-      {/* Jog mode */}
-      <SegmentedControl options={jogModes} value={mode} onChange={setMode} />
-
-      <Divider style={styles.cardSeparator} />
-
-      {/* Speed */}
-      <ChipGroup>
-        {speedOptions.map((spd) => (
-          <Chip
-            key={spd}
-            label={spd}
-            selected={selectedSpeed === spd}
-            onPress={() => setSelectedSpeed(spd)}
-          />
-        ))}
-      </ChipGroup>
-
     </Card>
+  );
+
+  // CNC-style DRO — the axis list replaces the old 4-across coordinate strip.
+  const dro = (
+    <PositionReadout axes={coords} size={wideLayout ? "lg" : "md"} />
   );
 
   const jogPad = (
@@ -396,13 +476,13 @@ export default function JogScreen() {
     </View>
   );
 
-  const stopTeach = (
-    <View style={styles.bottomRow}>
+  const stopTeach = (inline: boolean) => (
+    <View style={[styles.bottomRow, inline && styles.bottomRowInline]}>
       <Button
         label="STOP"
         variant="destructive"
         icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
-        style={styles.stopButton}
+        style={[styles.stopButton, inline && styles.stopButtonWide]}
         textStyle={styles.stopText}
         onPress={() => robotClient.sendCommand("HardStop")}
       />
@@ -411,39 +491,140 @@ export default function JogScreen() {
         label="Teach"
         variant="ghost"
         icon={<MousePointerClick size={18} color={colors.accent} />}
-        style={styles.teachButton}
+        style={[styles.teachButton, inline && styles.teachButtonWide]}
         textStyle={styles.teachButtonText}
         onPress={() => setTeachOpen(true)}
       />
     </View>
   );
 
-  return (
-    <View style={styles.container}>
-      <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-      <SubPageHeader title="Jog & Teach" />
+  // ── Points panel ────────────────────────────────────────────────────────────
+  const pointRows = (
+    <>
+      <View style={styles.pointsSearchWrap}>
+        <Input
+          value={pointSearch}
+          onChangeText={setPointSearch}
+          placeholder="Search points…"
+          icon={<Search size={16} color={colors.textFaint} />}
+          clearable
+          returnKeyType="search"
+        />
+      </View>
 
-      {twoColumn ? (
-        // Wide: jog config + STOP/Teach on the left, the jog buttons filling the right.
+      {filteredPoints.length === 0 ? (
+        <EmptyState
+          icon={<MapPin size={28} color={colors.textFaint} />}
+          title={points.length === 0 ? "No points saved yet" : "No matches"}
+          subtitle={
+            points.length === 0
+              ? "Jog the robot to a position, then press Teach to save it here."
+              : undefined
+          }
+          style={styles.pointsEmpty}
+        />
+      ) : (
+        filteredPoints.map((p, i) => (
+          <View key={p.name}>
+            <Pressable style={styles.pointListRow} onPress={() => setMoveTarget(p)}>
+              <View style={styles.pointListText}>
+                <Text style={styles.pointName} numberOfLines={1}>{p.name}</Text>
+                <Text style={styles.pointCoords} numberOfLines={1}>
+                  X {p.x.toFixed(1)}  Y {p.y.toFixed(1)}  Z {p.z.toFixed(1)}  RZ {p.rz.toFixed(1)}
+                </Text>
+              </View>
+              <Button
+                label="Move To"
+                variant="secondary"
+                size="sm"
+                icon={<Navigation size={14} color={buttonTextColor("secondary")} />}
+                onPress={() => setMoveTarget(p)}
+              />
+            </Pressable>
+            {i < filteredPoints.length - 1 && <Divider />}
+          </View>
+        ))
+      )}
+    </>
+  );
+
+  /** Wide: a full-height panel whose list scrolls on its own. */
+  const pointsPanel = (
+    <Card padded={false} style={styles.pointsCard}>
+      <View style={styles.pointsHeader}>
+        <Text style={styles.pointsTitle}>Points</Text>
+        <InfoTip text="Saved robot positions. Pick one to line- or joint-move the robot there — you choose the move type and speed, and a STOP button stays on screen for the whole move. Make sure the path is clear first." />
+      </View>
+      <ScrollView
+        style={styles.pointsScroll}
+        contentContainerStyle={styles.pointsScrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {pointRows}
+      </ScrollView>
+    </Card>
+  );
+
+  /** Narrow: the same list as a collapsible section so it never crowds the pad. */
+  const pointsCollapsible = (
+    <Card padded={false}>
+      <Pressable style={styles.pointsHeader} onPress={() => setPointsOpen(o => !o)}>
+        {pointsOpen
+          ? <ChevronDown size={16} color={colors.textMuted} />
+          : <ChevronRight size={16} color={colors.textMuted} />}
+        <Text style={styles.pointsTitle}>Points</Text>
+        <Text style={styles.pointsCount}>{points.length}</Text>
+        <View style={styles.pointsHeaderSpacer} />
+        <InfoTip text="Saved robot positions. Pick one to line- or joint-move the robot there — you choose the move type and speed, and a STOP button stays on screen for the whole move. Make sure the path is clear first." />
+      </Pressable>
+      {pointsOpen && <View style={styles.pointsCollapsedBody}>{pointRows}</View>}
+    </Card>
+  );
+
+  return (
+    <View style={styles.container} onLayout={onContentLayout}>
+      <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
+      <PageHeader
+        title="Jog & Teach"
+        subtitle="Manually move the robot, then save a point at its current position"
+        backTo="/control"
+      />
+
+      {wideLayout ? (
+        // Wide: jog config + DRO on the left, the pad with STOP/Teach directly
+        // underneath in the middle, saved points on the right (desktop widths).
         <View style={styles.wideRow}>
-          <View style={styles.wideLeftCol}>
+          <View style={[styles.sideCol, threeColumn && styles.sideColThree]}>
             <ScrollView
               style={styles.scroll}
-              contentContainerStyle={styles.wideColContent}
+              contentContainerStyle={styles.sideColContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
               {configCard}
+              {dro}
+              {/* Two-column widths have no room for a third pane — the points
+                  list rides along under the config column instead. */}
+              {twoColumn && pointsCollapsible}
             </ScrollView>
-            {stopTeach}
           </View>
 
-          <View style={styles.wideJogCol}>
+          <View style={styles.padCol}>
             {jogPad}
+            {stopTeach(true)}
           </View>
+
+          {threeColumn && (
+            <View style={[styles.sideCol, styles.sideColThree, styles.pointsCol]}>
+              {pointsPanel}
+            </View>
+          )}
         </View>
       ) : (
-        // Narrow: everything stacked, STOP/Teach pinned to the bottom.
+        // Narrow: config/DRO/points scroll; the jog pad is PINNED above the
+        // STOP/Teach footer so the jog buttons are always on screen (the DRO
+        // was pushing the pad below the fold when everything scrolled).
         <>
           <ScrollView
             style={styles.scroll}
@@ -452,9 +633,11 @@ export default function JogScreen() {
             keyboardShouldPersistTaps="handled"
           >
             {configCard}
-            {jogPad}
+            {dro}
+            {pointsCollapsible}
           </ScrollView>
-          {stopTeach}
+          <View style={styles.pinnedPad}>{jogPad}</View>
+          {stopTeach(false)}
         </>
       )}
 
@@ -466,6 +649,94 @@ export default function JogScreen() {
         onRequestClose={() => setTeachOpen(false)}
       >
         <TeachModal key={teachOpen ? "open" : "closed"} onClose={() => setTeachOpen(false)} />
+      </Modal>
+
+      {/* ── Move-to-point confirm (same actions as Space › Points) ── */}
+      <Modal
+        visible={!!moveTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMoveTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setMoveTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MapPin size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>{moveTarget?.name}</Text>
+              </View>
+              <Pressable onPress={() => setMoveTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.moveCoordText}>
+              X {moveTarget?.x.toFixed(1)}{"  "}
+              Y {moveTarget?.y.toFixed(1)}{"  "}
+              Z {moveTarget?.z.toFixed(1)}{"  "}
+              RZ {moveTarget?.rz.toFixed(1)}
+            </Text>
+
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.selectorLabel}>MOVE SPEED</Text>
+            </View>
+            <SegmentedControl
+              options={["Slow", "Normal", "Fast"] as const}
+              value={moveSpeed}
+              onChange={setMoveSpeed}
+              size="sm"
+            />
+
+            <Divider style={styles.cardSeparator} />
+
+            <Pressable style={styles.actionRow} onPress={() => moveToPoint("MoveL")}>
+              <Navigation size={18} color={colors.accent} />
+              <Text style={styles.actionText}>Line Move</Text>
+            </Pressable>
+            <Pressable style={styles.actionRow} onPress={() => moveToPoint("MoveJ")}>
+              <RotateCw size={18} color={colors.accent} />
+              <Text style={styles.actionText}>Joint Move</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Move stop overlay ── */}
+      <Modal visible={movingFromPage} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.moveStopCard}>
+            <Navigation size={28} color={colors.accent} />
+            <Text style={styles.moveStopTitle}>Moving to point</Text>
+            {movingToName && <Text style={styles.moveStopName}>{movingToName}</Text>}
+            <Button
+              label="STOP"
+              variant="destructive"
+              icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
+              onPress={() => {
+                robotClient.sendCommand("HardStop");
+                setMovingFromPage(false);
+                setMovingToName(null);
+              }}
+              style={styles.moveStopButton}
+              textStyle={styles.stopText}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Already at position popup ── */}
+      <Modal visible={!!alreadyHere} transparent animationType="fade" onRequestClose={() => setAlreadyHere(null)}>
+        <Pressable style={styles.overlay} onPress={() => setAlreadyHere(null)}>
+          <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
+            <MapPin size={28} color={colors.accent} />
+            <Text style={styles.alreadyHereTitle}>Already Here</Text>
+            <Text style={styles.alreadyHereBody}>
+              The robot is already at{"\n"}
+              <Text style={styles.alreadyHereName}>{alreadyHere}</Text>
+            </Text>
+            <Button label="OK" variant="primary" style={styles.alreadyHereButton} onPress={() => setAlreadyHere(null)} />
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -484,37 +755,45 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     padding: spacing.sm + 2,
-    gap: spacing.sm,
+    gap: spacing.md,
     paddingBottom: spacing.md,
   },
 
-  // ── Wide (tablet+) two-column layout ────────────────────────────────────────
-  // The whole pair is centred, so on a wide desktop the empty space reads as even
-  // margins around the two columns rather than as a moat around the jog pad.
+  // ── Wide layout ─────────────────────────────────────────────────────────────
+  // Three panes on desktop (config+DRO · pad+STOP/Teach · points), two when the
+  // window can't hold a third pane with real gutters. The pad column is fixed
+  // because the pad sizes itself; the side columns take the rest of the width.
   wideRow: {
     flex: 1,
     flexDirection: "row",
     justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    gap: spacing.xl,
   },
-  // Left column: the config card (scrolls if tall) with STOP/Teach pinned to its foot.
-  // Flexes so it gives way on a narrow tablet, capped so it doesn't sprawl on desktop.
-  wideLeftCol: {
+  sideCol: {
     flex: 1,
-    maxWidth: 440,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: colors.border,
+    minWidth: 290,
   },
-  wideColContent: {
-    padding: spacing.md,
-    gap: spacing.sm,
+  sideColThree: {
+    maxWidth: 460,
   },
-  // Right column: hugs the jog pad (a fixed ~405px, sized off the window) rather than
-  // flexing to fill, so the pad isn't left swimming in space on a wide screen.
-  wideJogCol: {
-    width: 430,
+  sideColContent: {
+    gap: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  pointsCol: {
+    // The points panel manages its own scrolling, so the column just fills height.
+    justifyContent: "flex-start",
+  },
+  // Centre column: the jog pad with STOP/Teach directly beneath it, both kept
+  // on screen (this column never scrolls) so STOP is always one tap away.
+  padCol: {
+    width: PAD_COL_WIDTH,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: spacing.md,
+    gap: spacing.xl,
   },
 
   // ── Card ──────────────────────────────────────────────────────────────────
@@ -529,40 +808,6 @@ const styles = StyleSheet.create({
 
   cardDivider: {
     marginHorizontal: spacing.xs,
-  },
-
-  // ── Position ──────────────────────────────────────────────────────────────
-  coordRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
-  coordCell: {
-    alignItems: "center",
-    flex: 1,
-  },
-
-  coordLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.textFaint,
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-
-  coordValue: {
-    ...type.mono,
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.text,
-  },
-
-  coordUnit: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: colors.textFaint,
-    letterSpacing: 0.3,
-    marginTop: 1,
   },
 
   // ── Selector ──────────────────────────────────────────────────────────────
@@ -594,6 +839,14 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.textFaint,
     letterSpacing: 0.8,
+  },
+
+  // Label + InfoTip row above the jog-mode segmented control and speed chips.
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs + 2,
   },
 
   selectorValueRow: {
@@ -650,8 +903,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: spacing.xs + 2,
   },
+  // Narrow: keeps the pad on screen above the STOP/Teach footer while the
+  // config/DRO/points scroll behind it.
+  pinnedPad: {
+    backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
 
-  // ── Bottom row (fixed) ────────────────────────────────────────────────────
+  // ── STOP / Teach row ──────────────────────────────────────────────────────
+  // Narrow: pinned footer directly beneath the pad. Wide: inline under the pad
+  // in the centre column (no top border, no pinned chrome).
   bottomRow: {
     flexDirection: "row",
     gap: spacing.sm + 2,
@@ -663,10 +927,24 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
 
+  bottomRowInline: {
+    alignSelf: "stretch",
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    borderTopWidth: 0,
+    gap: spacing.md,
+  },
+
   // STOP keeps its exact hit area (paddingVertical) — only color/radius come from the kit.
   stopButton: {
     flex: 3,
     paddingVertical: spacing.md,
+  },
+
+  // Wide has the room, so STOP grows (it never shrinks).
+  stopButtonWide: {
+    paddingVertical: spacing.lg + 2,
   },
 
   stopText: {
@@ -682,8 +960,76 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
 
+  teachButtonWide: {
+    paddingVertical: spacing.lg + 2,
+  },
+
   teachButtonText: {
     fontSize: 15,
+  },
+
+  // ── Points panel ──────────────────────────────────────────────────────────
+  pointsCard: {
+    flex: 1,
+    overflow: "hidden",
+  },
+
+  pointsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg - 2,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+
+  pointsTitle: {
+    ...type.sectionLabel,
+  },
+
+  pointsCount: {
+    ...type.mono,
+    fontSize: 12,
+    color: colors.textFaint,
+  },
+
+  pointsHeaderSpacer: {
+    flex: 1,
+  },
+
+  pointsScroll: {
+    flex: 1,
+  },
+
+  pointsScrollContent: {
+    paddingBottom: spacing.sm,
+  },
+
+  pointsCollapsedBody: {
+    paddingBottom: spacing.sm,
+  },
+
+  pointsSearchWrap: {
+    padding: spacing.md,
+  },
+
+  pointsEmpty: {
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+
+  pointListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg - 2,
+    paddingVertical: spacing.sm + 2,
+  },
+
+  pointListText: {
+    flex: 1,
+    gap: 2,
   },
 
   // ── Teach modal ───────────────────────────────────────────────────────────
@@ -708,6 +1054,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: spacing.md + 2,
+  },
+
+  dialogTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
 
   dialogTitle: {
@@ -795,5 +1147,103 @@ const styles = StyleSheet.create({
 
   modalConfirmFlex: {
     flex: 2,
+  },
+
+  // ── Move-to-point dialogs (mirrors Space › Points) ────────────────────────
+  moveDialog: {
+    width: 300,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
+  },
+
+  moveCoordText: {
+    ...type.mono,
+    fontSize: 11,
+    color: colors.textFaint,
+    marginBottom: spacing.md + 2,
+  },
+
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.md + 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.background,
+  },
+
+  actionText: {
+    fontSize: 15,
+    color: colors.accent,
+    fontWeight: "500",
+  },
+
+  moveStopCard: {
+    width: 240,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xl + 4,
+    paddingHorizontal: spacing.xl,
+    alignItems: "center",
+    gap: spacing.sm,
+    ...shadows.raised,
+  },
+
+  moveStopTitle: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    fontWeight: "600",
+    marginTop: spacing.xs,
+  },
+
+  moveStopName: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+
+  moveStopButton: {
+    borderRadius: radii.md,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.xl - 4,
+    marginTop: spacing.sm,
+  },
+
+  alreadyHereCard: {
+    width: 220,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xl + 4,
+    paddingHorizontal: spacing.xl,
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    ...shadows.raised,
+  },
+
+  alreadyHereTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.text,
+    marginTop: spacing.xs,
+  },
+
+  alreadyHereBody: {
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+
+  alreadyHereName: {
+    fontWeight: "700",
+  },
+
+  alreadyHereButton: {
+    paddingHorizontal: spacing.xl - 4,
+    marginTop: spacing.xs,
   },
 });

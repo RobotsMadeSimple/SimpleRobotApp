@@ -7,7 +7,7 @@ import {
   Router,
 } from "lucide-react-native";
 import { useEffect } from "react";
-import { BackHandler, StyleSheet } from "react-native";
+import { BackHandler } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -15,7 +15,6 @@ import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import "@/global.css";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { colors } from "@/src/components/ui/kit";
-import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
 import { NavRail } from "@/src/components/ui/NavRail";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
@@ -68,17 +67,10 @@ export function TabLayout() {
       // the left edge (see NavRail). Narrow screens keep the stock bottom bar.
       {...(isWide ? { tabBar: (props: any) => <NavRail {...props} /> } : {})}
       screenOptions={({ route }) => ({
-        headerShown: true,
-        headerTitleAlign: "left",
-        headerTitleStyle: { fontWeight: "700", fontSize: 20, color: colors.text },
-        headerStyle: {
-          backgroundColor: colors.surface,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.border,
-        },
-        headerShadowVisible: false,
-        // On wide screens the connection status lives in the rail instead.
-        headerRight: () => (isWide ? null : <ConnectionStatus />),
+        // Navigation chrome is owned by each page's <PageHeader> (breadcrumbs on
+        // wide, named back affordance + connection status on narrow) — the stock
+        // navigator header is disabled app-wide.
+        headerShown: false,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarPosition: isWide ? "left" : "bottom",

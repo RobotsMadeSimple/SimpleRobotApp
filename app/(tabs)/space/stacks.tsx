@@ -1,8 +1,7 @@
-import { useWideContent } from "@/src/components/ui/responsive";
+import { usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { accents, Button, colors, EmptyState, ListRow, spacing } from "@/src/components/ui/kit";
+import { accents, Button, colors, EmptyState, InfoTip, ListRow, PageHeader, SectionHeader, spacing } from "@/src/components/ui/kit";
 import { RobotStack } from "@/src/models/robotModels";
 import { useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -14,6 +13,8 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 export default function StacksPage() {
   const stacks = useStacks();
   const wideContent = useWideContent();
+  // Desktop-tier only: two columns of stack cards, one on tablets/phones.
+  const twoCol = usePaneLayout() === "desktop";
 
   function handleDelete(item: RobotStack) {
     appAlert(
@@ -44,19 +45,30 @@ export default function StacksPage() {
       onPress={() => router.push(`/space/stack-edit?id=${encodeURIComponent(item.id)}`)}
       chevron
       right={<DeleteIconButton size={15} style={gs.deleteBtn} onPress={() => handleDelete(item)} />}
+      style={twoCol && gs.stackCard}
     />
   );
 
   return (
     <View style={gs.page}>
       <NotConnectedOverlay />
-      <SubPageHeader title="Stacks" />
+      <PageHeader title="Stacks" subtitle="1D position arrays with optional round-robin indexing" />
 
       <FlatList
+        key={twoCol ? "2col" : "1col"}
         data={stacks}
         keyExtractor={item => item.id}
         renderItem={renderItem}
+        numColumns={twoCol ? 2 : 1}
+        columnWrapperStyle={twoCol ? gs.columnWrapper : undefined}
         contentContainerStyle={[gs.listContent, wideContent]}
+        ListHeaderComponent={
+          <SectionHeader
+            title="Stacks"
+            style={gs.hint}
+            right={<InfoTip text="A stack steps from a base point along one offset: each index multiplies the step offset. Set a max count to make the index wrap around (round-robin) instead of growing without bound." />}
+          />
+        }
         ListEmptyComponent={
           <EmptyState
             icon={<Layers size={40} color={colors.textFaint} />}
@@ -85,6 +97,10 @@ const gs = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
 
   listContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm + 2 },
+  hint: { marginBottom: spacing.sm },
+
+  columnWrapper: { gap: spacing.sm + 2 },
+  stackCard: { flex: 1 },
 
   deleteBtn: { padding: spacing.xs },
 

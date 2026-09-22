@@ -1,5 +1,3 @@
-import {
-  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import {
   accents,
@@ -11,14 +9,17 @@ import {
   Divider,
   EmptyState,
   FormRow,
+  InfoTip,
   Input,
   ListRow,
   radii,
   Screen,
   SectionHeader,
+  PageHeader,
   SegmentedControl,
   shadows,
   spacing,
+  StatTile,
 } from "@/src/components/ui/kit";
 import { useBuiltPrograms,
   useConnected } from "@/src/providers/RobotProvider";
@@ -33,7 +34,9 @@ import * as FileSystem from "expo-file-system/legacy";
 import {
   Check,
   ChevronDown,
+  CircleDot,
   FileText,
+  Spline,
   Plus,
   RefreshCw,
   Trash2,
@@ -1012,9 +1015,18 @@ export default function CncBuilderScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SubPageHeader
+      <PageHeader
         title="CNC Builder"
-        subtitle={programName}
+        subtitle={
+          selectedDxf
+            ? `${programName ?? "Program"} · ${selectedDxf} · ${selectedCount} selected`
+            : `${programName ?? "Program"} · pick a vector file to generate a toolpath`
+        }
+        crumbs={[
+          { label: "Program", href: "/program" },
+          { label: "Program Builder", href: `/(tabs)/program/builder?name=${encodeURIComponent(programName ?? "")}` },
+          { label: "CNC Builder" },
+        ]}
         right={
           <Button
             variant="primary"
@@ -1028,7 +1040,6 @@ export default function CncBuilderScreen() {
       />
 
       <Screen>
-
         {/* Vector file selector */}
         <SectionHeader title="Vector file (DXF / SVG)" />
         <Card padded={false}>
@@ -1080,8 +1091,27 @@ export default function CncBuilderScreen() {
         {/* Unified preview: part outline + holes, selection, direction, placement */}
         {selectedDxf && (
           <>
+            <View style={s.statRow}>
+              <StatTile
+                label="Contours"
+                value={`${contourSel.size}/${baseContours.length}`}
+                icon={Spline}
+                hint="selected"
+                style={s.statTile}
+              />
+              <StatTile
+                label="Holes"
+                value={`${selectedHoles.size}/${placedHoles.length}`}
+                icon={CircleDot}
+                hint={holeOp === "thread" ? "thread cycle" : "drill cycle"}
+                tint={[accents.purple, accents.purpleSoft]}
+                style={s.statTile}
+              />
+            </View>
             <SectionHeader
-              title={`Preview  ·  ${contourSel.size}/${baseContours.length} contours · ${selectedHoles.size}/${placedHoles.length} holes`}
+              title="Preview"
+              icon={FileText}
+              right={<InfoTip text="Tap shapes in the preview to choose what the robot machines. Holes become drill or thread cycles; contours become continuous blended moves. Saving writes the toolpath back into this program's CNC step." />}
             />
             <Card padded={false}>
               {loadingDxf ? (
@@ -1475,6 +1505,9 @@ function updateStepInList(steps: ProgramStep[], id: string, updater: (s: Program
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  statRow:  { flexDirection: "row", gap: spacing.md },
+  statTile: { flex: 1, minWidth: 0 },
+
   fitBtn: {
     position: "absolute", right: spacing.sm, top: spacing.sm,
     backgroundColor: "rgba(255,255,255,0.92)", borderWidth: 1, borderColor: colors.border,

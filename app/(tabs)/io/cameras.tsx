@@ -1,5 +1,4 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraState } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
@@ -28,11 +27,14 @@ import {
   colors,
   Divider,
   FormRow,
+  InfoTip,
   Input,
+  PageHeader,
   radii,
   Screen,
   SectionHeader,
   spacing,
+  StatusPill,
   type,
 } from "@/src/components/ui/kit";
 
@@ -264,8 +266,15 @@ function CameraConfigFields({
   const isCustom      = customSelected || !matchedOption;
 
   return (
-    <View>
-      <SectionHeader title="Configuration" />
+    // gap, not a bare View: SectionHeader relies on the parent's flex gap for
+    // its bottom spacing (Screen's gap can't reach inside this wrapper).
+    <View style={{ gap: spacing.md }}>
+      <SectionHeader
+        title="Configuration"
+        right={
+          <InfoTip text="Device Index selects which USB camera the controller opens, in the same order the OS enumerates them (0, 1, 2…). Resolution and Target FPS should match a mode the camera actually supports — an unsupported combination can leave the feed blank." />
+        }
+      />
       <Card>
         <FormRow label="Name">
           <Input
@@ -412,9 +421,16 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       {fullscreen && Platform.OS !== 'web' && (
         <CameraFullscreenModal camera={camera} onClose={() => setFullscreen(false)} />
       )}
-      <SubPageHeader
+      <PageHeader
         title={camera.name}
-        subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height} · ${camera.connected ? "Connected" : "Offline"}`}
+        subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height}`}
+        right={
+          <StatusPill
+            label={camera.connected ? "Connected" : "Offline"}
+            tone={camera.connected ? "success" : "danger"}
+            dot
+          />
+        }
       />
       {(() => {
         const feed = camera.connected
@@ -425,6 +441,11 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
               <Text style={styles.feedPlaceholderText}>Offline</Text>
             </View>
           );
+        const feedBlock = (
+          <View style={styles.feedBlock}>
+            {feed}
+          </View>
+        );
         const editables = (
           <>
             <CameraConfigFields
@@ -456,7 +477,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
               >
                 {editables}
               </ScrollView>
-              <View style={styles.camFeedPane}>{feed}</View>
+              <View style={styles.camFeedPane}>{feedBlock}</View>
             </View>
           );
         }
@@ -465,7 +486,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
             contentContainerStyle={[styles.scrollContent, wideContent]}
             showsVerticalScrollIndicator={false}
           >
-            {feed}
+            {feedBlock}
             {editables}
           </ScrollView>
         );
@@ -504,7 +525,7 @@ function NewCameraPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SubPageHeader title="New Camera" subtitle="USB Camera" />
+      <PageHeader title="New Camera" subtitle="USB Camera" />
       <Screen>
         <CameraConfigFields
           name={name}               setName={setName}
@@ -543,7 +564,7 @@ export default function CamerasPage() {
     if (!camera) {
       return (
         <View style={{ flex: 1, backgroundColor: colors.background }}>
-          <SubPageHeader title="Camera" subtitle="Loading…" />
+          <PageHeader title="Camera" subtitle="Loading…" />
         </View>
       );
     }
@@ -622,6 +643,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   feedPlaceholderText: { fontSize: 13, color: colors.textMuted },
+  feedBlock: { gap: spacing.md },
 
   // Wide (desktop) camera edit layout: frame left, settings right.
   camWideRow: { flex: 1, flexDirection: "row" },

@@ -1,8 +1,7 @@
-import { useWideContent } from "@/src/components/ui/responsive";
+import { usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { Button, colors, EmptyState, ListRow, spacing } from "@/src/components/ui/kit";
+import { Button, colors, EmptyState, InfoTip, ListRow, PageHeader, SectionHeader, spacing } from "@/src/components/ui/kit";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -14,6 +13,8 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 export default function GridsPage() {
   const grids = useGrids();
   const wideContent = useWideContent();
+  // Desktop-tier only: two columns of grid cards, one on tablets/phones.
+  const twoCol = usePaneLayout() === "desktop";
 
   function handleDelete(item: Grid) {
     appAlert(
@@ -47,19 +48,30 @@ export default function GridsPage() {
       onPress={() => router.push(`/space/grid-edit?id=${encodeURIComponent(item.id)}`)}
       chevron
       right={<DeleteIconButton size={15} style={gs.deleteBtn} onPress={() => handleDelete(item)} />}
+      style={twoCol && gs.gridCard}
     />
   );
 
   return (
     <View style={gs.page}>
       <NotConnectedOverlay />
-      <SubPageHeader title="Grids" />
+      <PageHeader title="Grids" subtitle="2D position arrays for pick-and-place and pallet operations" />
 
       <FlatList
+        key={twoCol ? "2col" : "1col"}
         data={grids}
         keyExtractor={item => item.id}
         renderItem={renderItem}
+        numColumns={twoCol ? 2 : 1}
+        columnWrapperStyle={twoCol ? gs.columnWrapper : undefined}
         contentContainerStyle={[gs.listContent, wideContent]}
+        ListHeaderComponent={
+          <SectionHeader
+            title="Grids"
+            style={gs.hint}
+            right={<InfoTip text="A grid steps from a base point: each row and column index multiplies the row/column offset, then rotates around the base point. Leave row/column count blank for an unbounded grid." />}
+          />
+        }
         ListEmptyComponent={
           <EmptyState
             icon={<Grid3x3 size={40} color={colors.textFaint} />}
@@ -87,6 +99,10 @@ const gs = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
 
   listContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm + 2 },
+  hint: { marginBottom: spacing.sm },
+
+  columnWrapper: { gap: spacing.sm + 2 },
+  gridCard: { flex: 1 },
 
   deleteBtn: { padding: spacing.xs },
 

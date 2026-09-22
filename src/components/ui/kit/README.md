@@ -55,7 +55,7 @@ import { colors, spacing, radii, type, shadows } from "@/src/components/ui/kit";
 `subtitleLines?` (default 1) for two-line descriptions.
 
 Keep using existing shared pieces where a screen already has them:
-`SubPageHeader`, `ProgramListLayout`, `AppAlert`, `NotConnectedOverlay`,
+`ProgramListLayout`, `AppAlert`, `NotConnectedOverlay`,
 `AnimatedPressable`, `useWideContent`/`usePaneLayout` from `responsive.ts`.
 `Screen` already applies `useWideContent` — don't apply it twice; keep manual
 `useWideContent` only in screens that can't adopt `Screen` (FlatList-driven or
@@ -104,3 +104,61 @@ After:
   />
 </Screen>
 ```
+
+## Makeover Playbook (page redesign pass)
+
+The navigator's stock header is now **disabled app-wide** (`headerShown: false`
+in `app/(tabs)/_layout.tsx`). Every page owns its chrome via `PageHeader`.
+
+### Per-page checklist
+
+1. **PageHeader first.** Structure every page as:
+   ```tsx
+   <View style={{ flex: 1, backgroundColor: colors.background }}>
+     <PageHeader title="Configure" subtitle="Motion and homing settings"
+                 right={<Button label="Save" size="sm" … />} />
+     <Screen> …content… </Screen>   // or your own ScrollView/panes
+   </View>
+   ```
+   - Wide: renders a breadcrumb trail (ancestors tappable) + large title.
+   - Narrow: safe-area bar; back affordance shows the **parent's name**
+     ("‹ Program"), never a bare arrow; connection status appears on the right
+     when no `right` actions are passed.
+   - Crumbs default from the route path via `routeLabels.ts` — **add labels
+     there for new routes**. Pass `crumbs={[…]}` explicitly when the logical
+     hierarchy is deeper than the flat route (e.g. Program › Vision › Zone).
+   - Every page uses `PageHeader` (SubPageHeader is retired and deleted).
+     Guarded exits (unsaved-changes prompts) use `onBack`/`onNavigate`.
+   - Exemplar: `app/(tabs)/robot/connected-robot.tsx`.
+2. **Explain the page.** Give PageHeader a one-line `subtitle` stating what the
+   page is for. Add a `HintBanner (RETIRED — do not add; user prefers InfoTip ⓘ only) id="…"` under the header on pages whose
+   workflow is non-obvious (first-use guidance; dismissal lasts the session).
+   Attach `InfoTip text="…"` beside individual settings/labels that need a
+   sentence of context (`SectionHeader right={<InfoTip …/>}` fits).
+3. **Show information.** Prefer showing live data over blank space: StatTile
+   rows for dashboard numbers (`<StatTile label value icon tint hint mono/>`),
+   StatusPill for states, `type.mono` for technical readouts. Empty lists get
+   `EmptyState` with a next-step action, never a bare "none".
+4. **Icons for scanning.** `SectionHeader icon={…}` on long pages, IconTile on
+   list rows, icons in primary buttons only when they clarify (lucide icons,
+   16–20px, tokens for color).
+5. **Wide layout.** No single skinny column in a huge window: two-column
+   form/detail+aside splits (existing `wideRow`/left-right col patterns),
+   StatTile rows, sensible max widths. Keep `useWideContent` alignment so
+   headers and content share the gutter (PageHeader applies it itself).
+6. **Narrow layout.** No horizontal overflow; touch targets ≥44px; primary
+   action reachable at the bottom, not only in the header; verify at ~390px.
+7. **Spacing rhythm.** Screen's `gap` handles vertical rhythm between cards —
+   remove per-card `marginBottom`. Inside cards: spacing.md between rows,
+   spacing.lg card padding. Never reintroduce hex colors or ad-hoc shadows.
+
+### Do not touch
+`kit/**` and `NavRail.tsx` are owned by the kit maintainer. Request gaps in
+your report instead of editing them.
+
+
+## Position displays (X/Y/Z/RZ, joints)
+Use `PositionReadout` — a CNC DRO-style vertical list (axis tile left,
+right-aligned tabular mono value, optional unit) — NEVER a grid of StatTiles.
+`size="lg"` for jog/DRO prominence, `card={false}` to embed in an existing Card.
+HintBanner is retired app-wide: pages explain themselves with InfoTip (the ⓘ icon) only.

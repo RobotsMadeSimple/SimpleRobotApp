@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import {
   accents,
   Button,
@@ -8,7 +7,9 @@ import {
   colors,
   Divider,
   Input,
+  InfoTip,
   ListRow,
+  PageHeader,
   radii,
   Screen,
   SectionHeader,
@@ -17,6 +18,7 @@ import {
   spacing,
   type,
 } from "@/src/components/ui/kit";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Gauge,
@@ -235,13 +237,16 @@ export default function ConfigureRobot() {
         { key: "m4Direction", label: "M4 — J4 Rotation" },
       ];
 
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SubPageHeader title="Configure Robot" />
-      <Screen>
+  const isWide = useIsWide();
 
+  const motionSection = (
+    <>
         {/* ── Motor Directions ── */}
-        <SectionHeader title="Motor Directions" />
+        <SectionHeader
+          title="Motor Directions"
+          icon={Zap}
+          right={<InfoTip text="Flips a motor's electrical direction in software. Use it if commanding '+' moves that axis the wrong way — it only changes which sign counts as forward, not how far or which axis moves. Changes here take effect on the connected controller as soon as you save, so double-check values before saving." />}
+        />
         <Card padded={false}>
           {motorRows.map(({ key, label }, idx) => (
             <ConfigRow
@@ -265,7 +270,11 @@ export default function ConfigureRobot() {
         {/* ── Homing — ASTRO ── */}
         {!isCNC && (
           <>
-            <SectionHeader title="Homing" />
+            <SectionHeader
+              title="Homing"
+              icon={Home}
+              right={<InfoTip text="Used only during the homing cycle: how fast each axis drives toward its home switch, which direction it drives to find that switch, and the position or angle assigned once it gets there." />}
+            />
             <Card padded={false}>
               <ConfigRow
                 icon={<Home size={16} color={accents.purple} />}
@@ -333,7 +342,11 @@ export default function ConfigureRobot() {
         {/* ── Homing — CNC4Axis ── */}
         {isCNC && (
           <>
-            <SectionHeader title="Homing" />
+            <SectionHeader
+              title="Homing"
+              icon={Home}
+              right={<InfoTip text="Used only during the homing cycle: how fast each axis drives toward its home switch, which direction it drives to find that switch, and the position or angle assigned once it gets there." />}
+            />
             <Card padded={false}>
               <ConfigRow
                 icon={<Home size={16} color={accents.purple} />}
@@ -397,7 +410,11 @@ export default function ConfigureRobot() {
             </Card>
 
             {/* ── Motor Setup (CNC only) ── */}
-            <SectionHeader title="Motor Setup" />
+            <SectionHeader
+              title="Motor Setup"
+              icon={Gauge}
+              right={<InfoTip text="Steps per motor revolution and how far one revolution moves the axis (mm) or spindle (degrees) — used to convert motion commands into step pulses. Match these to your driver's microstepping and leadscrew or pulley." />}
+            />
             <Card padded={false}>
               {([
                 { label: "X Axis",    stepsKey: "cncStepsPerRevX"  as const, measureKey: "cncMmPerRevX"   as const, isRotary: false },
@@ -426,9 +443,17 @@ export default function ConfigureRobot() {
             </Card>
           </>
         )}
+    </>
+  );
 
+  const tuningSection = (
+    <>
         {/* ── Jog Speeds ── */}
-        <SectionHeader title="Jogging" />
+        <SectionHeader
+          title="Jogging"
+          icon={Gauge}
+          right={<InfoTip text="Speeds used by the Slow / Normal / Fast toggle on the Jog & Teach screen." />}
+        />
         <Card padded={false}>
           {([
             { key: "jogSlowSpeed"   as const, label: "Slow Speed"   },
@@ -452,7 +477,11 @@ export default function ConfigureRobot() {
         </Card>
 
         {/* ── Joint Limits ── */}
-        <SectionHeader title="Joint Limits" />
+        <SectionHeader
+          title="Joint Limits"
+          icon={ShieldAlert}
+          right={<InfoTip text="When Soft Limits is on, the controller faults and stops motion if a joint would move past its Min or Max below. Leave a bound blank to leave that side unenforced." />}
+        />
         <Card padded={false}>
           <ConfigRow
             icon={<ShieldAlert size={16} color={config?.jointLimitsEnabled ? colors.success : colors.textFaint} />}
@@ -502,6 +531,24 @@ export default function ConfigureRobot() {
               />
             ))}
         </Card>
+    </>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader title="Configure" subtitle="Homing offsets, speeds and motion settings" />
+      <Screen>
+        {isWide ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideCol}>{motionSection}</View>
+            <View style={styles.wideCol}>{tuningSection}</View>
+          </View>
+        ) : (
+          <>
+            {motionSection}
+            {tuningSection}
+          </>
+        )}
 
         {/* ── Edit modal ── */}
         <Modal
@@ -635,6 +682,16 @@ const styles = StyleSheet.create({
     maxWidth: "45%",
     textAlign: "right",
   },
+
+  // ── Wide two-column layout ──────────────────────────────────────────────────
+  // Motor directions/homing/motor-setup on the left, jog speeds and joint
+  // limits on the right — turns the long single-column scroll into two.
+  wideRow: {
+    flexDirection: "row",
+    gap: spacing.lg,
+    alignItems: "flex-start",
+  },
+  wideCol: { flex: 1, gap: spacing.md },
 
   // ── Modal ──────────────────────────────────────────────────────────────────
   modalOverlay: {

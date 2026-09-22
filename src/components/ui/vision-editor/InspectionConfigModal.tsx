@@ -30,13 +30,12 @@ import {
   defaultBlobParams,
   defaultColorEntry,
 } from "@/src/models/robotModels";
-import { colors as kitColors, spacing, radii, shadows, accents } from "@/src/components/ui/kit";
+import { colors as kitColors, spacing, radii, shadows, accents, PageHeader } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
 import { ves } from "./visionEditorStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ZonePickerModal } from "./ZonePickerModal";
 import { DictionaryPickerModal } from "./DictionaryPickerModal";
 import { ColorEditModal } from "./ColorEditModal";
@@ -369,6 +368,7 @@ export function InspectionConfigModal({
 
   const linkedZone = zones.find(z => z.id === zoneId);
   const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
+  const configTitle = kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage';
 
   // Live feed — mirrors the main editor view: annotated stream while running,
   // raw camera stream otherwise, with the same Start/Stop control. Rendered
@@ -425,9 +425,14 @@ export function InspectionConfigModal({
 
   return (
     <View style={ves.configRoot}>
-        <SubPageHeader
-          title={kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage'}
+        <PageHeader
+          title={configTitle}
           subtitle={name || undefined}
+          // Full-screen modal, not a route — ancestor crumb is a plain label
+          // (no href, so it's non-tappable) purely to surface the "‹ Vision
+          // Editor" back affordance on narrow; onBack always runs handleClose
+          // (commit + close) regardless of which affordance is tapped.
+          crumbs={[{ label: "Vision Editor" }, { label: configTitle }]}
           onBack={handleClose}
           right={
             <TouchableOpacity onPress={handleClose} style={ves.configDoneBtn}>

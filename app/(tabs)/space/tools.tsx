@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import {
   Button,
@@ -7,7 +6,9 @@ import {
   Divider,
   EmptyState,
   FormRow,
+  InfoTip,
   Input,
+  PageHeader,
   radii,
   RadioRow,
   Screen,
@@ -128,7 +129,10 @@ function ToolFormModal({
               </FormRow>
 
               {/* Position */}
-              <Text style={[styles.fieldLabel, { marginTop: spacing.xs }]}>TCP Offset (mm / °)</Text>
+              <View style={styles.fieldLabelRow}>
+                <Text style={styles.fieldLabel}>TCP Offset (mm / °)</Text>
+                <InfoTip text="The tool center point's offset and rotation relative to the robot flange. This is the point that gets driven to saved coordinates while this tool is active." />
+              </View>
               <View style={styles.coordGrid}>
                 <CoordField label="X"  value={draft.x}  onChange={set("x")}  />
                 <CoordField label="Y"  value={draft.y}  onChange={set("y")}  />
@@ -237,10 +241,14 @@ export default function ToolsPage() {
 
   return (
     <View style={styles.container}>
-      <SubPageHeader title="Tools" />
+      <PageHeader title="Tools" subtitle="Define TCP offsets and pick the active tool" />
 
       <Screen>
-        <SectionHeader title="Saved tools" />
+        <SectionHeader
+          title="Saved tools"
+          icon={Wrench}
+          right={<InfoTip text="A tool's offset defines its TCP (tool center point) relative to the robot flange. Activate a tool so saved points and moves target that offset instead of the raw flange position." />}
+        />
 
         {/* No-tool row — always at top */}
         <Card padded={false}>
@@ -438,6 +446,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.textFaint,
     letterSpacing: 0.5,
+  },
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
     marginBottom: spacing.xs + 2,
   },
   formRow: { marginBottom: spacing.md + 2 },

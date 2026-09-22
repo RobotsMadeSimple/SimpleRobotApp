@@ -1,25 +1,31 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
-import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useRobots, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
   ArrowLeftRight,
+  CheckCircle2,
   CodeXml,
   Gamepad2,
   Info,
   Move3d,
   Settings2,
+  Wifi,
+  WifiOff,
 } from "lucide-react-native";
 import {
+  accents,
   Button,
   Card,
   colors,
+  PageHeader,
   Divider,
   ListRow,
   radii,
   SectionHeader,
   spacing,
+  StatTile,
   type,
 } from "@/src/components/ui/kit";
 import {
@@ -96,6 +102,7 @@ const MENU_ITEMS = [
 export default function ConnectedRobot() {
   const selectedRobot = useSelectedRobot();
   const robots = useRobots();
+  const status = useRobotStatus();
   // Two-pane (wide) layout below — Screen only handles the single-column
   // gutter, so this screen keeps its own useWideContent/useIsWide per the kit README.
   const wideContent = useWideContent();
@@ -107,9 +114,12 @@ export default function ConnectedRobot() {
 
   if (!robot) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.centerText}>No robot selected</Text>
-        <Button label="Back to Robot Selection" onPress={changeRobot} />
+      <View style={styles.container}>
+        <PageHeader title="Connected Robot" subtitle="No robot selected" />
+        <View style={styles.center}>
+          <Text style={styles.centerText}>No robot selected</Text>
+          <Button label="Back to Robot Selection" onPress={changeRobot} />
+        </View>
       </View>
     );
   }
@@ -152,6 +162,31 @@ export default function ConnectedRobot() {
           style={styles.changeBtn}
         />
       </Card>
+
+      <View style={styles.statRow}>
+        <StatTile
+          label="Status"
+          value={status.connected ? "Connected" : "Offline"}
+          icon={status.connected ? Wifi : WifiOff}
+          tint={status.connected ? [colors.success, colors.successSoft] : [colors.danger, colors.dangerSoft]}
+          style={styles.statTileHalf}
+        />
+        <StatTile
+          label="Homed"
+          value={status.wasHomed ? "Yes" : "No"}
+          icon={CheckCircle2}
+          tint={status.wasHomed ? [colors.success, colors.successSoft] : [accents.orange, accents.orangeSoft]}
+          style={styles.statTileHalf}
+        />
+        {/* Full-width row of its own — firmware strings (esp. prerelease builds)
+            need much more room than the 45% half tiles above give. */}
+        <StatTile
+          label="Firmware"
+          value={status.version && status.version !== "0.0.0" ? `v${status.version}` : "—"}
+          mono
+          style={styles.statTileFull}
+        />
+      </View>
     </>
   );
 
@@ -181,11 +216,20 @@ export default function ConnectedRobot() {
   );
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[styles.content, wideContent]}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.container}>
+      {/* Exemplar of the app-wide navigation pattern: PageHeader above the
+          scroll area — breadcrumbs on wide, named back label on narrow. */}
+      <PageHeader
+        title={robot.robotName || "Connected Robot"}
+        subtitle={`${robot.robotType || "Robot"} · ${robot.ipAddress}:${robot.port}`}
+        crumbs={[{ label: "Robot", href: "/robot" }, { label: "Connected Robot" }]}
+        backTo="/robot"
+      />
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, wideContent]}
+        showsVerticalScrollIndicator={false}
+      >
       {isWide ? (
         // Wide: robot info + Change Robot in a narrow left column, the navigation
         // targets in the wider right one.
@@ -199,7 +243,8 @@ export default function ConnectedRobot() {
           <View style={styles.narrowGap}>{navSection}</View>
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -208,9 +253,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scroll: { flex: 1 },
   content: {
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
+    // Vertical rhythm between stacked SectionHeader/Card groups — this screen
+    // rolls its own ScrollView instead of the kit Screen, so it must supply
+    // the gap Screen normally would (SectionHeader's negative marginBottom
+    // relies on a parent gap to avoid the Card overlapping its title).
+    gap: spacing.md,
   },
 
   // ── Wide two-column layout ──────────────────────────────────────────────────
@@ -223,11 +274,20 @@ const styles = StyleSheet.create({
   },
   wideLeftCol: {
     width: 360,
+    gap: spacing.md,
   },
   wideRightCol: {
     flex: 1,
+    gap: spacing.md,
   },
-  narrowGap: { marginTop: spacing.xl },
+  // Narrow: extra breathing room between the info group and the nav group,
+  // plus its own gap so "Navigate To" doesn't overlap its Card either.
+  narrowGap: { marginTop: spacing.md, gap: spacing.md },
+  statRow:  { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  // Status/Homed share a row (2-up); Firmware gets the full row width since
+  // long/prerelease version strings need much more room than half a tile.
+  statTileHalf: { flexGrow: 1, flexBasis: "45%", minWidth: 120 },
+  statTileFull: { flexBasis: "100%" },
   center: {
     flex: 1,
     justifyContent: "center",

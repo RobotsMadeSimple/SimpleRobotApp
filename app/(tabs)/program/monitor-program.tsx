@@ -2,7 +2,6 @@ import {
   ActionButton } from "@/src/components/ui/ActionButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { BuiltProgram,
   ProgramStatus,
   ProgramStep,
@@ -54,7 +53,7 @@ import { Image as ExpoImage } from "expo-image";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
-import { accents, colors, spacing, radii, StatusPill } from "@/src/components/ui/kit";
+import { accents, colors, spacing, radii, InfoTip, PageHeader, PositionReadout, StatusPill } from "@/src/components/ui/kit";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
@@ -521,11 +520,24 @@ export default function MonitorProgramScreen() {
 
   // ── Loading / not-found states ─────────────────────────────────────────────
 
+  // Monitor always sits logically under the robot's program list, whichever
+  // route pushed it (the tab index, a list row, or the builder's Run action).
+  const monitorCrumbs = [
+    { label: "Program", href: "/program" },
+    { label: "Programs", href: "/(tabs)/program/robot-programs" },
+    { label: programName },
+  ];
+
   if (!program && (!builtProgramsLoaded || resolving)) {
     return (
       <View style={styles.root}>
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-        <SubPageHeader title={programName} />
+        <PageHeader
+          title={programName}
+          subtitle="Loading from the controller…"
+          crumbs={monitorCrumbs}
+          backTo="/(tabs)/program/robot-programs"
+        />
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={colors.accent} />
           <Text style={styles.centerTitle}>{programName}</Text>
@@ -539,7 +551,12 @@ export default function MonitorProgramScreen() {
     return (
       <View style={styles.root}>
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-        <SubPageHeader title={programName} />
+        <PageHeader
+          title={programName}
+          subtitle="Not registered in the controller"
+          crumbs={monitorCrumbs}
+          backTo="/(tabs)/program/robot-programs"
+        />
         <View style={styles.centerState}>
           <Box size={40} color={colors.borderStrong} />
           <Text style={styles.centerTitle}>Program not found</Text>
@@ -597,7 +614,28 @@ export default function MonitorProgramScreen() {
   return (
     <View style={styles.root}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-      <SubPageHeader title={programName} />
+      <PageHeader
+        title={programName}
+        subtitle={
+          `${program.status}` +
+          (program.maxStepCount > 0 ? ` · step ${program.currentStepNumber}/${program.maxStepCount} (${pct}%)` : "") +
+          (isBackground ? " · background program" : isBuilt ? " · built here" : " · controller program")
+        }
+        crumbs={monitorCrumbs}
+        backTo="/(tabs)/program/robot-programs"
+        right={
+          <StatusPill
+            label={program.status}
+            tone={
+              program.status === "Error" ? "danger"
+                : isActivelyRunning ? "success"
+                : program.status === "Stopping" || program.status === "Stopped" ? "warning"
+                : "neutral"
+            }
+            dot
+          />
+        }
+      />
 
       {/* ── Persistent alert banner (fixed, always visible, no animation) ── */}
       {hasAlert && (
@@ -666,7 +704,10 @@ export default function MonitorProgramScreen() {
           </View>
 
           <View style={styles.progressHeader}>
-            <Text style={styles.sectionLabel}>PROGRESS</Text>
+            <View style={styles.progressLabelRow}>
+              <Text style={styles.sectionLabel}>PROGRESS</Text>
+              <InfoTip text="Start, Stop and Continue act on the robot immediately." />
+            </View>
             <Text style={styles.progressMeta}>
               <Text style={[styles.progressMetaBold, { color: theme.text }]}>
                 {program.currentStepNumber}
@@ -888,27 +929,18 @@ export default function MonitorProgramScreen() {
                 </View>
               )}
 
-              <View style={styles.coordRow}>
-                {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
-                  <View key={axis} style={styles.coordCell}>
-                    <Text style={styles.coordLabel}>{axis}</Text>
-                    <Text style={styles.coordValue}>
-                      {fmt(s?.[axis.toLowerCase() as "x" | "y" | "z" | "rz"])}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+              <PositionReadout
+                card={false}
+                axes={(["X", "Y", "Z", "RZ"] as const).map((axis) => ({
+                  label: axis,
+                  value:  fmt(s?.[axis.toLowerCase() as "x" | "y" | "z" | "rz"]),
+                  unit:   axis === "RZ" ? "°" : "mm",
+                }))}
+              />
 
-              <View style={[styles.coordRow, styles.coordRowTarget]}>
-                {(["X", "Y", "Z", "RZ"] as const).map((axis) => (
-                  <View key={axis} style={styles.coordCell}>
-                    <Text style={styles.coordLabelTarget}>{axis}</Text>
-                    <Text style={styles.coordValueTarget}>
-                      {fmt(s?.[`target${axis[0]}${axis.slice(1).toLowerCase()}` as "targetX" | "targetY" | "targetZ" | "targetRz"])}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+              <Text style={styles.targetPositionLine} numberOfLines={1}>
+                Target  X {fmt(s?.targetX)}  Y {fmt(s?.targetY)}  Z {fmt(s?.targetZ)}  RZ {fmt(s?.targetRz)}
+              </Text>
 
               <View style={styles.posSubRow}>
                 <Text style={styles.posSubLabel}>POINT</Text>
@@ -1043,8 +1075,11 @@ export default function MonitorProgramScreen() {
         <View style={[styles.logsSection, threeCol && styles.logsSectionFull]}>
           <View style={styles.logHeader}>
             <Text style={styles.logSectionLabel}>PROGRAM LOG</Text>
-            <View style={styles.logCountBadge}>
-              <Text style={styles.logCountText}>{totalLogCount} entries</Text>
+            <View style={styles.logHeaderRight}>
+              <View style={styles.logCountBadge}>
+                <Text style={styles.logCountText}>{totalLogCount} entries</Text>
+              </View>
+              <InfoTip text="Newest entry first, so the log never scrolls away from you while the program runs. Only the latest 50 are rendered — use Load 50 more to reach older ones." />
             </View>
           </View>
           <ScrollView
@@ -1196,6 +1231,9 @@ const styles = StyleSheet.create({
   progressHeader: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
   },
+  progressLabelRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+  },
   progressMeta:     { fontSize: 13, color: colors.textFaint },
   progressMetaBold: { fontWeight: "700" },
   progressMetaMuted:{},
@@ -1276,28 +1314,10 @@ const styles = StyleSheet.create({
   deleteBtnTextDisabled: { color: "#fca5a5" },
 
   // ── Position ───────────────────────────────────────────────────────────────
-  coordRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  targetPositionLine: {
+    fontSize: 12, fontWeight: "600", color: accents.purple,
+    fontFamily: "monospace", marginTop: spacing.xs,
   },
-  coordCell: {
-    alignItems: "center",
-    flex: 1,
-  },
-  coordLabel: {
-    fontSize: 11, fontWeight: "600", color: colors.textFaint,
-    letterSpacing: 0.5, marginBottom: spacing.xs,
-  },
-  coordValue: {
-    fontSize: 20, fontWeight: "700", color: colors.text,
-    fontFamily: "monospace",
-  },
-
-  // ── Position ───────────────────────────────────────────────────────────────
-  coordRowTarget:   { marginTop: 6 },
-  // Purple target-position accent has no kit token; left literal.
-  coordLabelTarget: { fontSize: 11, fontWeight: "600", color: "#c4b5fd", letterSpacing: 0.5, marginBottom: spacing.xs },
-  coordValueTarget: { fontSize: 16, fontWeight: "600", color: accents.purple, fontFamily: "monospace" },
 
   posSubRow: {
     flexDirection: "row", alignItems: "center", flexWrap: "wrap",
@@ -1338,6 +1358,7 @@ const styles = StyleSheet.create({
   logHeader: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
   },
+  logHeaderRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   logSectionLabel: {
     fontSize: 10, fontWeight: "700", color: "#475569",
     letterSpacing: 1, textTransform: "uppercase",

@@ -13,6 +13,8 @@ type Props = {
   right?: ReactNode;
   /** Optional custom subtitle node in place of `subtitle` (e.g. mono coordinates). */
   subtitleNode?: ReactNode;
+  /** Selected-state color when the page's identity isn't the accent blue (e.g. accents.purple). */
+  tint?: string;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -20,7 +22,8 @@ type Props = {
  * Flat selectable row with a radio indicator — active tool/local pickers,
  * base-point pickers. Stack inside a Card with Dividers.
  */
-export function RadioRow({ title, subtitle, subtitleNode, selected, onPress, right, style }: Props) {
+export function RadioRow({ title, subtitle, subtitleNode, selected, onPress, right, tint, style }: Props) {
+  const activeColor = tint ?? colors.accent;
   return (
     <AnimatedPressable
       style={[styles.row, style]}
@@ -28,11 +31,11 @@ export function RadioRow({ title, subtitle, subtitleNode, selected, onPress, rig
       accessibilityRole="radio"
       accessibilityState={{ selected }}
     >
-      <View style={[styles.radio, selected && styles.radioSelected]}>
-        {selected && <View style={styles.radioDot} />}
+      <View style={[styles.radio, selected && { borderColor: activeColor }]}>
+        {selected && <View style={[styles.radioDot, { backgroundColor: activeColor }]} />}
       </View>
       <View style={styles.body}>
-        <Text style={[type.title, selected && { color: colors.accent }]} numberOfLines={1}>
+        <Text style={[type.title, selected && { color: activeColor }]} numberOfLines={1}>
           {title}
         </Text>
         {subtitleNode ??
@@ -59,12 +62,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  radioSelected: { borderColor: colors.accent },
   radioDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: colors.accent,
   },
   body: { flex: 1 },
   sub:  { marginTop: 2 },

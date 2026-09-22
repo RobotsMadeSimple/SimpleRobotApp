@@ -16,6 +16,9 @@ import {
   ImagePlus,
   Inbox,
   Layers,
+  LucideIcon,
+  Move3d,
+  SlidersHorizontal,
   Timer,
   MessageSquare,
   OctagonX,
@@ -33,7 +36,7 @@ import {
 } from "lucide-react-native";
 import React from "react";
 import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
-import { colors } from "@/src/components/ui/kit";
+import { accents, colors } from "@/src/components/ui/kit";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -651,21 +654,100 @@ export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
   "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
 ]);
 
-export const STEP_CATEGORIES: { label: string; color: string; types: StepType[] }[] = [
-  { label: "Motion",       color: "#2563eb", types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove"] },
-  { label: "Flow",         color: "#0891b2", types: ["Loop", "IfCondition", "PauseProgram", "Label", "GoToLabel"] },
-  { label: "I/O",          color: "#ea580c", types: ["SetOutput"] },
-  { label: "Speed",        color: "#0284c7", types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius"] },
-  { label: "Variables",    color: "#7c3aed", types: ["SetVariable"] },
-  { label: "Vision",       color: "#0891b2", types: ["RunVision", "CaptureImage", "SaveImage"] },
-  { label: "Aux Axes",     color: "#7c3aed", types: ["AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"] },
-  { label: "Tool & Frame", color: "#7c3aed", types: ["SetTool", "SetLocal", "ClearLocal"] },
-  { label: "Utility",      color: "#475569", types: ["Wait", "StatusUpdate", "CallRoutine", "RunHoming"] },
-  { label: "Network",      color: "#0f766e", types: ["HttpRequest", "HttpReceive"] },
-  { label: "Background",   color: "#16a34a", types: ["StartBackground", "StopBackground", "WaitForBackground"] },
-  { label: "Timing",       color: "#0891b2", types: ["StopwatchControl"] },
-  { label: "CNC",          color: "#7c3aed", types: ["CncProgram"] },
+/**
+ * Block categories — the top level of the step picker's navigation.
+ *
+ * Purely presentational grouping metadata: every StepType keeps its own
+ * semantics, config modal and insertion behavior. The categories exist so the
+ * ~36 block types can be scanned in eight labelled groups instead of one long
+ * list, and so a step row can carry a subtle colour cue for its family.
+ *
+ * Tints come from kit tokens where a family exists. Two shades have no token:
+ * sky (#0284c7 — the established "speed/blend" shade in STEP_THEME) and teal
+ * (#0f766e — the established HTTP shade). Both are kept literal on purpose.
+ */
+export type StepCategoryKey =
+  | "motion" | "motionSettings" | "flow" | "variables"
+  | "io" | "vision" | "background" | "comms";
+
+export type StepCategory = {
+  key: StepCategoryKey;
+  label: string;
+  /** One sentence describing what the blocks in this group do. */
+  desc: string;
+  /** Category tint: [foreground, soft background]. */
+  color: string;
+  soft: string;
+  icon: LucideIcon;
+  types: StepType[];
+};
+
+export const STEP_CATEGORIES: StepCategory[] = [
+  {
+    key: "motion", label: "Motion", icon: Move3d,
+    desc: "Send the robot somewhere — points, jumps, threads and homing.",
+    color: colors.accent, soft: colors.accentSoft,
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "CncProgram"],
+  },
+  {
+    key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,
+    desc: "Change how later moves behave: speed, blending, tool and frame.",
+    color: "#0284c7", soft: "#e0f2fe",
+    types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius", "SetTool", "SetLocal", "ClearLocal"],
+  },
+  {
+    key: "flow", label: "Logic & Flow", icon: GitBranch,
+    desc: "Decide what runs next — branches, loops, jumps and pauses.",
+    color: accents.purple, soft: accents.purpleSoft,
+    types: ["IfCondition", "Loop", "CallRoutine", "Label", "GoToLabel", "PauseProgram"],
+  },
+  {
+    key: "variables", label: "Variables & Timing", icon: Hash,
+    desc: "Store values, count time, and wait before continuing.",
+    color: colors.warning, soft: colors.warningSoft,
+    types: ["SetVariable", "StopwatchControl", "Wait"],
+  },
+  {
+    key: "io", label: "I/O & Aux Axes", icon: Zap,
+    desc: "Drive digital outputs and auxiliary stepper axes.",
+    color: accents.orange, soft: accents.orangeSoft,
+    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"],
+  },
+  {
+    key: "vision", label: "Vision", icon: ScanSearch,
+    desc: "Run camera inspections and capture or save images.",
+    color: accents.cyan, soft: accents.cyanSoft,
+    types: ["RunVision", "CaptureImage", "SaveImage"],
+  },
+  {
+    key: "background", label: "Background", icon: Layers,
+    desc: "Start, stop and wait on programs running in parallel.",
+    color: colors.success, soft: colors.successSoft,
+    types: ["StartBackground", "StopBackground", "WaitForBackground"],
+  },
+  {
+    key: "comms", label: "Communication", icon: Radio,
+    desc: "Talk to the operator and to other machines over HTTP.",
+    color: "#0f766e", soft: "#f0fdfa",
+    types: ["HttpRequest", "HttpReceive", "StatusUpdate"],
+  },
 ];
+
+/** The category a step type belongs to (undefined only for Unknown steps). */
+export const STEP_CATEGORY_OF: Partial<Record<StepType, StepCategory>> =
+  Object.fromEntries(
+    STEP_CATEGORIES.flatMap(cat => cat.types.map(t => [t, cat] as const))
+  ) as Partial<Record<StepType, StepCategory>>;
+
+/** Category for a step type, falling back to a neutral "Other" family. */
+export const OTHER_CATEGORY: StepCategory = {
+  key: "flow", label: "Other", desc: "Unrecognised blocks.", icon: HelpCircle,
+  color: colors.textMuted, soft: colors.surfaceMuted, types: [],
+};
+
+export function categoryForStep(type: StepType): StepCategory {
+  return STEP_CATEGORY_OF[type] ?? OTHER_CATEGORY;
+}
 
 // ── Insert target ─────────────────────────────────────────────────────────────
 
