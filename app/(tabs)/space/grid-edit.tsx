@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids, usePoints } from "@/src/providers/RobotProvider";
@@ -91,6 +91,7 @@ export default function GridEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const grids  = useGrids();
   const points = usePoints();
+  const wideContent = useWideContent();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (grids.find(g => g.id === id) ?? null);
@@ -145,7 +146,7 @@ export default function GridEditPage() {
       />
 
       <ScrollView
-        contentContainerStyle={[s.scroll, wide.content]}
+        contentContainerStyle={[s.scroll, wideContent]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

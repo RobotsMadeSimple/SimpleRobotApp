@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
@@ -23,6 +23,7 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function GridsPage() {
   const grids = useGrids();
+  const wideContent = useWideContent();
 
   function handleDelete(item: Grid) {
     appAlert(
@@ -75,7 +76,7 @@ export default function GridsPage() {
         data={grids}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={[gs.listContent, wide.content]}
+        contentContainerStyle={[gs.listContent, wideContent]}
         ListEmptyComponent={
           <View style={gs.emptyContainer}>
             <Grid3x3 size={40} color="#d1d5db" />

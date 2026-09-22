@@ -1,19 +1,34 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Grid3x3, Minus, Plus, RotateCcw } from "lucide-react-native";
+import { Circle, Grid3x3, Hexagon, Minus, Plus, RotateCcw, Square } from "lucide-react-native";
 import { makeZoneDrawHtml } from "@/src/vision/visionHtml";
 import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from "@/src/models/robotModels";
-import { appAlert } from "@/src/components/ui/AppAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
 import { ves } from "./visionEditorStyles";
 
-const SHAPES: { shape: VisionZoneShape; label: string }[] = [
-  { shape: 'Rectangle', label: 'Rect' },
-  { shape: 'Circle',    label: 'Circle' },
-  { shape: 'Polygon',   label: 'Polygon' },
+/**
+ * What the shape picker offers. "Grid" is not a geometry the controller knows — it is a
+ * rectangle carrying a cell lattice. Making it a shape rather than a toggle is deliberate:
+ * the grid only ever made sense on a rectangle, and a circle or polygon with a lattice
+ * bolted on measured a bounding box that spilled outside the zone. So the lattice now
+ * belongs to one shape and cannot be turned on for the others.
+ */
+type UiShape = VisionZoneShape | 'Grid';
+
+type ShapeIcon = React.ComponentType<{ size?: number; color?: string }>;
+
+const UI_SHAPES: { shape: UiShape; label: string; Icon: ShapeIcon }[] = [
+  { shape: 'Rectangle', label: 'Rect',    Icon: Square },
+  { shape: 'Circle',    label: 'Circle',  Icon: Circle },
+  { shape: 'Polygon',   label: 'Polygon', Icon: Hexagon },
+  { shape: 'Grid',      label: 'Grid',    Icon: Grid3x3 },
 ];
+
+/** The real geometry a UI shape draws with — "Grid" is a rectangle underneath. */
+const canvasShape = (s: UiShape): VisionZoneShape => (s === 'Grid' ? 'Rectangle' : s);
 
 const MAX_GRID = 16;
 
@@ -43,6 +58,7 @@ export function ZoneDrawModal({
   onCancel: () => void;
 }) {
   const insets     = useSafeAreaInsets();
+  const isWide     = useIsWide();
   const webviewRef = useRef<VisionCanvasHandle>(null);
 
   // The shape the canvas is *built* with. Kept out of the html deps below so that
@@ -50,20 +66,35 @@ export function ZoneDrawModal({
   // resurrect initialGeometry on top of the new shape.
   const initialShape: VisionZoneShape = initialGeometry?.shape ?? 'Rectangle';
 
-  const [shape, setShape]       = useState<VisionZoneShape>(initialShape);
+  // A saved rectangle carrying a lattice reopens as the Grid shape. A lattice on any
+  // other saved shape is dropped here — the new rule is that only Grid has one, and the
+  // change is not committed until Save, so Cancel still leaves such a zone untouched.
+  const initialGridOn  = !!initialGrid && initialGrid.rows * initialGrid.cols > 1;
+  const initialUiShape: UiShape =
+    initialGridOn && initialShape === 'Rectangle' ? 'Grid' : initialShape;
+  const initialUiGrid  = initialUiShape === 'Grid' ? (initialGrid ?? { rows: 2, cols: 2 }) : undefined;
+
+  const [uiShape, setUiShape]   = useState<UiShape>(initialUiShape);
   const [geometry, setGeometry] = useState<VisionZoneGeometry | null>(initialGeometry ?? null);
   const [editing, setEditing]   = useState(!!initialGeometry);
   const [pts, setPts]           = useState(0);
-  const [grid, setGrid]         = useState<VisionZoneGrid | undefined>(initialGrid ?? undefined);
+  const [grid, setGrid]         = useState<VisionZoneGrid | undefined>(initialUiGrid);
+  // The shape a pending "change shape?" confirmation would switch to. Held here and
+  // shown as an in-modal overlay rather than through appAlert: appAlert renders from a
+  // host near the app root, which on web sits behind this modal's canvas iframe.
+  const [pendingShape, setPendingShape] = useState<UiShape | null>(null);
 
   useEffect(() => {
     if (!visible) return;
-    setShape(initialShape);
+    setUiShape(initialUiShape);
     setGeometry(initialGeometry ?? null);
     setEditing(!!initialGeometry);
     setPts(0);
-    setGrid(initialGrid ?? undefined);
-  }, [visible, initialShape, initialGeometry, initialGrid]);
+    setPendingShape(null);
+    // Recomputed from the props rather than the derived object above, so this does not
+    // re-run every render on a fresh literal — only when the zone being edited changes.
+    setGrid(initialUiShape === 'Grid' ? (initialGrid ?? { rows: 2, cols: 2 }) : undefined);
+  }, [visible, initialUiShape, initialGeometry, initialGrid]);
 
   // One place to push the grid down, so no stepper can forget to redraw. The html already
   // embeds the initial grid, so an early run before the WebView is ready costs nothing.
@@ -71,23 +102,30 @@ export function ZoneDrawModal({
     webviewRef.current?.injectJavaScript(`window.setGrid(${JSON.stringify(grid ?? null)});true;`);
   }, [grid]);
 
-  function applyShape(s: VisionZoneShape) {
-    setShape(s);
+  function applyShape(s: UiShape) {
+    setUiShape(s);
     setGeometry(null);
     setEditing(false);
     setPts(0);
-    webviewRef.current?.injectJavaScript(`window.setShape(${JSON.stringify(s)});true;`);
+    // The lattice belongs to Grid and to nothing else, so it turns on with Grid and
+    // off with every other shape.
+    setGrid(s === 'Grid' ? { rows: 2, cols: 2 } : undefined);
+    webviewRef.current?.injectJavaScript(`window.setShape(${JSON.stringify(canvasShape(s))});true;`);
   }
 
-  function changeShape(s: VisionZoneShape) {
-    if (s === shape) return;
-    // Switching shape discards the working geometry — a circle has no meaningful
+  function changeShape(s: UiShape) {
+    if (s === uiShape) return;
+    // Rect and Grid draw the same rectangle, so switching between them keeps the shape
+    // and merely adds or removes the lattice — no reason to discard it or ask.
+    if (canvasShape(s) === canvasShape(uiShape)) {
+      setUiShape(s);
+      setGrid(s === 'Grid' ? (grid ?? { rows: 2, cols: 2 }) : undefined);
+      return;
+    }
+    // A real shape change discards the working geometry — a circle has no meaningful
     // polygon form — so confirm rather than silently dropping someone's edits.
     if (geometry || pts > 0) {
-      appAlert("Change shape?", "This clears the shape you're working on.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Change", style: "destructive", onPress: () => applyShape(s) },
-      ]);
+      setPendingShape(s);
       return;
     }
     applyShape(s);
@@ -125,136 +163,178 @@ export function ZoneDrawModal({
     [snapshotUri, zones, editingZoneId, initialShape, initialGeometry, initialGrid]
   );
 
+  const cShape   = canvasShape(uiShape);
   const gridOn   = !!grid && grid.rows * grid.cols > 1;
   const rotation = geometry?.shape === 'Rectangle' ? (geometry.rotation ?? 0) : 0;
-  const drafting = !editing && shape === 'Polygon' && pts > 0;
+  const drafting = !editing && uiShape === 'Polygon' && pts > 0;
 
   const hint =
-    editing && shape === 'Rectangle'
+    editing && cShape === 'Rectangle'
       ? 'Drag a corner to resize · the top grip to rotate · inside to move'
-    : editing               ? 'Drag a handle to reshape · drag inside to move'
-    : shape === 'Rectangle' ? 'Drag to draw a rectangle'
-    : shape === 'Circle'    ? 'Drag from the center outward'
-    : pts >= 3              ? 'Tap Close Shape, or keep adding points'
-    :                         `Tap to add points (${pts}/3 minimum)`;
+    : editing                ? 'Drag a handle to reshape · drag inside to move'
+    : uiShape === 'Grid'     ? 'Drag to draw a grid zone'
+    : uiShape === 'Rectangle'? 'Drag to draw a rectangle'
+    : uiShape === 'Circle'   ? 'Drag from the center outward'
+    : pts >= 3               ? 'Tap Close Shape, or keep adding points'
+    :                          `Tap to add points (${pts}/3 minimum)`;
+
+  const toolbar = (
+    <View
+      style={[
+        isWide ? ves.drawRail : ves.drawToolbarInner,
+        isWide
+          ? { paddingTop: (insets.top || 0) + 12, paddingLeft: (insets.left || 0) + 12 }
+          : { paddingBottom: insets.bottom || 10 },
+      ]}
+    >
+      <View style={isWide ? ves.drawShapeCol : ves.drawShapeRow}>
+        {UI_SHAPES.map(({ shape: s, label, Icon }) => {
+          const active = uiShape === s;
+          return (
+            <TouchableOpacity
+              key={s}
+              style={[ves.drawShapeChip, isWide && ves.drawChipWide, active && ves.drawShapeChipActive]}
+              onPress={() => changeShape(s)}
+            >
+              <Icon size={15} color={active ? "#0891b2" : "#fff"} />
+              <Text style={[ves.drawShapeText, active && ves.drawShapeTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {(rotation !== 0 || geometry || pts > 0) && (
+        <View style={isWide ? ves.drawColGroup : ves.drawToolRow}>
+          {rotation !== 0 && (
+            <TouchableOpacity
+              onPress={() => webviewRef.current?.injectJavaScript('window.setRotation(0);true;')}
+              style={[ves.drawRotChip, isWide && ves.drawChipWide]}
+              hitSlop={6}
+            >
+              <RotateCcw size={12} color="#fdba74" />
+              <Text style={ves.drawRotChipText}>{rotation}°</Text>
+            </TouchableOpacity>
+          )}
+          {(geometry || pts > 0) && (
+            <TouchableOpacity onPress={clearShape} style={[ves.drawClearBtn, isWide && ves.drawChipWide]}>
+              <Text style={ves.drawClearText}>Clear</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Cell steppers — only for the Grid shape, once a rectangle exists to divide. */}
+      {uiShape === 'Grid' && geometry && (
+        <View style={isWide ? ves.drawColGroup : ves.drawToolRow}>
+          {isWide && <Text style={ves.drawRailLabel}>CELLS</Text>}
+          {(['rows', 'cols'] as const).map(axis => (
+            <View key={axis} style={ves.drawStepper}>
+              <Text style={ves.drawStepperLabel}>{axis === 'rows' ? 'R' : 'C'}</Text>
+              <TouchableOpacity style={ves.drawStepBtn} onPress={() => stepGrid(axis, -1)} hitSlop={6}>
+                <Minus size={12} color="rgba(255,255,255,0.75)" />
+              </TouchableOpacity>
+              <Text style={ves.drawStepValue}>{grid?.[axis] ?? 1}</Text>
+              <TouchableOpacity style={ves.drawStepBtn} onPress={() => stepGrid(axis, 1)} hitSlop={6}>
+                <Plus size={12} color="rgba(255,255,255,0.75)" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* On the rail, drop the actions to the foot so Save sits under the thumb. */}
+      {isWide && <View style={ves.drawRailSpacer} />}
+
+      <View style={isWide ? ves.drawColGroup : ves.drawToolRow}>
+        <TouchableOpacity onPress={onCancel} style={[ves.drawCancelBtn, isWide && ves.drawChipWide]}>
+          <Text style={ves.drawCancelText}>Cancel</Text>
+        </TouchableOpacity>
+
+        {!isWide && <View style={ves.drawToolSpacer} />}
+
+        {drafting && (
+          <TouchableOpacity onPress={() => inject('undoPoint')} style={[ves.drawCancelBtn, isWide && ves.drawChipWide]}>
+            <Text style={ves.drawCancelText}>Undo</Text>
+          </TouchableOpacity>
+        )}
+        {drafting && pts >= 3 && (
+          <TouchableOpacity onPress={() => inject('closePolygon')} style={[ves.drawFinishBtn, isWide && ves.drawChipWide]}>
+            <Text style={ves.drawFinishText}>Close Shape</Text>
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity
+          onPress={() => geometry && onDone(geometry, gridOn ? grid : undefined)}
+          disabled={!geometry}
+          style={[ves.drawSaveBtn, isWide && ves.drawChipWide, !geometry && ves.drawSaveBtnDisabled]}
+        >
+          <Text style={ves.drawSaveText}>Save</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const canvasArea = (
+    <View style={ves.drawCanvasArea}>
+      {html ? (
+        <VisionCanvas
+          ref={webviewRef}
+          html={html}
+          style={StyleSheet.absoluteFill}
+          onMessage={onMessage}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+          <Text style={{ color: '#9ca3af', fontSize: 14, textAlign: 'center' }}>
+            Select a camera to load a snapshot for zone drawing.
+          </Text>
+        </View>
+      )}
+
+      <View style={ves.drawHint} pointerEvents="none">
+        <Text style={ves.drawHintText}>{hint}</Text>
+      </View>
+    </View>
+  );
 
   return (
     <Modal visible={visible} animationType="slide" statusBarTranslucent onRequestClose={onCancel}>
-      <View style={ves.drawModalRoot}>
-        {html ? (
-          <VisionCanvas
-            ref={webviewRef}
-            html={html}
-            style={StyleSheet.absoluteFill}
-            onMessage={onMessage}
-          />
+      {/* Canvas and toolbar are siblings, so the image is sized to what's left rather
+          than sitting under the controls. Wide: rail then image. Narrow: image then bar. */}
+      <View style={[ves.drawModalRoot, isWide && ves.drawModalRootWide]}>
+        {isWide ? (
+          <>
+            {toolbar}
+            {canvasArea}
+          </>
         ) : (
-          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
-            <Text style={{ color: '#6b7280', fontSize: 14 }}>
-              Select a camera above to load a snapshot for zone drawing.
-            </Text>
-          </View>
+          <>
+            {canvasArea}
+            {toolbar}
+          </>
         )}
 
-        <View style={ves.drawHint} pointerEvents="none">
-          <Text style={ves.drawHintText}>{hint}</Text>
-        </View>
-
-        <View style={ves.drawToolbar} pointerEvents="box-none">
-          <View style={[ves.drawToolbarInner, { paddingBottom: insets.bottom || 10 }]}>
-            <View style={ves.drawToolRow}>
-              <View style={ves.drawShapeRow}>
-                {SHAPES.map(({ shape: s, label }) => (
-                  <TouchableOpacity
-                    key={s}
-                    style={[ves.drawShapeChip, shape === s && ves.drawShapeChipActive]}
-                    onPress={() => changeShape(s)}
-                  >
-                    <Text style={[ves.drawShapeText, shape === s && ves.drawShapeTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {rotation !== 0 && (
+        {/* Change-shape confirmation, drawn as the last child so it sits above the
+            canvas (an app-root alert would render behind this modal's iframe on web). */}
+        {pendingShape && (
+          <View style={ves.confirmOverlay}>
+            <View style={ves.confirmCard}>
+              <Text style={ves.confirmTitle}>Change shape?</Text>
+              <Text style={ves.confirmMsg}>This clears the shape you&apos;re working on.</Text>
+              <View style={ves.confirmActions}>
+                <TouchableOpacity style={ves.confirmCancelBtn} onPress={() => setPendingShape(null)}>
+                  <Text style={ves.confirmCancelText}>Cancel</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => webviewRef.current?.injectJavaScript('window.setRotation(0);true;')}
-                  style={ves.drawRotChip}
-                  hitSlop={6}
+                  style={ves.confirmChangeBtn}
+                  onPress={() => { const s = pendingShape; setPendingShape(null); applyShape(s); }}
                 >
-                  <RotateCcw size={12} color="#fdba74" />
-                  <Text style={ves.drawRotChipText}>{rotation}°</Text>
+                  <Text style={ves.confirmChangeText}>Change</Text>
                 </TouchableOpacity>
-              )}
-
-              {(geometry || pts > 0) && (
-                <TouchableOpacity onPress={clearShape} style={ves.drawClearBtn}>
-                  <Text style={ves.drawClearText}>Clear</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Grid only means something once there is a shape to divide up. */}
-            {geometry && (
-              <View style={ves.drawToolRow}>
-                <TouchableOpacity
-                  style={[ves.drawGridToggle, gridOn && ves.drawGridToggleOn]}
-                  onPress={() => setGrid(gridOn ? undefined : { rows: 2, cols: 2 })}
-                  activeOpacity={0.75}
-                >
-                  <Grid3x3 size={13} color={gridOn ? "#67e8f9" : "rgba(255,255,255,0.6)"} />
-                  <Text style={[ves.drawGridToggleText, gridOn && ves.drawGridToggleTextOn]}>GRID</Text>
-                </TouchableOpacity>
-
-                {!gridOn ? (
-                  <Text style={ves.drawGridHint}>Off — color inspections measure the whole zone</Text>
-                ) : (
-                  <>
-                    <View style={ves.drawToolSpacer} />
-                    {(['rows', 'cols'] as const).map(axis => (
-                      <View key={axis} style={ves.drawStepper}>
-                        <Text style={ves.drawStepperLabel}>{axis === 'rows' ? 'R' : 'C'}</Text>
-                        <TouchableOpacity style={ves.drawStepBtn} onPress={() => stepGrid(axis, -1)} hitSlop={6}>
-                          <Minus size={12} color="rgba(255,255,255,0.75)" />
-                        </TouchableOpacity>
-                        <Text style={ves.drawStepValue}>{grid![axis]}</Text>
-                        <TouchableOpacity style={ves.drawStepBtn} onPress={() => stepGrid(axis, 1)} hitSlop={6}>
-                          <Plus size={12} color="rgba(255,255,255,0.75)" />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </>
-                )}
               </View>
-            )}
-
-            <View style={ves.drawToolRow}>
-              <TouchableOpacity onPress={onCancel} style={ves.drawCancelBtn}>
-                <Text style={ves.drawCancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <View style={ves.drawToolSpacer} />
-
-              {drafting && (
-                <TouchableOpacity onPress={() => inject('undoPoint')} style={ves.drawCancelBtn}>
-                  <Text style={ves.drawCancelText}>Undo</Text>
-                </TouchableOpacity>
-              )}
-              {drafting && pts >= 3 && (
-                <TouchableOpacity onPress={() => inject('closePolygon')} style={ves.drawFinishBtn}>
-                  <Text style={ves.drawFinishText}>Close Shape</Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity
-                onPress={() => geometry && onDone(geometry, gridOn ? grid : undefined)}
-                disabled={!geometry}
-                style={[ves.drawSaveBtn, !geometry && ves.drawSaveBtnDisabled]}
-              >
-                <Text style={ves.drawSaveText}>Save</Text>
-              </TouchableOpacity>
             </View>
           </View>
-        </View>
+        )}
       </View>
     </Modal>
   );

@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { RobotStack } from "@/src/models/robotModels";
 import { usePoints, useStacks } from "@/src/providers/RobotProvider";
@@ -91,6 +91,7 @@ export default function StackEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const stacks = useStacks();
   const points = usePoints();
+  const wideContent = useWideContent();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (stacks.find(s => s.id === id) ?? null);
@@ -143,7 +144,7 @@ export default function StackEditPage() {
       />
 
       <ScrollView
-        contentContainerStyle={[s.scroll, wide.content]}
+        contentContainerStyle={[s.scroll, wideContent]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -595,6 +595,7 @@ export default function CncBuilderScreen() {
   const { programName, stepId } = useLocalSearchParams<{ programName?: string; stepId?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected = useConnected();
+  const wideContent = useWideContent();
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -1022,7 +1023,7 @@ export default function CncBuilderScreen() {
         }
       />
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={[s.scroll, wide.content]}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[s.scroll, wideContent]}>
 
         {/* Vector file selector */}
         <Text style={s.sectionLabel}>VECTOR FILE (DXF / SVG)</Text>

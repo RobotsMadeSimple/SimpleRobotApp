@@ -40,6 +40,19 @@ export const ves = StyleSheet.create({
   configFieldLabel: { fontSize: 12, fontWeight: "600", color: "#6b7280", width: 60 },
   configNameInput:  { flex: 1, fontSize: 14, color: "#111827" },
 
+  // Headered card that groups related fields under a small caption (e.g. "DETAILS",
+  // "COLORS TO MATCH"). Rows stack inside; groupRowBorder adds a divider between them.
+  groupCard: {
+    backgroundColor: "#fff", borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, gap: 10,
+    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+  },
+  groupTitle: { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8 },
+  groupRow:   { flexDirection: "row", alignItems: "center", gap: 10 },
+  groupRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f0f0f0", paddingTop: 10,
+  },
+
   colorEntryRow: {
     flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: "#f9fafb", borderRadius: 8,
@@ -64,10 +77,12 @@ export const ves = StyleSheet.create({
   },
 
   // Zone draw modal
-  drawModalRoot: { flex: 1, backgroundColor: "#000" },
-  drawToolbar: {
-    position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10,
-  },
+  drawModalRoot:     { flex: 1, backgroundColor: "#000" },
+  drawModalRootWide: { flexDirection: "row" },
+  // The camera image lives here, sized to whatever the toolbar leaves. Canvas and
+  // toolbar are flex siblings now, not a full-bleed canvas with the bar floating over
+  // it, so the picture ends where the toolbar begins instead of running underneath.
+  drawCanvasArea:    { flex: 1, position: "relative" },
   drawToolbarInner: {
     gap: 8,
     paddingHorizontal: 12, paddingVertical: 10,
@@ -80,8 +95,11 @@ export const ves = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 8,
   },
   drawCancelText:      { color: "#fff", fontSize: 13, fontWeight: "600" },
-  drawShapeRow:        { flex: 1, flexDirection: "row", gap: 6 },
-  drawShapeChip:       { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 8 },
+  // A standalone row in the vertical bottom bar: content-height (no flex:1, which would
+  // grow it vertically and overlap the rows below) and wrapping so all four shape chips
+  // stay on screen on a narrow phone.
+  drawShapeRow:        { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  drawShapeChip:       { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 8 },
   drawShapeChipActive: { backgroundColor: "#fff" },
   drawShapeText:       { fontSize: 13, fontWeight: "600", color: "#fff" },
   drawShapeTextActive: { color: "#0891b2" },
@@ -96,16 +114,9 @@ export const ves = StyleSheet.create({
   drawSaveBtnDisabled: { backgroundColor: "rgba(255,255,255,0.15)" },
   drawSaveText:        { color: "#fff", fontSize: 13, fontWeight: "700" },
 
-  // Grid + rotation controls — dark-toolbar twins of the light ones on the zone list
-  drawGridToggle: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
-  },
-  drawGridToggleOn:     { borderColor: "#22d3ee", backgroundColor: "rgba(34,211,238,0.15)" },
-  drawGridToggleText:   { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.6)", letterSpacing: 0.4 },
-  drawGridToggleTextOn: { color: "#67e8f9" },
-  drawGridHint:         { flex: 1, fontSize: 11, color: "rgba(255,255,255,0.45)" },
+  // Grid cell steppers + rotation reset — dark-toolbar twins of the light ones on the
+  // zone list. The old GRID on/off toggle is gone: the lattice now rides on the Grid
+  // shape, so there is nothing to toggle.
   drawStepper:          { flexDirection: "row", alignItems: "center", gap: 3 },
   drawStepperLabel:     { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.55)", marginRight: 1 },
   drawStepBtn: {
@@ -123,6 +134,45 @@ export const ves = StyleSheet.create({
   drawHintText: {
     color: "rgba(255,255,255,0.65)", fontSize: 12,
     backgroundColor: "rgba(0,0,0,0.4)", paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8,
+  },
+
+  // Left-rail variant of the draw toolbar for wide screens: the same controls in a
+  // fixed-width column down the left edge. An in-flow sibling of the canvas, so the
+  // image ends where the rail begins rather than running underneath it.
+  drawRail: {
+    width: 240, gap: 12,
+    paddingHorizontal: 12, paddingVertical: 12,
+    backgroundColor: "rgba(0,0,0,0.62)",
+  },
+
+  // Change-shape confirmation, drawn inside the draw modal (above its canvas) rather
+  // than via the app-root alert, which stacks behind this modal's iframe on web.
+  confirmOverlay: {
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 20, elevation: 20,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center", justifyContent: "center", padding: 24,
+  },
+  confirmCard: {
+    width: "100%", maxWidth: 320, backgroundColor: "#fff", borderRadius: 16, padding: 20,
+  },
+  confirmTitle:      { fontSize: 16, fontWeight: "700", color: "#111827" },
+  confirmMsg:        { fontSize: 13.5, color: "#6b7280", marginTop: 8, lineHeight: 19 },
+  confirmActions:    { flexDirection: "row", gap: 10, marginTop: 20 },
+  confirmCancelBtn:  { flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 11, borderWidth: 1.5, borderColor: "#e5e7eb" },
+  confirmCancelText: { fontSize: 14, fontWeight: "600", color: "#6b7280" },
+  confirmChangeBtn:  { flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 11, backgroundColor: "#dc2626" },
+  confirmChangeText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  // Shapes and actions run left-to-right in the bottom bar, top-to-bottom in the rail.
+  drawShapeCol:  { flexDirection: "column", gap: 6 },
+  drawColGroup:  { flexDirection: "column", gap: 8, alignItems: "stretch" },
+  // A chip/button that fills the rail's width with its label centred.
+  drawChipWide:  { width: "100%", alignItems: "center" },
+  // Pushes the action group to the foot of the rail so Save sits where the thumb expects.
+  drawRailSpacer: { flex: 1 },
+  drawRailLabel: {
+    fontSize: 10, fontWeight: "700", color: "rgba(255,255,255,0.45)",
+    letterSpacing: 0.6, marginBottom: 2,
   },
 
   // Inspection type picker

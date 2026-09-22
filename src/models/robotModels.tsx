@@ -186,12 +186,19 @@ export type VisionProgram = {
   arucoInspections?: ArucoInspection[];
   lineInspections?: LineInspection[];
   barcodeInspections?: BarcodeInspection[];
+  /**
+   * Display order of inspections, as a flat list of inspection ids across all the typed
+   * lists above. Lets the user drag inspections into any order regardless of type. Ids
+   * missing from this list (e.g. a freshly added inspection) fall to the end in their
+   * type-grouped order; an empty/absent list means "keep the default type grouping".
+   */
+  inspectionOrder?: string[];
   lastUpdatedUnixMs: number;
 };
 
 export type BlobResult       = { x: number; y: number; size: number };
 export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[] };
+export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[]; timings?: Record<string, number> };
 
 export type ArucoResult = {
   inspectionId: string;

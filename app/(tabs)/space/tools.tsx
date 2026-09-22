@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -172,6 +172,7 @@ export default function ToolsPage() {
   const tools      = useTools();
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
+  const wideContent = useWideContent();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
@@ -247,7 +248,7 @@ export default function ToolsPage() {
       <SubPageHeader title="Tools" />
 
       <ScrollView
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {/* Section header */}

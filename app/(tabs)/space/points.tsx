@@ -1,4 +1,4 @@
-import { wide, useIsWide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
@@ -319,6 +319,7 @@ export default function PointsPage() {
   const points = usePoints();
   const robot = useSelectedRobot();
   const isWide = useIsWide();
+  const wideContent = useWideContent();
   const [selectedPoint, setSelectedPoint] = useState<Point | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movingFromPage, setMovingFromPage] = useState(false);
@@ -443,7 +444,7 @@ export default function PointsPage() {
 
   // Speed selector + table — right pane in wide mode, stacked below the map on phones.
   const speedBarEl = (
-    <View style={[styles.speedBar, wide.bar]}>
+    <View style={[styles.speedBar, wideContent]}>
       <Text style={styles.speedBarLabel}>SPEED</Text>
       <View style={styles.speedSegRow}>
         {(["Slow", "Normal", "Fast"] as const).map((spd) => {
@@ -469,7 +470,7 @@ export default function PointsPage() {
       renderItem={renderItem}
       ListHeaderComponent={Header}
       stickyHeaderIndices={[0]}
-      contentContainerStyle={[styles.list, wide.content]}
+      contentContainerStyle={[styles.list, wideContent]}
       ListEmptyComponent={
         <Text style={styles.empty}>No points available</Text>
       }

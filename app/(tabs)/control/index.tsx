@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -42,6 +42,8 @@ const HOMING_LABELS: Record<string, string> = {
 
 export default function Control() {
   const s = useRobotStatus();
+  const wideContent = useWideContent();
+  const isWide = useIsWide();
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
   const isHoming = !!s?.homingState && s.homingState !== "WaitingForStart";
@@ -79,81 +81,96 @@ export default function Control() {
     },
   ];
 
+  const posSection = (
+    <View style={styles.posCard}>
+      <View style={styles.coordRow}>
+        {coords.map(({ label, value }) => (
+          <View key={label} style={styles.coordCell}>
+            <Text style={styles.coordLabel}>{label}</Text>
+            <Text style={styles.coordValue}>{fmt(value)}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.badgeRow}>
+        <View style={[styles.badge, s?.wasHomed ? styles.badgeGreen : styles.badgeGray]}>
+          <View style={[styles.badgeDot, s?.wasHomed ? styles.dotGreen : styles.dotGray]} />
+          <Text style={[styles.badgeText, s?.wasHomed ? styles.badgeTextGreen : styles.badgeTextGray]}>
+            {s?.wasHomed ? "Homed" : "Not Homed"}
+          </Text>
+        </View>
+
+        <View style={[styles.badge, s?.moving ? styles.badgeBlue : styles.badgeGray]}>
+          <View style={[styles.badgeDot, s?.moving ? styles.dotBlue : styles.dotGray]} />
+          <Text style={[styles.badgeText, s?.moving ? styles.badgeTextBlue : styles.badgeTextGray]}>
+            {s?.moving ? "Moving" : "Idle"}
+          </Text>
+        </View>
+
+        <View style={[styles.badge, s?.driverConnected ? styles.badgeGreen : styles.badgeGray]}>
+          <Cpu size={11} color={s?.driverConnected ? "#166534" : "#6b7280"} />
+          <Text style={[styles.badgeText, s?.driverConnected ? styles.badgeTextGreen : styles.badgeTextGray]}>
+            {s?.driverConnected ? "Driver" : "No Driver"}
+          </Text>
+        </View>
+
+        {s?.driverConnected && (
+          <View style={[styles.badge, s?.driverOk ? styles.badgeGreen : styles.badgeRed]}>
+            <View style={[styles.badgeDot, s?.driverOk ? styles.dotGreen : styles.dotRed]} />
+            <Text style={[styles.badgeText, s?.driverOk ? styles.badgeTextGreen : styles.badgeTextRed]}>
+              {s?.driverOk ? "Driver OK" : "Fault"}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+
+  const actionsSection = (
+    <>
+      <Text style={styles.sectionLabel}>ACTIONS</Text>
+      <View style={styles.menuCard}>
+        {actions.map((item, i) => (
+          <Pressable key={i} onPress={item.onPress}>
+            {({ pressed }) => (
+              <View style={[
+                styles.menuRow,
+                i < actions.length - 1 && styles.menuRowBorder,
+                pressed && styles.menuRowPressed,
+              ]}>
+                <View style={[styles.menuIconTile, { backgroundColor: item.iconBg }]}>
+                  {item.icon}
+                </View>
+                <View style={styles.menuTextBlock}>
+                  <Text style={styles.menuRowText}>{item.label}</Text>
+                  <Text style={styles.menuRowSub}>{item.sub}</Text>
+                </View>
+                <ChevronRight size={18} color="#c4c4c4" />
+              </View>
+            )}
+          </Pressable>
+        ))}
+      </View>
+    </>
+  );
+
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
 
-      <ScrollView contentContainerStyle={[styles.scroll, wide.content]} showsVerticalScrollIndicator={false}>
-
-        {/* ── Position card ────────────────────────────────────────── */}
-        <View style={styles.posCard}>
-          <View style={styles.coordRow}>
-            {coords.map(({ label, value }) => (
-              <View key={label} style={styles.coordCell}>
-                <Text style={styles.coordLabel}>{label}</Text>
-                <Text style={styles.coordValue}>{fmt(value)}</Text>
-              </View>
-            ))}
+      <ScrollView contentContainerStyle={[styles.scroll, wideContent]} showsVerticalScrollIndicator={false}>
+        {isWide ? (
+          // Wide: live position/status on the left, the action selectors on the right.
+          <View style={styles.wideRow}>
+            <View style={styles.wideLeftCol}>{posSection}</View>
+            <View style={styles.wideRightCol}>{actionsSection}</View>
           </View>
-
-          <View style={styles.badgeRow}>
-            <View style={[styles.badge, s?.wasHomed ? styles.badgeGreen : styles.badgeGray]}>
-              <View style={[styles.badgeDot, s?.wasHomed ? styles.dotGreen : styles.dotGray]} />
-              <Text style={[styles.badgeText, s?.wasHomed ? styles.badgeTextGreen : styles.badgeTextGray]}>
-                {s?.wasHomed ? "Homed" : "Not Homed"}
-              </Text>
-            </View>
-
-            <View style={[styles.badge, s?.moving ? styles.badgeBlue : styles.badgeGray]}>
-              <View style={[styles.badgeDot, s?.moving ? styles.dotBlue : styles.dotGray]} />
-              <Text style={[styles.badgeText, s?.moving ? styles.badgeTextBlue : styles.badgeTextGray]}>
-                {s?.moving ? "Moving" : "Idle"}
-              </Text>
-            </View>
-
-            <View style={[styles.badge, s?.driverConnected ? styles.badgeGreen : styles.badgeGray]}>
-              <Cpu size={11} color={s?.driverConnected ? "#166534" : "#6b7280"} />
-              <Text style={[styles.badgeText, s?.driverConnected ? styles.badgeTextGreen : styles.badgeTextGray]}>
-                {s?.driverConnected ? "Driver" : "No Driver"}
-              </Text>
-            </View>
-
-            {s?.driverConnected && (
-              <View style={[styles.badge, s?.driverOk ? styles.badgeGreen : styles.badgeRed]}>
-                <View style={[styles.badgeDot, s?.driverOk ? styles.dotGreen : styles.dotRed]} />
-                <Text style={[styles.badgeText, s?.driverOk ? styles.badgeTextGreen : styles.badgeTextRed]}>
-                  {s?.driverOk ? "Driver OK" : "Fault"}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── Actions ──────────────────────────────────────────────── */}
-        <Text style={styles.sectionLabel}>ACTIONS</Text>
-        <View style={styles.menuCard}>
-          {actions.map((item, i) => (
-            <Pressable key={i} onPress={item.onPress}>
-              {({ pressed }) => (
-                <View style={[
-                  styles.menuRow,
-                  i < actions.length - 1 && styles.menuRowBorder,
-                  pressed && styles.menuRowPressed,
-                ]}>
-                  <View style={[styles.menuIconTile, { backgroundColor: item.iconBg }]}>
-                    {item.icon}
-                  </View>
-                  <View style={styles.menuTextBlock}>
-                    <Text style={styles.menuRowText}>{item.label}</Text>
-                    <Text style={styles.menuRowSub}>{item.sub}</Text>
-                  </View>
-                  <ChevronRight size={18} color="#c4c4c4" />
-                </View>
-              )}
-            </Pressable>
-          ))}
-        </View>
-
+        ) : (
+          <>
+            {posSection}
+            {actionsSection}
+          </>
+        )}
       </ScrollView>
 
       {/* ── Confirmation modal ───────────────────────────────────────── */}
@@ -210,6 +227,11 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
 
+  // Wide: live position/status on a narrow left column, actions on the wider right.
+  wideRow:      { flexDirection: "row", gap: 16, alignItems: "flex-start" },
+  wideLeftCol:  { width: 360 },
+  wideRightCol: { flex: 1 },
+
   // ── Position card ────────────────────────────────────────────────────────
   posCard: {
     backgroundColor: "#fff",
@@ -250,6 +272,7 @@ const styles = StyleSheet.create({
 
   badgeRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     marginTop: 2,
   },

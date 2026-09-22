@@ -1,0 +1,86 @@
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
+import { FEED_HTML } from "@/src/vision/visionHtml";
+import type { VisionZone } from "@/src/models/robotModels";
+
+export type VisionFeedHandle = VisionCanvasHandle;
+
+/**
+ * The camera/feed preview shared by the vision editor and the inspection config editor,
+ * so both read the same and stay in sync. Pushes the feed URL and the zone outlines into
+ * the WebView (on load and whenever they change) — every declared zone always shows on
+ * the preview, whichever editor it's rendered in. Sizes itself by layout: a fixed height
+ * on phones, an aspect-ratio box that grows with the pane on wide screens.
+ *
+ * The card has no outer margin on purpose — the surrounding pane owns the padding, so the
+ * frame lines up identically in both editors.
+ */
+export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
+  feedUrl: string | null;
+  zones?: VisionZone[];
+  isWide: boolean;
+  /** width/height for the wide-layout aspect box (defaults to 4:3). */
+  aspect?: number;
+  placeholder?: string;
+  pointerEvents?: "none" | "auto" | "box-none" | "box-only";
+  onMessage?: (event: { nativeEvent: { data: string } }) => void;
+}>(function VisionFeedViewer(
+  { feedUrl, zones, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage },
+  ref,
+) {
+  const webRef = useRef<VisionCanvasHandle>(null);
+  useImperativeHandle(ref, () => ({
+    injectJavaScript: (code: string) => webRef.current?.injectJavaScript(code),
+  }), []);
+
+  // Stringify once so the inject effect fires on real geometry changes, not every render.
+  const zonesJson = useMemo(
+    () => JSON.stringify((zones ?? []).map(z => ({ geometry: z.geometry }))),
+    [zones],
+  );
+
+  const injectFeed = useCallback(() => {
+    webRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
+  }, [feedUrl]);
+  const injectZones = useCallback(() => {
+    webRef.current?.injectJavaScript(`window.setZones(${zonesJson});window.setZonesVisible(true);true;`);
+  }, [zonesJson]);
+
+  useEffect(() => { injectFeed(); }, [injectFeed]);
+  useEffect(() => { injectZones(); }, [injectZones]);
+
+  // Fresh WebView: re-send both once the document is ready.
+  const onLoad = useCallback(() => { injectFeed(); injectZones(); }, [injectFeed, injectZones]);
+
+  return (
+    <View
+      style={[styles.feedCard, isWide ? { width: "100%", aspectRatio: aspect, maxHeight: 560 } : { height: 220 }]}
+      pointerEvents={pointerEvents}
+    >
+      <VisionCanvas
+        ref={webRef}
+        html={FEED_HTML}
+        style={{ flex: 1, backgroundColor: "#111" }}
+        focusable={false}
+        onLoad={onLoad}
+        onMessage={onMessage}
+      />
+      {!feedUrl && (
+        <View style={styles.placeholder}>
+          <Text style={styles.placeholderText}>{placeholder}</Text>
+        </View>
+      )}
+    </View>
+  );
+});
+
+const styles = StyleSheet.create({
+  feedCard: {
+    backgroundColor: "#111", borderRadius: 12, overflow: "hidden",
+    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
+  },
+  placeholder: { ...StyleSheet.absoluteFill, justifyContent: "center", alignItems: "center" },
+  placeholderText: { color: "#6b7280", fontSize: 13 },
+});

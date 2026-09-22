@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
@@ -61,6 +61,7 @@ export default function SpacePage() {
   const grids  = useGrids();
   const stacks = useStacks();
   const tools  = useTools();
+  const wideContent = useWideContent();
 
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
@@ -78,7 +79,7 @@ export default function SpacePage() {
       <NotConnectedOverlay />
 
       <ScrollView
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
 

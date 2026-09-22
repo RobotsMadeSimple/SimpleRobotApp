@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
@@ -130,6 +130,7 @@ function LocalProgramCard({
 
 export default function PhoneProgramsScreen() {
   const connected = useConnected();
+  const wideContent = useWideContent();
   const [programs, setPrograms] = useState<BuiltProgram[]>([]);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick(t => t + 1), []);
@@ -181,7 +182,7 @@ export default function PhoneProgramsScreen() {
       />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {programs.length === 0 ? (

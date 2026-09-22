@@ -1,5 +1,5 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search, X } from "lucide-react-native";
 import { ReactNode } from "react";
 import {
@@ -100,6 +100,7 @@ export function ProgramListLayout({
   topOverlay, children,
 }: Props) {
   const activeChipBg = accentColor + "22"; // ~13 % opacity tint
+  const wideContent = useWideContent();
 
   return (
     <View style={s.root}>
@@ -167,7 +168,7 @@ export function ProgramListLayout({
 
       <ScrollView
         style={s.scroll}
-        contentContainerStyle={[s.content, wide.content]}
+        contentContainerStyle={[s.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {isEmpty ? (

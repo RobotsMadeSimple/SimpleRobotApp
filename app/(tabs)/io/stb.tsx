@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
@@ -7,6 +7,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 export default function StbPage() {
   const status = useRobotStatus();
+  const wideContent = useWideContent();
 
   const inputs = [
     { label: "Input 1", value: status.input1 },
@@ -29,7 +30,7 @@ export default function StbPage() {
         subtitle={`STB4100 · USB HID · ${status.driverConnected ? "Connected" : "Offline"}`}
       />
       <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         <View>

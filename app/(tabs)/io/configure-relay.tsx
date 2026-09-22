@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -21,6 +21,7 @@ const RELAY_COUNT = 4;
 export default function ConfigureRelayPage() {
   const relay   = useRelayIO();
   const names   = relay?.names ?? ["Relay 1", "Relay 2", "Relay 3", "Relay 4"];
+  const wideContent = useWideContent();
 
   // Local edit state — string per channel
   const [edits,  setEdits]  = useState<string[]>(names);
@@ -89,7 +90,7 @@ export default function ConfigureRelayPage() {
         </View>
 
         {/* ── Column headers ── */}
-        <View style={[styles.colHeaders, wide.bar]}>
+        <View style={[styles.colHeaders, wideContent]}>
           <Text style={[styles.colHeader, { width: 60 }]}>CHANNEL</Text>
           <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
         </View>
@@ -97,7 +98,7 @@ export default function ConfigureRelayPage() {
         {/* ── Relay rows ── */}
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[styles.listContent, wide.content]}
+          contentContainerStyle={[styles.listContent, wideContent]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >

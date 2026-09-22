@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "@/src/connections/robotState";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -89,6 +89,7 @@ function ProgressBar({ progress }: { progress: number }) {
 export default function AboutRobot() {
   const [robot, setRobot] = useState(getSelectedRobot());
   const status = useRobotStatus();
+  const wideContent = useWideContent();
 
   useEffect(() => subscribeRobot(setRobot), []);
 
@@ -329,7 +330,7 @@ export default function AboutRobot() {
       <SubPageHeader title="About Robot" />
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero card */}

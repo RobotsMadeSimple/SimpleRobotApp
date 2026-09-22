@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -99,6 +99,7 @@ export default function IoPage() {
   const nanos  = useNanoIO();
   const relay  = useRelayIO();
   const status = useRobotStatus();
+  const wideContent = useWideContent();
 
   const [ioConfig,    setIoConfig]    = useState<IOConfig | null>(null);
   const [auxDevices,  setAuxDevices]  = useState<AuxDeviceState[]>([]);
@@ -241,7 +242,7 @@ export default function IoPage() {
       <NotConnectedOverlay />
 
       <ScrollView
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {/* STB4100 — always visible, 1 card */}

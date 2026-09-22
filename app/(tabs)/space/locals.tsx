@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -175,6 +175,7 @@ export default function LocalsPage() {
   const locals      = useLocals();
   const status      = useRobotStatus();
   const activeLocal = status.activeLocal;
+  const wideContent = useWideContent();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
@@ -262,7 +263,7 @@ export default function LocalsPage() {
       <SubPageHeader title="Locals" />
 
       <ScrollView
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {/* Section header */}

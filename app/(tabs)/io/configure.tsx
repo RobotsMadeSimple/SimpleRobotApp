@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoPinState, PinType } from "@/src/models/robotModels";
@@ -203,6 +203,7 @@ export default function ConfigurePage() {
   const { nanoId } = useLocalSearchParams<{ nanoId: string }>();
   const nanos       = useNanoIO();
   const nano        = nanos.find(n => n.id === nanoId);
+  const wideContent = useWideContent();
 
   // Build initial edit state from the current nanoIO snapshot
   const initialEdits = useMemo<PinEdit[]>(() => {
@@ -315,7 +316,7 @@ export default function ConfigurePage() {
         </View>
 
         {/* ── Column headers ── */}
-        <View style={[styles.colHeaders, wide.bar]}>
+        <View style={[styles.colHeaders, wideContent]}>
           <Text style={[styles.colHeader, { width: 44 }]}>PIN</Text>
           <Text style={[styles.colHeader, { width: 52 }]}>TYPE</Text>
           <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
@@ -324,7 +325,7 @@ export default function ConfigurePage() {
         {/* ── Pin list ── */}
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[styles.listContent, wide.content]}
+          contentContainerStyle={[styles.listContent, wideContent]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >

@@ -2,6 +2,7 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
 import { VisionProgram } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { useCameras } from "@/src/providers/RobotProvider";
 import { router, useFocusEffect } from "expo-router";
 import { ScanSearch } from "lucide-react-native";
 import { useCallback, useState } from "react";
@@ -13,8 +14,12 @@ export default function VisionListScreen() {
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
   const [sort, setSort]         = useState<SortState>(defaultSort());
+  const cameras                 = useCameras();
 
   const refresh = useCallback(async () => {
+    // Cameras drive the new-program default below; pull a fresh list on focus so a
+    // camera added since connect is available to pick.
+    robotClient.getCameras().catch(() => {});
     try {
       const { programs: progs } = await robotClient.getVisionPrograms();
       setPrograms(progs);
@@ -30,7 +35,9 @@ export default function VisionListScreen() {
   function createNew() {
     const newProg: VisionProgram = {
       id: "", name: "New Vision Program",
-      description: "", cameraId: "", zones: [], inspections: [], lastUpdatedUnixMs: 0,
+      // Default to the first available camera so the editor opens on a live feed
+      // instead of an empty picker; "" if none are connected yet.
+      description: "", cameraId: cameras[0]?.id ?? "", zones: [], inspections: [], lastUpdatedUnixMs: 0,
     };
     router.navigate({ pathname: "/(tabs)/program/vision-editor", params: { program: JSON.stringify(newProg) } });
   }

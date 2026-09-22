@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -87,6 +87,8 @@ const MENU_ITEMS = [
 export default function ConnectedRobot() {
   const selectedRobot = useSelectedRobot();
   const robots = useRobots();
+  const wideContent = useWideContent();
+  const isWide = useIsWide();
 
   const robot =
     robots.find((r) => r.serialNumber === selectedRobot?.serialNumber) ??
@@ -105,18 +107,17 @@ export default function ConnectedRobot() {
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
 
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[styles.content, wide.content]}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Robot info card */}
+  const infoSection = (
+    <>
       <Text style={styles.sectionLabel}>CONNECTED ROBOT</Text>
       <View style={styles.card}>
-        <View style={styles.robotRow}>
-          <View style={styles.imageWrapper}>
-            <Image source={imageSource} style={styles.robotImage} resizeMode="contain" />
+        <View style={[styles.robotRow, isWide && styles.robotRowWide]}>
+          <View style={[styles.imageWrapper, isWide && styles.imageWrapperWide]}>
+            <Image
+              source={imageSource}
+              style={[styles.robotImage, isWide && styles.robotImageWide]}
+              resizeMode="contain"
+            />
           </View>
 
           <View style={styles.robotInfo}>
@@ -138,9 +139,12 @@ export default function ConnectedRobot() {
           <Text style={styles.changeBtnText}>Change Robot</Text>
         </TouchableOpacity>
       </View>
+    </>
+  );
 
-      {/* Navigation menu */}
-      <Text style={[styles.sectionLabel, { marginTop: 20 }]}>NAVIGATE TO</Text>
+  const navSection = (
+    <>
+      <Text style={styles.sectionLabel}>NAVIGATE TO</Text>
       <View style={styles.card}>
         {MENU_ITEMS.map((item, i) => {
           const Icon = item.icon;
@@ -166,6 +170,28 @@ export default function ConnectedRobot() {
           );
         })}
       </View>
+    </>
+  );
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, wideContent]}
+      showsVerticalScrollIndicator={false}
+    >
+      {isWide ? (
+        // Wide: robot info + Change Robot in a narrow left column, the navigation
+        // targets in the wider right one.
+        <View style={styles.wideRow}>
+          <View style={styles.wideLeftCol}>{infoSection}</View>
+          <View style={styles.wideRightCol}>{navSection}</View>
+        </View>
+      ) : (
+        <>
+          {infoSection}
+          <View style={{ marginTop: 20 }}>{navSection}</View>
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -178,6 +204,21 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+
+  // ── Wide two-column layout ──────────────────────────────────────────────────
+  // Info + Change Robot on a narrow left column, navigation on the wider right.
+  // alignItems flex-start so each column is only as tall as its own content.
+  wideRow: {
+    flexDirection: "row",
+    gap: 16,
+    alignItems: "flex-start",
+  },
+  wideLeftCol: {
+    width: 360,
+  },
+  wideRightCol: {
+    flex: 1,
   },
   center: {
     flex: 1,
@@ -226,6 +267,12 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 14,
   },
+  // Wide: stack the image above the info and let it span the column width.
+  robotRowWide: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 12,
+  },
   imageWrapper: {
     width: 120,
     height: 120,
@@ -234,9 +281,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  imageWrapperWide: {
+    width: "100%",
+    height: 200,
+  },
   robotImage: {
     width: 120,
     height: 120,
+  },
+  robotImageWide: {
+    width: "100%",
+    height: 200,
   },
   robotInfo: {
     flex: 1,

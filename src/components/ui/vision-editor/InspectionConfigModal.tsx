@@ -30,10 +30,9 @@ import {
   defaultBlobParams,
   defaultColorEntry,
 } from "@/src/models/robotModels";
-import { FEED_HTML } from "@/src/vision/visionHtml";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
-import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
 import { ves } from "./visionEditorStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
@@ -92,38 +91,49 @@ export function InspectionConfigModal({
   const [minCoverageText, setMinCoverageText] = useState('50');
   const [maxCoverageText, setMaxCoverageText] = useState('90');
 
-  const minCovBarWRef  = useRef(1);
-  const minCovValRef   = useRef(50);
-  const minCovStartRef = useRef(50);
+  // One range slider drives both bounds. Refs (not state) because the PanResponder is
+  // created once and would otherwise close over stale values.
+  const covBarWRef   = useRef(1);
+  const minCovValRef = useRef(50);
+  const maxCovValRef = useRef(90);
+  const minOnRef     = useRef(false);
+  const maxOnRef     = useRef(false);
   minCovValRef.current = minCoverage ?? 50;
-
-  const maxCovBarWRef  = useRef(1);
-  const maxCovValRef   = useRef(90);
-  const maxCovStartRef = useRef(90);
   maxCovValRef.current = maxCoverage ?? 90;
+  minOnRef.current     = minCoverage !== null;
+  maxOnRef.current     = maxCoverage !== null;
 
-  const minCovPan = useRef(PanResponder.create({
+  // One pan responder per thumb — each thumb owns its own drag. Detecting which thumb
+  // from the touch position was unreliable (locationX reads as ~0 on web, so it always
+  // picked the min); giving each thumb its own handler is robust everywhere. Each is
+  // clamped against the other so the min can never pass the max (an empty pass band).
+  const minDragStart = useRef(0);
+  const maxDragStart = useRef(0);
+  const dxToPct = (g: { dx: number }) => (g.dx / Math.max(1, covBarWRef.current)) * 100;
+  const clampPct = (v: number) => Math.round(Math.max(0, Math.min(100, v)) * 10) / 10;
+
+  const minThumbPan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { minCovStartRef.current = minCovValRef.current; },
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { minDragStart.current = minCovValRef.current; },
     onPanResponderMove: (_, g) => {
       if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const v = Math.round(Math.max(0, Math.min(100,
-        minCovStartRef.current + (g.dx / Math.max(1, minCovBarWRef.current)) * 100)) * 10) / 10;
+      let v = clampPct(minDragStart.current + dxToPct(g));
+      if (maxOnRef.current) v = Math.min(v, maxCovValRef.current);
       setMinCoverage(v); setMinCoverageText(String(v));
     },
-    onPanResponderRelease: () => {},
   })).current;
 
-  const maxCovPan = useRef(PanResponder.create({
+  const maxThumbPan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { maxCovStartRef.current = maxCovValRef.current; },
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { maxDragStart.current = maxCovValRef.current; },
     onPanResponderMove: (_, g) => {
       if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const v = Math.round(Math.max(0, Math.min(100,
-        maxCovStartRef.current + (g.dx / Math.max(1, maxCovBarWRef.current)) * 100)) * 10) / 10;
+      let v = clampPct(maxDragStart.current + dxToPct(g));
+      if (minOnRef.current) v = Math.max(v, minCovValRef.current);
       setMaxCoverage(v); setMaxCoverageText(String(v));
     },
-    onPanResponderRelease: () => {},
   })).current;
 
   // Polygon-specific state
@@ -160,7 +170,6 @@ export function InspectionConfigModal({
 
   const [zonePickerOpen, setZonePickerOpen]   = useState(false);
   const [colorEditState, setColorEditState]   = useState<{ entry: ColorEntry } | null>(null);
-  const debugWebviewRef = useRef<any>(null);
 
   // Pulse the Start/Stop button while a start/stop transition is in flight — mirrors the main view.
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -261,16 +270,6 @@ export function InspectionConfigModal({
     return () => clearTimeout(t);
   }, [lineCannyT1, lineCannyT2, lineHoughThresh, lineMinLineLen, lineMaxLineGap,
       lineFilterByAngle, lineMinAngle, lineMaxAngle, name, enabled, zoneId]);
-
-  // Start / stop the debug feed when visibility, URL, or paused state changes
-  useEffect(() => {
-    if (!debugWebviewRef.current) return;
-    if (visible && feedUrl) {
-      debugWebviewRef.current.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
-    } else {
-      debugWebviewRef.current.injectJavaScript(`window.pauseFeed();true;`);
-    }
-  }, [visible, feedUrl]);
 
   useEffect(() => {
     if (!visible) return;
@@ -374,27 +373,17 @@ export function InspectionConfigModal({
   // raw camera stream otherwise, with the same Start/Stop control. Rendered
   // above the config fields on phones, in a left pane on wide screens.
   const feedSection = (
-    <>
-        <View style={ws.feedCard}>
-            <VisionCanvas
-              ref={debugWebviewRef}
-              html={FEED_HTML}
-              style={{ flex: 1, backgroundColor: '#0d1117' }}
-              onLoad={() => {
-                if (feedUrl)
-                  debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
-              }}
-            />
-            {!feedUrl && (
-              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#9ca3af', fontSize: 13 }}>No camera feed</Text>
-              </View>
-            )}
-        </View>
+    <View style={ws.feedPad}>
+        {/* Shared with the vision editor: same frame, same padding, zones always drawn. */}
+        <VisionFeedViewer
+          feedUrl={feedUrl ?? null}
+          zones={zones}
+          isWide={isWide}
+          placeholder="No camera feed"
+        />
 
         {onToggleRunning && (
-          <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+          <View>
             <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
               <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -421,14 +410,16 @@ export function InspectionConfigModal({
         )}
 
         {isRunning && (
-          <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+          <View>
             <VisionResults
               result={visionResult ?? null}
               only={initialBlob?.id ?? initialColor?.id ?? initialPolygon?.id ?? initialAruco?.id ?? initialLine?.id ?? initialBarcode?.id}
+              // Feed the thresholds being edited so the coverage bar tracks them live.
+              colorInspections={initialColor ? [{ ...initialColor, minCoverage, maxCoverage }] : undefined}
             />
           </View>
         )}
-    </>
+    </View>
   );
 
   return (
@@ -446,18 +437,8 @@ export function InspectionConfigModal({
         />
 
         <View style={isWide ? ws.wideRow : ws.stack}>
-        {isWide ? (
-          /* Wide layout: feed + run + results in a fixed left pane */
-          <ScrollView
-            style={[ws.leftPane, isSplit && wide.paneSplit]}
-            contentContainerStyle={ws.leftPaneContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {feedSection}
-          </ScrollView>
-        ) : (
-          feedSection
-        )}
+        {/* Narrow: feed stacks on top. Wide: it moves to a fixed pane on the right (below). */}
+        {!isWide && feedSection}
 
         <ScrollView
           style={{ flex: 1 }}
@@ -465,22 +446,23 @@ export function InspectionConfigModal({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Name */}
-          <View style={ves.configCard}>
-            <Text style={ves.configFieldLabel}>Name</Text>
-            <TextInput
-              style={ves.configNameInput}
-              value={name}
-              onChangeText={setName}
-              placeholder="Inspection name"
-              placeholderTextColor="#9ca3af"
-            />
-          </View>
-
-          {/* Enabled */}
-          <View style={ves.configCard}>
-            <Text style={[ves.configFieldLabel, { flex: 1 }]}>Enabled</Text>
-            <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: accent }} />
+          {/* Name + Enabled grouped under one header */}
+          <View style={ves.groupCard}>
+            <Text style={ves.groupTitle}>DETAILS</Text>
+            <View style={ves.groupRow}>
+              <Text style={ves.configFieldLabel}>Name</Text>
+              <TextInput
+                style={ves.configNameInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="Inspection name"
+                placeholderTextColor="#9ca3af"
+              />
+            </View>
+            <View style={[ves.groupRow, ves.groupRowBorder]}>
+              <Text style={[ves.configFieldLabel, { flex: 1 }]}>Enabled</Text>
+              <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: accent }} />
+            </View>
           </View>
 
           {/* Zone */}
@@ -625,58 +607,61 @@ export function InspectionConfigModal({
           {/* Color coverage */}
           {kind === 'color' && (
             <>
-              <Text style={[ves.sectionLabel, { marginTop: 4 }]}>COLORS TO MATCH</Text>
+              <View style={ves.groupCard}>
+                <Text style={ves.groupTitle}>COLORS TO MATCH</Text>
 
-              {colors.length === 0 && (
-                <View style={ves.emptyCard}>
-                  <Text style={ves.emptyText}>No colors yet — add at least one</Text>
-                </View>
-              )}
+                {colors.length === 0 && (
+                  <View style={ves.emptyCard}>
+                    <Text style={ves.emptyText}>No colors yet — add at least one</Text>
+                  </View>
+                )}
 
-              {colors.map(ce => (
+                {colors.map(ce => (
+                  <TouchableOpacity
+                    key={ce.id}
+                    style={ves.colorEntryRow}
+                    onPress={() => setColorEditState({ entry: ce })}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{
+                      width: 28, height: 28, borderRadius: 6,
+                      backgroundColor: `rgb(${ce.r},${ce.g},${ce.b})`,
+                      borderWidth: 1, borderColor: '#d1d5db',
+                    }} />
+                    <Text style={{ flex: 1, fontSize: 12, color: '#374151' }}>
+                      rgb({ce.r}, {ce.g}, {ce.b})
+                    </Text>
+                    <View style={{
+                      backgroundColor: '#f0f9ff', borderRadius: 5,
+                      paddingHorizontal: 6, paddingVertical: 2,
+                      borderWidth: 1, borderColor: '#bae6fd',
+                    }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: '#0891b2' }}>
+                        ±{ce.tolerance}
+                      </Text>
+                    </View>
+                    <DeleteIconButton
+                      size={13}
+                      onPress={() => setColors(prev => prev.filter(c => c.id !== ce.id))}
+                      style={ves.iconBtn}
+                    />
+                  </TouchableOpacity>
+                ))}
+
                 <TouchableOpacity
-                  key={ce.id}
-                  style={ves.colorEntryRow}
-                  onPress={() => setColorEditState({ entry: ce })}
+                  style={ves.addBtn}
+                  onPress={() => setColorEditState({ entry: defaultColorEntry() })}
                   activeOpacity={0.75}
                 >
-                  <View style={{
-                    width: 28, height: 28, borderRadius: 6,
-                    backgroundColor: `rgb(${ce.r},${ce.g},${ce.b})`,
-                    borderWidth: 1, borderColor: '#d1d5db',
-                  }} />
-                  <Text style={{ flex: 1, fontSize: 12, color: '#374151' }}>
-                    rgb({ce.r}, {ce.g}, {ce.b})
-                  </Text>
-                  <View style={{
-                    backgroundColor: '#f0f9ff', borderRadius: 5,
-                    paddingHorizontal: 6, paddingVertical: 2,
-                    borderWidth: 1, borderColor: '#bae6fd',
-                  }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#0891b2' }}>
-                      ±{ce.tolerance}
-                    </Text>
-                  </View>
-                  <DeleteIconButton
-                    size={13}
-                    onPress={() => setColors(prev => prev.filter(c => c.id !== ce.id))}
-                    style={ves.iconBtn}
-                  />
+                  <Plus size={13} color="#d946ef" />
+                  <Text style={[ves.addBtnText, { color: '#d946ef' }]}>Add Color</Text>
                 </TouchableOpacity>
-              ))}
-
-              <TouchableOpacity
-                style={ves.addBtn}
-                onPress={() => setColorEditState({ entry: defaultColorEntry() })}
-                activeOpacity={0.75}
-              >
-                <Plus size={13} color="#d946ef" />
-                <Text style={[ves.addBtnText, { color: '#d946ef' }]}>Add Color</Text>
-              </TouchableOpacity>
+              </View>
 
               <Text style={[ves.sectionLabel, { marginTop: 4 }]}>PASS / FAIL THRESHOLDS</Text>
 
               <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: 10 }]}>
+                {/* Min row */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <Switch
                     value={minCoverage !== null}
@@ -694,7 +679,8 @@ export function InspectionConfigModal({
                         onChangeText={t => {
                           setMinCoverageText(t);
                           const n = parseFloat(t);
-                          if (!isNaN(n)) setMinCoverage(Math.min(100, Math.max(0, n)));
+                          // Clamp to the max, so the min can never be set above it.
+                          if (!isNaN(n)) setMinCoverage(Math.min(maxCoverage ?? 100, Math.max(0, n)));
                         }}
                         onBlur={() => {
                           if (minCoverageText.trim() === '' || isNaN(parseFloat(minCoverageText)))
@@ -705,36 +691,9 @@ export function InspectionConfigModal({
                     </>
                   )}
                 </View>
-                {minCoverage !== null && (
-                  <View
-                    style={{ marginTop: 10, height: 22, position: 'relative' }}
-                    onLayout={e => { minCovBarWRef.current = e.nativeEvent.layout.width; }}
-                    {...minCovPan.panHandlers}
-                  >
-                    <View style={{
-                      position: 'absolute', left: 0, right: 0,
-                      top: (22 - 5) / 2, height: 5, borderRadius: 3,
-                      backgroundColor: '#e5e7eb', overflow: 'hidden',
-                    }}>
-                      <View style={{ width: `${minCoverage}%`, height: '100%', borderRadius: 3, backgroundColor: '#16a34a' }} />
-                    </View>
-                    <View style={{
-                      position: 'absolute', left: `${minCoverage}%`, top: 0,
-                      width: 22, height: 22, marginLeft: -11,
-                      justifyContent: 'center', alignItems: 'center',
-                    }}>
-                      <View style={{
-                        width: 18, height: 18, borderRadius: 9,
-                        backgroundColor: '#fff', borderWidth: 2, borderColor: '#16a34a',
-                        shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
-                      }} />
-                    </View>
-                  </View>
-                )}
-              </View>
 
-              <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: 10 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {/* Max row */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
                   <Switch
                     value={maxCoverage !== null}
                     onValueChange={v => { setMaxCoverage(v ? 90 : null); if (v) setMaxCoverageText('90'); }}
@@ -751,7 +710,8 @@ export function InspectionConfigModal({
                         onChangeText={t => {
                           setMaxCoverageText(t);
                           const n = parseFloat(t);
-                          if (!isNaN(n)) setMaxCoverage(Math.min(100, Math.max(0, n)));
+                          // Clamp to the min, so the max can never be set below it.
+                          if (!isNaN(n)) setMaxCoverage(Math.max(minCoverage ?? 0, Math.min(100, n)));
                         }}
                         onBlur={() => {
                           if (maxCoverageText.trim() === '' || isNaN(parseFloat(maxCoverageText)))
@@ -762,30 +722,60 @@ export function InspectionConfigModal({
                     </>
                   )}
                 </View>
-                {maxCoverage !== null && (
+
+                {/* One merged range slider — green min thumb, red max thumb, the pass band
+                    (coverage between them) filled between. */}
+                {(minCoverage !== null || maxCoverage !== null) && (
                   <View
-                    style={{ marginTop: 10, height: 22, position: 'relative' }}
-                    onLayout={e => { maxCovBarWRef.current = e.nativeEvent.layout.width; }}
-                    {...maxCovPan.panHandlers}
+                    style={{ marginTop: 14, height: 28, position: 'relative' }}
+                    onLayout={e => { covBarWRef.current = e.nativeEvent.layout.width; }}
                   >
                     <View style={{
                       position: 'absolute', left: 0, right: 0,
-                      top: (22 - 5) / 2, height: 5, borderRadius: 3,
+                      top: (28 - 5) / 2, height: 5, borderRadius: 3,
                       backgroundColor: '#e5e7eb', overflow: 'hidden',
                     }}>
-                      <View style={{ width: `${maxCoverage}%`, height: '100%', borderRadius: 3, backgroundColor: '#dc2626' }} />
-                    </View>
-                    <View style={{
-                      position: 'absolute', left: `${maxCoverage}%`, top: 0,
-                      width: 22, height: 22, marginLeft: -11,
-                      justifyContent: 'center', alignItems: 'center',
-                    }}>
                       <View style={{
-                        width: 18, height: 18, borderRadius: 9,
-                        backgroundColor: '#fff', borderWidth: 2, borderColor: '#dc2626',
-                        shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+                        position: 'absolute', top: 0, bottom: 0,
+                        left: `${minCoverage ?? 0}%`,
+                        right: `${maxCoverage !== null ? 100 - maxCoverage : 0}%`,
+                        backgroundColor: '#86efac',
                       }} />
                     </View>
+                    {minCoverage !== null && (
+                      <View
+                        {...minThumbPan.panHandlers}
+                        hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                        style={{
+                          position: 'absolute', left: `${minCoverage}%`, top: 0,
+                          width: 28, height: 28, marginLeft: -14,
+                          justifyContent: 'center', alignItems: 'center',
+                        }}
+                      >
+                        <View style={{
+                          width: 18, height: 18, borderRadius: 9,
+                          backgroundColor: '#fff', borderWidth: 2, borderColor: '#16a34a',
+                          shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+                        }} />
+                      </View>
+                    )}
+                    {maxCoverage !== null && (
+                      <View
+                        {...maxThumbPan.panHandlers}
+                        hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                        style={{
+                          position: 'absolute', left: `${maxCoverage}%`, top: 0,
+                          width: 28, height: 28, marginLeft: -14,
+                          justifyContent: 'center', alignItems: 'center',
+                        }}
+                      >
+                        <View style={{
+                          width: 18, height: 18, borderRadius: 9,
+                          backgroundColor: '#fff', borderWidth: 2, borderColor: '#dc2626',
+                          shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+                        }} />
+                      </View>
+                    )}
                   </View>
                 )}
               </View>
@@ -794,6 +784,17 @@ export function InspectionConfigModal({
 
           <View style={{ height: 40 }} />
         </ScrollView>
+
+        {isWide && (
+          /* Wide layout: feed + run + results in a fixed pane on the right */
+          <ScrollView
+            style={[ws.feedPane, isSplit && wide.paneSplit]}
+            contentContainerStyle={ws.leftPaneContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {feedSection}
+          </ScrollView>
+        )}
         </View>
 
       <ZonePickerModal
@@ -834,20 +835,18 @@ export function InspectionConfigModal({
 
 const ws = StyleSheet.create({
   stack: { flex: 1 },
-  // Matches the main vision editor's feedCard so both feeds read the same.
-  feedCard: {
-    height: 220, backgroundColor: "#0d1117",
-    borderRadius: 12, overflow: "hidden",
-    marginHorizontal: 14, marginTop: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
-  },
+  // Padding around the frame + its controls. Matches the vision editor's feed pane
+  // (paddingHorizontal 20 / paddingTop 18) so the frame sits identically in both editors.
+  feedPad: { paddingHorizontal: 20, paddingTop: 18, gap: 10 },
   wideRow: {
     flex: 1, flexDirection: "row",
-    width: "100%", maxWidth: 1200, alignSelf: "center",
+    width: "100%",
   },
-  leftPane: {
-    width: 420, flexGrow: 0, flexShrink: 0,
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+  // Feed pane (on the right) grows with the (uncapped) row width, bounded for very
+  // wide/narrow desktops. "split" mode overrides this to an even 50/50 via wide.paneSplit.
+  feedPane: {
+    width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e7eb",
   },
   leftPaneContent: { paddingBottom: 24 },
   rightPaneContent: { width: "100%", maxWidth: 720, alignSelf: "center" },

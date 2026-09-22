@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import "@/global.css";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
@@ -56,6 +57,7 @@ function usePreventBackExit() {
 
 export function TabLayout() {
   const insets = useSafeAreaInsets();
+  const isWide = useIsWide();
   usePreventBackExit();
 
   return (
@@ -67,10 +69,13 @@ export function TabLayout() {
         headerRight: () => <ConnectionStatus />,
         tabBarActiveTintColor: "#2563eb",
         tabBarInactiveTintColor: "#64748b",
-        tabBarStyle: {
-          height: 60 + insets.bottom,
-          paddingBottom: insets.bottom,
-        },
+        // Wide screens (tablet/desktop/web): a vertical navigation rail down the left
+        // edge. Narrow screens keep the classic bottom tab bar.
+        tabBarPosition: isWide ? "left" : "bottom",
+        tabBarVariant: isWide ? "material" : "uikit",
+        tabBarStyle: isWide
+          ? { paddingTop: insets.top }
+          : { height: 60 + insets.bottom, paddingBottom: insets.bottom },
         tabBarLabelStyle: { fontSize: 12 },
         tabBarIcon: ({ color, size }) => {
           const icons: Record<string, any> = {

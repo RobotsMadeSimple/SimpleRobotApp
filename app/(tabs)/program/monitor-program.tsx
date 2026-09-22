@@ -52,7 +52,7 @@ import {
 // change, which on a board updating each ply reads as a flicker rather than a move.
 import { Image as ExpoImage } from "expo-image";
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { wide } from "@/src/components/ui/responsive";
+import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
 
 // ── Status theming ────────────────────────────────────────────────────────────
@@ -258,6 +258,9 @@ export default function MonitorProgramScreen() {
   }, [programName, program]);
 
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
+  // Three columns only on genuinely wide (desktop) screens — three side-by-side cards
+  // need the room; below that the page stays a single scroll.
+  const threeCol = usePaneLayout() === "desktop";
 
   // Spinner while an action is being applied — cleared when the status changes
   // (the action took effect) or after a short fallback timeout.
@@ -412,7 +415,7 @@ export default function MonitorProgramScreen() {
     () => (builtProgram?.variables ?? []).filter(v => v.displayOnMonitor && v.isImage).map(v => v.name),
     [builtProgram?.variables],
   );
-  const monitoredImageKey = monitoredImages.join(' ');
+  const monitoredImageKey = monitoredImages.join(' ');
 
   useFocusEffect(
     useCallback(() => {
@@ -423,7 +426,10 @@ export default function MonitorProgramScreen() {
         robotClient.getProgramVariables(programName)
           .then(({ variables, images }) => {
             if (cancelled) return;
-            setVarSnapshots(variables);
+            // Only overwrite with a non-empty snapshot. A stopped/finished program reports
+            // no values, and we hold the last live ones rather than dropping back to the
+            // declared initial values. Cleared on program change (see below).
+            if (variables.length > 0) setVarSnapshots(variables);
             for (const img of images) {
               // Revision 0 is "declared, never written" — there is nothing to ask for.
               if (img.revision === 0) continue;
@@ -450,11 +456,13 @@ export default function MonitorProgramScreen() {
     }, [programName, hasMonitoredVars, monitoredImageKey])
   );
 
-  // A different program's images are not this one's. Clearing on the name rather than in
-  // the poll's cleanup keeps the last frame on screen when the page merely loses focus.
+  // A different program's images and values are not this one's. Clearing on the name
+  // rather than in the poll's cleanup keeps the last frame/values on screen when the page
+  // merely loses focus, while still resetting when you open a different program.
   useEffect(() => {
     imageRevs.current = {};
     setImageData({});
+    setVarSnapshots([]);
   }, [programName]);
 
   // The variable poll re-renders this page every 300ms. Built inline, the data URI would
@@ -559,9 +567,26 @@ export default function MonitorProgramScreen() {
   const hasAlert   = !!(pinnedError || pinnedWarning);
   const isError    = !!pinnedError;
   const alertColor = isError ? '#dc2626' : '#d97706';
-  const alertLight = isError ? '#fef2f2' : '#fffbeb';
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  // Declared monitor scalars with their initial values. Shown before the program starts
+  // (the controller reports no running values yet) so the VARIABLES section is always
+  // present instead of popping in on first run. Plain (not memoised) so it can sit after
+  // the early returns above without disturbing hook order.
+  const declaredMonitorVars: ProgramVariableSnapshot[] = (builtProgram?.variables ?? [])
+    .filter(v => v.displayOnMonitor && !isListVariable(v) && !v.isImage && !v.isString)
+    .map(v => ({ name: v.name, value: v.value ?? 0, isBoolean: v.isBoolean === true }));
+  // Live values once running; the declared initial values before then.
+  const displayVars = varSnapshots.length > 0 ? varSnapshots : declaredMonitorVars;
+
+  // On desktop each data column scrolls on its own inside a viewport-height row, so the
+  // page itself never scrolls and the log fits on screen. On narrow, Column is a plain
+  // View and everything stacks in the outer ScrollView exactly as before.
+  const Column: any = threeCol ? ScrollView : View;
+  const columnProps: any = threeCol
+    ? { style: styles.wideCol, contentContainerStyle: styles.wideColContent, nestedScrollEnabled: true, showsVerticalScrollIndicator: false }
+    : {};
 
   return (
     <View style={styles.root}>
@@ -586,10 +611,15 @@ export default function MonitorProgramScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.scroll} contentContainerStyle={wide.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={threeCol ? styles.wideScroll : wide.content} scrollEnabled={!threeCol} showsVerticalScrollIndicator={false}>
+        {/* On desktop the sections split into three columns: name + actions, position,
+            and the log. On narrower screens these wrapper Views are unstyled, so they
+            simply stack and the single-column order is exactly as before. */}
+        <View style={threeCol && styles.wideColumns}>
+          <Column {...columnProps}>
 
-        {/* ── Hero: full-width status banner ── */}
-        <View style={[styles.hero, { backgroundColor: hasAlert ? alertLight : theme.bg }]}>
+        {/* ── Program card: identity (name, image, chips) + progress + actions ── */}
+        <View style={styles.section}>
           {/* Status + built chip */}
           <View style={styles.heroTopRow}>
             <View style={[styles.statusBadge, { borderColor: theme.bar + "55" }]}>
@@ -633,10 +663,7 @@ export default function MonitorProgramScreen() {
               </Text>
             </View>
           </View>
-        </View>
 
-        {/* ── Progress section ── */}
-        <View style={styles.section}>
           <View style={styles.progressHeader}>
             <Text style={styles.sectionLabel}>PROGRESS</Text>
             <Text style={styles.progressMeta}>
@@ -725,16 +752,58 @@ export default function MonitorProgramScreen() {
               )}
             </View>
           ) : null}
+
+          {/* Edit / Delete now sit inside the progress card, under the run controls. */}
+          {isBuilt && (
+            <View style={[styles.managementRow, { marginTop: 10 }]}>
+              <ActionButton
+                label="Edit"
+                icon={<Edit2 size={15} color="#2563eb" />}
+                style={styles.editBtn}
+                textStyle={styles.editBtnText}
+                spinnerColor="#2563eb"
+                onPress={handleEditPress}
+              />
+              <ActionButton
+                label="Delete"
+                icon={<Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />}
+                loading={deleting}
+                disabled={isActivelyRunning}
+                style={[styles.deleteBtn, isActivelyRunning && styles.deleteBtnDisabled]}
+                textStyle={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}
+                spinnerColor="#dc2626"
+                onPress={() =>
+                  appAlert(
+                    "Delete Program",
+                    `Delete "${programName}"? This cannot be undone.`,
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Delete",
+                        style: "destructive",
+                        onPress: async () => {
+                          setDeleting(true);
+                          await robotClient.deleteBuiltProgram(programName).catch(() => {});
+                          robotClient.getBuiltPrograms().catch(() => {});
+                          router.back();
+                        },
+                      },
+                    ]
+                  )
+                }
+              />
+            </View>
+          )}
         </View>
 
         {/* ── Variables ── */}
-        {varSnapshots.length > 0 && (
+        {displayVars.length > 0 && (
           <>
             <View style={styles.gapBand} />
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>VARIABLES</Text>
               <View style={styles.varGrid}>
-                {varSnapshots.map(v => {
+                {displayVars.map(v => {
                   const display = v.isBoolean
                     ? (v.value !== 0 ? "True" : "False")
                     : Number.isInteger(v.value) ? String(v.value) : v.value.toFixed(4).replace(/\.?0+$/, '');
@@ -794,25 +863,12 @@ export default function MonitorProgramScreen() {
           </>
         )}
 
-        {/* ── Speed Override + Position (foreground only) ── */}
+          </Column>
+          <Column {...columnProps}>
+
+        {/* ── Position (foreground only) — speed override merged onto its foot ── */}
         {!isBackground && (
           <>
-            <View style={styles.gapBand} />
-            <TouchableOpacity style={styles.section} onPress={() => setSpeedModalOpen(true)} activeOpacity={0.7}>
-              {(() => {
-                const pct   = s?.speedOverridePercent ?? 100;
-                const color = pct > 100 ? "#dc2626" : pct < 50 ? "#d97706" : "#2563eb";
-                return (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <Gauge size={16} color={color} />
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Speed Override</Text>
-                    <Text style={{ fontSize: 16, fontWeight: "700", color }}>{Math.round(pct)}%</Text>
-                    <ChevronRight size={16} color="#d1d5db" />
-                  </View>
-                );
-              })()}
-            </TouchableOpacity>
-
             <View style={styles.gapBand} />
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>POSITION</Text>
@@ -894,55 +950,22 @@ export default function MonitorProgramScreen() {
                   );
                 })}
               </View>
-            </View>
-          </>
-        )}
 
-        {/* ── Program management (built only) ── */}
-        {isBuilt && (
-          <>
-            <View style={styles.gapBand} />
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>PROGRAM</Text>
-              <View style={styles.managementRow}>
-                <ActionButton
-                  label="Edit"
-                  icon={<Edit2 size={15} color="#2563eb" />}
-                  style={styles.editBtn}
-                  textStyle={styles.editBtnText}
-                  spinnerColor="#2563eb"
-                  onPress={handleEditPress}
-                />
-
-                <ActionButton
-                  label="Delete"
-                  icon={<Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />}
-                  loading={deleting}
-                  disabled={isActivelyRunning}
-                  style={[styles.deleteBtn, isActivelyRunning && styles.deleteBtnDisabled]}
-                  textStyle={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}
-                  spinnerColor="#dc2626"
-                  onPress={() =>
-                    appAlert(
-                      "Delete Program",
-                      `Delete "${programName}"? This cannot be undone.`,
-                      [
-                        { text: "Cancel", style: "cancel" },
-                        {
-                          text: "Delete",
-                          style: "destructive",
-                          onPress: async () => {
-                            setDeleting(true);
-                            await robotClient.deleteBuiltProgram(programName).catch(() => {});
-                            robotClient.getBuiltPrograms().catch(() => {});
-                            router.back();
-                          },
-                        },
-                      ]
-                    )
-                  }
-                />
-              </View>
+              {/* Speed override, merged onto the foot of the position card. */}
+              <TouchableOpacity style={styles.speedOverrideRow} onPress={() => setSpeedModalOpen(true)} activeOpacity={0.7}>
+                {(() => {
+                  const pct   = s?.speedOverridePercent ?? 100;
+                  const color = pct > 100 ? "#dc2626" : pct < 50 ? "#d97706" : "#2563eb";
+                  return (
+                    <>
+                      <Gauge size={16} color={color} />
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Speed Override</Text>
+                      <Text style={{ fontSize: 16, fontWeight: "700", color }}>{Math.round(pct)}%</Text>
+                      <ChevronRight size={16} color="#d1d5db" />
+                    </>
+                  );
+                })()}
+              </TouchableOpacity>
             </View>
           </>
         )}
@@ -1011,9 +1034,12 @@ export default function MonitorProgramScreen() {
           </>
         )}
 
+          </Column>
+          <View style={threeCol && styles.wideCol}>
+
         {/* ── Logs ── */}
         <View style={styles.gapBand} />
-        <View style={styles.logsSection}>
+        <View style={[styles.logsSection, threeCol && styles.logsSectionFull]}>
           <View style={styles.logHeader}>
             <Text style={styles.logSectionLabel}>PROGRAM LOG</Text>
             <View style={styles.logCountBadge}>
@@ -1021,7 +1047,7 @@ export default function MonitorProgramScreen() {
             </View>
           </View>
           <ScrollView
-            style={styles.logsScroll}
+            style={threeCol ? styles.logsScrollFull : styles.logsScroll}
             showsVerticalScrollIndicator
             nestedScrollEnabled
           >
@@ -1054,7 +1080,9 @@ export default function MonitorProgramScreen() {
           </ScrollView>
         </View>
 
-        <View style={{ height: 48 }} />
+          </View>
+        </View>
+        {!threeCol && <View style={{ height: 48 }} />}
       </ScrollView>
 
       <SpeedOverrideModal
@@ -1070,6 +1098,35 @@ export default function MonitorProgramScreen() {
 
 const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: "#f3f4f6" },
+
+  // ── Wide (desktop) three-column layout ──────────────────────────────────────
+  // flexGrow makes the content fill the viewport height (the outer ScrollView has
+  // scrolling disabled at this width), and the row + columns inherit that height so
+  // each column scrolls on its own instead of the whole page scrolling.
+  wideScroll:  { flexGrow: 1, paddingHorizontal: 10, paddingTop: 10 },
+  // stretch (not flex-start) so every column takes the row's full height — that is what
+  // lets the log card in the right column fill the space instead of sitting in a short box.
+  wideColumns: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 10,
+    width: "100%",
+  },
+  wideCol: { flex: 1 },
+  // Scroll content for the left/middle data columns (ScrollViews on desktop).
+  wideColContent: { paddingBottom: 16 },
+
+  // Speed override, merged onto the foot of the position card with a divider above it.
+  speedOverrideRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e7eb",
+  },
   scroll: { flex: 1 },
 
   // ── Center states (loading / not-found) ───────────────────────────────────
@@ -1081,9 +1138,6 @@ const styles = StyleSheet.create({
   centerSub:   { fontSize: 13, color: "#9ca3af", textAlign: "center", lineHeight: 20 },
 
   // ── Hero ───────────────────────────────────────────────────────────────────
-  hero: {
-    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24, gap: 16,
-  },
   heroTopRow: {
     flexDirection: "row", alignItems: "center", gap: 8,
   },
@@ -1294,6 +1348,10 @@ const styles = StyleSheet.create({
   logsScroll: {
     height: 260, borderRadius: 8,
   },
+  // Desktop three-column: the log card and its scroll fill the column height (which the
+  // stretched row gives them) instead of the fixed 260 box used in the single column.
+  logsSectionFull: { flex: 1 },
+  logsScrollFull:  { flex: 1, borderRadius: 8 },
   logsEmpty:    { color: "#64748b", fontSize: 13, fontStyle: "italic" },
   loadMoreBtn:  { paddingVertical: 10, alignItems: "center" },
   loadMoreText: { fontSize: 12, fontWeight: "600", color: "#475569" },

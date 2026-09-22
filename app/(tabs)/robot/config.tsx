@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
@@ -164,6 +164,7 @@ export default function ConfigureRobot() {
   const [config, setConfig] = useState<RobotConfig | null>(null);
   const [editing, setEditing] = useState<EditingField | null>(null);
   const [saving, setSaving] = useState(false);
+  const wideContent = useWideContent();
 
   useEffect(() => {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
@@ -233,7 +234,7 @@ export default function ConfigureRobot() {
       <SubPageHeader title="Configure Robot" />
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.content, wide.content]}
+        contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
 

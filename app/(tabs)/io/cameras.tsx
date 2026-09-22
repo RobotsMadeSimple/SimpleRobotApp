@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraState } from "@/src/models/robotModels";
@@ -380,6 +380,8 @@ function CameraConfigFields({
 // ── CameraDetailPage ──────────────────────────────────────────────────────────
 
 function CameraDetailPage({ camera }: { camera: CameraState }) {
+  const wideContent = useWideContent();
+  const isWide = useIsWide();
   const [fullscreen,  setFullscreen]  = useState(false);
   const [name,        setName]        = useState(camera.name);
   const [deviceIndex, setDeviceIndex] = useState(String(camera.deviceIndex));
@@ -412,38 +414,63 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
         title={camera.name}
         subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height} · ${camera.connected ? "Connected" : "Offline"}`}
       />
-      <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
-        {camera.connected
+      {(() => {
+        const feed = camera.connected
           ? <CameraWebSocketFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />
           : (
             <View style={styles.feedPlaceholder}>
               <Camera size={28} color="#4b5563" />
               <Text style={styles.feedPlaceholderText}>Offline</Text>
             </View>
-          )
+          );
+        const editables = (
+          <>
+            <CameraConfigFields
+              name={name}               setName={setName}
+              deviceIndex={deviceIndex} setDeviceIndex={setDeviceIndex}
+              width={width}             setWidth={setWidth}
+              height={height}           setHeight={setHeight}
+              targetFps={targetFps}     setTargetFps={setTargetFps}
+              savedResolutions={camera.supportedResolutions ?? []}
+            />
+            <TouchableOpacity
+              style={[styles.saveBtn, saving && { opacity: 0.5 }]}
+              onPress={save}
+              disabled={saving}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.saveBtnText}>{saving ? "Saving…" : "Save"}</Text>
+            </TouchableOpacity>
+          </>
+        );
+
+        // Wide: the editable settings fill a wider left column, the live frame a column
+        // on the right. Narrow: everything stacked in one scroll as before.
+        if (isWide) {
+          return (
+            <View style={styles.camWideRow}>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingTop: 20, paddingBottom: 40, gap: 20 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {editables}
+              </ScrollView>
+              <View style={styles.camFeedPane}>{feed}</View>
+            </View>
+          );
         }
-
-        <CameraConfigFields
-          name={name}               setName={setName}
-          deviceIndex={deviceIndex} setDeviceIndex={setDeviceIndex}
-          width={width}             setWidth={setWidth}
-          height={height}           setHeight={setHeight}
-          targetFps={targetFps}     setTargetFps={setTargetFps}
-          savedResolutions={camera.supportedResolutions ?? []}
-        />
-
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && { opacity: 0.5 }]}
-          onPress={save}
-          disabled={saving}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.saveBtnText}>{saving ? "Saving…" : "Save"}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        return (
+          <ScrollView
+            contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
+            showsVerticalScrollIndicator={false}
+          >
+            {feed}
+            {editables}
+          </ScrollView>
+        );
+      })()}
     </View>
   );
 }
@@ -451,6 +478,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
 // ── NewCameraPage ─────────────────────────────────────────────────────────────
 
 function NewCameraPage() {
+  const wideContent = useWideContent();
   const [name,        setName]        = useState("Camera");
   const [deviceIndex, setDeviceIndex] = useState("0");
   const [width,       setWidth]       = useState("640");
@@ -480,7 +508,7 @@ function NewCameraPage() {
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <SubPageHeader title="New Camera" subtitle="USB Camera" />
       <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         <CameraConfigFields
@@ -637,6 +665,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   feedPlaceholderText: { fontSize: 13, color: "#6b7280" },
+
+  // Wide (desktop) camera edit layout: frame left, settings right.
+  camWideRow: { flex: 1, flexDirection: "row" },
+  camFeedPane: {
+    width: "48%", minWidth: 380, maxWidth: 820,
+    padding: 16,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e7eb",
+  },
 
   fullscreenClose: {
     position: "absolute",

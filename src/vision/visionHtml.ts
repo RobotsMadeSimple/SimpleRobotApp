@@ -399,6 +399,19 @@ function drawGrid(g,grid,color){
 
 // ── Interaction ──────────────────────────────────────────────────────────────
 
+// Desktop hover feedback (ignored by touch, which never hovers): a point you can grab
+// shows the hand, the interior of a finished shape shows the move-grab too, and an
+// empty canvas you can draw on shows the crosshair. Kept cheap - a hit test per move.
+function hoverCursor(x,y){
+  if(drag) return 'grabbing';
+  if(editing&&geom){
+    if(hitHandle(x,y)) return 'grab';
+    if(inside(x,y)) return 'grab';
+    return 'default';
+  }
+  return 'crosshair';
+}
+
 function onDown(p){
   // With a shape on the canvas, a stray tap outside it must not start a new one -
   // that is what Clear is for. Only handles and the interior respond.
@@ -536,16 +549,18 @@ c.addEventListener('pointerdown',function(e){
   e.preventDefault();
   try{c.setPointerCapture(e.pointerId);}catch(err){}
   onDown({x:e.clientX,y:e.clientY});
+  // A drag that grabbed a handle or the body reads as grabbing; a fresh draw stays crosshair.
+  if(drag&&drag.kind!=='new'&&drag.kind!=='polyhover') c.style.cursor='grabbing';
 },{passive:false});
 
 c.addEventListener('pointermove',function(e){
-  if(!drag) return;
-  e.preventDefault();
-  onMove({x:e.clientX,y:e.clientY});
+  if(drag){e.preventDefault();onMove({x:e.clientX,y:e.clientY});return;}
+  // Not dragging: just update the hover cursor so the mouse tells you what a point does.
+  c.style.cursor=hoverCursor(e.clientX,e.clientY);
 },{passive:false});
 
-c.addEventListener('pointerup',function(e){e.preventDefault();onUp();},{passive:false});
-c.addEventListener('pointercancel',function(){onUp();},{passive:false});
+c.addEventListener('pointerup',function(e){e.preventDefault();onUp();c.style.cursor=hoverCursor(e.clientX,e.clientY);},{passive:false});
+c.addEventListener('pointercancel',function(){onUp();c.style.cursor='default';},{passive:false});
 
 post();
 <\/script>
@@ -568,6 +583,35 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
 var _ws=null,_timer=null,_lastUrl=null,_gen=0;
 
+// Zone outlines drawn over every frame, so every declared zone is visible whether or
+// not an inspection uses it. The host pushes the zones in and toggles them; the canvas
+// is the image at natural size, so normalized zone coords map straight to it.
+var _zones=[],_zonesVisible=true;
+window.setZones=function(z){_zones=z||[];};
+window.setZonesVisible=function(v){_zonesVisible=!!v;};
+function drawZones(){
+  if(!_zonesVisible||!_zones.length||!c.width||!c.height)return;
+  var W=c.width,H=c.height,m=Math.min(W,H);
+  ctx.save();
+  ctx.lineWidth=Math.max(2,Math.round(m*0.005));
+  ctx.strokeStyle='#22d3ee';
+  for(var i=0;i<_zones.length;i++){
+    var g=_zones[i].geometry;if(!g)continue;
+    if(g.shape==='Circle'){
+      ctx.beginPath();ctx.arc(g.cx*W,g.cy*H,g.radius*m,0,2*Math.PI);ctx.stroke();
+    }else if(g.shape==='Polygon'&&g.points&&g.points.length>=2){
+      ctx.beginPath();ctx.moveTo(g.points[0][0]*W,g.points[0][1]*H);
+      for(var j=1;j<g.points.length;j++)ctx.lineTo(g.points[j][0]*W,g.points[j][1]*H);
+      ctx.closePath();ctx.stroke();
+    }else{
+      var x=g.x*W,y=g.y*H,w=g.width*W,h=g.height*H,rot=(g.rotation||0)*Math.PI/180;
+      if(rot){ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate(rot);ctx.strokeRect(-w/2,-h/2,w,h);ctx.restore();}
+      else{ctx.strokeRect(x,y,w,h);}
+    }
+  }
+  ctx.restore();
+}
+
 // Each setFeed bumps the generation; only the current generation is allowed to
 // draw, so a just-closed feed (e.g. the raw camera socket while switching to the
 // annotated vision socket) can't paint stale frames and cause flicker.
@@ -582,7 +626,7 @@ function drawSrc(src,cb,g){
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
-      ctx.drawImage(img,0,0);
+      ctx.drawImage(img,0,0);drawZones();
     }
     if(cb)cb();
   };
@@ -610,7 +654,7 @@ function startPoll(url,ms,g){
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
-      ctx.drawImage(img,0,0);busy=false;
+      ctx.drawImage(img,0,0);drawZones();busy=false;
     };
     img.onerror=function(){busy=false;};
     img.src=url+'?_='+Date.now();

@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 ﻿import { ActionButton } from "@/src/components/ui/ActionButton";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
@@ -243,6 +243,8 @@ export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
   const robotStatus      = useRobotStatus();
+  const wideContent      = useWideContent();
+  const isWide           = useIsWide();
   const [visionCount,    setVisionCount]    = useState(0);
   const [localCount,     setLocalCount]     = useState(0);
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
@@ -303,13 +305,8 @@ export default function ProgramScreen() {
     programSummaries.filter(p => !builtNames.has(p.name)).length;
   const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
 
-  return (
-    <View style={{ flex: 1 }}>
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[styles.content, wide.content]}
-      showsVerticalScrollIndicator={false}
-    >
+  const runningSection = (
+    <>
       {/* Now Running / Last Ran */}
       <Text style={styles.sectionLabel}>
         {displayedProgram && displayedProgram.status === "Ready" ? "LAST RAN" : "NOW RUNNING"}
@@ -328,9 +325,13 @@ export default function ProgramScreen() {
           <Text style={styles.nothingRunningText}>No program has been run yet</Text>
         </View>
       )}
+    </>
+  );
 
+  const navSection = (
+    <>
       {/* Nav tiles */}
-      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>PROGRAMS</Text>
+      <Text style={styles.sectionLabel}>PROGRAMS</Text>
 
       <NavTile
         icon={<Cpu size={20} color="#2563eb" />}
@@ -375,6 +376,28 @@ export default function ProgramScreen() {
           onPress={() => router.navigate("/(tabs)/program/vision")}
         />
       )}
+    </>
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={[styles.content, wideContent]}
+      showsVerticalScrollIndicator={false}
+    >
+      {isWide ? (
+        // Wide: the running program on the left, the page selectors on the right.
+        <View style={styles.wideRow}>
+          <View style={styles.wideLeftCol}>{runningSection}</View>
+          <View style={styles.wideRightCol}>{navSection}</View>
+        </View>
+      ) : (
+        <>
+          {runningSection}
+          {navSection}
+        </>
+      )}
     </ScrollView>
 
     <SpeedOverrideModal
@@ -391,6 +414,11 @@ export default function ProgramScreen() {
 const styles = StyleSheet.create({
   scroll:   { flex: 1, backgroundColor: "#f3f4f6" },
   content:  { padding: 16, paddingBottom: 32, gap: 10 },
+
+  // Wide: running program on a narrow left column, page selectors on the wider right.
+  wideRow:      { flexDirection: "row", gap: 16, alignItems: "flex-start" },
+  wideLeftCol:  { width: 360, gap: 10 },
+  wideRightCol: { flex: 1, gap: 10 },
 
   nothingRunning: {
     backgroundColor: "#fff",

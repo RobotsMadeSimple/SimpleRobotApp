@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useNanoIO } from "@/src/providers/RobotProvider";
@@ -61,6 +61,7 @@ export default function NanosPage() {
   const nanos = useNanoIO();
 
   const nano = nanoId ? (nanos.find(n => n.id === nanoId) ?? null) : null;
+  const wideContent = useWideContent();
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
@@ -86,7 +87,7 @@ export default function NanosPage() {
         }
       />
       <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {nano ? (

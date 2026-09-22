@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { ios } from "@/src/components/ui/io/ioShared";
@@ -330,6 +330,7 @@ function AuxDeviceDetail({ device }: { device: AuxDeviceState }) {
 export default function AuxPage() {
   const { deviceId } = useLocalSearchParams<{ deviceId?: string }>();
   const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
+  const wideContent = useWideContent();
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
@@ -353,7 +354,7 @@ export default function AuxPage() {
         }
       />
       <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         {device ? (

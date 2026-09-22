@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRelayIO } from "@/src/providers/RobotProvider";
@@ -14,6 +14,7 @@ export default function RelayPage() {
   const relays    = relay?.relays ?? [false, false, false, false];
   const names     = relay?.names  ?? ["Relay 1", "Relay 2", "Relay 3", "Relay 4"];
   const serial    = relay?.serial ?? "";
+  const wideContent = useWideContent();
 
   // Refresh live IO on entry. relayIO is otherwise only updated on connect or
   // after the app's own toggle actions, so a relay changed by a running program
@@ -40,7 +41,7 @@ export default function RelayPage() {
         }
       />
       <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
+        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
         showsVerticalScrollIndicator={false}
       >
         <View>

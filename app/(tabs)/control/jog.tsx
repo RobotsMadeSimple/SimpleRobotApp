@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import JogPad from "@/src/components/ui/JogPad";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
@@ -262,6 +262,9 @@ export default function JogScreen() {
   const locals     = useLocals();
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
+  const wideContent = useWideContent();
+  // Two columns on tablets, foldables and desktop (the split breakpoint and up).
+  const twoColumn = useIsWide();
 
   const [tool, setToolLocal] = useState(activeTool || "None");
 
@@ -315,114 +318,146 @@ export default function JogScreen() {
         { label: "RZ", value: s?.localRZ, unit: "°"  },
       ];
 
+  // The three pieces the layout arranges. Defined once so the single-column and
+  // two-column layouts place the same controls without duplicating them.
+  const configCard = (
+    <View style={styles.card}>
+
+      {/* Position strip */}
+      <View style={styles.coordRow}>
+        {coords.map(({ label, value, unit }) => (
+          <View key={label} style={styles.coordCell}>
+            <Text style={styles.coordLabel}>{label}</Text>
+            <Text style={styles.coordValue}>{fmt(value)}</Text>
+            <Text style={styles.coordUnit}>{unit}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.cardSeparator} />
+
+      {/* Local / Tool row */}
+      <View style={styles.selectorsRow}>
+        <Selector
+          label="LOCAL"
+          value={local}
+          options={localOptions}
+          onSelect={setLocal}
+          icon={<Grid2X2 size={15} color="#6b7280" />}
+          viewLabel="View Locals"
+          viewRoute="/space/locals"
+        />
+        <View style={styles.cardDivider} />
+        <Selector
+          label="TOOL"
+          value={tool || "None"}
+          options={["None", ...tools.map(t => t.name)]}
+          onSelect={setTool}
+          icon={<Wrench size={15} color="#6b7280" />}
+          viewLabel="View Tools"
+          viewRoute="/space/tools"
+        />
+      </View>
+
+      <View style={styles.cardSeparator} />
+
+      {/* Jog mode */}
+      <View style={styles.segmentRow}>
+        {jogModes.map(({ key, icon }) => {
+          const active = mode === key;
+          return (
+            <AnimatedPressable
+              key={key}
+              style={[styles.segment, active && styles.segmentActive]}
+              onPress={() => setMode(key)}
+            >
+              {icon(active)}
+              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
+            </AnimatedPressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.cardSeparator} />
+
+      {/* Speed */}
+      <View style={styles.chipRow}>
+        {speedOptions.map((spd) => {
+          const active = selectedSpeed === spd;
+          return (
+            <AnimatedPressable
+              key={spd}
+              style={[styles.chip, active && styles.chipActive]}
+              onPress={() => setSelectedSpeed(spd)}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
+            </AnimatedPressable>
+          );
+        })}
+      </View>
+
+    </View>
+  );
+
+  const jogPad = (
+    <View style={styles.jogWrapper}>
+      <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} />
+    </View>
+  );
+
+  const stopTeach = (
+    <View style={styles.bottomRow}>
+      <AnimatedPressable style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")}>
+        <OctagonX size={22} color="white" />
+        <Text style={styles.stopText}>STOP</Text>
+      </AnimatedPressable>
+
+      <AnimatedPressable style={styles.teachButton} onPress={() => setTeachOpen(true)}>
+        <MousePointerClick size={18} color="#2563eb" />
+        <Text style={styles.teachButtonText}>Teach</Text>
+      </AnimatedPressable>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
       <SubPageHeader title="Jog & Teach" />
 
-      {/* ── Scrollable area: position + controls + jogpad ── */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, wide.content]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Combined position + controls card */}
-        <View style={styles.card}>
-
-          {/* Position strip */}
-          <View style={styles.coordRow}>
-            {coords.map(({ label, value, unit }) => (
-              <View key={label} style={styles.coordCell}>
-                <Text style={styles.coordLabel}>{label}</Text>
-                <Text style={styles.coordValue}>{fmt(value)}</Text>
-                <Text style={styles.coordUnit}>{unit}</Text>
-              </View>
-            ))}
+      {twoColumn ? (
+        // Wide: jog config + STOP/Teach on the left, the jog buttons filling the right.
+        <View style={styles.wideRow}>
+          <View style={styles.wideLeftCol}>
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.wideColContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {configCard}
+            </ScrollView>
+            {stopTeach}
           </View>
 
-          <View style={styles.cardSeparator} />
-
-          {/* Local / Tool row */}
-          <View style={styles.selectorsRow}>
-            <Selector
-              label="LOCAL"
-              value={local}
-              options={localOptions}
-              onSelect={setLocal}
-              icon={<Grid2X2 size={15} color="#6b7280" />}
-              viewLabel="View Locals"
-              viewRoute="/space/locals"
-            />
-            <View style={styles.cardDivider} />
-            <Selector
-              label="TOOL"
-              value={tool || "None"}
-              options={["None", ...tools.map(t => t.name)]}
-              onSelect={setTool}
-              icon={<Wrench size={15} color="#6b7280" />}
-              viewLabel="View Tools"
-              viewRoute="/space/tools"
-            />
+          <View style={styles.wideJogCol}>
+            {jogPad}
           </View>
-
-          <View style={styles.cardSeparator} />
-
-          {/* Jog mode */}
-          <View style={styles.segmentRow}>
-            {jogModes.map(({ key, icon }) => {
-              const active = mode === key;
-              return (
-                <AnimatedPressable
-                  key={key}
-                  style={[styles.segment, active && styles.segmentActive]}
-                  onPress={() => setMode(key)}
-                >
-                  {icon(active)}
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
-                </AnimatedPressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.cardSeparator} />
-
-          {/* Speed */}
-          <View style={styles.chipRow}>
-            {speedOptions.map((spd) => {
-              const active = selectedSpeed === spd;
-              return (
-                <AnimatedPressable
-                  key={spd}
-                  style={[styles.chip, active && styles.chipActive]}
-                  onPress={() => setSelectedSpeed(spd)}
-                >
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
-                </AnimatedPressable>
-              );
-            })}
-          </View>
-
         </View>
-
-        {/* JogPad */}
-        <View style={styles.jogWrapper}>
-          <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} />
-        </View>
-      </ScrollView>
-
-      {/* ── Fixed bottom row: STOP + Teach ── */}
-      <View style={styles.bottomRow}>
-        <AnimatedPressable style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")}>
-          <OctagonX size={22} color="white" />
-          <Text style={styles.stopText}>STOP</Text>
-        </AnimatedPressable>
-
-        <AnimatedPressable style={styles.teachButton} onPress={() => setTeachOpen(true)}>
-          <MousePointerClick size={18} color="#2563eb" />
-          <Text style={styles.teachButtonText}>Teach</Text>
-        </AnimatedPressable>
-      </View>
+      ) : (
+        // Narrow: everything stacked, STOP/Teach pinned to the bottom.
+        <>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, wideContent]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {configCard}
+            {jogPad}
+          </ScrollView>
+          {stopTeach}
+        </>
+      )}
 
       {/* ── Teach modal ── */}
       <Modal
@@ -452,6 +487,35 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 8,
     paddingBottom: 12,
+  },
+
+  // ── Wide (tablet+) two-column layout ────────────────────────────────────────
+  // The whole pair is centred, so on a wide desktop the empty space reads as even
+  // margins around the two columns rather than as a moat around the jog pad.
+  wideRow: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+  // Left column: the config card (scrolls if tall) with STOP/Teach pinned to its foot.
+  // Flexes so it gives way on a narrow tablet, capped so it doesn't sprawl on desktop.
+  wideLeftCol: {
+    flex: 1,
+    maxWidth: 440,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: "#e5e7eb",
+  },
+  wideColContent: {
+    padding: 12,
+    gap: 8,
+  },
+  // Right column: hugs the jog pad (a fixed ~405px, sized off the window) rather than
+  // flexing to fill, so the pad isn't left swimming in space on a wide screen.
+  wideJogCol: {
+    width: 430,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
   },
 
   // ── Card ──────────────────────────────────────────────────────────────────

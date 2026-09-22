@@ -1,4 +1,4 @@
-import { wide } from "@/src/components/ui/responsive";
+import { useWideContent } from "@/src/components/ui/responsive";
 import { RobotCard } from "@/src/components/ui/RobotCards";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
@@ -25,6 +25,7 @@ export default function Robot() {
   const selectedRobot = useSelectedRobot();
   const [manualIp, setManualIp] = useState("");
   const [lastIp,   setLastIp]   = useState<string | null>(null);
+  const wideContent = useWideContent();
 
   useEffect(() => {
     AsyncStorage.getItem(LAST_IP_KEY).then(v => { if (v) setLastIp(v); }).catch(() => {});
@@ -57,7 +58,7 @@ export default function Robot() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scrollContent, wide.content]}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.scrollContent, wideContent]}>
       {/* Manual connection card */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>MANUAL CONNECTION</Text>
@@ -123,7 +124,7 @@ export default function Robot() {
       ) : (
         <FlatList
           scrollEnabled={false}
-          contentContainerStyle={[styles.list, wide.content]}
+          contentContainerStyle={[styles.list, wideContent]}
           data={robots}
           keyExtractor={(r) => r.serialNumber || r.ipAddress}
           renderItem={({ item }) => <RobotCard robot={item} />}
