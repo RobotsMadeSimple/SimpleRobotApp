@@ -1,5 +1,20 @@
-import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import {
+  accents,
+  Button,
+  Card,
+  colors,
+  Divider,
+  Input,
+  radii,
+  RadioRow,
+  Screen,
+  SectionHeader,
+  shadows,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
 import { RobotStack } from "@/src/models/robotModels";
 import { usePoints, useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -14,8 +29,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -35,7 +48,7 @@ function SignedNumberInput({
   useEffect(() => { setText(String(value)); }, [value]);
 
   return (
-    <TextInput
+    <Input
       style={s.input}
       value={text}
       onChangeText={raw => {
@@ -47,7 +60,6 @@ function SignedNumberInput({
       }}
       keyboardType="numbers-and-punctuation"
       placeholder={placeholder ?? "0"}
-      placeholderTextColor="#9ca3af"
       selectTextOnFocus
     />
   );
@@ -65,8 +77,7 @@ function OptionalCountInput({
   useEffect(() => { setText(value !== undefined ? String(value) : ""); }, [value]);
 
   return (
-    <TextInput
-      style={s.input}
+    <Input
       value={text}
       onChangeText={raw => {
         const cleaned = raw.replace(/[^0-9]/g, "");
@@ -79,7 +90,6 @@ function OptionalCountInput({
       }}
       keyboardType="numeric"
       placeholder="unlimited"
-      placeholderTextColor="#9ca3af"
       selectTextOnFocus
     />
   );
@@ -91,7 +101,6 @@ export default function StackEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const stacks = useStacks();
   const points = usePoints();
-  const wideContent = useWideContent();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (stacks.find(s => s.id === id) ?? null);
@@ -125,62 +134,51 @@ export default function StackEditPage() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#f3f4f6" }}
+      style={s.page}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <SubPageHeader
         title={isNew ? "New Stack" : "Edit Stack"}
         right={
-          <TouchableOpacity
+          <Button
+            label="Save"
+            size="sm"
             onPress={handleSave}
             disabled={!canSave}
-            hitSlop={8}
-            activeOpacity={0.7}
-            style={[s.saveBtn, !canSave && { opacity: 0.4 }]}
-          >
-            <Text style={s.saveBtnText}>Save</Text>
-          </TouchableOpacity>
+            style={s.saveBtn}
+          />
         }
       />
 
-      <ScrollView
-        contentContainerStyle={[s.scroll, wideContent]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <Screen>
 
         {/* ── Name ── */}
-        <Text style={s.sectionLabel}>NAME</Text>
-        <View style={s.card}>
-          <TextInput
-            style={s.cardInput}
+        <SectionHeader title="Name" />
+        <Card>
+          <Input
             value={draft.name}
             onChangeText={v => set({ name: v })}
             placeholder="e.g. Tube Rack A"
-            placeholderTextColor="#9ca3af"
             autoCapitalize="words"
             returnKeyType="next"
+            style={s.nameInput}
           />
-        </View>
+        </Card>
 
         {/* ── Base Point ── */}
-        <Text style={s.sectionLabel}>BASE POINT</Text>
-        <View style={s.card}>
-          <TouchableOpacity
-            style={s.pickerRow}
-            onPress={() => setPointPickerOpen(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={[s.pickerRowText, !draft.basePointName && { color: "#9ca3af" }]}>
+        <SectionHeader title="Base point" />
+        <Card padded={false}>
+          <AnimatedPressable style={s.pickerRow} onPress={() => setPointPickerOpen(true)}>
+            <Text style={[s.pickerRowText, !draft.basePointName && s.pickerRowPlaceholder]}>
               {draft.basePointName || "Select point…"}
             </Text>
-            <ChevronRight size={16} color="#d1d5db" />
-          </TouchableOpacity>
-        </View>
+            <ChevronRight size={16} color={colors.textFaint} />
+          </AnimatedPressable>
+        </Card>
 
         {/* ── Step Offset ── */}
-        <Text style={s.sectionLabel}>STEP OFFSET  (mm per index step)</Text>
-        <View style={s.card}>
+        <SectionHeader title="Step offset  (mm per index step)" />
+        <Card>
           <View style={s.axisRow}>
             {(["X", "Y", "Z"] as const).map(axis => (
               <View key={axis} style={s.axisCol}>
@@ -192,11 +190,11 @@ export default function StackEditPage() {
               </View>
             ))}
           </View>
-        </View>
+        </Card>
 
         {/* ── Max Count ── */}
-        <Text style={s.sectionLabel}>MAX COUNT  (optional — enables round-robin)</Text>
-        <View style={s.card}>
+        <SectionHeader title="Max count  (optional — enables round-robin)" />
+        <Card>
           <View style={s.countRow}>
             <OptionalCountInput
               value={draft.maxCount}
@@ -206,10 +204,9 @@ export default function StackEditPage() {
           <Text style={s.hint}>
             When set, indices ≥ max count wrap around via modulo.
           </Text>
-        </View>
+        </Card>
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      </Screen>
 
       {/* ── Base point picker ── */}
       <Modal
@@ -222,9 +219,9 @@ export default function StackEditPage() {
           <Pressable style={s.pickerCard} onPress={() => {}}>
             <View style={s.pickerHeader}>
               <Text style={s.pickerTitle}>Select Base Point</Text>
-              <TouchableOpacity onPress={() => setPointPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
-              </TouchableOpacity>
+              <Pressable onPress={() => setPointPickerOpen(false)} hitSlop={12}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
             </View>
             <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
               {points.length === 0 && (
@@ -233,20 +230,18 @@ export default function StackEditPage() {
               {points.map((p, i) => {
                 const active = draft.basePointName === p.name;
                 return (
-                  <TouchableOpacity
-                    key={p.name}
-                    style={[s.pickerItem, i < points.length - 1 && s.pickerItemBorder, active && s.pickerItemActive]}
-                    onPress={() => { set({ basePointName: p.name }); setPointPickerOpen(false); }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[s.radioRing, active && s.radioRingActive]}>
-                      {active && <View style={s.radioDot} />}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.pickerItemLabel, active && { color: "#7c3aed" }]}>{p.name}</Text>
-                      <Text style={s.pickerItemDesc}>{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</Text>
-                    </View>
-                  </TouchableOpacity>
+                  <View key={p.name}>
+                    <RadioRow
+                      title={p.name}
+                      subtitleNode={
+                        <Text style={s.pickerItemDesc}>{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</Text>
+                      }
+                      selected={active}
+                      onPress={() => { set({ basePointName: p.name }); setPointPickerOpen(false); }}
+                      style={s.pickerItem}
+                    />
+                    {i < points.length - 1 && <Divider inset />}
+                  </View>
                 );
               })}
             </ScrollView>
@@ -260,136 +255,79 @@ export default function StackEditPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  scroll: { padding: 16 },
+  page: { flex: 1, backgroundColor: colors.background },
 
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", color: "#6b7280",
-    letterSpacing: 0.8, marginBottom: 6, marginTop: 4,
-  },
+  // Stacks use accents.purple for their primary action, unlike the default
+  // kit Button primary (accent blue), to match the app-wide Stacks color coding.
+  saveBtn: { backgroundColor: accents.purple },
 
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
-    overflow: "hidden",
-  },
+  nameInput: { borderWidth: 0, backgroundColor: "transparent", paddingHorizontal: 0 },
 
-  cardInput: {
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: "#111827",
-  },
-
-  input: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    fontSize: 14,
-    color: "#111827",
-    backgroundColor: "#f9fafb",
-  },
+  // Coordinate/position values use the mono type preset.
+  input: { ...type.mono },
 
   axisRow: {
     flexDirection: "row",
-    gap: 10,
-    padding: 14,
+    gap: spacing.sm + 2,
   },
   axisCol: { flex: 1 },
   axisLabel: {
-    fontSize: 11, fontWeight: "600", color: "#9ca3af",
-    textAlign: "center", marginBottom: 4,
+    fontSize: 11, fontWeight: "600", color: colors.textFaint,
+    textAlign: "center", marginBottom: spacing.xs,
   },
 
   countRow: {
-    padding: 14,
-    paddingBottom: 8,
+    paddingHorizontal: spacing.md + 2,
+    paddingTop: spacing.md,
   },
   hint: {
-    fontSize: 12, color: "#9ca3af",
-    paddingHorizontal: 14, paddingBottom: 12,
+    fontSize: 12, color: colors.textFaint,
+    paddingHorizontal: spacing.md + 2, paddingTop: spacing.xs, paddingBottom: spacing.sm,
   },
 
   pickerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 13,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md + 1,
   },
   pickerRowText: {
-    fontSize: 15, color: "#111827",
+    ...type.body,
+    fontSize: 15,
+    color: colors.text,
   },
-
-  saveBtn: {
-    backgroundColor: "#7c3aed",
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  saveBtnText: {
-    color: "#fff", fontSize: 14, fontWeight: "600",
-  },
+  pickerRowPlaceholder: { color: colors.textFaint },
 
   // ── Point picker modal ────────────────────────────────────────────────────
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
   pickerCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
     width: 300,
     maxHeight: "70%",
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
     overflow: "hidden",
+    ...shadows.raised,
   },
   pickerHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md + 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
   },
-  pickerTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  pickerTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   pickerEmpty: {
-    fontSize: 13, color: "#9ca3af",
-    textAlign: "center", padding: 20,
+    fontSize: 13, color: colors.textFaint,
+    textAlign: "center", padding: spacing.xl - 4,
   },
-  pickerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    gap: 12,
-  },
-  pickerItemBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
-  },
-  pickerItemActive:  { backgroundColor: "#f5f3ff" },
-  pickerItemLabel:   { fontSize: 14, fontWeight: "600", color: "#111827" },
-  pickerItemDesc:    { fontSize: 11, color: "#9ca3af", fontFamily: "monospace", marginTop: 1 },
-
-  radioRing: {
-    width: 18, height: 18, borderRadius: 9,
-    borderWidth: 2, borderColor: "#d1d5db",
-    justifyContent: "center", alignItems: "center",
-  },
-  radioRingActive: { borderColor: "#7c3aed" },
-  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#7c3aed" },
+  pickerItem: { paddingHorizontal: spacing.lg },
+  pickerItemDesc: { ...type.mono, fontSize: 11, color: colors.textFaint, marginTop: 1 },
 });

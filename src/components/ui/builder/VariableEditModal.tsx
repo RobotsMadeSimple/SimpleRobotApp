@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Check, ChevronDown, Minus, Plus, X } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
+import { colors, accents } from "@/src/components/ui/kit";
 import {
   ListElementType,
   ProgramVariable,
@@ -37,7 +38,7 @@ export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "
  */
 const TYPE_OPTIONS: { key: VarType; label: string; desc: string; color: string; bg: string; border: string }[] = [
   { key: "number",    label: "Number",    desc: "A numeric value",                     color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
-  { key: "boolean",   label: "Boolean",   desc: "True or false, stored as 1 or 0",     color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+  { key: "boolean",   label: "Boolean",   desc: "True or false, stored as 1 or 0",     color: colors.success, bg: colors.successSoft, border: "#bbf7d0" },
   { key: "string",    label: "String",    desc: "Text, with $var interpolation",       color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
   { key: "image",     label: "Image",     desc: "A camera frame, from CaptureImage",   color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
   { key: "list",      label: "List",      desc: "Numbers, booleans, points or records", color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
@@ -54,7 +55,7 @@ const TYPE_OPTIONS: { key: VarType; label: string; desc: string; color: string; 
  */
 const ELEMENT_OPTIONS: { key: ListElementType; label: string; desc: string; color: string; bg: string; border: string }[] = [
   { key: "Number",  label: "Numbers",  desc: "Numeric values",                  color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
-  { key: "Boolean", label: "Booleans", desc: "True/false flags",                color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+  { key: "Boolean", label: "Booleans", desc: "True/false flags",                color: colors.success, bg: colors.successSoft, border: "#bbf7d0" },
   { key: "Point",   label: "Points",   desc: "Poses — x, y, z, rx, ry, rz",     color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
   { key: "Record",  label: "Objects",  desc: "Records of named number fields",  color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
 ];
@@ -226,10 +227,10 @@ export function VariableEditModal({
       : elemType === "Record"
       ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0d9488", fontWeight: "600" }}>${name.trim() || "name"}[0].field</Text> in expressions. Elements are added while the program runs.</Text>
       : elemType === "Boolean"
-      ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0</Text>, so it drops straight into a condition.</Text>
+      ? <Text style={ms.hintText}>Referenced as <Text style={{ color: colors.success, fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0</Text>, so it drops straight into a condition.</Text>
       : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions.</Text>
     : varType === "boolean"
-    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
+    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: colors.success, fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
     : varType === "stopwatch"
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0891b2", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. Value is elapsed milliseconds.</Text>
     : varType === "string"
@@ -247,7 +248,7 @@ export function VariableEditModal({
             <View style={{ width: 18 }} />
             <Text style={ms.title}>{isNew ? "New Variable" : "Edit Variable"}</Text>
             <TouchableOpacity onPress={closeAll} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color="#9ca3af" />
+              <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -258,7 +259,7 @@ export function VariableEditModal({
             value={name}
             onChangeText={setName}
             placeholder="e.g. speed, pickHeight, counter"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={colors.textFaint}
             autoFocus={isNew}
             autoCapitalize="none"
             returnKeyType="next"
@@ -315,12 +316,12 @@ export function VariableEditModal({
                       key={opt.v}
                       style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center",
                         borderWidth: 1.5,
-                        borderColor: active ? "#16a34a" : "#e5e7eb",
-                        backgroundColor: active ? "#f0fdf4" : "#f9fafb" }]}
+                        borderColor: active ? colors.success : colors.border,
+                        backgroundColor: active ? colors.successSoft : colors.surfaceMuted }]}
                       onPress={() => { setValueExpr(undefined); setValue(opt.v); }}
                       activeOpacity={0.7}
                     >
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: active ? "#16a34a" : "#6b7280" }}>
+                      <Text style={{ fontSize: 14, fontWeight: "700", color: active ? colors.success : colors.textMuted }}>
                         {opt.label}
                       </Text>
                     </TouchableOpacity>
@@ -329,8 +330,8 @@ export function VariableEditModal({
                 <TouchableOpacity
                   style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 9, alignItems: "center",
                     borderWidth: 1.5,
-                    borderColor: usingExpr ? "#7c3aed" : "#e5e7eb",
-                    backgroundColor: usingExpr ? "#f5f3ff" : "#f9fafb" }}
+                    borderColor: usingExpr ? accents.purple : colors.border,
+                    backgroundColor: usingExpr ? accents.purpleSoft : colors.surfaceMuted }}
                   onPress={() => setValueExpr(valueExpr ?? "")}
                   activeOpacity={0.7}
                   accessibilityRole="button"
@@ -338,7 +339,7 @@ export function VariableEditModal({
                   accessibilityLabel="Set the initial value from an expression"
                 >
                   <Text style={{ fontSize: 14, fontWeight: "700", fontStyle: "italic",
-                    color: usingExpr ? "#7c3aed" : "#6b7280" }}>
+                    color: usingExpr ? accents.purple : colors.textMuted }}>
                     fx
                   </Text>
                 </TouchableOpacity>
@@ -407,21 +408,21 @@ export function VariableEditModal({
                   booleans share it; a boolean is stored as the 0/1 a record field can
                   hold, so only the per-row control differs. */}
               <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUES</Text>
-              <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+              <View style={{ borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong,
                 borderLeftWidth: 3, borderLeftColor: selectedElem.color,
-                backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
+                backgroundColor: colors.surfaceMuted, marginTop: 4, marginBottom: 4 }}>
                 <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
-                  fontSize: 15, color: "#64748b" }}>[</Text>
+                  fontSize: 15, color: colors.textMuted }}>[</Text>
                 {listValues.length === 0 && (
                   <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
-                    color: "#9ca3af", fontStyle: "italic" }}>
+                    color: colors.textFaint, fontStyle: "italic" }}>
                     {"// empty — items can also be added while the program runs"}
                   </Text>
                 )}
                 {listValues.map((v, idx) => (
                   <View key={idx} style={{ flexDirection: "row", alignItems: "center",
                     paddingLeft: 26, paddingRight: 6, paddingVertical: 5 }}>
-                    <Text style={{ fontSize: 11, color: "#cbd5e1", width: 20 }}>{idx}</Text>
+                    <Text style={{ fontSize: 11, color: colors.textFaint, width: 20 }}>{idx}</Text>
                     {elemType === "Boolean" ? (
                       <View style={{ flex: 1, flexDirection: "row", gap: 6 }}>
                         {([{ label: "false", on: false }, { label: "true", on: true }] as const).map(opt => {
@@ -431,13 +432,13 @@ export function VariableEditModal({
                               key={opt.label}
                               style={{ flex: 1, paddingVertical: 6, borderRadius: 7, alignItems: "center",
                                 borderWidth: 1,
-                                borderColor: active ? "#16a34a" : "#e2e8f0",
-                                backgroundColor: active ? "#f0fdf4" : "#ffffff" }}
+                                borderColor: active ? colors.success : colors.border,
+                                backgroundColor: active ? colors.successSoft : colors.surface }}
                               onPress={() => setListBool(idx, opt.on)}
                               activeOpacity={0.7}
                             >
                               <Text style={{ fontSize: 13, fontWeight: active ? "700" : "500",
-                                color: active ? "#16a34a" : "#94a3b8" }}>
+                                color: active ? colors.success : colors.textFaint }}>
                                 {opt.label}
                               </Text>
                             </TouchableOpacity>
@@ -451,17 +452,17 @@ export function VariableEditModal({
                         value={v}
                         onChangeText={raw => updateListItem(idx, raw)}
                         placeholder="0"
-                        placeholderTextColor="#9ca3af"
+                        placeholderTextColor={colors.textFaint}
                         keyboardType="numbers-and-punctuation"
                         selectTextOnFocus
                       />
                     )}
                     {idx < listValues.length - 1 && (
-                      <Text style={{ fontSize: 14, color: "#94a3b8", marginLeft: 2, marginRight: 2 }}>,</Text>
+                      <Text style={{ fontSize: 14, color: colors.textFaint, marginLeft: 2, marginRight: 2 }}>,</Text>
                     )}
                     <TouchableOpacity onPress={() => removeListItem(idx)}
                       hitSlop={8} style={{ padding: 5 }} activeOpacity={0.7}>
-                      <Minus size={13} color="#dc2626" />
+                      <Minus size={13} color={colors.danger} />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -471,11 +472,11 @@ export function VariableEditModal({
                   onPress={addListItem}
                   activeOpacity={0.7}
                 >
-                  <Plus size={12} color="#9ca3af" />
-                  <Text style={{ fontSize: 12, color: "#9ca3af" }}>add item</Text>
+                  <Plus size={12} color={colors.textFaint} />
+                  <Text style={{ fontSize: 12, color: colors.textFaint }}>add item</Text>
                 </TouchableOpacity>
                 <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
-                  fontSize: 15, color: "#64748b" }}>]</Text>
+                  fontSize: 15, color: colors.textMuted }}>]</Text>
               </View>
                 </>
               )}
@@ -518,49 +519,49 @@ export function VariableEditModal({
             value={desc}
             onChangeText={setDesc}
             placeholder="What this variable controls…"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={colors.textFaint}
             returnKeyType="done"
           />
 
           {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") && (
             <>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Show on Monitor</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Show on Monitor</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                     Display the live value on the program detail page while running.
                   </Text>
                 </View>
                 <Switch
                   value={displayOnMonitor}
                   onValueChange={setDisplayOnMonitor}
-                  trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                  trackColor={{ false: colors.border, true: colors.accent }}
                 />
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Global Variable</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Global Variable</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                     Shared across all programs running at the same time. First program to start sets the initial value.
                   </Text>
                 </View>
                 <Switch
                   value={isGlobal}
                   onValueChange={setIsGlobal}
-                  trackColor={{ false: "#e5e7eb", true: "#16a34a" }}
+                  trackColor={{ false: colors.border, true: colors.success }}
                 />
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Persistent</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Persistent</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                     Value is saved to disk when the program finishes and restored on the next run.
                   </Text>
                 </View>
                 <Switch
                   value={isPersistent}
                   onValueChange={setIsPersistent}
-                  trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+                  trackColor={{ false: colors.border, true: "#7c3aed" }}
                 />
               </View>
             </>
@@ -612,7 +613,7 @@ export function VariableEditModal({
               activeOpacity={0.7}
               disabled={!canSave}
             >
-              <Check size={15} color="white" />
+              <Check size={15} color={colors.onAccent} />
               <Text style={ms.saveText}>Save</Text>
             </TouchableOpacity>
           </View>
@@ -638,17 +639,17 @@ export function VariableEditModal({
               style={[
                 { flexDirection: "row", alignItems: "center", gap: 12,
                   paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6" },
+                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
                 active && { backgroundColor: opt.bg },
               ]}
             >
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : "#111827" }}>
+                  color: active ? opt.color : colors.text }}>
                   {opt.label}
                 </Text>
-                <Text style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{opt.desc}</Text>
+                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
               </View>
               {active && <Check size={16} color={opt.color} />}
             </TouchableOpacity>
@@ -675,17 +676,17 @@ export function VariableEditModal({
               style={[
                 { flexDirection: "row", alignItems: "center", gap: 12,
                   paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6" },
+                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
                 active && { backgroundColor: opt.bg },
               ]}
             >
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : "#111827" }}>
+                  color: active ? opt.color : colors.text }}>
                   {opt.label}
                 </Text>
-                <Text style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{opt.desc}</Text>
+                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
               </View>
               {active && <Check size={16} color={opt.color} />}
             </TouchableOpacity>

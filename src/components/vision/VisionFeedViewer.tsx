@@ -4,6 +4,7 @@ import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
 import { FEED_HTML } from "@/src/vision/visionHtml";
 import type { VisionZone } from "@/src/models/robotModels";
+import { colors, radii, shadows } from "@/src/components/ui/kit";
 
 export type VisionFeedHandle = VisionCanvasHandle;
 
@@ -78,9 +79,9 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
 
 const styles = StyleSheet.create({
   feedCard: {
-    backgroundColor: "#111", borderRadius: 12, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
+    backgroundColor: "#111", borderRadius: radii.md, overflow: "hidden", // camera feed frame, intentionally near-black
+    ...shadows.soft,
   },
   placeholder: { ...StyleSheet.absoluteFill, justifyContent: "center", alignItems: "center" },
-  placeholderText: { color: "#6b7280", fontSize: 13 },
+  placeholderText: { color: colors.textMuted, fontSize: 13 },
 });

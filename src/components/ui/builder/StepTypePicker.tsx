@@ -20,6 +20,7 @@ import {
   StepIcon,
 } from "./stepUtils";
 import { ms } from "./builderStyles";
+import { colors, radii } from "@/src/components/ui/kit";
 
 // ── Step type picker modal ────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ export function StepTypePicker({
           <Text style={[ms.rowLabel, { color: theme.accent }]}>{s.label}</Text>
           <Text style={ms.rowDesc}>{restricted ? "Not allowed in background programs" : s.desc}</Text>
         </View>
-        {restricted ? <OctagonX size={14} color="#dc2626" /> : <ChevronRight size={16} color="#d1d5db" />}
+        {restricted ? <OctagonX size={14} color={colors.danger} /> : <ChevronRight size={16} color={colors.borderStrong} />}
       </TouchableOpacity>
     );
   }
@@ -74,25 +75,25 @@ export function StepTypePicker({
           <View style={ms.header}>
             <Text style={ms.title}>Add Step</Text>
             <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color="#9ca3af" />
+              <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
 
           {/* Search bar */}
           <View style={ptStyles.searchBar}>
-            <Search size={14} color="#9ca3af" />
+            <Search size={14} color={colors.textFaint} />
             <TextInput
               style={ptStyles.searchInput}
               value={search}
               onChangeText={setSearch}
               placeholder="Search steps…"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               returnKeyType="search"
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
-                <X size={13} color="#9ca3af" />
+                <X size={13} color={colors.textFaint} />
               </TouchableOpacity>
             )}
           </View>
@@ -135,16 +136,16 @@ const ptStyles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 9,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
     paddingHorizontal: 10,
-    backgroundColor: "#f9fafb",
+    backgroundColor: colors.surfaceMuted,
     marginBottom: 10,
   },
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: "#111827",
+    color: colors.text,
     paddingVertical: 9,
   },
   catHeader: {
@@ -152,7 +153,7 @@ const ptStyles = StyleSheet.create({
     paddingBottom: 6,
     paddingHorizontal: 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
     marginBottom: 2,
   },
   catLabel: {

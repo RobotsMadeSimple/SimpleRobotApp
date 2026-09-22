@@ -30,6 +30,7 @@ import {
   defaultBlobParams,
   defaultColorEntry,
 } from "@/src/models/robotModels";
+import { colors as kitColors, spacing, radii, shadows, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
@@ -386,19 +387,19 @@ export function InspectionConfigModal({
           <View>
             <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
               <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  borderRadius: 12, paddingVertical: 13,
-                  backgroundColor: isRunning ? '#dc2626' : '#0891b2' }}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+                  borderRadius: radii.md, paddingVertical: spacing.md,
+                  backgroundColor: isRunning ? kitColors.danger : accents.cyan }}
                 onPress={onToggleRunning}
                 activeOpacity={0.8}
                 disabled={!!transitioning}
               >
                 {transitioning
-                  ? <ActivityIndicator size="small" color="#fff" />
+                  ? <ActivityIndicator size="small" color={kitColors.onAccent} />
                   : isRunning
-                    ? <EyeOff size={16} color="#fff" />
-                    : <Eye size={16} color="#fff" />}
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                    ? <EyeOff size={16} color={kitColors.onAccent} />
+                    : <Eye size={16} color={kitColors.onAccent} />}
+                <Text style={{ color: kitColors.onAccent, fontSize: 14, fontWeight: '700' }}>
                   {transitioning === 'starting' ? 'Starting...'
                     : transitioning === 'stopping' ? 'Stopping...'
                     : isRunning ? 'Stop Vision'
@@ -430,7 +431,7 @@ export function InspectionConfigModal({
           onBack={handleClose}
           right={
             <TouchableOpacity onPress={handleClose} style={ves.configDoneBtn}>
-              <Check size={15} color="#fff" />
+              <Check size={15} color={kitColors.onAccent} />
               <Text style={ves.configDoneBtnText}>Done</Text>
             </TouchableOpacity>
           }
@@ -442,7 +443,7 @@ export function InspectionConfigModal({
 
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[{ padding: 14, gap: 10 }, isWide && ws.rightPaneContent]}
+          contentContainerStyle={[{ padding: spacing.lg, gap: spacing.sm }, isWide && ws.rightPaneContent]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -456,7 +457,7 @@ export function InspectionConfigModal({
                 value={name}
                 onChangeText={setName}
                 placeholder="Inspection name"
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={kitColors.textFaint}
               />
             </View>
             <View style={[ves.groupRow, ves.groupRowBorder]}>
@@ -472,10 +473,10 @@ export function InspectionConfigModal({
             activeOpacity={0.75}
           >
             <Text style={ves.configFieldLabel}>Zone</Text>
-            <Text style={{ flex: 1, fontSize: 14, color: '#111827' }}>
+            <Text style={{ flex: 1, fontSize: 14, color: kitColors.text }}>
               {linkedZone?.name ?? 'Full image'}
             </Text>
-            <ChevronDown size={15} color="#9ca3af" />
+            <ChevronDown size={15} color={kitColors.textFaint} />
           </TouchableOpacity>
 
           {/* Blob params */}
@@ -514,15 +515,15 @@ export function InspectionConfigModal({
               <Text style={ves.blobPanelTitle}>ArUco Detection</Text>
 
               <TouchableOpacity
-                style={[ves.configCard, { marginBottom: 8 }]}
+                style={[ves.configCard, { marginBottom: spacing.sm }]}
                 onPress={() => setDictPickerOpen(true)}
                 activeOpacity={0.75}
               >
                 <Text style={ves.paramLabel}>Dictionary</Text>
-                <Text style={{ flex: 1, fontSize: 13, color: '#111827' }}>
+                <Text style={{ flex: 1, fontSize: 13, color: kitColors.text }}>
                   {ARUCO_DICTIONARIES.find(d => d.id === arucoDictId)?.label ?? String(arucoDictId)}
                 </Text>
-                <ChevronDown size={14} color="#9ca3af" />
+                <ChevronDown size={14} color={kitColors.textFaint} />
               </TouchableOpacity>
               <Text style={ves.paramDesc}>
                 Must match the dictionary used to generate the printed markers.
@@ -578,17 +579,17 @@ export function InspectionConfigModal({
             <View style={ves.blobPanel}>
               <Text style={ves.blobPanelTitle}>Barcode / QR Detection</Text>
               <TouchableOpacity
-                style={[ves.configCard, { marginBottom: 4 }]}
+                style={[ves.configCard, { marginBottom: spacing.xs }]}
                 onPress={() => setFormatPickerOpen(true)}
                 activeOpacity={0.75}
               >
                 <Text style={ves.paramLabel}>Formats</Text>
-                <Text style={{ flex: 1, fontSize: 13, color: '#111827' }}>
+                <Text style={{ flex: 1, fontSize: 13, color: kitColors.text }}>
                   {barcodeFormats.length === 0
                     ? 'All formats'
                     : barcodeFormats.map(f => BARCODE_FORMATS.find(b => b.id === f)?.label ?? f).join(', ')}
                 </Text>
-                <ChevronDown size={14} color="#9ca3af" />
+                <ChevronDown size={14} color={kitColors.textFaint} />
               </TouchableOpacity>
               <Text style={ves.paramDesc}>
                 Select specific formats to speed up detection, or leave as "All formats" to scan everything.
@@ -626,9 +627,9 @@ export function InspectionConfigModal({
                     <View style={{
                       width: 28, height: 28, borderRadius: 6,
                       backgroundColor: `rgb(${ce.r},${ce.g},${ce.b})`,
-                      borderWidth: 1, borderColor: '#d1d5db',
+                      borderWidth: 1, borderColor: kitColors.borderStrong,
                     }} />
-                    <Text style={{ flex: 1, fontSize: 12, color: '#374151' }}>
+                    <Text style={{ flex: 1, fontSize: 12, color: kitColors.textSecondary }}>
                       rgb({ce.r}, {ce.g}, {ce.b})
                     </Text>
                     <View style={{
@@ -636,7 +637,7 @@ export function InspectionConfigModal({
                       paddingHorizontal: 6, paddingVertical: 2,
                       borderWidth: 1, borderColor: '#bae6fd',
                     }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: '#0891b2' }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: accents.cyan }}>
                         ±{ce.tolerance}
                       </Text>
                     </View>
@@ -660,16 +661,16 @@ export function InspectionConfigModal({
 
               <Text style={[ves.sectionLabel, { marginTop: 4 }]}>PASS / FAIL THRESHOLDS</Text>
 
-              <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: 10 }]}>
+              <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: spacing.sm }]}>
                 {/* Min row */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
                   <Switch
                     value={minCoverage !== null}
                     onValueChange={v => { setMinCoverage(v ? 50 : null); if (v) setMinCoverageText('50'); }}
-                    trackColor={{ true: '#16a34a' }}
+                    trackColor={{ true: kitColors.success }}
                     style={{ transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }] }}
                   />
-                  <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>Min coverage</Text>
+                  <Text style={{ fontSize: 13, color: kitColors.textSecondary, flex: 1 }}>Min coverage</Text>
                   {minCoverage !== null && (
                     <>
                       <TextInput
@@ -687,20 +688,20 @@ export function InspectionConfigModal({
                             setMinCoverageText(String(minCoverage));
                         }}
                       />
-                      <Text style={{ fontSize: 11, color: '#9ca3af' }}>%</Text>
+                      <Text style={{ fontSize: 11, color: kitColors.textFaint }}>%</Text>
                     </>
                   )}
                 </View>
 
                 {/* Max row */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm }}>
                   <Switch
                     value={maxCoverage !== null}
                     onValueChange={v => { setMaxCoverage(v ? 90 : null); if (v) setMaxCoverageText('90'); }}
-                    trackColor={{ true: '#dc2626' }}
+                    trackColor={{ true: kitColors.danger }}
                     style={{ transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }] }}
                   />
-                  <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>Max coverage</Text>
+                  <Text style={{ fontSize: 13, color: kitColors.textSecondary, flex: 1 }}>Max coverage</Text>
                   {maxCoverage !== null && (
                     <>
                       <TextInput
@@ -718,7 +719,7 @@ export function InspectionConfigModal({
                             setMaxCoverageText(String(maxCoverage));
                         }}
                       />
-                      <Text style={{ fontSize: 11, color: '#9ca3af' }}>%</Text>
+                      <Text style={{ fontSize: 11, color: kitColors.textFaint }}>%</Text>
                     </>
                   )}
                 </View>
@@ -733,7 +734,7 @@ export function InspectionConfigModal({
                     <View style={{
                       position: 'absolute', left: 0, right: 0,
                       top: (28 - 5) / 2, height: 5, borderRadius: 3,
-                      backgroundColor: '#e5e7eb', overflow: 'hidden',
+                      backgroundColor: kitColors.border, overflow: 'hidden',
                     }}>
                       <View style={{
                         position: 'absolute', top: 0, bottom: 0,
@@ -753,9 +754,9 @@ export function InspectionConfigModal({
                         }}
                       >
                         <View style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          backgroundColor: '#fff', borderWidth: 2, borderColor: '#16a34a',
-                          shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+                          width: 18, height: 18, borderRadius: radii.sm,
+                          backgroundColor: kitColors.surface, borderWidth: 2, borderColor: kitColors.success,
+                          ...shadows.soft,
                         }} />
                       </View>
                     )}
@@ -770,9 +771,9 @@ export function InspectionConfigModal({
                         }}
                       >
                         <View style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          backgroundColor: '#fff', borderWidth: 2, borderColor: '#dc2626',
-                          shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+                          width: 18, height: 18, borderRadius: radii.sm,
+                          backgroundColor: kitColors.surface, borderWidth: 2, borderColor: kitColors.danger,
+                          ...shadows.soft,
                         }} />
                       </View>
                     )}
@@ -846,8 +847,8 @@ const ws = StyleSheet.create({
   // wide/narrow desktops. "split" mode overrides this to an even 50/50 via wide.paneSplit.
   feedPane: {
     width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
-    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e7eb",
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: kitColors.border,
   },
-  leftPaneContent: { paddingBottom: 24 },
+  leftPaneContent: { paddingBottom: spacing.xl },
   rightPaneContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 });

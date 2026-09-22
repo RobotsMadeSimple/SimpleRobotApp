@@ -1,7 +1,25 @@
-import { useWideContent } from "@/src/components/ui/responsive";
 import {
   SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import {
+  accents,
+  Button,
+  Card,
+  Chip,
+  ChipGroup,
+  colors,
+  Divider,
+  EmptyState,
+  FormRow,
+  Input,
+  ListRow,
+  radii,
+  Screen,
+  SectionHeader,
+  SegmentedControl,
+  shadows,
+  spacing,
+} from "@/src/components/ui/kit";
 import { useBuiltPrograms,
   useConnected } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -29,14 +47,10 @@ import React,
   useState } from "react";
 import {
   ActivityIndicator,
-  Modal,
   PanResponder,
   Platform,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -123,8 +137,8 @@ function NumericInput({
   }, [value]);
 
   return (
-    <TextInput
-      style={[s.input, style]}
+    <Input
+      style={style}
       value={text}
       onChangeText={v => {
         if (v === "" || v === "-" || /^-?\d*\.?\d*$/.test(v)) {
@@ -185,8 +199,8 @@ function VarInput({
   }, [value, expr]);
 
   return (
-    <TextInput
-      style={[s.input, expr != null && s.inputExpr, style]}
+    <Input
+      style={[expr != null && s.inputExpr, style]}
       value={text}
       onChangeText={v => {
         setText(v);
@@ -212,14 +226,13 @@ function VarInput({
       autoCorrect={false}
       selectTextOnFocus
       placeholder={placeholder}
-      placeholderTextColor="#9ca3af"
     />
   );
 }
 
-// ── Collapsible section & compact field row ───────────────────────────────────
+// ── Collapsible section ────────────────────────────────────────────────────────
 // The parameter list got long; sections collapse to a single row showing a
-// live summary of their values, and fields sit label-left / input-right.
+// live summary of their values. Fields inside use the kit's FormRow (inline).
 
 function Section({
   title,
@@ -234,23 +247,19 @@ function Section({
 }) {
   const [open, setOpen] = useState(initOpen);
   return (
-    <View style={s.card}>
+    <Card padded={false}>
       <TouchableOpacity style={s.secHeader} onPress={() => setOpen(v => !v)} activeOpacity={0.7}>
         <Text style={s.secTitle}>{title}</Text>
         <Text style={s.secSummary} numberOfLines={1}>{open ? "" : summary ?? ""}</Text>
-        <ChevronDown size={16} color="#9ca3af" style={{ transform: [{ rotate: open ? "180deg" : "0deg" }] }} />
+        <ChevronDown size={16} color={colors.textFaint} style={{ transform: [{ rotate: open ? "180deg" : "0deg" }] }} />
       </TouchableOpacity>
-      {open && <View style={s.secBody}>{children}</View>}
-    </View>
-  );
-}
-
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <View style={s.fieldRow}>
-      <Text style={s.fieldRowLabel}>{label}</Text>
-      <View style={s.fieldRowInput}>{children}</View>
-    </View>
+      {open && (
+        <>
+          <Divider />
+          <View style={s.secBody}>{children}</View>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -501,12 +510,12 @@ function ContourViewport({
         {origin && (
           <G>
             <Line x1={toX(origin.x) - 9} y1={toY(origin.y)} x2={toX(origin.x) + 9} y2={toY(origin.y)}
-              stroke="#0891b2" strokeWidth={1.25} />
+              stroke={accents.cyan} strokeWidth={1.25} />
             <Line x1={toX(origin.x)} y1={toY(origin.y) - 9} x2={toX(origin.x)} y2={toY(origin.y) + 9}
-              stroke="#0891b2" strokeWidth={1.25} />
+              stroke={accents.cyan} strokeWidth={1.25} />
             <Circle cx={toX(origin.x)} cy={toY(origin.y)} r={3.5}
-              fill="none" stroke="#0891b2" strokeWidth={1.25} />
-            <SvgText x={toX(origin.x) + 7} y={toY(origin.y) - 7} fill="#0891b2" fontSize={9} fontWeight="700">
+              fill="none" stroke={accents.cyan} strokeWidth={1.25} />
+            <SvgText x={toX(origin.x) + 7} y={toY(origin.y) - 7} fill={accents.cyan} fontSize={9} fontWeight="700">
               {origin.label}
             </SvgText>
           </G>
@@ -564,7 +573,7 @@ function ContourViewport({
         {(toolpath ?? []).map((c, i) => (
           <G key={`t${i}`}>
             {arrowsFor(c).map((ar, j) => (
-              <Path key={j} d={trianglePath(ar.x, ar.y, ar.a)} fill="#f97316" />
+              <Path key={j} d={trianglePath(ar.x, ar.y, ar.a)} fill={accents.orange} />
             ))}
             {c.points.length > 0 && (
               <Circle
@@ -595,7 +604,6 @@ export default function CncBuilderScreen() {
   const { programName, stepId } = useLocalSearchParams<{ programName?: string; stepId?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected = useConnected();
-  const wideContent = useWideContent();
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -1003,77 +1011,81 @@ export default function CncBuilderScreen() {
   const selectedCount = selectedHoles.size + contourSel.size;
 
   return (
-    <View style={s.root}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <SubPageHeader
         title="CNC Builder"
         subtitle={programName}
         right={
-          <TouchableOpacity
-            style={[s.saveBtn, (saving || selectedCount === 0) && s.saveBtnDisabled]}
+          <Button
+            variant="primary"
+            size="sm"
+            label={`Save  (${selectedCount})`}
+            loading={saving}
+            disabled={selectedCount === 0}
             onPress={handleSave}
-            disabled={saving || selectedCount === 0}
-            activeOpacity={0.75}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={s.saveBtnText}>Save  ({selectedCount})</Text>
-            )}
-          </TouchableOpacity>
+          />
         }
       />
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={[s.scroll, wideContent]}>
+      <Screen>
 
         {/* Vector file selector */}
-        <Text style={s.sectionLabel}>VECTOR FILE (DXF / SVG)</Text>
-        <View style={s.card}>
+        <SectionHeader title="Vector file (DXF / SVG)" />
+        <Card padded={false}>
           {/* Upload button */}
-          <TouchableOpacity style={s.uploadRow} onPress={handleUpload} disabled={uploading || !connected} activeOpacity={0.7}>
-            {uploading ? (
-              <ActivityIndicator size="small" color="#7c3aed" />
-            ) : (
-              <Upload size={16} color="#7c3aed" />
-            )}
-            <Text style={s.uploadText}>{uploading ? "Uploading…" : "Upload DXF from device"}</Text>
-          </TouchableOpacity>
+          <ListRow
+            card={false}
+            chevron={false}
+            icon={uploading
+              ? <ActivityIndicator size="small" color={colors.accent} />
+              : <Upload size={18} color={colors.accent} />}
+            title={uploading ? "Uploading…" : "Upload DXF from device"}
+            onPress={uploading || !connected ? undefined : handleUpload}
+          />
+          <Divider />
 
           {/* File list */}
           {loadingFiles ? (
-            <ActivityIndicator style={{ margin: 12 }} color="#7c3aed" />
+            <ActivityIndicator style={{ margin: spacing.md }} color={colors.accent} />
           ) : dxfFiles.length === 0 ? (
-            <Text style={s.emptyHint}>No DXF files on controller. Upload one above.</Text>
+            <EmptyState title="No DXF files on controller." subtitle="Upload one above." />
           ) : (
             dxfFiles.map(name => (
-              <TouchableOpacity
-                key={name}
-                style={[s.fileRow, selectedDxf === name && s.fileRowSelected]}
-                onPress={() => setSelectedDxf(name)}
-                activeOpacity={0.7}
-              >
-                <FileText size={15} color={selectedDxf === name ? "#7c3aed" : "#6b7280"} />
-                <Text style={[s.fileName, selectedDxf === name && s.fileNameSelected]} numberOfLines={1}>{name}</Text>
-                {selectedDxf === name && <Check size={14} color="#7c3aed" />}
-                <DeleteIconButton size={14} onPress={() => handleDeleteDxf(name)} style={{ marginLeft: "auto" }} />
-              </TouchableOpacity>
+              <View key={name}>
+                <ListRow
+                  card={false}
+                  chevron={false}
+                  icon={<FileText size={15} color={selectedDxf === name ? colors.accent : colors.textMuted} />}
+                  title={name}
+                  titleColor={selectedDxf === name ? colors.accent : undefined}
+                  onPress={() => setSelectedDxf(name)}
+                  right={
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                      {selectedDxf === name && <Check size={14} color={colors.accent} />}
+                      <DeleteIconButton size={14} onPress={() => handleDeleteDxf(name)} />
+                    </View>
+                  }
+                />
+                <Divider />
+              </View>
             ))
           )}
 
           <TouchableOpacity style={s.refreshRow} onPress={refreshFiles} activeOpacity={0.7}>
-            <RefreshCw size={13} color="#9ca3af" />
+            <RefreshCw size={13} color={colors.textFaint} />
             <Text style={s.refreshText}>Refresh</Text>
           </TouchableOpacity>
-        </View>
+        </Card>
 
         {/* Unified preview: part outline + holes, selection, direction, placement */}
         {selectedDxf && (
           <>
-            <Text style={s.sectionLabel}>
-              PREVIEW  ·  {contourSel.size}/{baseContours.length} contours · {selectedHoles.size}/{placedHoles.length} holes
-            </Text>
-            <View style={s.card}>
+            <SectionHeader
+              title={`Preview  ·  ${contourSel.size}/${baseContours.length} contours · ${selectedHoles.size}/${placedHoles.length} holes`}
+            />
+            <Card padded={false}>
               {loadingDxf ? (
-                <ActivityIndicator style={{ margin: 24 }} color="#7c3aed" />
+                <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} />
               ) : (
                 <>
                   <ContourViewport
@@ -1134,18 +1146,16 @@ export default function CncBuilderScreen() {
                   />
 
                   {/* Tap behavior */}
-                  <View style={[s.segRow, { marginHorizontal: 12, marginTop: 8 }]}>
-                    {([["select", "Select"], ["start", "Start Point"], ["dir", "Direction"]] as const).map(([m, label]) => (
-                      <TouchableOpacity
-                        key={m}
-                        style={[s.segBtn, tapMode === m && s.segBtnActive]}
-                        onPress={() => setTapMode(m)}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={[s.segBtnText, tapMode === m && s.segBtnTextActive]}>{label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                  <SegmentedControl
+                    options={[
+                      { label: "Select",      value: "select" },
+                      { label: "Start Point", value: "start" },
+                      { label: "Direction",   value: "dir" },
+                    ]}
+                    value={tapMode}
+                    onChange={setTapMode}
+                    style={{ marginHorizontal: spacing.md, marginTop: spacing.sm }}
+                  />
                   <Text style={s.hintText}>
                     {tapMode === "select"
                       ? "Tap a contour or hole to include/exclude it. Drag to pan, pinch or scroll to zoom. Triangles show travel direction; the green dot is the start."
@@ -1155,36 +1165,40 @@ export default function CncBuilderScreen() {
                   </Text>
 
                   <View style={s.selectionBtns}>
-                    <TouchableOpacity
-                      style={s.selBtn}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      label="All Contours"
+                      textStyle={{ color: colors.accent }}
+                      style={{ flex: 1 }}
                       onPress={() => setContourSel(new Set(baseContours.map((_, i) => i)))}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={s.selBtnText}>All Contours</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.selBtn}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      label="No Contours"
+                      textStyle={{ color: colors.accent }}
+                      style={{ flex: 1 }}
                       onPress={() => setContourSel(new Set())}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={s.selBtnText}>No Contours</Text>
-                    </TouchableOpacity>
+                    />
                     {placedHoles.length > 0 && (
                       <>
-                        <TouchableOpacity
-                          style={s.selBtn}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          label="All Holes"
+                          textStyle={{ color: colors.warning }}
+                          style={{ flex: 1 }}
                           onPress={() => setSelectedHoles(new Set(placedHoles.map((_, i) => i)))}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[s.selBtnText, { color: "#d97706" }]}>All Holes</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={s.selBtn}
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          label="No Holes"
+                          textStyle={{ color: colors.warning }}
+                          style={{ flex: 1 }}
                           onPress={() => setSelectedHoles(new Set())}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[s.selBtnText, { color: "#d97706" }]}>No Holes</Text>
-                        </TouchableOpacity>
+                        />
                       </>
                     )}
                   </View>
@@ -1197,71 +1211,64 @@ export default function CncBuilderScreen() {
                   )}
                 </>
               )}
-            </View>
+            </Card>
 
             <Section
               title="Placement"
               summary={`${originMode === "current" ? "@robot · " : ""}×${scale} · (${offsetX}, ${offsetY})${flipY ? " · flip Y" : ""}${offsetMode !== "none" ? ` · ${offsetMode} ${offsetDist}mm` : ""}`}
             >
               <Text style={s.dynLabel}>ORIGIN</Text>
-              <View style={[s.segRow, { marginHorizontal: 0, marginTop: 0 }]}>
-                {([["absolute", "Fixed Position"], ["current", "Robot Position"]] as const).map(([m, label]) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[s.segBtn, originMode === m && s.segBtnActive]}
-                    onPress={() => setOriginMode(m)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[s.segBtnText, originMode === m && s.segBtnTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <SegmentedControl
+                options={[
+                  { label: "Fixed Position", value: "absolute" },
+                  { label: "Robot Position", value: "current" },
+                ]}
+                value={originMode}
+                onChange={setOriginMode}
+              />
               <Text style={s.hintSm}>
                 {originMode === "current"
                   ? "The robot's position when the block runs becomes the origin — jog to where the toolpath should go, then run. Z is relative too: Active Z 0 = the height the robot starts at."
                   : "Coordinates are absolute robot positions (within the active local frame)."}
               </Text>
-              <FieldRow label="Scale">
+              <FormRow inline label="Scale">
                 <NumericInput value={scale} onChange={setScale} placeholder="1" style={s.inputSm} />
-              </FieldRow>
-              <FieldRow label={originMode === "current" ? "Offset X (mm)" : "Origin X (mm)"}>
+              </FormRow>
+              <FormRow inline label={originMode === "current" ? "Offset X (mm)" : "Origin X (mm)"}>
                 <NumericInput value={offsetX} onChange={setOffsetX} placeholder="0" style={s.inputSm} />
-              </FieldRow>
-              <FieldRow label={originMode === "current" ? "Offset Y (mm)" : "Origin Y (mm)"}>
+              </FormRow>
+              <FormRow inline label={originMode === "current" ? "Offset Y (mm)" : "Origin Y (mm)"}>
                 <NumericInput value={offsetY} onChange={setOffsetY} placeholder="0" style={s.inputSm} />
-              </FieldRow>
+              </FormRow>
               <Text style={s.hintSm}>
                 {originMode === "current"
                   ? "Scale multiplies file units into mm; the file's lower-left corner lands this far from the robot's start position."
                   : "Scale multiplies file units into mm; origin is the robot position of the file's lower-left corner."}
               </Text>
-              <FieldRow label="Flip Y">
+              <FormRow inline label="Flip Y">
                 <TouchableOpacity
-                  style={[s.toggleBtn, flipY && s.toggleBtnOn, { alignSelf: "flex-end" }]}
+                  style={[s.toggleBtn, flipY && s.toggleBtnOn]}
                   onPress={() => setFlipY(v => !v)}
                   activeOpacity={0.7}
                 >
                   <Text style={[s.toggleBtnText, flipY && s.toggleBtnTextOn]}>{flipY ? "ON" : "OFF"}</Text>
                 </TouchableOpacity>
-              </FieldRow>
+              </FormRow>
 
               <Text style={s.dynLabel}>TOOL OFFSET</Text>
-              <View style={[s.segRow, { marginHorizontal: 0, marginTop: 0 }]}>
-                {([["none", "None"], ["outside", "Outside"], ["inside", "Inside"]] as const).map(([m, label]) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[s.segBtn, offsetMode === m && s.segBtnActive]}
-                    onPress={() => setOffsetMode(m)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[s.segBtnText, offsetMode === m && s.segBtnTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <SegmentedControl
+                options={[
+                  { label: "None",    value: "none" },
+                  { label: "Outside", value: "outside" },
+                  { label: "Inside",  value: "inside" },
+                ]}
+                value={offsetMode}
+                onChange={setOffsetMode}
+              />
               {offsetMode !== "none" && (
-                <FieldRow label="Offset distance (mm)">
+                <FormRow inline label="Offset distance (mm)">
                   <NumericInput value={offsetDist} onChange={setOffsetDist} placeholder="1" style={s.inputSm} />
-                </FieldRow>
+                </FormRow>
               )}
               <Text style={s.hintSm}>Shifts closed contours by e.g. half the tool diameter — shown dashed in the preview. Open contours are not offset.</Text>
             </Section>
@@ -1271,15 +1278,15 @@ export default function CncBuilderScreen() {
               initOpen
               summary={`Z ${fieldExprs.safeZ ?? safeZ}→${fieldExprs.activeZ ?? activeZ} · ${fieldExprs.activeSpeed ?? activeSpeed} mm/s · blend ${fieldExprs.blendRadius ?? blendRadius}`}
             >
-              <FieldRow label="Safe Z (mm)">
+              <FormRow inline label="Safe Z (mm)">
                 <VarInput value={safeZ} expr={fieldExprs.safeZ} onChange={setSafeZ} onExpr={setFieldExpr("safeZ")} placeholder="5" style={s.inputSm} />
-              </FieldRow>
-              <FieldRow label="Active Z (mm)">
+              </FormRow>
+              <FormRow inline label="Active Z (mm)">
                 <VarInput value={activeZ} expr={fieldExprs.activeZ} onChange={setActiveZ} onExpr={setFieldExpr("activeZ")} placeholder="0" style={s.inputSm} />
-              </FieldRow>
-              <FieldRow label="Blend radius (mm)">
+              </FormRow>
+              <FormRow inline label="Blend radius (mm)">
                 <VarInput value={blendRadius} expr={fieldExprs.blendRadius} onChange={setBlendRadius} onExpr={setFieldExpr("blendRadius")} placeholder="0" style={s.inputSm} />
-              </FieldRow>
+              </FormRow>
               <Text style={s.hintSm}>Blend &gt; 0 runs each contour as one continuous move at full speed; 0 stops at every point. Fields accept $variable expressions.</Text>
 
               <Text style={s.dynLabel}>ACTIVE</Text>
@@ -1322,27 +1329,23 @@ export default function CncBuilderScreen() {
                 summary={`${holeOp} ${fieldExprs.holeDepth ?? holeDepth}${holeOp === "thread" ? ` · ${THREAD_PRESETS.find(p => Math.abs(p.pitch - threadPitch) < 0.001)?.label ?? `${fieldExprs.threadPitch ?? threadPitch} mm/rev`}` : ""}${holePeck ? " · peck" : ""}`}
               >
                 <Text style={s.dynLabel}>OPERATION</Text>
-                <View style={[s.segRow, { marginHorizontal: 0, marginTop: 0 }]}>
-                  {([["drill", "Drill"], ["thread", "Thread"]] as const).map(([m, label]) => (
-                    <TouchableOpacity
-                      key={m}
-                      style={[s.segBtn, holeOp === m && s.segBtnActive]}
-                      onPress={() => setHoleOp(m)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={[s.segBtnText, holeOp === m && s.segBtnTextActive]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <SegmentedControl
+                  options={[
+                    { label: "Drill",  value: "drill" },
+                    { label: "Thread", value: "thread" },
+                  ]}
+                  value={holeOp}
+                  onChange={setHoleOp}
+                />
                 <Text style={s.hintSm}>
                   {holeOp === "drill"
                     ? "Plunges straight down into each selected hole."
                     : "Taps each selected hole — Z and RZ move together at the pitch below."}
                 </Text>
 
-                <FieldRow label="Depth (mm)">
+                <FormRow inline label="Depth (mm)">
                   <VarInput value={holeDepth} expr={fieldExprs.holeDepth} onChange={setHoleDepth} onExpr={setFieldExpr("holeDepth")} placeholder="-15" style={s.inputSm} />
-                </FieldRow>
+                </FormRow>
                 <Text style={s.hintSm}>Negative = down, measured from Safe Z. Accepts $variable expressions.</Text>
 
                 {holeOp === "thread" && (
@@ -1356,55 +1359,57 @@ export default function CncBuilderScreen() {
                       <Text style={s.presetBtnText}>
                         {THREAD_PRESETS.find(p => Math.abs(p.pitch - threadPitch) < 0.001)?.label ?? `${threadPitch} mm/rev`}
                       </Text>
-                      <ChevronDown size={15} color="#7c3aed" style={{ transform: [{ rotate: presetOpen ? "180deg" : "0deg" }] }} />
+                      <ChevronDown size={15} color={colors.accent} style={{ transform: [{ rotate: presetOpen ? "180deg" : "0deg" }] }} />
                     </TouchableOpacity>
                     {presetOpen && (
                       <View style={[s.presetList, { marginHorizontal: 0 }]}>
                         {THREAD_PRESETS.map((p, i) => (
-                          <TouchableOpacity
-                            key={i}
-                            style={[s.presetItem, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6" }]}
-                            onPress={() => { setThreadPitch(p.pitch); setFieldExpr("threadPitch")(undefined); setPresetOpen(false); }}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[s.presetItemText, Math.abs(p.pitch - threadPitch) < 0.001 && { color: "#7c3aed", fontWeight: "700" }]}>
-                              {p.label}  <Text style={{ color: "#9ca3af" }}>{p.pitch} mm/rev</Text>
-                            </Text>
-                            {Math.abs(p.pitch - threadPitch) < 0.001 && <Check size={14} color="#7c3aed" />}
-                          </TouchableOpacity>
+                          <View key={i}>
+                            {i > 0 && <Divider />}
+                            <TouchableOpacity
+                              style={s.presetItem}
+                              onPress={() => { setThreadPitch(p.pitch); setFieldExpr("threadPitch")(undefined); setPresetOpen(false); }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[s.presetItemText, Math.abs(p.pitch - threadPitch) < 0.001 && { color: colors.accent, fontWeight: "700" }]}>
+                                {p.label}  <Text style={{ color: colors.textFaint }}>{p.pitch} mm/rev</Text>
+                              </Text>
+                              {Math.abs(p.pitch - threadPitch) < 0.001 && <Check size={14} color={colors.accent} />}
+                            </TouchableOpacity>
+                          </View>
                         ))}
                       </View>
                     )}
-                    <FieldRow label="Pitch (mm/rev)">
+                    <FormRow inline label="Pitch (mm/rev)">
                       <VarInput value={threadPitch} expr={fieldExprs.threadPitch} onChange={setThreadPitch} onExpr={setFieldExpr("threadPitch")} placeholder="1.5" style={s.inputSm} />
-                    </FieldRow>
+                    </FormRow>
                   </>
                 )}
 
-                <FieldRow label="Peck (retract between passes)">
+                <FormRow inline label="Peck (retract between passes)">
                   <TouchableOpacity
-                    style={[s.toggleBtn, holePeck && s.toggleBtnOn, { alignSelf: "flex-end" }]}
+                    style={[s.toggleBtn, holePeck && s.toggleBtnOn]}
                     onPress={() => setHolePeck(v => !v)}
                     activeOpacity={0.7}
                   >
                     <Text style={[s.toggleBtnText, holePeck && s.toggleBtnTextOn]}>{holePeck ? "ON" : "OFF"}</Text>
                   </TouchableOpacity>
-                </FieldRow>
+                </FormRow>
                 {holePeck && (
-                  <FieldRow label="Peck depth (mm)">
+                  <FormRow inline label="Peck depth (mm)">
                     <VarInput value={holePeckDepth} expr={fieldExprs.holePeckDepth} onChange={setHolePeckDepth} onExpr={setFieldExpr("holePeckDepth")} placeholder="5" style={s.inputSm} />
-                  </FieldRow>
+                  </FormRow>
                 )}
                 {holeOp === "thread" && (
-                  <FieldRow label="Reverse out">
+                  <FormRow inline label="Reverse out">
                     <TouchableOpacity
-                      style={[s.toggleBtn, threadReverseOut && s.toggleBtnOn, { alignSelf: "flex-end" }]}
+                      style={[s.toggleBtn, threadReverseOut && s.toggleBtnOn]}
                       onPress={() => setThreadReverseOut(v => !v)}
                       activeOpacity={0.7}
                     >
                       <Text style={[s.toggleBtnText, threadReverseOut && s.toggleBtnTextOn]}>{threadReverseOut ? "ON" : "OFF"}</Text>
                     </TouchableOpacity>
-                  </FieldRow>
+                  </FormRow>
                 )}
                 <Text style={s.hintSm}>
                   {holeOp === "thread"
@@ -1415,20 +1420,19 @@ export default function CncBuilderScreen() {
             )}
 
             <Section title="Path Quality" summary={`join ${joinTol} mm · detail ${detail} mm`}>
-              <FieldRow label="Join tolerance (mm)">
+              <FormRow inline label="Join tolerance (mm)">
                 <NumericInput value={joinTol} onChange={setJoinTol} placeholder="0.1" style={s.inputSm} />
-              </FieldRow>
+              </FormRow>
               <Text style={s.hintSm}>Segments whose ends are within this distance chain into one tool-down pass. Raise if the tool lifts at every point.</Text>
-              <FieldRow label="Detail tolerance (mm)">
+              <FormRow inline label="Detail tolerance (mm)">
                 <NumericInput value={detail} onChange={setDetail} placeholder="0.05" style={s.inputSm} />
-              </FieldRow>
+              </FormRow>
               <Text style={s.hintSm}>Max deviation when simplifying curves. Raise to reduce point count.</Text>
             </Section>
           </>
         )}
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      </Screen>
     </View>
   );
 }
@@ -1471,161 +1475,74 @@ function updateStepInList(steps: ProgramStep[], id: string, updater: (s: Program
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f9fafb" },
-  scroll: { padding: 16 },
-  modeRow: {
-    flexDirection: "row", gap: 8, marginBottom: 14,
-    backgroundColor: "#f3f4f6", borderRadius: 12, padding: 4,
-  },
-  modeBtn: {
-    flex: 1, paddingVertical: 9, alignItems: "center", borderRadius: 9,
-  },
-  modeBtnActive: {
-    backgroundColor: "#fff",
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
-  },
-  modeBtnText: { fontSize: 13, fontWeight: "600", color: "#9ca3af" },
-  modeBtnTextActive: { color: "#7c3aed" },
-  groupLabel: {
-    fontSize: 12, fontWeight: "800", color: "#6b7280",
-    letterSpacing: 0.6, paddingHorizontal: 14,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6",
-    paddingTop: 12,
-  },
-  segRow: {
-    flexDirection: "row", gap: 6, marginHorizontal: 14, marginTop: 4,
-    backgroundColor: "#f3f4f6", borderRadius: 10, padding: 3,
-  },
-  segBtn: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 8 },
-  segBtnActive: {
-    backgroundColor: "#fff",
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 3, elevation: 1,
-  },
-  segBtnText: { fontSize: 12, fontWeight: "600", color: "#9ca3af" },
-  segBtnTextActive: { color: "#7c3aed" },
   fitBtn: {
-    position: "absolute", right: 8, top: 8,
-    backgroundColor: "rgba(255,255,255,0.92)", borderWidth: 1, borderColor: "#e5e7eb",
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
+    position: "absolute", right: spacing.sm, top: spacing.sm,
+    backgroundColor: "rgba(255,255,255,0.92)", borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.sm - 1, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs + 1,
   },
-  fitBtnText: { fontSize: 12, fontWeight: "700", color: "#7c3aed" },
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", color: "#9ca3af",
-    letterSpacing: 0.8, marginBottom: 6, marginTop: 4,
-  },
-  card: {
-    backgroundColor: "#fff", borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "#e5e7eb",
-    marginBottom: 18, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
-  },
-  uploadRow: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    paddingHorizontal: 14, paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#f3f4f6",
-  },
-  uploadText: { fontSize: 14, color: "#7c3aed", fontWeight: "600" },
-  emptyHint: { fontSize: 13, color: "#9ca3af", padding: 14 },
-  fileRow: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 14, paddingVertical: 11,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#f3f4f6",
-  },
-  fileRowSelected: { backgroundColor: "#faf5ff" },
-  fileName: { flex: 1, fontSize: 14, color: "#374151" },
-  fileNameSelected: { color: "#7c3aed", fontWeight: "600" },
+  fitBtnText: { fontSize: 12, fontWeight: "700", color: colors.accent },
   refreshRow: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    padding: 12, justifyContent: "center",
+    flexDirection: "row", alignItems: "center", gap: spacing.xs + 2,
+    padding: spacing.md, justifyContent: "center",
   },
-  refreshText: { fontSize: 12, color: "#9ca3af" },
+  refreshText: { fontSize: 12, color: colors.textFaint },
   viewport: {
     alignSelf: "center",
-    borderRadius: 10, overflow: "hidden",
-    marginVertical: 8,
-    borderWidth: 1, borderColor: "#e5e7eb",
+    borderRadius: radii.sm + 1, overflow: "hidden",
+    marginVertical: spacing.sm,
+    borderWidth: 1, borderColor: colors.border,
   },
   emptyViewport: {
     height: VIEWPORT_SIZE, justifyContent: "center", alignItems: "center",
-    margin: 8,
+    margin: spacing.sm,
   },
-  emptyViewportText: { fontSize: 13, color: "#9ca3af" },
+  emptyViewportText: { fontSize: 13, color: colors.textFaint },
   selectionBtns: {
-    flexDirection: "row", gap: 8, padding: 12, paddingTop: 4,
-  },
-  selBtn: {
-    flex: 1, paddingVertical: 8, alignItems: "center",
-    borderRadius: 8, borderWidth: 1, borderColor: "#e5e7eb",
-    backgroundColor: "#f9fafb",
-  },
-  selBtnText: { fontSize: 13, color: "#7c3aed", fontWeight: "600" },
-  fieldLabel: {
-    fontSize: 11, fontWeight: "700", color: "#9ca3af",
-    letterSpacing: 0.6, marginBottom: 4, paddingHorizontal: 14,
-    marginTop: 2,
+    flexDirection: "row", gap: spacing.sm, padding: spacing.md, paddingTop: spacing.xs,
   },
   hintText: {
-    fontSize: 12, color: "#9ca3af", paddingHorizontal: 14, marginTop: 2, marginBottom: 4,
+    fontSize: 12, color: colors.textFaint, paddingHorizontal: spacing.md + 2, marginTop: 2, marginBottom: spacing.xs,
   },
-  input: {
-    marginHorizontal: 14, borderWidth: 1, borderColor: "#e5e7eb",
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10,
-    fontSize: 15, color: "#111827", backgroundColor: "#f9fafb",
-  },
-  inputExpr: { color: "#7c3aed", fontWeight: "600", borderColor: "#ddd6fe", backgroundColor: "#faf5ff" },
-  inputSm: { marginHorizontal: 0, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
+  inputExpr: { color: colors.accent, fontWeight: "600", borderColor: colors.accentBorder, backgroundColor: colors.accentSoft },
+  inputSm: { width: 150 },
 
   // Collapsible sections
-  secHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
-  secTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  secSummary: { flex: 1, fontSize: 12, color: "#9ca3af", textAlign: "right" },
+  secHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm + 2, paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm + 5 },
+  secTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
+  secSummary: { flex: 1, fontSize: 12, color: colors.textFaint, textAlign: "right" },
   secBody: {
-    paddingHorizontal: 14, paddingBottom: 14, paddingTop: 12, gap: 10,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6",
+    paddingHorizontal: spacing.md + 2, paddingBottom: spacing.md + 2, paddingTop: spacing.md, gap: spacing.sm + 2,
   },
 
   // Compact rows
-  fieldRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  fieldRowLabel: { flex: 1, fontSize: 13, fontWeight: "600", color: "#374151" },
-  fieldRowInput: { width: 150 },
-  tripleRow: { flexDirection: "row", gap: 8 },
+  tripleRow: { flexDirection: "row", gap: spacing.sm },
   tripleCell: { flex: 1 },
-  tripleLabel: { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5, marginBottom: 4 },
-  dynLabel: { fontSize: 11, fontWeight: "800", color: "#6b7280", letterSpacing: 0.6, marginTop: 2 },
-  hintSm: { fontSize: 11, color: "#9ca3af", lineHeight: 15 },
+  tripleLabel: { fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5, marginBottom: spacing.xs },
+  dynLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.6, marginTop: 2 },
+  hintSm: { fontSize: 11, color: colors.textFaint, lineHeight: 15 },
   presetBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginHorizontal: 14, borderWidth: 1, borderColor: "#ddd6fe",
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10,
-    backgroundColor: "#faf5ff",
+    marginHorizontal: spacing.md + 2, borderWidth: 1, borderColor: colors.accentBorder,
+    borderRadius: radii.sm - 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    backgroundColor: colors.accentSoft,
   },
-  presetBtnText: { fontSize: 14, color: "#7c3aed", fontWeight: "600" },
+  presetBtnText: { fontSize: 14, color: colors.accent, fontWeight: "600" },
   presetList: {
-    marginHorizontal: 14, marginTop: 4,
-    borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8,
-    backgroundColor: "#fff", overflow: "hidden",
+    marginHorizontal: spacing.md + 2, marginTop: spacing.xs,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm - 1,
+    backgroundColor: colors.surface, overflow: "hidden",
   },
   presetItem: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 12, paddingVertical: 10,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
   },
-  presetItemText: { fontSize: 14, color: "#374151" },
-  toggleRow: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 14,
-  },
+  presetItemText: { fontSize: 14, color: colors.textSecondary },
   toggleBtn: {
-    paddingHorizontal: 14, paddingVertical: 7,
-    borderRadius: 8, borderWidth: 1, borderColor: "#e5e7eb",
-    backgroundColor: "#f9fafb",
+    paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm - 1,
+    borderRadius: radii.sm - 1, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
   },
-  toggleBtnOn: { borderColor: "#7c3aed", backgroundColor: "#faf5ff" },
-  toggleBtnText: { fontSize: 13, fontWeight: "700", color: "#9ca3af" },
-  toggleBtnTextOn: { color: "#7c3aed" },
-  saveBtn: {
-    backgroundColor: "#7c3aed", borderRadius: 10,
-    paddingHorizontal: 16, paddingVertical: 8,
-  },
-  saveBtnDisabled: { backgroundColor: "#9ca3af" },
-  saveBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  toggleBtnOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  toggleBtnText: { fontSize: 13, fontWeight: "700", color: colors.textFaint },
+  toggleBtnTextOn: { color: colors.accent },
 });

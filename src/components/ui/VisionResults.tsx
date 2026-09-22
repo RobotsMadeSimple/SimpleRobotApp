@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Check, X } from "lucide-react-native";
 import { ColorCoverageInspection, VisionResult } from "@/src/models/robotModels";
+import { colors, spacing, radii, shadows } from "@/src/components/ui/kit";
 
 type Status = "pass" | "fail" | "found" | "none";
 /** For a color coverage row: the pass band [min,max] and where the reading landed. */
@@ -9,10 +10,10 @@ type Bar = { value: number; min: number | null; max: number | null; passed: bool
 type Row = { id: string; name: string; value: string; status: Status; bar?: Bar; ms?: number };
 
 const STATUS_COLOR: Record<Status, string> = {
-  pass:  "#16a34a",
-  found: "#2563eb",
-  fail:  "#dc2626",
-  none:  "#9ca3af",
+  pass:  colors.success,
+  found: colors.accent,
+  fail:  colors.danger,
+  none:  colors.textFaint,
 };
 
 /** Flattens a VisionResult into per-inspection rows (name + value + optional bar/timing). */
@@ -61,8 +62,8 @@ function PassFailIcon({ status }: { status: Status }) {
   if (status !== "pass" && status !== "fail") return null;
   const passed = status === "pass";
   return (
-    <View style={[styles.pfIcon, { backgroundColor: passed ? "#16a34a" : "#dc2626" }]}>
-      {passed ? <Check size={11} color="#fff" strokeWidth={3.5} /> : <X size={11} color="#fff" strokeWidth={3.5} />}
+    <View style={[styles.pfIcon, { backgroundColor: passed ? colors.success : colors.danger }]}>
+      {passed ? <Check size={11} color={colors.onAccent} strokeWidth={3.5} /> : <X size={11} color={colors.onAccent} strokeWidth={3.5} />}
     </View>
   );
 }
@@ -80,7 +81,7 @@ function CoverageBar({ bar }: { bar: Bar }) {
       <View
         style={[
           styles.barMarker,
-          { left: clampPct(bar.value), backgroundColor: bar.passed ? "#16a34a" : "#dc2626" },
+          { left: clampPct(bar.value), backgroundColor: bar.passed ? colors.success : colors.danger },
         ]}
       />
     </View>
@@ -145,25 +146,25 @@ export function VisionResults({
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: "#fff", borderRadius: 10, paddingHorizontal: 12 },
+  card: { backgroundColor: colors.surface, borderRadius: radii.sm, paddingHorizontal: spacing.md },
   cardEmbedded: { backgroundColor: "transparent", borderRadius: 0, paddingHorizontal: 0 },
-  row: { paddingVertical: 6 },
-  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f0f0f0" },
-  rowTop: { flexDirection: "row", alignItems: "center", gap: 10 },
-  name: { flex: 1, fontSize: 13, fontWeight: "600", color: "#374151", userSelect: "none" },
+  row: { paddingVertical: spacing.xs },
+  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  name: { flex: 1, fontSize: 13, fontWeight: "600", color: colors.textSecondary, userSelect: "none" },
   value: { fontSize: 13, fontWeight: "700", maxWidth: "60%", textAlign: "right", userSelect: "none" },
   // Embedded: no name to the left, so the value leads the row.
   valueEmbedded: { flex: 1, maxWidth: undefined, textAlign: "left" },
-  timing: { fontSize: 11, fontWeight: "600", color: "#9ca3af", userSelect: "none" },
+  timing: { fontSize: 11, fontWeight: "600", color: colors.textFaint, userSelect: "none" },
 
   // Coverage row: bar takes the remaining width, reading + time stacked at the right.
   // The bar shrinks (flexShrink) so the reading text is never clipped.
-  barRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  barRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   barWrap: { flex: 1, flexShrink: 1 },
   // Fixed width so the bar's size stays constant regardless of the reading text
   // (e.g. "5.0% PASS" vs "100.0% FAIL"). Sized for the widest case.
   readout: { alignItems: "flex-end", flexShrink: 0, width: 78 },
-  readoutTop: { flexDirection: "row", alignItems: "center", gap: 5 },
+  readoutTop: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   valueReadout: { fontSize: 13, fontWeight: "700", userSelect: "none" },
   pfIcon: {
     width: 16, height: 16, borderRadius: 8,
@@ -173,12 +174,14 @@ const styles = StyleSheet.create({
   // Coverage bar
   barTrack: {
     position: "relative", height: 8, borderRadius: 4,
-    backgroundColor: "#e5e7eb",
+    backgroundColor: colors.border,
   },
+  // Pass-band fill: a bolder green than any success token so it stays visible against
+  // the gray track — intentionally not colors.success/successSoft, no matching token.
   barPass: { position: "absolute", top: 0, bottom: 0, backgroundColor: "#86efac", borderRadius: 4 },
   barMarker: {
     position: "absolute", top: -3, width: 14, height: 14, borderRadius: 7, marginLeft: -7,
-    borderWidth: 2, borderColor: "#fff",
-    shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+    borderWidth: 2, borderColor: colors.surface,
+    ...shadows.soft,
   },
 });

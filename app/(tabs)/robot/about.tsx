@@ -1,4 +1,3 @@
-import { useWideContent } from "@/src/components/ui/responsive";
 import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "@/src/connections/robotState";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -21,10 +20,26 @@ import {
   Zap,
 } from "lucide-react-native";
 
+import {
+  accents,
+  Button,
+  Card,
+  colors,
+  Divider,
+  Input,
+  ListRow,
+  radii,
+  Screen,
+  SectionHeader,
+  shadows,
+  spacing,
+  StatusPill,
+  type,
+} from "@/src/components/ui/kit";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useEffect, useRef, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { ActivityIndicator, Animated, Image, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Constants from "expo-constants";
 import * as WebBrowser from "expo-web-browser";
 
@@ -39,39 +54,65 @@ const defaultRobotImage = require("@/assets/images/no-robot.png");
 
 // ── Small building blocks ─────────────────────────────────────────────────────
 
-function InfoRow({
+/** Label/value row — a flat ListRow used inside a Card, no chevron/onPress. */
+function Row({
   icon,
   tileBg,
   label,
   value,
-  last = false,
 }: {
   icon: React.ReactNode;
   tileBg?: string;
   label: string;
   value: string | number | React.ReactNode;
-  last?: boolean;
 }) {
   return (
-    <View style={[styles.infoRow, !last && styles.infoRowBorder]}>
-      <View style={[styles.rowTile, { backgroundColor: tileBg ?? "#f3f4f6" }]}>
-        {icon}
-      </View>
-      <Text style={styles.infoLabel}>{label}</Text>
-      {typeof value === "string" || typeof value === "number" ? (
-        <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>
-      ) : (
-        value
-      )}
-    </View>
+    <ListRow
+      card={false}
+      icon={icon}
+      iconColor={tileBg}
+      title={label}
+      right={
+        typeof value === "string" || typeof value === "number" ? (
+          <Text style={styles.rowValue} numberOfLines={1}>{value}</Text>
+        ) : (
+          value
+        )
+      }
+    />
+  );
+}
+
+/** Pressable action row (icon tile + accent label), e.g. "Check for Updates". */
+function ActionRow({
+  icon,
+  label,
+  onPress,
+  disabled,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <ListRow
+      card={false}
+      icon={icon}
+      iconColor={colors.background}
+      title={label}
+      titleColor={colors.accent}
+      chevron={false}
+      onPress={disabled ? undefined : onPress}
+    />
   );
 }
 
 function StatusDot({ ok, label }: { ok: boolean; label: string }) {
   return (
     <View style={styles.statusDot}>
-      <View style={[styles.dot, { backgroundColor: ok ? "#16a34a" : "#dc2626" }]} />
-      <Text style={[styles.dotLabel, { color: ok ? "#16a34a" : "#dc2626" }]}>{label}</Text>
+      <View style={[styles.dot, { backgroundColor: ok ? colors.success : colors.danger }]} />
+      <Text style={[styles.dotLabel, { color: ok ? colors.success : colors.danger }]}>{label}</Text>
     </View>
   );
 }
@@ -89,7 +130,6 @@ function ProgressBar({ progress }: { progress: number }) {
 export default function AboutRobot() {
   const [robot, setRobot] = useState(getSelectedRobot());
   const status = useRobotStatus();
-  const wideContent = useWideContent();
 
   useEffect(() => subscribeRobot(setRobot), []);
 
@@ -326,15 +366,11 @@ export default function AboutRobot() {
   const electronHasUpdate  = electronLatestVersion !== null && electronLatestVersion !== evCurrent;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <View style={styles.root}>
       <SubPageHeader title="About Robot" />
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={[styles.content, wideContent]}
-        showsVerticalScrollIndicator={false}
-      >
+      <Screen>
         {/* Hero card */}
-        <View style={styles.heroCard}>
+        <Card style={styles.heroCard}>
           <View style={styles.heroImageWrapper}>
             <Image source={imageSource} style={styles.heroImage} resizeMode="contain" />
           </View>
@@ -344,45 +380,52 @@ export default function AboutRobot() {
               <Text style={styles.typeText}>{robot.robotType}</Text>
             </View>
           )}
-        </View>
+        </Card>
 
         {/* Identity */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>IDENTITY</Text>
-          <TouchableOpacity onPress={openEdit} style={styles.editButton}>
-            <Pencil size={14} color="#2563eb" />
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.card}>
-          <InfoRow icon={<Tag size={16} color="#2563eb" />}  tileBg="#eff6ff" label="Name"          value={robot.robotName   || "—"} />
-          <InfoRow icon={<Cpu size={16} color="#7c3aed" />}  tileBg="#f5f3ff" label="Type"          value={robot.robotType   || "—"} />
-          <InfoRow icon={<Hash size={16} color="#6b7280" />} tileBg="#f9fafb" label="Serial Number" value={robot.serialNumber || "—"} last />
-        </View>
+        <SectionHeader
+          title="Identity"
+          right={
+            <TouchableOpacity onPress={openEdit} style={styles.editButton}>
+              <Pencil size={14} color={colors.accent} />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+          }
+        />
+        <Card>
+          <Row icon={<Tag size={18} color={colors.accent} />} tileBg={colors.accentSoft} label="Name" value={robot.robotName || "—"} />
+          <Divider inset />
+          <Row icon={<Cpu size={18} color={accents.purple} />} tileBg={accents.purpleSoft} label="Type" value={robot.robotType || "—"} />
+          <Divider inset />
+          <Row icon={<Hash size={18} color={colors.textMuted} />} tileBg={colors.surfaceMuted} label="Serial Number" value={robot.serialNumber || "—"} />
+        </Card>
 
         {/* Network */}
-        <Text style={styles.sectionLabel}>NETWORK</Text>
-        <View style={styles.card}>
-          <InfoRow icon={<Network size={16} color="#0891b2" />} tileBg="#ecfeff" label="IP Address" value={robot.ipAddress       || "—"} />
-          <InfoRow icon={<Server  size={16} color="#0891b2" />} tileBg="#ecfeff" label="Port"       value={robot.port} />
-          <InfoRow icon={<Zap     size={16} color="#0891b2" />} tileBg="#ecfeff" label="Endpoint"   value={robot.controlEndpoint} last />
-        </View>
+        <SectionHeader title="Network" />
+        <Card>
+          <Row icon={<Network size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="IP Address" value={robot.ipAddress || "—"} />
+          <Divider inset />
+          <Row icon={<Server size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Port" value={robot.port} />
+          <Divider inset />
+          <Row icon={<Zap size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Endpoint" value={robot.controlEndpoint} />
+        </Card>
 
         {/* Live status */}
-        <Text style={styles.sectionLabel}>LIVE STATUS</Text>
-        <View style={styles.card}>
-          <InfoRow
-            icon={status.connected ? <Wifi size={16} color="#16a34a" /> : <WifiOff size={16} color="#dc2626" />}
-            tileBg={status.connected ? "#f0fdf4" : "#fef2f2"}
+        <SectionHeader title="Live Status" />
+        <Card>
+          <Row
+            icon={status.connected ? <Wifi size={18} color={colors.success} /> : <WifiOff size={18} color={colors.danger} />}
+            tileBg={status.connected ? colors.successSoft : colors.dangerSoft}
             label="Connection"
             value={<StatusDot ok={status.connected} label={status.connected ? "Connected" : "Disconnected"} />}
           />
-          <InfoRow
-            icon={<Cpu size={16} color={status.driverConnected ? "#16a34a" : "#dc2626"} />}
-            tileBg={status.driverConnected ? "#f0fdf4" : "#fef2f2"}
+          <Divider inset />
+          <Row
+            icon={<Cpu size={18} color={status.driverConnected ? colors.success : colors.danger} />}
+            tileBg={status.driverConnected ? colors.successSoft : colors.dangerSoft}
             label="Motor Driver"
             value={
-              <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={styles.multiDot}>
                 <StatusDot ok={status.driverConnected} label={status.driverConnected ? "Connected" : "Disconnected"} />
                 {status.driverConnected && (
                   <StatusDot ok={status.driverOk} label={status.driverOk ? "OK" : "Fault"} />
@@ -390,205 +433,169 @@ export default function AboutRobot() {
               </View>
             }
           />
-          <InfoRow
-            icon={<Activity size={16} color={status.wasHomed ? "#16a34a" : "#f97316"} />}
-            tileBg={status.wasHomed ? "#f0fdf4" : "#fff7ed"}
+          <Divider inset />
+          <Row
+            icon={<Activity size={18} color={status.wasHomed ? colors.success : accents.orange} />}
+            tileBg={status.wasHomed ? colors.successSoft : accents.orangeSoft}
             label="Homed"
             value={<StatusDot ok={status.wasHomed} label={status.wasHomed ? "Yes" : "No"} />}
           />
-          <InfoRow
-            icon={<Gauge size={16} color="#6b7280" />}
-            tileBg="#f9fafb"
+          <Divider inset />
+          <Row
+            icon={<Gauge size={18} color={colors.textMuted} />}
+            tileBg={colors.surfaceMuted}
             label="Homing State"
             value={isHoming ? status.homingState : "Idle"}
-            last
           />
-        </View>
+        </Card>
 
         {/* Software */}
-        <Text style={styles.sectionLabel}>SOFTWARE</Text>
-        <View style={styles.card}>
-          <View style={[styles.infoRow, styles.infoRowBorder]}>
-            <View style={[styles.rowTile, { backgroundColor: "#eff6ff" }]}>
-              <Download size={16} color="#2563eb" />
-            </View>
-            <Text style={styles.infoLabel}>Controller Version</Text>
-            <View style={styles.versionRight}>
-              {isUpToDate && (
-                <View style={styles.upToDateChip}>
-                  <CheckCircle2 size={11} color="#16a34a" />
-                  <Text style={styles.upToDateText}>Up to date</Text>
-                </View>
-              )}
-              {hasUpdate && (
-                <View style={styles.updateChip}>
-                  <Text style={styles.updateChipText}>v{latestVersion} available</Text>
-                </View>
-              )}
-              <Text style={[styles.infoValue, { maxWidth: undefined }]} numberOfLines={1}>{controllerVersion}</Text>
-            </View>
-          </View>
-          <View style={[styles.infoRow, styles.infoRowBorder]}>
-            <View style={[styles.rowTile, { backgroundColor: isLinux ? "#f0fdf4" : "#f9fafb" }]}>
-              <Server size={16} color={isLinux ? "#16a34a" : "#6b7280"} />
-            </View>
-            <Text style={styles.infoLabel}>Platform</Text>
-            <Text style={styles.infoValue}>{isLinux ? "Linux" : "Windows"}</Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.infoRow, styles.infoRowBorder]}
+        <SectionHeader title="Software" />
+        <Card>
+          <Row
+            icon={<Download size={18} color={colors.accent} />}
+            tileBg={colors.accentSoft}
+            label="Controller Version"
+            value={
+              <View style={styles.versionRight}>
+                {isUpToDate && (
+                  <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
+                )}
+                {hasUpdate && <StatusPill label={`v${latestVersion} available`} tone="warning" />}
+                <Text style={styles.rowValue} numberOfLines={1}>{controllerVersion}</Text>
+              </View>
+            }
+          />
+          <Divider inset />
+          <Row
+            icon={<Server size={18} color={isLinux ? colors.success : colors.textMuted} />}
+            tileBg={isLinux ? colors.successSoft : colors.surfaceMuted}
+            label="Platform"
+            value={isLinux ? "Linux" : "Windows"}
+          />
+          <Divider inset />
+          <ActionRow
+            icon={checkingUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
+            label="Check for Updates"
             onPress={checkForUpdates}
-            activeOpacity={0.7}
             disabled={checkingUpdate}
-          >
-            <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
-              {checkingUpdate
-                ? <ActivityIndicator size="small" color="#2563eb" />
-                : <RefreshCw size={16} color="#2563eb" />}
-            </View>
-            <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.cardAction}
+          />
+          <Divider />
+          <Button
+            variant="ghost"
+            label={updating ? "Updating…" : "Update Controller"}
+            icon={(checkingUpdate || updating)
+              ? <ActivityIndicator size="small" color={isLinux ? colors.accent : colors.textFaint} />
+              : <Download size={15} color={isLinux ? colors.accent : colors.textFaint} />}
+            textStyle={!isLinux && styles.cardActionTextDisabled}
             onPress={handleUpdate}
-            activeOpacity={isLinux ? 0.7 : 1}
             disabled={!isLinux || checkingUpdate || updating}
-          >
-            {checkingUpdate || updating
-              ? <ActivityIndicator size="small" color={isLinux ? "#2563eb" : "#9ca3af"} />
-              : <Download size={15} color={isLinux ? "#2563eb" : "#9ca3af"} />}
-            <Text style={[styles.cardActionText, !isLinux && styles.cardActionTextDisabled]}>
-              {updating ? "Updating…" : "Update Controller"}
-            </Text>
-          </TouchableOpacity>
+            style={styles.cardActionBtn}
+          />
           {!isLinux && (
             <Text style={styles.cardNote}>Remote update is only available on Linux controllers.</Text>
           )}
-        </View>
+        </Card>
 
         {/* App update — Android */}
         {isAndroid && (
           <>
-            <Text style={styles.sectionLabel}>APP</Text>
-            <View style={styles.card}>
-              <View style={[styles.infoRow, styles.infoRowBorder]}>
-                <View style={[styles.rowTile, { backgroundColor: "#eff6ff" }]}>
-                  <Download size={16} color="#2563eb" />
-                </View>
-                <Text style={styles.infoLabel}>App Version</Text>
-                <View style={styles.versionRight}>
-                  {appIsUpToDate && (
-                    <View style={styles.upToDateChip}>
-                      <CheckCircle2 size={11} color="#16a34a" />
-                      <Text style={styles.upToDateText}>Up to date</Text>
-                    </View>
-                  )}
-                  {appHasUpdate && (
-                    <View style={styles.updateChip}>
-                      <Text style={styles.updateChipText}>v{appLatestVersion} available</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.infoValue, { maxWidth: undefined }]} numberOfLines={1}>v{appVersion}</Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={[styles.infoRow, styles.infoRowBorder]}
+            <SectionHeader title="App" />
+            <Card>
+              <Row
+                icon={<Download size={18} color={colors.accent} />}
+                tileBg={colors.accentSoft}
+                label="App Version"
+                value={
+                  <View style={styles.versionRight}>
+                    {appIsUpToDate && (
+                      <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
+                    )}
+                    {appHasUpdate && <StatusPill label={`v${appLatestVersion} available`} tone="warning" />}
+                    <Text style={styles.rowValue} numberOfLines={1}>v{appVersion}</Text>
+                  </View>
+                }
+              />
+              <Divider inset />
+              <ActionRow
+                icon={checkingAppUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
+                label="Check for Updates"
                 onPress={checkAppForUpdates}
-                activeOpacity={0.7}
                 disabled={checkingAppUpdate}
-              >
-                <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
-                  {checkingAppUpdate
-                    ? <ActivityIndicator size="small" color="#2563eb" />
-                    : <RefreshCw size={16} color="#2563eb" />}
-                </View>
-                <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cardAction}
+              />
+              <Divider />
+              <Button
+                variant="ghost"
+                label="Update App"
+                icon={<Download size={15} color={appHasUpdate ? colors.accent : colors.textFaint} />}
+                textStyle={!appHasUpdate && styles.cardActionTextDisabled}
                 onPress={handleAppUpdate}
-                activeOpacity={appHasUpdate ? 0.7 : 1}
                 disabled={!appAssetUrl || !appHasUpdate}
-              >
-                <Download size={15} color={appHasUpdate ? "#2563eb" : "#9ca3af"} />
-                <Text style={[styles.cardActionText, !appHasUpdate && styles.cardActionTextDisabled]}>
-                  Update App
-                </Text>
-              </TouchableOpacity>
-            </View>
+                style={styles.cardActionBtn}
+              />
+            </Card>
           </>
         )}
 
         {/* App update — Electron */}
         {isElectron && (
           <>
-            <Text style={styles.sectionLabel}>APP</Text>
-            <View style={styles.card}>
-              <View style={[styles.infoRow, styles.infoRowBorder]}>
-                <View style={[styles.rowTile, { backgroundColor: "#eff6ff" }]}>
-                  <Download size={16} color="#2563eb" />
-                </View>
-                <Text style={styles.infoLabel}>App Version</Text>
-                <View style={styles.versionRight}>
-                  {electronIsUpToDate && (
-                    <View style={styles.upToDateChip}>
-                      <CheckCircle2 size={11} color="#16a34a" />
-                      <Text style={styles.upToDateText}>Up to date</Text>
-                    </View>
-                  )}
-                  {electronHasUpdate && (
-                    <View style={styles.updateChip}>
-                      <Text style={styles.updateChipText}>v{electronLatestVersion} available</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.infoValue, { maxWidth: undefined }]} numberOfLines={1}>
-                    {electronVersion ? `v${electronVersion}` : "—"}
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={[styles.infoRow, styles.infoRowBorder]}
+            <SectionHeader title="App" />
+            <Card>
+              <Row
+                icon={<Download size={18} color={colors.accent} />}
+                tileBg={colors.accentSoft}
+                label="App Version"
+                value={
+                  <View style={styles.versionRight}>
+                    {electronIsUpToDate && (
+                      <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
+                    )}
+                    {electronHasUpdate && <StatusPill label={`v${electronLatestVersion} available`} tone="warning" />}
+                    <Text style={styles.rowValue} numberOfLines={1}>
+                      {electronVersion ? `v${electronVersion}` : "—"}
+                    </Text>
+                  </View>
+                }
+              />
+              <Divider inset />
+              <ActionRow
+                icon={checkingElectronUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
+                label="Check for Updates"
                 onPress={checkElectronForUpdates}
-                activeOpacity={0.7}
                 disabled={checkingElectronUpdate || downloadingElectron}
-              >
-                <View style={[styles.rowTile, { backgroundColor: "#f3f4f6" }]}>
-                  {checkingElectronUpdate
-                    ? <ActivityIndicator size="small" color="#2563eb" />
-                    : <RefreshCw size={16} color="#2563eb" />}
-                </View>
-                <Text style={[styles.infoLabel, { color: "#2563eb" }]}>Check for Updates</Text>
-              </TouchableOpacity>
+              />
               {downloadingElectron && <ProgressBar progress={electronDownloadProgress} />}
-              <TouchableOpacity
-                style={styles.cardAction}
+              <Divider />
+              <Button
+                variant="ghost"
+                label={downloadingElectron ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%` : "Update App"}
+                icon={downloadingElectron
+                  ? <ActivityIndicator size="small" color={colors.accent} />
+                  : <Download size={15} color={electronHasUpdate ? colors.accent : colors.textFaint} />}
+                textStyle={!electronHasUpdate && styles.cardActionTextDisabled}
                 onPress={handleElectronUpdate}
-                activeOpacity={electronHasUpdate ? 0.7 : 1}
                 disabled={!electronHasUpdate || downloadingElectron || checkingElectronUpdate}
-              >
-                {downloadingElectron
-                  ? <ActivityIndicator size="small" color="#2563eb" />
-                  : <Download size={15} color={electronHasUpdate ? "#2563eb" : "#9ca3af"} />}
-                <Text style={[styles.cardActionText, !electronHasUpdate && styles.cardActionTextDisabled]}>
-                  {downloadingElectron ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%` : "Update App"}
-                </Text>
-              </TouchableOpacity>
-            </View>
+                style={styles.cardActionBtn}
+              />
+            </Card>
           </>
         )}
 
         {/* Restart */}
-        <TouchableOpacity style={styles.restartButton} onPress={() => setRestartVisible(true)}>
-          <RefreshCw size={15} color="#dc2626" />
-          <Text style={styles.restartButtonText}>Restart Controller</Text>
-        </TouchableOpacity>
+        <Button
+          variant="dangerSoft"
+          label="Restart Controller"
+          icon={<RefreshCw size={15} color={colors.danger} />}
+          onPress={() => setRestartVisible(true)}
+        />
 
         {/* ── Modals ── */}
 
         <Modal visible={updating} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
-              <ActivityIndicator size="large" color="#2563eb" style={{ marginBottom: 16 }} />
+              <ActivityIndicator size="large" color={colors.accent} style={styles.modalSpinner} />
               <Text style={styles.modalTitle}>Updating Controller</Text>
               <Text style={styles.modalBody}>
                 Downloading and applying the update. The controller will reconnect automatically once complete.
@@ -600,13 +607,11 @@ export default function AboutRobot() {
         <Modal visible={updateDone} transparent animationType="fade" onRequestClose={() => setUpdateDone(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
-              <CheckCircle2 size={36} color="#16a34a" style={{ marginBottom: 12 }} />
+              <CheckCircle2 size={36} color={colors.success} style={styles.modalIcon} />
               <Text style={styles.modalTitle}>Update Complete</Text>
               <Text style={styles.modalBody}>The controller is now running the latest version.</Text>
               <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.saveButton} onPress={() => setUpdateDone(false)}>
-                  <Text style={styles.saveButtonText}>Done</Text>
-                </TouchableOpacity>
+                <Button label="Done" onPress={() => setUpdateDone(false)} style={styles.modalButtonFlex} />
               </View>
             </View>
           </View>
@@ -620,16 +625,14 @@ export default function AboutRobot() {
                 The robot will disconnect briefly while the controller restarts. Motion will stop.
               </Text>
               <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setRestartVisible(false)}>
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.restartConfirmButton, restarting && { opacity: 0.6 }]}
+                <Button variant="secondary" label="Cancel" onPress={() => setRestartVisible(false)} style={styles.modalButtonFlex} />
+                <Button
+                  variant="destructive"
+                  label={restarting ? "Restarting…" : "Restart"}
                   onPress={confirmRestart}
                   disabled={restarting}
-                >
-                  <Text style={styles.saveButtonText}>{restarting ? "Restarting…" : "Restart"}</Text>
-                </TouchableOpacity>
+                  style={styles.modalButtonFlex}
+                />
               </View>
             </View>
           </View>
@@ -639,33 +642,33 @@ export default function AboutRobot() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Edit Robot Identity</Text>
-              <Text style={styles.editLabel}>ROBOT NAME</Text>
-              <TextInput
+              <Text style={styles.editLabel}>Robot Name</Text>
+              <Input
                 style={styles.editInput}
                 value={editName}
                 onChangeText={setEditName}
                 placeholder="Robot name"
-                placeholderTextColor="#9ca3af"
               />
-              <Text style={styles.editLabel}>ROBOT TYPE</Text>
+              <Text style={styles.editLabel}>Robot Type</Text>
               <View style={styles.pickerWrapper}>
-                <Picker selectedValue={editType} onValueChange={setEditType} style={styles.picker} dropdownIconColor="#6b7280">
+                <Picker selectedValue={editType} onValueChange={setEditType} style={styles.picker} dropdownIconColor={colors.textMuted}>
                   <Picker.Item label="ASTRO"      value="ASTRO" />
                   <Picker.Item label="4-Axis CNC" value="CNC4Axis" />
                 </Picker>
               </View>
               <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setEditVisible(false)}>
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.saveButton, saving && { opacity: 0.6 }]} onPress={saveEdit} disabled={saving}>
-                  <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save"}</Text>
-                </TouchableOpacity>
+                <Button variant="secondary" label="Cancel" onPress={() => setEditVisible(false)} style={styles.modalButtonFlex} />
+                <Button
+                  label={saving ? "Saving…" : "Save"}
+                  onPress={saveEdit}
+                  disabled={saving}
+                  style={styles.modalButtonFlex}
+                />
               </View>
             </View>
           </View>
         </Modal>
-      </ScrollView>
+      </Screen>
 
       {/* Toast */}
       {toast && (
@@ -680,105 +683,50 @@ export default function AboutRobot() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: "#f3f4f6" },
-  content:     { padding: 16, paddingBottom: 36 },
-  center:      { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f3f4f6" },
-  centerText:  { fontSize: 15, color: "#6b7280" },
+  root:       { flex: 1, backgroundColor: colors.background },
+  center:     { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background },
+  centerText: { fontSize: 15, color: colors.textMuted },
 
   heroCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
     alignItems: "center",
-    paddingVertical: 24,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    gap: 8,
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
   },
-  heroImageWrapper: { width: 110, height: 110, borderRadius: 20, backgroundColor: "#ffffff", justifyContent: "center", alignItems: "center", marginBottom: 4 },
+  heroImageWrapper: { width: 110, height: 110, borderRadius: radii.xl, backgroundColor: colors.surface, justifyContent: "center", alignItems: "center", marginBottom: spacing.xs },
   heroImage:        { width: 110, height: 110 },
-  heroName:         { fontSize: 22, fontWeight: "700", color: "#111827" },
-  typeBadge:        { backgroundColor: "#eff6ff", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4 },
-  typeText:         { fontSize: 13, fontWeight: "600", color: "#2563eb" },
+  heroName:         { ...type.pageTitle, fontSize: 22 },
+  typeBadge:        { backgroundColor: colors.accentSoft, borderRadius: radii.sm - 1, paddingHorizontal: spacing.md, paddingVertical: spacing.xs / 2 },
+  typeText:         { fontSize: 13, fontWeight: "600", color: colors.accent },
 
-  sectionHeader:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  sectionLabel:   { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8, marginBottom: 8 },
-  editButton:     { flexDirection: "row", alignItems: "center", gap: 4 },
-  editButtonText: { fontSize: 12, fontWeight: "600", color: "#2563eb" },
+  editButton:     { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  editButtonText: { fontSize: 12, fontWeight: "600", color: colors.accent },
 
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
-  infoRow:       { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 13, gap: 12 },
-  infoRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb" },
-  rowTile:       { width: 32, height: 32, borderRadius: 8, justifyContent: "center", alignItems: "center" },
-  infoLabel:     { flex: 1, fontSize: 14, fontWeight: "500", color: "#374151" },
-  infoValue:     { fontSize: 14, color: "#6b7280", maxWidth: "45%", textAlign: "right" },
+  rowValue: { ...type.body, color: colors.textMuted, maxWidth: "45%", textAlign: "right" },
 
-  versionRight:  { flexDirection: "row", alignItems: "center", gap: 6 },
-  upToDateChip:  { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  upToDateText:  { fontSize: 11, fontWeight: "600", color: "#16a34a" },
-  updateChip:    { backgroundColor: "#fef3c7", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  updateChipText:{ fontSize: 11, fontWeight: "600", color: "#d97706" },
+  multiDot:     { flexDirection: "row", gap: spacing.sm },
+  versionRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
 
-  cardAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 13,
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
-  },
-  cardActionText:         { fontSize: 14, fontWeight: "600", color: "#2563eb" },
-  cardActionTextDisabled: { color: "#9ca3af" },
-  cardNote: { fontSize: 12, color: "#9ca3af", textAlign: "center", paddingHorizontal: 16, paddingBottom: 12 },
+  cardActionBtn:          { paddingVertical: spacing.sm + 5, borderRadius: 0 },
+  cardActionTextDisabled: { color: colors.textFaint },
+  cardNote: { fontSize: 12, color: colors.textFaint, textAlign: "center", paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
 
-  progressBarTrack: { height: 3, backgroundColor: "#e5e7eb", marginHorizontal: 16, marginBottom: 2 },
-  progressBarFill:  { height: 3, backgroundColor: "#2563eb", borderRadius: 2 },
+  progressBarTrack: { height: 3, backgroundColor: colors.border, marginHorizontal: spacing.lg, marginBottom: 2 },
+  progressBarFill:  { height: 3, backgroundColor: colors.accent, borderRadius: 2 },
 
-  restartButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fff5f5",
-    marginBottom: 20,
-  },
-  restartButtonText:    { fontSize: 14, fontWeight: "600", color: "#dc2626" },
-  restartConfirmButton: { flex: 1, backgroundColor: "#dc2626", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "center", alignItems: "center" },
+  modalCard:    { backgroundColor: colors.surface, borderRadius: radii.xl, padding: spacing.xl - 4, width: 300, alignItems: "center", ...shadows.raised },
+  modalSpinner: { marginBottom: spacing.lg },
+  modalIcon:    { marginBottom: spacing.md },
+  modalTitle:   { ...type.title, fontSize: 16, marginBottom: spacing.sm, textAlign: "center" },
+  modalBody:    { ...type.body, color: colors.textMuted, marginBottom: spacing.lg, lineHeight: 18, textAlign: "center" },
 
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
-  modalCard:    { backgroundColor: "#ffffff", borderRadius: 16, padding: 20, width: 300, alignItems: "center", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
-  modalTitle:   { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8, textAlign: "center" },
-  modalBody:    { fontSize: 13, color: "#6b7280", marginBottom: 16, lineHeight: 18, textAlign: "center" },
+  editLabel: { ...type.sectionLabel, marginBottom: spacing.xs, alignSelf: "flex-start" },
+  editInput: { marginBottom: spacing.md, width: "100%" },
+  pickerWrapper: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surfaceMuted, marginBottom: spacing.md, overflow: "hidden", width: "100%" },
+  picker:        { color: colors.text },
 
-  editLabel:     { fontSize: 11, fontWeight: "600", color: "#6b7280", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4, alignSelf: "flex-start" },
-  editInput:     { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, color: "#111827", backgroundColor: "#f9fafb", marginBottom: 12, width: "100%" },
-  pickerWrapper: { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 8, backgroundColor: "#f9fafb", marginBottom: 12, overflow: "hidden", width: "100%" },
-  picker:        { color: "#111827" },
-
-  modalButtons:     { flexDirection: "row", gap: 10, marginTop: 4, width: "100%" },
-  cancelButton:     { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
-  cancelButtonText: { fontSize: 14, fontWeight: "600", color: "#6b7280" },
-  saveButton:       { flex: 1, backgroundColor: "#2563eb", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
-  saveButtonText:   { fontSize: 14, fontWeight: "600", color: "#ffffff" },
+  modalButtons: { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.xs, width: "100%" },
+  modalButtonFlex: { flex: 1 },
 
   statusDot: { flexDirection: "row", alignItems: "center", gap: 5 },
   dot:       { width: 8, height: 8, borderRadius: 4 },
@@ -786,20 +734,16 @@ const styles = StyleSheet.create({
 
   toast: {
     position: "absolute",
-    bottom: 24,
-    left: 16,
-    right: 16,
-    backgroundColor: "#111827",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    bottom: spacing.xl,
+    left: spacing.lg,
+    right: spacing.lg,
+    backgroundColor: colors.surfaceDark,
+    borderRadius: radii.sm + 1,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 8,
+    ...shadows.raised,
   },
-  toastError: { backgroundColor: "#dc2626" },
-  toastText:  { color: "#ffffff", fontSize: 14, fontWeight: "500", textAlign: "center" },
+  toastError: { backgroundColor: colors.danger },
+  toastText:  { color: colors.onSurfaceDark, fontSize: 14, fontWeight: "500", textAlign: "center" },
 });

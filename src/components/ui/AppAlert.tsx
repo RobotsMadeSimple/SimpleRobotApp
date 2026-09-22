@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Info, Trash2 } from "lucide-react-native";
 import { AnimatedPressable } from "./AnimatedPressable";
+import { colors, shadows, spacing } from "@/src/components/ui/kit";
 
 // A drop-in replacement for React Native's Alert.alert that works on web too
 // (Alert.alert button callbacks never fire on React Native Web). Render a single
@@ -67,8 +68,8 @@ export function AppAlertHost() {
         <Pressable style={styles.card} onPress={() => {}}>
           <View style={[styles.iconCircle, { backgroundColor: hasDestructive ? "#fee2e2" : "#dbeafe" }]}>
             {hasDestructive
-              ? <Trash2 size={22} color="#dc2626" />
-              : <Info size={22} color="#2563eb" />}
+              ? <Trash2 size={22} color={colors.danger} />
+              : <Info size={22} color={colors.accent} />}
           </View>
 
           <Text style={styles.title}>{current?.title}</Text>
@@ -92,7 +93,7 @@ export function AppAlertHost() {
                   ]}
                   onPress={() => dismiss(btn)}
                 >
-                  {isDestructive && <Trash2 size={15} color="#fff" />}
+                  {isDestructive && <Trash2 size={15} color={colors.onAccent} />}
                   <Text
                     style={[
                       styles.btnText,
@@ -114,25 +115,21 @@ export function AppAlertHost() {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   card: {
     width: "100%",
     maxWidth: 360,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderRadius: 18,
     paddingHorizontal: 22,
-    paddingTop: 24,
+    paddingTop: spacing.xl,
     paddingBottom: 18,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    ...shadows.raised,
   },
   iconCircle: {
     width: 52,
@@ -145,12 +142,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
     textAlign: "center",
   },
   message: {
     fontSize: 13.5,
-    color: "#6b7280",
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 19,
     marginTop: 8,
@@ -171,32 +168,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     borderRadius: 11,
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
   },
   btnStacked: {
     flex: 0,
     alignSelf: "stretch",
   },
   btnDefault: {
-    backgroundColor: "#2563eb",
+    backgroundColor: colors.accent,
   },
   btnDestructive: {
-    backgroundColor: "#dc2626",
+    backgroundColor: colors.danger,
   },
   btnCancel: {
     borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    backgroundColor: "#fff",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   btnText: {
     fontSize: 14,
     fontWeight: "700",
   },
   btnSolidText: {
-    color: "#fff",
+    color: colors.onAccent,
   },
   btnCancelText: {
-    color: "#6b7280",
+    color: colors.textMuted,
     fontWeight: "600",
   },
 });

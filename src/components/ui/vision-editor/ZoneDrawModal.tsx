@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
+import { colors, accents } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 
 /**
@@ -196,7 +197,7 @@ export function ZoneDrawModal({
               style={[ves.drawShapeChip, isWide && ves.drawChipWide, active && ves.drawShapeChipActive]}
               onPress={() => changeShape(s)}
             >
-              <Icon size={15} color={active ? "#0891b2" : "#fff"} />
+              <Icon size={15} color={active ? accents.cyan : colors.onAccent} />
               <Text style={[ves.drawShapeText, active && ves.drawShapeTextActive]}>{label}</Text>
             </TouchableOpacity>
           );
@@ -285,7 +286,7 @@ export function ZoneDrawModal({
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
-          <Text style={{ color: '#9ca3af', fontSize: 14, textAlign: 'center' }}>
+          <Text style={{ color: colors.textFaint, fontSize: 14, textAlign: 'center' }}>
             Select a camera to load a snapshot for zone drawing.
           </Text>
         </View>

@@ -1,3 +1,4 @@
+import { colors, radii, spacing } from "@/src/components/ui/kit";
 import { router } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -18,7 +19,7 @@ export function SubPageHeader({ title, subtitle, right, onBack }: Props) {
   return (
     <View style={styles.bar}>
       <Pressable style={styles.backBtn} onPress={() => onBack ? onBack() : router.back()} hitSlop={8}>
-        <ArrowLeft size={20} color="#111827" />
+        <ArrowLeft size={20} color={colors.text} />
       </Pressable>
 
       <View style={styles.titleBlock}>
@@ -38,18 +39,18 @@ const styles = StyleSheet.create({
     flexDirection:     "row",
     alignItems:        "center",
     gap:               10,
-    paddingHorizontal: 16,
-    paddingTop:        16,
-    paddingBottom:     12,
-    backgroundColor:   "#fff",
+    paddingHorizontal: spacing.lg,
+    paddingTop:        spacing.lg,
+    paddingBottom:     spacing.md,
+    backgroundColor:   colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
   },
   backBtn: {
     width:           36,
     height:          36,
-    borderRadius:    10,
-    backgroundColor: "#f3f4f6",
+    borderRadius:    radii.sm,
+    backgroundColor: colors.background,
     justifyContent:  "center",
     alignItems:      "center",
   },
@@ -59,11 +60,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize:   16,
     fontWeight: "700",
-    color:      "#111827",
+    color:      colors.text,
   },
   subtitle: {
     fontSize:  11,
-    color:     "#9ca3af",
+    color:     colors.textFaint,
     marginTop: 1,
   },
 });

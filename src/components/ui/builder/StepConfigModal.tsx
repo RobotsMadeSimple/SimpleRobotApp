@@ -53,6 +53,7 @@ import {
 } from "@/src/providers/RobotProvider";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { colors, radii, accents } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
@@ -238,7 +239,7 @@ export function StepConfigModal({
     if (!isSet) {
       return (
         <TouchableOpacity style={ms.modRowAdd} onPress={() => setSubPage(page)} activeOpacity={0.7}>
-          <Plus size={15} color="#b8bec9" />
+          <Plus size={15} color={colors.textFaint} />
           <Text style={ms.modAddText}>{label}</Text>
         </TouchableOpacity>
       );
@@ -248,10 +249,10 @@ export function StepConfigModal({
         <View style={ms.modRow}>
           <Text style={[ms.subRowLabel, { flex: 1 }]} numberOfLines={1}>Clear {label}?</Text>
           <TouchableOpacity onPress={() => setClearConfirm(null)} hitSlop={8} activeOpacity={0.7} style={{ paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#6b7280" }}>Cancel</Text>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted }}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => { clearFields(clearKeys); setClearConfirm(null); }} hitSlop={8} activeOpacity={0.7} style={{ paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: "#dc2626" }}>Clear</Text>
+            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.danger }}>Clear</Text>
           </TouchableOpacity>
         </View>
       );
@@ -280,9 +281,9 @@ export function StepConfigModal({
                 <TouchableOpacity
                   key={mode}
                   style={[
-                    { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
-                      backgroundColor: gridPointMode === mode ? '#2563eb' : '#f3f4f6',
-                      borderWidth: 1, borderColor: gridPointMode === mode ? '#2563eb' : '#e5e7eb' }
+                    { flex: 1, paddingVertical: 8, borderRadius: radii.sm, alignItems: 'center',
+                      backgroundColor: gridPointMode === mode ? colors.accent : colors.background,
+                      borderWidth: 1, borderColor: gridPointMode === mode ? colors.accent : colors.border }
                   ]}
                   onPress={() => {
                     setGridPointMode(mode);
@@ -302,7 +303,7 @@ export function StepConfigModal({
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: gridPointMode === mode ? '#fff' : '#374151' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: gridPointMode === mode ? colors.surface : colors.textSecondary }}>
                     {mode === 'savedPoint' ? 'Point' : mode === 'gridPoint' ? 'Grid' : mode === 'stackPoint' ? 'Stack' : 'Variable'}
                   </Text>
                 </TouchableOpacity>
@@ -360,7 +361,7 @@ export function StepConfigModal({
                       {grids.find(g => g.id === draft!.gridPoint?.gridId)?.name ?? 'Select grid…'}
                     </Text>
                   </View>
-                  <ChevronRight size={16} color="#d1d5db" />
+                  <ChevronRight size={16} color={colors.borderStrong} />
                 </TouchableOpacity>
 
                 {/* Row & Column vs Grid Index toggle */}
@@ -368,9 +369,9 @@ export function StepConfigModal({
                   {[false, true].map(useIdx => (
                     <TouchableOpacity
                       key={String(useIdx)}
-                      style={[{ flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center',
-                        backgroundColor: draft!.gridPoint?.useGridIndex === useIdx ? '#eff6ff' : '#f9fafb',
-                        borderWidth: 1, borderColor: draft!.gridPoint?.useGridIndex === useIdx ? '#2563eb' : '#e5e7eb' }]}
+                      style={[{ flex: 1, paddingVertical: 7, borderRadius: radii.sm, alignItems: 'center',
+                        backgroundColor: draft!.gridPoint?.useGridIndex === useIdx ? colors.accentSoft : colors.surfaceMuted,
+                        borderWidth: 1, borderColor: draft!.gridPoint?.useGridIndex === useIdx ? colors.accent : colors.border }]}
                       onPress={() => {
                         set({ gridPoint: { ...(draft!.gridPoint ?? { gridId: '', rowIndex: 0, colIndex: 0 }), useGridIndex: useIdx } });
                         if (useIdx) {
@@ -382,7 +383,7 @@ export function StepConfigModal({
                       }}
                       activeOpacity={0.7}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: draft!.gridPoint?.useGridIndex === useIdx ? '#2563eb' : '#6b7280' }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: draft!.gridPoint?.useGridIndex === useIdx ? colors.accent : colors.textMuted }}>
                         {useIdx ? 'Grid Index' : 'Row & Column'}
                       </Text>
                     </TouchableOpacity>
@@ -434,7 +435,7 @@ export function StepConfigModal({
                       <View style={ms.header}>
                         <Text style={ms.title}>Select Grid</Text>
                         <TouchableOpacity onPress={() => setGridPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
-                          <X size={18} color="#9ca3af" />
+                          <X size={18} color={colors.textFaint} />
                         </TouchableOpacity>
                       </View>
                       <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
@@ -480,7 +481,7 @@ export function StepConfigModal({
                       {stacks.find(s => s.id === draft!.stackPoint?.stackId)?.name ?? 'Select stack…'}
                     </Text>
                   </View>
-                  <ChevronRight size={16} color="#d1d5db" />
+                  <ChevronRight size={16} color={colors.borderStrong} />
                 </TouchableOpacity>
 
                 <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INDEX</Text>
@@ -502,7 +503,7 @@ export function StepConfigModal({
                       <View style={ms.header}>
                         <Text style={ms.title}>Select Stack</Text>
                         <TouchableOpacity onPress={() => setStackPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
-                          <X size={18} color="#9ca3af" />
+                          <X size={18} color={colors.textFaint} />
                         </TouchableOpacity>
                       </View>
                       <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
@@ -559,7 +560,7 @@ export function StepConfigModal({
                     />
 
                     {expr.trim().length > 0 && (
-                      <Text style={[ms.hintText, { marginTop: 8, fontWeight: "700", color: asPoints ? "#0891b2" : "#7c3aed" }]}>
+                      <Text style={[ms.hintText, { marginTop: 8, fontWeight: "700", color: asPoints ? accents.cyan : accents.purple }]}>
                         {asPoints
                           ? `Coordinates from element ${ptMatch![2].trim() || "0"} of $${ptMatch![1]}.`
                           : "Resolves to text, then matched against your saved points by name."}
@@ -665,7 +666,7 @@ export function StepConfigModal({
             <TouchableOpacity
               onPress={() => set({ offsetX:undefined,offsetY:undefined,offsetZ:undefined,offsetRX:undefined,offsetRY:undefined,offsetRZ:undefined })}
               style={{ marginTop: 4 }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
+              <Text style={{ fontSize: 12, color: colors.textFaint }}>Clear offset</Text>
             </TouchableOpacity>
           </>
         );
@@ -692,7 +693,7 @@ export function StepConfigModal({
             <TouchableOpacity
               onPress={() => set({ toolOffsetX:undefined,toolOffsetY:undefined,toolOffsetZ:undefined,toolOffsetRX:undefined,toolOffsetRY:undefined,toolOffsetRZ:undefined })}
               style={{ marginTop: 4 }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear offset</Text>
+              <Text style={{ fontSize: 12, color: colors.textFaint }}>Clear offset</Text>
             </TouchableOpacity>
           </>
         );
@@ -725,7 +726,7 @@ export function StepConfigModal({
             <TouchableOpacity
               onPress={() => set({ overrideX:undefined,overrideY:undefined,overrideZ:undefined,overrideRX:undefined,overrideRY:undefined,overrideRZ:undefined })}
               style={{ marginTop: 4 }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 12, color: "#9ca3af" }}>Clear all overrides</Text>
+              <Text style={{ fontSize: 12, color: colors.textFaint }}>Clear all overrides</Text>
             </TouchableOpacity>
           </>
         );
@@ -757,7 +758,7 @@ export function StepConfigModal({
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
               </View>
-              <ChevronRight size={16} color="#d1d5db" />
+              <ChevronRight size={16} color={colors.borderStrong} />
             </TouchableOpacity>
             {modifierRow("Override Speed",    speedSet,    speedSummary,    "speed",       speedKeys)}
             {modifierRow("Position Offset",   hasOffset,   offsetSummary,   "posOffset",   offsetKeys)}
@@ -769,14 +770,14 @@ export function StepConfigModal({
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                   <View style={{ flex: 1, marginRight: 12 }}>
                     <Text style={[ms.subRowLabel, !draft!.blend && ms.modLabelOff]}>Blend Into Next Move</Text>
-                    <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                       Round this corner instead of stopping, carrying speed into the next MoveL.
                     </Text>
                   </View>
                   <Switch
                     value={!!draft!.blend}
                     onValueChange={v => set({ blend: v || undefined })}
-                    trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                    trackColor={{ false: colors.border, true: colors.accent }}
                   />
                 </View>
                 {draft!.blend && (
@@ -820,14 +821,14 @@ export function StepConfigModal({
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
               </View>
-              <ChevronRight size={16} color="#d1d5db" />
+              <ChevronRight size={16} color={colors.borderStrong} />
             </TouchableOpacity>
             <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("jumpHeight")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Jump Height</Text>
                 <Text style={ms.subRowValue}>{jumpHeightLabel}</Text>
               </View>
-              <ChevronRight size={16} color="#d1d5db" />
+              <ChevronRight size={16} color={colors.borderStrong} />
             </TouchableOpacity>
             {modifierRow("Override Speed",    speedSet,    speedSummary,    "speed",       speedKeys)}
             {modifierRow("Position Offset",   hasOffset,   offsetSummary,   "posOffset",   offsetKeys)}
@@ -839,14 +840,14 @@ export function StepConfigModal({
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                   <View style={{ flex: 1, marginRight: 12 }}>
                     <Text style={[ms.subRowLabel, !draft!.blend && ms.modLabelOff]}>Blend Apex Corners</Text>
-                    <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                       Round the lift and lower corners into a smooth arch instead of stopping at the top.
                     </Text>
                   </View>
                   <Switch
                     value={!!draft!.blend}
                     onValueChange={v => set({ blend: v || undefined })}
-                    trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                    trackColor={{ false: colors.border, true: colors.accent }}
                   />
                 </View>
                 {draft!.blend && (
@@ -874,7 +875,7 @@ export function StepConfigModal({
             <Text style={ms.fieldLabel}>CARD</Text>
             <View style={ms.segRow}>
               {([
-                { key: "stb",   label: "STB4100", Icon: CircuitBoard, color: "#16a34a", enabled: ioConfig?.enableStbCard   ?? true  },
+                { key: "stb",   label: "STB4100", Icon: CircuitBoard, color: colors.success, enabled: ioConfig?.enableStbCard   ?? true  },
                 { key: "relay", label: "Relay",   Icon: Radio,        color: "#0891b2", enabled: ioConfig?.enableRelayCard  ?? false },
                 { key: "nano",  label: "Nano",    Icon: Cpu,          color: "#4f46e5", enabled: ioConfig?.enableNanoCards  ?? true  },
               ] as const).filter(c => c.enabled).map(({ key, label, Icon, color }) => {
@@ -883,7 +884,7 @@ export function StepConfigModal({
                   <TouchableOpacity key={key} style={[ms.seg, active && ms.segActive, { flex: 1, flexDirection: "column", alignItems: "center", gap: 2, paddingVertical: 6 }]}
                     onPress={() => set({ outputCard: key, outputNumber: 1, outputNanoId: key === "nano" ? (nanos?.[0]?.id ?? undefined) : undefined })}
                     activeOpacity={0.8}>
-                    <Icon size={14} color={active ? color : "#6b7280"} />
+                    <Icon size={14} color={active ? color : colors.textMuted} />
                     <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
                   </TouchableOpacity>
                 );
@@ -945,7 +946,7 @@ export function StepConfigModal({
                 )}
                 <Text style={[ms.fieldLabel, { marginTop: 12 }]}>OUTPUT PIN</Text>
                 {outputPins.length === 0 ? (
-                  <Text style={{ fontSize: 13, color: "#9ca3af", marginTop: 4 }}>No output pins configured on this Nano</Text>
+                  <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No output pins configured on this Nano</Text>
                 ) : (
                   <View style={ms.segRow}>
                     {outputPins.map(p => {
@@ -966,7 +967,7 @@ export function StepConfigModal({
             <View style={ms.switchRow}>
               <Text style={ms.switchLabel}>{draft!.outputValue ? "ON" : "OFF"}</Text>
               <Switch value={draft!.outputValue ?? false} onValueChange={v => set({ outputValue: v })}
-                trackColor={{ false: "#e5e7eb", true: "#2563eb" }} />
+                trackColor={{ false: colors.border, true: colors.accent }} />
             </View>
 
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PULSE</Text>
@@ -981,7 +982,7 @@ export function StepConfigModal({
                   set({ pulseMs: ms > 0 ? ms : undefined });
                   setPulseMs(v ? "500" : "");
                 }}
-                trackColor={{ false: "#e5e7eb", true: "#f59e0b" }}
+                trackColor={{ false: colors.border, true: "#f59e0b" }}
               />
             </View>
             {(draft!.pulseMs ?? 0) > 0 && (
@@ -989,7 +990,7 @@ export function StepConfigModal({
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>PULSE DURATION  (ms)</Text>
                 <View style={[ms.input, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
                   <TextInput
-                    style={{ flex: 1, fontSize: 14, color: "#111827" }}
+                    style={{ flex: 1, fontSize: 14, color: colors.text }}
                     value={pulseMsText}
                     onChangeText={v => {
                       if (v === "" || /^\d+$/.test(v)) {
@@ -1003,14 +1004,14 @@ export function StepConfigModal({
                     placeholder="500"
                     placeholderTextColor="#c4c4c4"
                   />
-                  <Text style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 6 }}>ms</Text>
+                  <Text style={{ fontSize: 12, color: colors.textFaint, paddingLeft: 6 }}>ms</Text>
                 </View>
                 <View style={[ms.switchRow, { marginTop: 10 }]}>
                   <Text style={ms.switchLabel}>Block until pulse completes</Text>
                   <Switch
                     value={draft!.pulseBlocking ?? false}
                     onValueChange={v => set({ pulseBlocking: v || undefined })}
-                    trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+                    trackColor={{ false: colors.border, true: "#7c3aed" }}
                   />
                 </View>
                 <Text style={ms.hintText}>
@@ -1069,17 +1070,17 @@ export function StepConfigModal({
                     <Text style={[ms.fieldLabel, { marginTop: 14 }]}>TIMEOUT FLAG VARIABLE  (optional)</Text>
                     <Text style={ms.hintText}>Set to 1 if timed out, 0 if condition was met. Leave blank to ignore.</Text>
                     <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
                       <TouchableOpacity
                         style={[ms.input, { flex: 1, justifyContent: "center" }]}
                         onPress={() => setWaitTimeoutVarPicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.waitTimeoutVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                        <Text style={{ color: draft!.waitTimeoutVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
                           {draft!.waitTimeoutVariableName ?? "none"}
                         </Text>
                       </TouchableOpacity>
                       {draft!.waitTimeoutVariableName && (
                         <TouchableOpacity onPress={() => set({ waitTimeoutVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color="#9ca3af" />
+                          <X size={14} color={colors.textFaint} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1135,17 +1136,17 @@ export function StepConfigModal({
                     <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
                     <Text style={ms.hintText}>Set to the current iteration number (0-based).</Text>
                     <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
                       <TouchableOpacity
                         style={[ms.input, { flex: 1, justifyContent: "center" }]}
                         onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachIndexVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                        <Text style={{ color: draft!.forEachIndexVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
                           {draft!.forEachIndexVariableName ?? "none"}
                         </Text>
                       </TouchableOpacity>
                       {draft!.forEachIndexVariableName && (
                         <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color="#9ca3af" />
+                          <X size={14} color={colors.textFaint} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1168,11 +1169,11 @@ export function StepConfigModal({
                   ? <Text style={ms.emptyHint}>No list variables defined yet.</Text>
                   : (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
-                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
                       <TouchableOpacity
                         style={[ms.input, { flex: 1, justifyContent: "center" }]}
                         onPress={() => setForEachSourcePicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                        <Text style={{ color: draft!.forEachVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
                           {draft!.forEachVariableName ?? "select a list variable"}
                         </Text>
                       </TouchableOpacity>
@@ -1199,17 +1200,17 @@ export function StepConfigModal({
                         : "Receives the current index each iteration — a point or object element is not a number, so read it with $name[$i].field."}
                     </Text>
                     <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
                       <TouchableOpacity
                         style={[ms.input, { flex: 1, justifyContent: "center" }]}
                         onPress={() => setForEachValuePicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachValueVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                        <Text style={{ color: draft!.forEachValueVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
                           {draft!.forEachValueVariableName ?? "none"}
                         </Text>
                       </TouchableOpacity>
                       {draft!.forEachValueVariableName && (
                         <TouchableOpacity onPress={() => set({ forEachValueVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color="#9ca3af" />
+                          <X size={14} color={colors.textFaint} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1226,17 +1227,17 @@ export function StepConfigModal({
                     <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
                     <Text style={ms.hintText}>Receives the current iteration index (0-based).</Text>
                     <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: "#7c3aed", fontWeight: "600", marginRight: 6 }}>$</Text>
+                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
                       <TouchableOpacity
                         style={[ms.input, { flex: 1, justifyContent: "center" }]}
                         onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachIndexVariableName ? "#1e293b" : "#9ca3af", fontSize: 14 }}>
+                        <Text style={{ color: draft!.forEachIndexVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
                           {draft!.forEachIndexVariableName ?? "none"}
                         </Text>
                       </TouchableOpacity>
                       {draft!.forEachIndexVariableName && (
                         <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color="#9ca3af" />
+                          <X size={14} color={colors.textFaint} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1291,8 +1292,8 @@ export function StepConfigModal({
               {SEVERITIES.map(({ key, label }) => {
                 const active = severity === key;
                 const color =
-                  key === 'Warning' ? '#d97706' :
-                  key === 'Error'   ? '#dc2626' : '#6b7280';
+                  key === 'Warning' ? colors.warning :
+                  key === 'Error'   ? colors.danger : colors.textMuted;
                 return (
                   <TouchableOpacity key={key} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
                     onPress={() => {
@@ -1397,22 +1398,22 @@ export function StepConfigModal({
             <Text style={ms.fieldLabel}>VISION PROGRAM</Text>
             <TouchableOpacity
               style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4,
-                borderWidth: 1, borderColor: selectedVP ? '#0891b2' : '#e5e7eb',
-                borderRadius: 10, backgroundColor: '#f9fafb', paddingHorizontal: 12, paddingVertical: 11 }}
+                borderWidth: 1, borderColor: selectedVP ? accents.cyan : colors.border,
+                borderRadius: radii.sm, backgroundColor: colors.surfaceMuted, paddingHorizontal: 12, paddingVertical: 11 }}
               onPress={() => setVisionProgPickerOpen(true)}
               activeOpacity={0.75}
             >
               {selectedVP ? (
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#0891b2' }}>{selectedVP.name}</Text>
-                  <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: accents.cyan }}>{selectedVP.name}</Text>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 1 }}>
                     {selectedVP.cameraId || 'No camera'} · {selectedVP.zones.length} zone{selectedVP.zones.length !== 1 ? 's' : ''}
                   </Text>
                 </View>
               ) : (
-                <Text style={{ flex: 1, fontSize: 14, color: '#9ca3af' }}>Tap to select a vision program…</Text>
+                <Text style={{ flex: 1, fontSize: 14, color: colors.textFaint }}>Tap to select a vision program…</Text>
               )}
-              <ChevronDown size={14} color={selectedVP ? '#0891b2' : '#9ca3af'} />
+              <ChevronDown size={14} color={selectedVP ? accents.cyan : colors.textFaint} />
             </TouchableOpacity>
 
             {selectedVP && (
@@ -1429,15 +1430,15 @@ export function StepConfigModal({
                   return (
                     <TouchableOpacity
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4,
-                        borderWidth: 1, borderColor: active ? '#0891b2' : '#e5e7eb',
-                        borderRadius: 10, backgroundColor: '#f9fafb', paddingHorizontal: 12, paddingVertical: 11 }}
+                        borderWidth: 1, borderColor: active ? accents.cyan : colors.border,
+                        borderRadius: radii.sm, backgroundColor: colors.surfaceMuted, paddingHorizontal: 12, paddingVertical: 11 }}
                       onPress={() => setZonePickerOpen(true)}
                       activeOpacity={0.75}
                     >
-                      <Text style={{ flex: 1, fontSize: 14, fontWeight: active ? '700' : '400', color: active ? '#0891b2' : '#9ca3af' }}>
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: active ? '700' : '400', color: active ? accents.cyan : colors.textFaint }}>
                         {label}
                       </Text>
-                      <ChevronDown size={14} color={active ? '#0891b2' : '#9ca3af'} />
+                      <ChevronDown size={14} color={active ? accents.cyan : colors.textFaint} />
                     </TouchableOpacity>
                   );
                 })()}
@@ -1453,12 +1454,12 @@ export function StepConfigModal({
                 {inspections.filter(insp => insp.enabled).map(insp => {
                   const out = getOutput(insp.id);
                   return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#f9fafb", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#e5e7eb" }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>{insp.name}</Text>
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.border }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>{insp.name}</Text>
                       <VarSelectorButton
                         label="DETECTED (any blobs found)"
                         value={out?.detectedVar}
-                        accent="#16a34a"
+                        accent={colors.success}
                         placeholder="None — tap to assign"
                         marginTop={false}
                         onPress={() => setVisionPicker({ inspId: insp.id, field: 'detectedVar' })}
@@ -1466,14 +1467,14 @@ export function StepConfigModal({
                       <VarSelectorButton
                         label="COUNT"
                         value={out?.countVar}
-                        accent="#2563eb"
+                        accent={colors.accent}
                         placeholder="None — tap to assign"
                         onPress={() => setVisionPicker({ inspId: insp.id, field: 'countVar' })}
                       />
                       <VarSelectorButton
                         label="POINTS"
                         value={out?.pointsVar}
-                        accent="#0891b2"
+                        accent={accents.cyan}
                         placeholder="None — tap to assign"
                         onPress={() => setVisionPicker({ inspId: insp.id, field: 'pointsVar' })}
                       />
@@ -1496,17 +1497,17 @@ export function StepConfigModal({
                   const grid = (selectedVP?.zones ?? []).find(z => z.id === insp.zoneId)?.grid;
                   const gridded = !!grid && grid.rows * grid.cols > 1;
                   return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fdf4ff", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#e9d5ff" }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fdf4ff", borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: "#e9d5ff" }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>
                         {insp.name}
                         {gridded && (
-                          <Text style={{ fontWeight: "400", color: "#9ca3af" }}>  ({grid!.rows}×{grid!.cols} grid)</Text>
+                          <Text style={{ fontWeight: "400", color: colors.textFaint }}>  ({grid!.rows}×{grid!.cols} grid)</Text>
                         )}
                       </Text>
                       <VarSelectorButton
                         label="COVERAGE %"
                         value={out?.coverageVar}
-                        accent="#7c3aed"
+                        accent={accents.purple}
                         placeholder="None — tap to assign"
                         marginTop={false}
                         onPress={() => setColorPicker({ inspId: insp.id, field: 'coverageVar' })}
@@ -1514,7 +1515,7 @@ export function StepConfigModal({
                       <VarSelectorButton
                         label={gridded ? "PASSED (ALL CELLS)" : "PASSED"}
                         value={out?.passedVar}
-                        accent="#16a34a"
+                        accent={colors.success}
                         placeholder="None — tap to assign"
                         onPress={() => setColorPicker({ inspId: insp.id, field: 'passedVar' })}
                       />
@@ -1523,18 +1524,18 @@ export function StepConfigModal({
                           <VarSelectorButton
                             label="CELLS (OBJECT LIST)"
                             value={out?.cellsVar}
-                            accent="#0891b2"
+                            accent={accents.cyan}
                             placeholder="None — tap to assign"
                             onPress={() => setColorPicker({ inspId: insp.id, field: 'cellsVar' })}
                           />
                           <VarSelectorButton
                             label="CELLS PASSED"
                             value={out?.cellsPassedVar}
-                            accent="#16a34a"
+                            accent={colors.success}
                             placeholder="None — tap to assign"
                             onPress={() => setColorPicker({ inspId: insp.id, field: 'cellsPassedVar' })}
                           />
-                          <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+                          <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
                             Read a cell with $name[i].coverage, .passed, .row, .col or .index.
                           </Text>
                         </>
@@ -1551,14 +1552,14 @@ export function StepConfigModal({
                 {polygonInspections.filter(i => i.enabled).map(insp => {
                   const out = getPolygonOutput(insp.id);
                   return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fffbeb", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#fde68a" }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>
-                        {insp.name}  <Text style={{ fontWeight: "400", color: "#9ca3af" }}>({insp.sides}-sided)</Text>
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.warningSoft, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.warningBorder }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>
+                        {insp.name}  <Text style={{ fontWeight: "400", color: colors.textFaint }}>({insp.sides}-sided)</Text>
                       </Text>
                       <VarSelectorButton
                         label="FOUND"
                         value={out?.foundVar}
-                        accent="#16a34a"
+                        accent={colors.success}
                         placeholder="None — tap to assign"
                         marginTop={false}
                         onPress={() => setPolygonPicker({ inspId: insp.id, field: 'foundVar' })}
@@ -1566,28 +1567,28 @@ export function StepConfigModal({
                       <VarSelectorButton
                         label="COUNT"
                         value={out?.countVar}
-                        accent="#2563eb"
+                        accent={colors.accent}
                         placeholder="None — tap to assign"
                         onPress={() => setPolygonPicker({ inspId: insp.id, field: 'countVar' })}
                       />
                       <VarSelectorButton
                         label="ANGLE (deg)"
                         value={out?.angleVar}
-                        accent="#d97706"
+                        accent={colors.warning}
                         placeholder="None — tap to assign"
                         onPress={() => setPolygonPicker({ inspId: insp.id, field: 'angleVar' })}
                       />
                       <VarSelectorButton
                         label="CENTER X"
                         value={out?.centerXVar}
-                        accent="#0891b2"
+                        accent={accents.cyan}
                         placeholder="None — tap to assign"
                         onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerXVar' })}
                       />
                       <VarSelectorButton
                         label="CENTER Y"
                         value={out?.centerYVar}
-                        accent="#0891b2"
+                        accent={accents.cyan}
                         placeholder="None — tap to assign"
                         onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerYVar' })}
                       />
@@ -1603,12 +1604,12 @@ export function StepConfigModal({
                 {arucoInspections.filter(i => i.enabled).map(insp => {
                   const out = getArucoOutput(insp.id);
                   return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#f0fdf4", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#bbf7d0" }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151", marginBottom: 4 }}>{insp.name}</Text>
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.successSoft, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.successBorder }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>{insp.name}</Text>
                       <VarSelectorButton
                         label="FOUND"
                         value={out?.foundVar}
-                        accent="#16a34a"
+                        accent={colors.success}
                         placeholder="None — tap to assign"
                         marginTop={false}
                         onPress={() => setArucoPicker({ inspId: insp.id, field: 'foundVar' })}
@@ -1616,28 +1617,28 @@ export function StepConfigModal({
                       <VarSelectorButton
                         label="COUNT"
                         value={out?.countVar}
-                        accent="#2563eb"
+                        accent={colors.accent}
                         placeholder="None — tap to assign"
                         onPress={() => setArucoPicker({ inspId: insp.id, field: 'countVar' })}
                       />
                       <VarSelectorButton
                         label="FIRST MARKER ID"
                         value={out?.firstIdVar}
-                        accent="#0891b2"
+                        accent={accents.cyan}
                         placeholder="None — tap to assign"
                         onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstIdVar' })}
                       />
                       <VarSelectorButton
                         label="FIRST CENTER X"
                         value={out?.firstCenterXVar}
-                        accent="#0891b2"
+                        accent={accents.cyan}
                         placeholder="None — tap to assign"
                         onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstCenterXVar' })}
                       />
                       <VarSelectorButton
                         label="FIRST CENTER Y"
                         value={out?.firstCenterYVar}
-                        accent="#0891b2"
+                        accent={accents.cyan}
                         placeholder="None — tap to assign"
                         onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstCenterYVar' })}
                       />
@@ -1711,11 +1712,11 @@ export function StepConfigModal({
             </Text>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>LABEL NAME</Text>
             <TextInput
-              style={[ms.input, isDuplicate && { borderColor: "#ef4444", borderWidth: 1 }]}
+              style={[ms.input, isDuplicate && { borderColor: colors.danger, borderWidth: 1 }]}
               value={draft!.labelName ?? ""}
               onChangeText={v => set({ labelName: v || undefined })}
               placeholder="e.g. loop_start, retry…"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               autoFocus
               autoCapitalize="none"
               returnKeyType="done"
@@ -1772,7 +1773,7 @@ export function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>ACTIVE TOOL</Text>
-            <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 6 }}>
               Select which tool TCP offset to activate for subsequent move steps.
             </Text>
             {[{ name: 'none', label: 'None (clear tool)' }, ...allTools.map(t => ({ name: t.name, label: t.name }))].map((t, i, arr) => {
@@ -1805,7 +1806,7 @@ export function StepConfigModal({
         return (
           <>
             <Text style={ms.fieldLabel}>ACTIVE LOCAL</Text>
-            <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 6 }}>
               Select which local coordinate frame to activate for subsequent move steps.
             </Text>
             {[{ name: 'none', label: 'None (clear local)' }, ...allLocals.map(l => ({ name: l.name, label: l.name }))].map((l, i, arr) => {
@@ -1903,7 +1904,7 @@ export function StepConfigModal({
               <Switch
                 value={peckOn}
                 onValueChange={v => set({ threadPeck: v || undefined })}
-                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                trackColor={{ false: colors.border, true: colors.accent }}
               />
             </View>
             {peckOn && (
@@ -1928,7 +1929,7 @@ export function StepConfigModal({
               <Switch
                 value={draft!.threadReverseOut ?? true}
                 onValueChange={v => set({ threadReverseOut: v ? undefined : false })}
-                trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                trackColor={{ false: colors.border, true: colors.accent }}
               />
             </View>
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (deg/s)</Text>
@@ -2074,7 +2075,7 @@ export function StepConfigModal({
               <Switch
                 value={draft!.auxWaitForDone !== false}
                 onValueChange={v => set({ auxWaitForDone: v ? undefined : false })}
-                trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+                trackColor={{ false: colors.border, true: "#7c3aed" }}
               />
             </View>
             <Text style={ms.hintText}>
@@ -2151,7 +2152,7 @@ export function StepConfigModal({
                     onPress={() => set({ auxVelocity: Math.abs(velocity || (isPhysical ? 10 : 800)) * val, auxUnit: isPhysical ? unit : undefined })}
                     activeOpacity={0.8}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
-                      <Icon size={15} color={active ? "#7c3aed" : "#6b7280"} />
+                      <Icon size={15} color={active ? "#7c3aed" : colors.textMuted} />
                       <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
                     </View>
                   </TouchableOpacity>
@@ -2260,7 +2261,7 @@ export function StepConfigModal({
               <Switch
                 value={draft!.auxImmediate ?? false}
                 onValueChange={v => set({ auxImmediate: v || undefined })}
-                trackColor={{ false: "#e5e7eb", true: "#dc2626" }}
+                trackColor={{ false: colors.border, true: colors.danger }}
               />
             </View>
           </>
@@ -2383,19 +2384,19 @@ export function StepConfigModal({
             <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
               {swActions.map(a => {
                 const active = draft!.stopwatchAction === a;
-                const color  = a === "Start" ? "#16a34a" : a === "Stop" ? "#dc2626" : "#d97706";
-                const bg     = a === "Start" ? "#f0fdf4" : a === "Stop" ? "#fef2f2" : "#fffbeb";
-                const border = a === "Start" ? "#bbf7d0" : a === "Stop" ? "#fecaca" : "#fde68a";
+                const color  = a === "Start" ? colors.success : a === "Stop" ? colors.danger : colors.warning;
+                const bg     = a === "Start" ? colors.successSoft : a === "Stop" ? colors.dangerSoft : colors.warningSoft;
+                const border = a === "Start" ? colors.successBorder : a === "Stop" ? colors.dangerBorder : colors.warningBorder;
                 return (
                   <TouchableOpacity
                     key={a}
-                    style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center", borderWidth: 1.5,
-                      borderColor: active ? color : "#e5e7eb",
-                      backgroundColor: active ? bg : "#f9fafb" }]}
+                    style={[{ flex: 1, paddingVertical: 10, borderRadius: radii.sm, alignItems: "center", borderWidth: 1.5,
+                      borderColor: active ? color : colors.border,
+                      backgroundColor: active ? bg : colors.surfaceMuted }]}
                     onPress={() => set({ stopwatchAction: a })}
                     activeOpacity={0.7}
                   >
-                    <Text style={{ fontSize: 14, fontWeight: "700", color: active ? color : "#6b7280" }}>{a}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: "700", color: active ? color : colors.textMuted }}>{a}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2468,7 +2469,7 @@ export function StepConfigModal({
               value={draft!.jsonUrl ?? ""}
               onChangeText={v => set({ jsonUrl: v || undefined })}
               placeholder="https://api.example.com/robot"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               keyboardType="url"
               returnKeyType="done"
@@ -2480,7 +2481,7 @@ export function StepConfigModal({
               value={draft!.jsonTimeoutMs != null ? String(draft!.jsonTimeoutMs) : ""}
               onChangeText={v => set({ jsonTimeoutMs: v ? parseInt(v) || undefined : undefined })}
               placeholder="10000"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               keyboardType="numeric"
               returnKeyType="done"
             />
@@ -2495,14 +2496,14 @@ export function StepConfigModal({
                 return (
                   <TouchableOpacity
                     key={String(opt.value)}
-                    style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center",
-                      borderWidth: 1.5, borderColor: active ? accent : "#e5e7eb",
-                      backgroundColor: active ? "#f0fdfa" : "#f9fafb" }]}
+                    style={[{ flex: 1, paddingVertical: 10, borderRadius: radii.sm, alignItems: "center",
+                      borderWidth: 1.5, borderColor: active ? accent : colors.border,
+                      backgroundColor: active ? "#f0fdfa" : colors.surfaceMuted }]}
                     onPress={() => set({ jsonWaitForResponse: opt.value })}
                     activeOpacity={0.7}
                   >
                     <Text style={{ fontSize: 12, fontWeight: "700",
-                      color: active ? accent : "#6b7280" }}>{opt.label}</Text>
+                      color: active ? accent : colors.textMuted }}>{opt.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2518,14 +2519,14 @@ export function StepConfigModal({
               Pick a list variable to send the whole list as a JSON array.
             </Text>
             {/* JSON block */}
-            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+            <View style={{ borderRadius: radii.sm, borderWidth: 1, borderColor: colors.borderStrong,
               borderLeftWidth: 3, borderLeftColor: accent,
               backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
               <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
                 fontSize: 15, color: "#64748b" }}>{"{"}</Text>
               {outbound.length === 0 && (
                 <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
-                  color: "#9ca3af", fontStyle: "italic" }}>
+                  color: colors.textFaint, fontStyle: "italic" }}>
                   // no fields yet
                 </Text>
               )}
@@ -2543,7 +2544,7 @@ export function StepConfigModal({
                       setOutbound(next);
                     }}
                     placeholder="key"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={colors.textFaint}
                     returnKeyType="next"
                     autoCapitalize="none"
                   />
@@ -2558,7 +2559,7 @@ export function StepConfigModal({
                       activeOpacity={0.75}
                     >
                       {row.listVar ? <List size={12} color={accent} /> : <Camera size={12} color={accent} />}
-                      <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: "#7c3aed" }}
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: accents.purple }}
                         numberOfLines={1}>${row.listVar ?? row.imageVar}</Text>
                       {row.listVar && (
                         <Text style={{ fontSize: 11, color: "#94a3b8" }}>[ ]</Text>
@@ -2567,7 +2568,7 @@ export function StepConfigModal({
                   ) : (
                     <>
                       <TextInput
-                        style={{ flex: 2, fontSize: 14, color: "#7c3aed", paddingHorizontal: 1,
+                        style={{ flex: 2, fontSize: 14, color: accents.purple, paddingHorizontal: 1,
                           paddingVertical: 2, minWidth: 30 }}
                         value={row.expr}
                         onChangeText={v => {
@@ -2576,7 +2577,7 @@ export function StepConfigModal({
                           setOutbound(next);
                         }}
                         placeholder="$var or expr"
-                        placeholderTextColor="#9ca3af"
+                        placeholderTextColor={colors.textFaint}
                         returnKeyType="done"
                         autoCapitalize="none"
                       />
@@ -2592,7 +2593,7 @@ export function StepConfigModal({
                   <TouchableOpacity
                     onPress={() => setOutbound(outbound.filter((_, j) => j !== i))}
                     hitSlop={8} style={{ padding: 5 }}>
-                    <Minus size={13} color="#dc2626" />
+                    <Minus size={13} color={colors.danger} />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -2602,8 +2603,8 @@ export function StepConfigModal({
                 onPress={() => setOutbound([...outbound, { key: "", expr: "" }])}
                 activeOpacity={0.7}
               >
-                <Plus size={12} color="#9ca3af" />
-                <Text style={{ fontSize: 12, color: "#9ca3af" }}>add field</Text>
+                <Plus size={12} color={colors.textFaint} />
+                <Text style={{ fontSize: 12, color: colors.textFaint }}>add field</Text>
               </TouchableOpacity>
               <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
                 fontSize: 15, color: "#64748b" }}>{"}"}</Text>
@@ -2611,29 +2612,29 @@ export function StepConfigModal({
 
             {/* ── Inbound mapping ── */}
             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 20, marginBottom: 6 }}>
-              <Globe size={13} color="#2563eb" style={{ marginRight: 5 }} />
-              <Text style={[ms.fieldLabel, { marginTop: 0, color: "#2563eb" }]}>INBOUND VARIABLES</Text>
+              <Globe size={13} color={colors.accent} style={{ marginRight: 5 }} />
+              <Text style={[ms.fieldLabel, { marginTop: 0, color: colors.accent }]}>INBOUND VARIABLES</Text>
             </View>
             <Text style={[ms.hintText, { marginBottom: 8 }]}>
               Map response JSON keys to program variables. Leave empty to ignore the response.
               A JSON array mapped onto a list variable replaces the list; read its length with <Text style={{ fontFamily: "monospace" }}>$name.length</Text>.
             </Text>
             {/* JSON block */}
-            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
-              borderLeftWidth: 3, borderLeftColor: "#2563eb",
+            <View style={{ borderRadius: radii.sm, borderWidth: 1, borderColor: colors.borderStrong,
+              borderLeftWidth: 3, borderLeftColor: colors.accent,
               backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
               <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
                 fontSize: 15, color: "#64748b" }}>{"{"}</Text>
               {inbound.length === 0 && (
                 <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
-                  color: "#9ca3af", fontStyle: "italic" }}>
+                  color: colors.textFaint, fontStyle: "italic" }}>
                   // no mappings yet
                 </Text>
               )}
               {inbound.map((row, i) => (
                 <View key={i} style={{ flexDirection: "row", alignItems: "center",
                   paddingLeft: 26, paddingRight: 6, paddingVertical: 5 }}>
-                  <Text style={{ fontSize: 14, color: "#2563eb" }}>"</Text>
+                  <Text style={{ fontSize: 14, color: colors.accent }}>"</Text>
                   <TextInput
                     style={{ flex: 1, fontSize: 14, color: "#0f172a", paddingHorizontal: 1,
                       paddingVertical: 2, minWidth: 20 }}
@@ -2644,22 +2645,22 @@ export function StepConfigModal({
                       setInbound(next);
                     }}
                     placeholder="key"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={colors.textFaint}
                     returnKeyType="done"
                     autoCapitalize="none"
                   />
-                  <Text style={{ fontSize: 14, color: "#2563eb" }}>"</Text>
-                  <ArrowRight size={16} color="#2563eb" style={{ marginHorizontal: 6 }} />
+                  <Text style={{ fontSize: 14, color: colors.accent }}>"</Text>
+                  <ArrowRight size={16} color={colors.accent} style={{ marginHorizontal: 6 }} />
                   <TouchableOpacity
                     style={{ flex: 2, flexDirection: "row", alignItems: "center", gap: 5,
                       minWidth: 30 }}
                     onPress={() => setJsonInboundPicker(i)}
                     activeOpacity={0.75}
                   >
-                    <Search size={12} color={row.variableName ? "#2563eb" : "#94a3b8"} />
+                    <Search size={12} color={row.variableName ? colors.accent : "#94a3b8"} />
                     <Text style={{ flex: 1, fontSize: 14,
                       fontWeight: row.variableName ? "700" : "400",
-                      color: row.variableName ? "#7c3aed" : "#9ca3af" }} numberOfLines={1}>
+                      color: row.variableName ? accents.purple : colors.textFaint }} numberOfLines={1}>
                       {row.variableName ? `$${row.variableName}` : "search variables…"}
                     </Text>
                   </TouchableOpacity>
@@ -2669,7 +2670,7 @@ export function StepConfigModal({
                   <TouchableOpacity
                     onPress={() => setInbound(inbound.filter((_, j) => j !== i))}
                     hitSlop={8} style={{ padding: 5 }}>
-                    <Minus size={13} color="#dc2626" />
+                    <Minus size={13} color={colors.danger} />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -2679,8 +2680,8 @@ export function StepConfigModal({
                 onPress={() => setInbound([...inbound, { key: "", variableName: "" }])}
                 activeOpacity={0.7}
               >
-                <Plus size={12} color="#9ca3af" />
-                <Text style={{ fontSize: 12, color: "#9ca3af" }}>add mapping</Text>
+                <Plus size={12} color={colors.textFaint} />
+                <Text style={{ fontSize: 12, color: colors.textFaint }}>add mapping</Text>
               </TouchableOpacity>
               <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
                 fontSize: 15, color: "#64748b" }}>{"}"}</Text>
@@ -2736,7 +2737,7 @@ export function StepConfigModal({
       }
 
       case "CaptureImage": {
-        const accentImg = "#0891b2";
+        const accentImg = accents.cyan;
         const imageVarsForCapture = (variables ?? []).filter(v => v.isImage === true);
         return (
           <>
@@ -2758,7 +2759,7 @@ export function StepConfigModal({
                     onPress={() => set({ captureImageCameraId: cam.id })}
                     activeOpacity={0.7}
                   >
-                    <Camera size={14} color={active ? accentImg : "#6b7280"} />
+                    <Camera size={14} color={active ? accentImg : colors.textMuted} />
                     <Text style={[ms.rowLabel, { flex: 1 }, active && { color: accentImg }]}>{cam.name}</Text>
                     {active && <Check size={14} color={accentImg} />}
                   </TouchableOpacity>
@@ -2772,7 +2773,7 @@ export function StepConfigModal({
                 onPress={() => setCaptureVarCreateOpen(true)}
                 hitSlop={8} activeOpacity={0.7}
                 style={{ flexDirection: "row", alignItems: "center", gap: 4,
-                  backgroundColor: "#e0f2fe", borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4,
+                  backgroundColor: "#e0f2fe", borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 4,
                   borderWidth: 1, borderColor: "#7dd3fc" }}
               >
                 <Plus size={12} color={accentImg} />
@@ -2830,13 +2831,13 @@ export function StepConfigModal({
               value={draft!.httpReceiveName ?? ""}
               onChangeText={v => set({ httpReceiveName: v || undefined })}
               placeholder="e.g. part-ready"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               returnKeyType="done"
             />
             {draft!.httpReceiveName ? (
-              <View style={{ backgroundColor: "#f0fdf4", borderRadius: 8, borderWidth: 1,
-                borderColor: "#bbf7d0", padding: 10, marginTop: 8 }}>
+              <View style={{ backgroundColor: colors.successSoft, borderRadius: radii.sm, borderWidth: 1,
+                borderColor: colors.successBorder, padding: 10, marginTop: 8 }}>
                 <Text style={{ fontSize: 11, color: "#15803d", fontWeight: "600", marginBottom: 2 }}>
                   POST endpoint
                 </Text>
@@ -2855,7 +2856,7 @@ export function StepConfigModal({
                 set({ httpReceiveTimeoutMs: isNaN(n) ? undefined : n });
               }}
               placeholder="30000 (default)"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               keyboardType="number-pad"
               returnKeyType="done"
             />
@@ -2868,14 +2869,14 @@ export function StepConfigModal({
             <Text style={[ms.hintText, { marginBottom: 8 }]}>
               Map incoming JSON keys to program variables.
             </Text>
-            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+            <View style={{ borderRadius: radii.sm, borderWidth: 1, borderColor: colors.borderStrong,
               borderLeftWidth: 3, borderLeftColor: accentRcv,
               backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
               <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
                 fontSize: 15, color: "#64748b" }}>{"{"}</Text>
               {rcvInbound.length === 0 && (
                 <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
-                  color: "#9ca3af", fontStyle: "italic" }}>
+                  color: colors.textFaint, fontStyle: "italic" }}>
                   // no mappings yet
                 </Text>
               )}
@@ -2893,7 +2894,7 @@ export function StepConfigModal({
                       setRcvInbound(next);
                     }}
                     placeholder="key"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={colors.textFaint}
                     returnKeyType="done"
                     autoCapitalize="none"
                   />
@@ -2907,7 +2908,7 @@ export function StepConfigModal({
                     <Search size={12} color={row.variableName ? accentRcv : "#94a3b8"} />
                     <Text style={{ flex: 1, fontSize: 14,
                       fontWeight: row.variableName ? "700" : "400",
-                      color: row.variableName ? "#7c3aed" : "#9ca3af" }} numberOfLines={1}>
+                      color: row.variableName ? accents.purple : colors.textFaint }} numberOfLines={1}>
                       {row.variableName ? `$${row.variableName}` : "search variables…"}
                     </Text>
                   </TouchableOpacity>
@@ -2917,7 +2918,7 @@ export function StepConfigModal({
                   <TouchableOpacity
                     onPress={() => setRcvInbound(rcvInbound.filter((_, j) => j !== i))}
                     hitSlop={8} style={{ padding: 5 }}>
-                    <Minus size={13} color="#dc2626" />
+                    <Minus size={13} color={colors.danger} />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -2927,8 +2928,8 @@ export function StepConfigModal({
                 onPress={() => setRcvInbound([...rcvInbound, { key: "", variableName: "" }])}
                 activeOpacity={0.7}
               >
-                <Plus size={12} color="#9ca3af" />
-                <Text style={{ fontSize: 12, color: "#9ca3af" }}>add mapping</Text>
+                <Plus size={12} color={colors.textFaint} />
+                <Text style={{ fontSize: 12, color: colors.textFaint }}>add mapping</Text>
               </TouchableOpacity>
               <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
                 fontSize: 15, color: "#64748b" }}>{"}"}</Text>
@@ -2955,7 +2956,7 @@ export function StepConfigModal({
 
       case "Unknown":
         return (
-          <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: 8, marginTop: 8 }}>
+          <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: radii.sm, marginTop: 8 }}>
             <Text style={{ fontSize: 14, color: "#92400e", fontWeight: "600", marginBottom: 6 }}>
               Unrecognized Step Type
             </Text>
@@ -3043,12 +3044,12 @@ export function StepConfigModal({
             <View style={ms.header}>
               {subPage ? (
                 <TouchableOpacity onPress={() => setSubPage(null)} hitSlop={12} activeOpacity={0.7}>
-                  <ArrowLeft size={18} color="#111" />
+                  <ArrowLeft size={18} color={colors.text} />
                 </TouchableOpacity>
               ) : <View style={{ width: 18 }} />}
               <Text style={ms.title}>{subPage ? subPageTitle[subPage] : "Configure Step"}</Text>
               <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
+                <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
 
@@ -3123,7 +3124,7 @@ export function StepConfigModal({
     {/* Vision program picker */}
     <BottomSheet visible={visionProgPickerOpen} onClose={() => setVisionProgPickerOpen(false)} title="Select Vision Program">
       {visionPrograms.length === 0 && (
-        <Text style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: 16 }}>No vision programs saved yet.</Text>
+        <Text style={{ fontSize: 13, color: colors.textFaint, textAlign: 'center', padding: 16 }}>No vision programs saved yet.</Text>
       )}
       <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
         {visionPrograms.map((vp, i) => {
@@ -3146,7 +3147,7 @@ export function StepConfigModal({
                 {!!vp.description && <Text style={ms.rowDesc}>{vp.description}</Text>}
                 <Text style={ms.rowDesc}>{vp.cameraId || 'No camera'} · {vp.zones.length} zone{vp.zones.length !== 1 ? 's' : ''}</Text>
               </View>
-              {active && <Check size={16} color="#2563eb" />}
+              {active && <Check size={16} color={colors.accent} />}
             </TouchableOpacity>
           );
         })}
@@ -3179,7 +3180,7 @@ export function StepConfigModal({
                 {active && <View style={ms.radioDot} />}
               </View>
               <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{z.name}</Text>
-              {active && <Check size={16} color="#2563eb" />}
+              {active && <Check size={16} color={colors.accent} />}
             </TouchableOpacity>
           );
         })}
@@ -3203,7 +3204,7 @@ export function StepConfigModal({
       <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
         {(['metric', 'imperial'] as const).map(group => (
           <View key={group}>
-            <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b7280', paddingHorizontal: 4, paddingTop: 8, paddingBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textMuted, paddingHorizontal: 4, paddingTop: 8, paddingBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               {group === 'metric' ? 'Metric' : 'Imperial UNC'}
             </Text>
             {THREAD_PRESETS.filter(p => p.group === group).map((p, i, arr) => {
@@ -3220,7 +3221,7 @@ export function StepConfigModal({
                     <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.label}</Text>
                     <Text style={ms.rowDesc}>{p.pitch.toFixed(3)} mm / revolution</Text>
                   </View>
-                  {active && <Check size={16} color="#2563eb" />}
+                  {active && <Check size={16} color={colors.accent} />}
                 </TouchableOpacity>
               );
             })}

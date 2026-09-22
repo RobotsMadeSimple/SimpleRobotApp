@@ -1,3 +1,4 @@
+import { colors, radii } from "@/src/components/ui/kit";
 import { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -35,9 +36,9 @@ export function JogButton({
   onStart,
   onStop,
   size = 70,
-  color = "#666666",
-  activeColor = "#2563eb",
-  activeBg = "#dbeafe",
+  color = colors.textMuted,
+  activeColor = colors.accent,
+  activeBg = colors.accentSoft,
   restBg = "transparent",
 }: Props) {
   const isRow     = iconPosition === "left" || iconPosition === "right";
@@ -85,14 +86,14 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 8,
+    borderRadius: radii.sm,
   },
   content: {
     alignItems: "center",
     justifyContent: "center",
   },
   text: {
-    color: "#666",
+    color: colors.textMuted,
     fontWeight: "600",
   },
 });

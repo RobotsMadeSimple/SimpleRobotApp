@@ -9,6 +9,7 @@ import {
 import { X } from "lucide-react-native";
 import { ProgramVariable, hasScalarElements, variableList } from "@/src/models/robotModels";
 import { VarPickerModal } from "./VarPicker";
+import { colors, accents } from "@/src/components/ui/kit";
 
 // ── Numeric inputs ────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ export function NumericInput({
       keyboardType="numeric"
       autoFocus={autoFocus}
       placeholder={placeholder}
-      placeholderTextColor="#9ca3af"
+      placeholderTextColor={colors.textFaint}
     />
   );
 }
@@ -104,7 +105,7 @@ export function OptionalNumericInput({
       }}
       keyboardType="numeric"
       placeholder={placeholder}
-      placeholderTextColor="#9ca3af"
+      placeholderTextColor={colors.textFaint}
     />
   );
 }
@@ -285,20 +286,20 @@ export function ExpressionInput({
       <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
         <TextInput
           ref={inputRef}
-          style={{ flex: 1, fontSize: 14, color: exprActive ? "#7c3aed" : "#111827" }}
+          style={{ flex: 1, fontSize: 14, color: exprActive ? accents.purple : colors.text }}
           value={text}
           onChangeText={handleChange}
           onFocus={() => { isFocused.current = true; }}
           onBlur={() => { isFocused.current = false; commit(text); }}
           keyboardType="default"
           placeholder={placeholder ?? (allowUndefined ? "default" : "0")}
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={colors.textFaint}
           autoFocus={autoFocus}
           returnKeyType="done"
         />
         {text.trim().length > 0 && (
           <TouchableOpacity onPress={clear} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
-            <X size={13} color="#9ca3af" />
+            <X size={13} color={colors.textFaint} />
           </TouchableOpacity>
         )}
       </View>
@@ -319,7 +320,7 @@ export function ExpressionInput({
             activeOpacity={0.7}
             style={[exprStyles.opChip, { backgroundColor: "#ede9fe", borderColor: "#c4b5fd" }]}
           >
-            <Text style={[exprStyles.opChipText, { color: "#7c3aed", fontSize: 13 }]}>$var</Text>
+            <Text style={[exprStyles.opChipText, { color: accents.purple, fontSize: 13 }]}>$var</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -377,7 +378,7 @@ export function TemplateInput({
   variables,
   style,
   placeholder,
-  accent = "#7c3aed",
+  accent = accents.purple,
   quickTokens,
   autoFocus,
   autoCapitalize = "none",
@@ -418,11 +419,11 @@ export function TemplateInput({
       <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
         <TextInput
           ref={inputRef}
-          style={{ flex: 1, fontSize: 14, color: hasRef ? accent : "#111827" }}
+          style={{ flex: 1, fontSize: 14, color: hasRef ? accent : colors.text }}
           value={value}
           onChangeText={onChange}
           placeholder={placeholder}
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={colors.textFaint}
           autoCapitalize={autoCapitalize}
           autoCorrect={autoCapitalize === "sentences"}
           autoFocus={autoFocus}
@@ -430,7 +431,7 @@ export function TemplateInput({
         />
         {value.length > 0 && (
           <TouchableOpacity onPress={() => onChange("")} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
-            <X size={13} color="#9ca3af" />
+            <X size={13} color={colors.textFaint} />
           </TouchableOpacity>
         )}
       </View>
@@ -443,7 +444,7 @@ export function TemplateInput({
               activeOpacity={0.7}
               style={[exprStyles.opChip, { backgroundColor: "#ede9fe", borderColor: "#c4b5fd" }]}
             >
-              <Text style={[exprStyles.opChipText, { color: "#7c3aed", fontSize: 13 }]}>$var</Text>
+              <Text style={[exprStyles.opChipText, { color: accents.purple, fontSize: 13 }]}>$var</Text>
             </TouchableOpacity>
           )}
           {(quickTokens ?? []).map(t => (
@@ -455,7 +456,7 @@ export function TemplateInput({
       )}
 
       {warning && (
-        <Text style={{ fontSize: 11, color: "#b45309", marginTop: 6 }}>
+        <Text style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
           {warning} is missing its $ — it will be left as written, not substituted.
         </Text>
       )}
@@ -484,16 +485,16 @@ export const exprStyles = StyleSheet.create({
     paddingVertical: 5,
     alignItems: "center",
   },
-  chipText: { fontSize: 13, fontWeight: "700", color: "#7c3aed" },
+  chipText: { fontSize: 13, fontWeight: "700", color: accents.purple },
   chipHint: { fontSize: 10, color: "#a78bfa", marginTop: 1 },
   opChip: {
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.background,
     borderWidth: 1,
-    borderColor: "#d1d5db",
+    borderColor: colors.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 5,
     alignItems: "center",
   },
-  opChipText: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  opChipText: { fontSize: 15, fontWeight: "600", color: colors.textSecondary },
 });

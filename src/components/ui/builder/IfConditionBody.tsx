@@ -16,6 +16,7 @@ import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { STEP_THEME } from "./stepUtils";
 import { newId } from "./stepUtils";
 import { ScopeFrame } from "./stepUtils";
+import { colors, accents } from "@/src/components/ui/kit";
 
 const ifStyles = StyleSheet.create({
   branchCard: {
@@ -37,19 +38,19 @@ const ifStyles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5,
   },
   branchLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 0.5 },
-  condSummary: { flex: 1, fontSize: 12, color: "#6b7280" },
+  condSummary: { flex: 1, fontSize: 12, color: colors.textMuted },
   branchControlRow: {
     flexDirection: "row", alignItems: "center", gap: 6,
     marginTop: 10, paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   branchControlBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingVertical: 5, paddingHorizontal: 10,
-    borderRadius: 6, backgroundColor: "#f3f4f6",
-    borderWidth: 1, borderColor: "#e5e7eb",
+    borderRadius: 6, backgroundColor: colors.background,
+    borderWidth: 1, borderColor: colors.border,
   },
-  branchControlText: { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.3 },
+  branchControlText: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.3 },
 });
 
 export function IfConditionBody({
@@ -108,7 +109,7 @@ export function IfConditionBody({
               <View style={{ width: 18 }} />
               <Text style={ms.title}>Edit Condition</Text>
               <TouchableOpacity onPress={() => setEditingKey(null)} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
+                <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
@@ -129,12 +130,12 @@ export function IfConditionBody({
 
       <View style={{ gap: 6, padding: 10 }}>
         {/* IF branch */}
-        <View style={[ifStyles.branchCard, { borderColor: "#bae6fd", backgroundColor: "#f0f9ff" }]}>
+        <View style={[ifStyles.branchCard, { borderColor: "#bae6fd", backgroundColor: colors.accentSoft }]}>
           <TouchableOpacity
             style={[ifStyles.branchCardHeader, { backgroundColor: "#e0f2fe" }]}
             onPress={() => openConditionEditor("if")} activeOpacity={0.7}>
-            <View style={[ifStyles.branchBadge, { backgroundColor: "#0891b2" }]}>
-              <Text style={[ifStyles.branchLabel, { color: "#fff" }]}>IF</Text>
+            <View style={[ifStyles.branchBadge, { backgroundColor: accents.cyan }]}>
+              <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>IF</Text>
             </View>
             <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(step.condition)}</Text>
             <Pencil size={13} color="#c4b5fd" />
@@ -144,21 +145,21 @@ export function IfConditionBody({
             onPress={() => onEnterScope({ kind: "ifTrue", stepId: step.id, label: "IF" })}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 12, color: "#64748b" }}>{ifSteps.length} step{ifSteps.length !== 1 ? "s" : ""}</Text>
+            <Text style={{ fontSize: 12, color: colors.textMuted }}>{ifSteps.length} step{ifSteps.length !== 1 ? "s" : ""}</Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <Text style={{ fontSize: 12, fontWeight: "600", color: "#0891b2" }}>Enter</Text>
-              <ArrowRight size={13} color="#0891b2" />
+              <Text style={{ fontSize: 12, fontWeight: "600", color: accents.cyan }}>Enter</Text>
+              <ArrowRight size={13} color={accents.cyan} />
             </View>
           </TouchableOpacity>
         </View>
 
         {/* ELSE IF branches */}
         {elseIfBranches.map((branch, idx) => (
-          <View key={branch.id} style={[ifStyles.branchCard, { borderColor: "#ddd6fe", backgroundColor: "#faf5ff" }]}>
+          <View key={branch.id} style={[ifStyles.branchCard, { borderColor: accents.purpleBorder, backgroundColor: "#faf5ff" }]}>
             <View style={[ifStyles.branchCardHeader, { backgroundColor: "#ede9fe" }]}>
               <TouchableOpacity style={ifStyles.branchCardHeaderTap} onPress={() => openConditionEditor(branch.id)} activeOpacity={0.7}>
-                <View style={[ifStyles.branchBadge, { backgroundColor: "#7c3aed" }]}>
-                  <Text style={[ifStyles.branchLabel, { color: "#fff" }]}>ELSE IF</Text>
+                <View style={[ifStyles.branchBadge, { backgroundColor: accents.purple }]}>
+                  <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>ELSE IF</Text>
                 </View>
                 <Text style={ifStyles.condSummary} numberOfLines={1}>{conditionSummary(branch.condition)}</Text>
                 <Pencil size={13} color="#c4b5fd" />
@@ -169,7 +170,7 @@ export function IfConditionBody({
                   { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) }) },
                 ])}
                 hitSlop={8} activeOpacity={0.7}>
-                <X size={13} color="#9ca3af" />
+                <X size={13} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
             <TouchableOpacity
@@ -177,10 +178,10 @@ export function IfConditionBody({
               onPress={() => onEnterScope({ kind: "elseIf", stepId: step.id, label: `ELSE IF ${idx + 1}`, branchId: branch.id })}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>{(branch.steps ?? []).length} step{(branch.steps ?? []).length !== 1 ? "s" : ""}</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>{(branch.steps ?? []).length} step{(branch.steps ?? []).length !== 1 ? "s" : ""}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text style={{ fontSize: 12, fontWeight: "600", color: "#7c3aed" }}>Enter</Text>
-                <ArrowRight size={13} color="#7c3aed" />
+                <Text style={{ fontSize: 12, fontWeight: "600", color: accents.purple }}>Enter</Text>
+                <ArrowRight size={13} color={accents.purple} />
               </View>
             </TouchableOpacity>
           </View>
@@ -188,10 +189,10 @@ export function IfConditionBody({
 
         {/* ELSE branch */}
         {elseSteps !== undefined && (
-          <View style={[ifStyles.branchCard, { borderColor: "#d1d5db", backgroundColor: "#f9fafb" }]}>
-            <View style={[ifStyles.branchCardHeader, { backgroundColor: "#f3f4f6" }]}>
-              <View style={[ifStyles.branchBadge, { backgroundColor: "#6b7280" }]}>
-                <Text style={[ifStyles.branchLabel, { color: "#fff" }]}>ELSE</Text>
+          <View style={[ifStyles.branchCard, { borderColor: colors.borderStrong, backgroundColor: colors.surfaceMuted }]}>
+            <View style={[ifStyles.branchCardHeader, { backgroundColor: colors.background }]}>
+              <View style={[ifStyles.branchBadge, { backgroundColor: colors.textMuted }]}>
+                <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>ELSE</Text>
               </View>
               <View style={{ flex: 1 }} />
               <TouchableOpacity
@@ -200,7 +201,7 @@ export function IfConditionBody({
                   { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
                 ])}
                 hitSlop={8} activeOpacity={0.7}>
-                <X size={13} color="#9ca3af" />
+                <X size={13} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
             <TouchableOpacity
@@ -208,10 +209,10 @@ export function IfConditionBody({
               onPress={() => onEnterScope({ kind: "else", stepId: step.id, label: "ELSE" })}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>{(elseSteps ?? []).length} step{(elseSteps ?? []).length !== 1 ? "s" : ""}</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>{(elseSteps ?? []).length} step{(elseSteps ?? []).length !== 1 ? "s" : ""}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text style={{ fontSize: 12, fontWeight: "600", color: "#6b7280" }}>Enter</Text>
-                <ArrowRight size={13} color="#6b7280" />
+                <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textMuted }}>Enter</Text>
+                <ArrowRight size={13} color={colors.textMuted} />
               </View>
             </TouchableOpacity>
           </View>
@@ -226,7 +227,7 @@ export function IfConditionBody({
               elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: "ALL", items: [] }, steps: [] }],
             })}
             activeOpacity={0.7}>
-            <Plus size={11} color="#6b7280" />
+            <Plus size={11} color={colors.textMuted} />
             <Text style={ifStyles.branchControlText}>ELSE IF</Text>
           </TouchableOpacity>
           {elseSteps === undefined && (
@@ -234,7 +235,7 @@ export function IfConditionBody({
               style={ifStyles.branchControlBtn}
               onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
               activeOpacity={0.7}>
-              <Plus size={11} color="#6b7280" />
+              <Plus size={11} color={colors.textMuted} />
               <Text style={ifStyles.branchControlText}>ELSE</Text>
             </TouchableOpacity>
           )}

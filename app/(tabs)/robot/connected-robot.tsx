@@ -5,7 +5,6 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
   ArrowLeftRight,
-  ChevronRight,
   CodeXml,
   Gamepad2,
   Info,
@@ -13,11 +12,21 @@ import {
   Settings2,
 } from "lucide-react-native";
 import {
+  Button,
+  Card,
+  colors,
+  Divider,
+  ListRow,
+  radii,
+  SectionHeader,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
+import {
   Image,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -78,8 +87,8 @@ const MENU_ITEMS = [
     label: "About Robot",
     description: "Serial number, firmware and diagnostics",
     icon: Info,
-    tileColor: "#f9fafb",
-    iconColor: "#6b7280",
+    tileColor: colors.surfaceMuted,
+    iconColor: colors.textMuted,
     onPress: () => router.navigate("/robot/about"),
   },
 ];
@@ -87,6 +96,8 @@ const MENU_ITEMS = [
 export default function ConnectedRobot() {
   const selectedRobot = useSelectedRobot();
   const robots = useRobots();
+  // Two-pane (wide) layout below — Screen only handles the single-column
+  // gutter, so this screen keeps its own useWideContent/useIsWide per the kit README.
   const wideContent = useWideContent();
   const isWide = useIsWide();
 
@@ -98,9 +109,7 @@ export default function ConnectedRobot() {
     return (
       <View style={styles.center}>
         <Text style={styles.centerText}>No robot selected</Text>
-        <TouchableOpacity style={styles.disconnectBtn} onPress={changeRobot} activeOpacity={0.8}>
-          <Text style={styles.disconnectBtnText}>Back to Robot Selection</Text>
-        </TouchableOpacity>
+        <Button label="Back to Robot Selection" onPress={changeRobot} />
       </View>
     );
   }
@@ -109,8 +118,8 @@ export default function ConnectedRobot() {
 
   const infoSection = (
     <>
-      <Text style={styles.sectionLabel}>CONNECTED ROBOT</Text>
-      <View style={styles.card}>
+      <SectionHeader title="Connected Robot" />
+      <Card padded={false}>
         <View style={[styles.robotRow, isWide && styles.robotRowWide]}>
           <View style={[styles.imageWrapper, isWide && styles.imageWrapperWide]}>
             <Image
@@ -127,49 +136,47 @@ export default function ConnectedRobot() {
                 <Text style={styles.typeText}>{robot.robotType}</Text>
               </View>
             )}
-            <Text style={styles.robotIp} numberOfLines={1}>
+            <Text style={[type.mono, styles.robotIp]} numberOfLines={1}>
               {robot.ipAddress}:{robot.port}
             </Text>
           </View>
         </View>
 
-        <View style={styles.cardSeparator} />
+        <Divider style={styles.cardSeparator} />
 
-        <TouchableOpacity style={styles.changeBtn} onPress={changeRobot} activeOpacity={0.8}>
-          <Text style={styles.changeBtnText}>Change Robot</Text>
-        </TouchableOpacity>
-      </View>
+        <Button
+          label="Change Robot"
+          variant="ghost"
+          onPress={changeRobot}
+          textStyle={styles.changeBtnText}
+          style={styles.changeBtn}
+        />
+      </Card>
     </>
   );
 
   const navSection = (
     <>
-      <Text style={styles.sectionLabel}>NAVIGATE TO</Text>
-      <View style={styles.card}>
+      <SectionHeader title="Navigate To" />
+      <Card>
         {MENU_ITEMS.map((item, i) => {
           const Icon = item.icon;
           const isLast = i === MENU_ITEMS.length - 1;
           return (
-            <TouchableOpacity
-              key={i}
-              style={[styles.menuRow, !isLast && styles.menuRowBorder]}
-              onPress={item.onPress}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.iconTile, { backgroundColor: item.tileColor }]}>
-                <Icon size={20} color={item.iconColor} />
-              </View>
-
-              <View style={styles.menuText}>
-                <Text style={styles.menuLabel}>{item.label}</Text>
-                <Text style={styles.menuDesc} numberOfLines={1}>{item.description}</Text>
-              </View>
-
-              <ChevronRight size={18} color="#d1d5db" />
-            </TouchableOpacity>
+            <View key={item.label}>
+              <ListRow
+                card={false}
+                title={item.label}
+                subtitle={item.description}
+                icon={<Icon size={20} color={item.iconColor} />}
+                iconColor={item.tileColor}
+                onPress={item.onPress}
+              />
+              {!isLast && <Divider inset />}
+            </View>
           );
         })}
-      </View>
+      </Card>
     </>
   );
 
@@ -189,7 +196,7 @@ export default function ConnectedRobot() {
       ) : (
         <>
           {infoSection}
-          <View style={{ marginTop: 20 }}>{navSection}</View>
+          <View style={styles.narrowGap}>{navSection}</View>
         </>
       )}
     </ScrollView>
@@ -199,11 +206,11 @@ export default function ConnectedRobot() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.background,
   },
   content: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
 
   // ── Wide two-column layout ──────────────────────────────────────────────────
@@ -211,7 +218,7 @@ const styles = StyleSheet.create({
   // alignItems flex-start so each column is only as tall as its own content.
   wideRow: {
     flexDirection: "row",
-    gap: 16,
+    gap: spacing.lg,
     alignItems: "flex-start",
   },
   wideLeftCol: {
@@ -220,64 +227,37 @@ const styles = StyleSheet.create({
   wideRightCol: {
     flex: 1,
   },
+  narrowGap: { marginTop: spacing.xl },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f3f4f6",
-    gap: 16,
+    backgroundColor: colors.background,
+    gap: spacing.lg,
   },
   centerText: {
     fontSize: 15,
-    color: "#6b7280",
-  },
-  disconnectBtn: {
-    backgroundColor: "#2563eb",
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    borderRadius: 10,
-  },
-  disconnectBtnText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
+    color: colors.textMuted,
   },
 
   // ── Robot info ─────────────────────────────────────────────────────────────
   robotRow: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    gap: 14,
+    padding: spacing.lg,
+    gap: spacing.md + 2,
   },
   // Wide: stack the image above the info and let it span the column width.
   robotRowWide: {
     flexDirection: "column",
     alignItems: "stretch",
-    gap: 12,
+    gap: spacing.md,
   },
   imageWrapper: {
     width: 120,
     height: 120,
-    borderRadius: 16,
-    backgroundColor: "#ffffff",
+    borderRadius: radii.xl,
+    backgroundColor: colors.surface,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -295,73 +275,37 @@ const styles = StyleSheet.create({
   },
   robotInfo: {
     flex: 1,
-    gap: 4,
+    gap: spacing.xs,
   },
   robotName: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
   },
   typeBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "#eff6ff",
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radii.sm - 3,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
   typeText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#2563eb",
+    color: colors.accent,
   },
   robotIp: {
     fontSize: 13,
-    color: "#9ca3af",
+    color: colors.textFaint,
   },
   cardSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#e5e7eb",
+    marginVertical: 0,
   },
   changeBtn: {
-    paddingVertical: 13,
-    alignItems: "center",
+    borderRadius: 0,
+    paddingVertical: spacing.md + 1,
   },
   changeBtnText: {
-    color: "#dc2626",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-
-  // ── Menu rows ──────────────────────────────────────────────────────────────
-  menuRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 14,
-  },
-  menuRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  iconTile: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  menuText: {
-    flex: 1,
-    gap: 2,
-  },
-  menuLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  menuDesc: {
-    fontSize: 12,
-    color: "#9ca3af",
+    color: colors.danger,
   },
 });

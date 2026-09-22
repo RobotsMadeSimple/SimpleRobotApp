@@ -1,18 +1,31 @@
-import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import {
+  Button,
+  buttonTextColor,
+  Card,
+  colors,
+  Divider,
+  ListRow,
+  radii,
+  Screen,
+  SectionHeader,
+  shadows,
+  spacing,
+  StatusPill,
+  type,
+} from "@/src/components/ui/kit";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
-  ChevronRight,
   Cpu,
   Gamepad2,
   HomeIcon,
   OctagonX,
-  Zap,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
 // ── Homing state → human-readable label ───────────────────────────────────────
 const HOMING_LABELS: Record<string, string> = {
@@ -42,7 +55,6 @@ const HOMING_LABELS: Record<string, string> = {
 
 export default function Control() {
   const s = useRobotStatus();
-  const wideContent = useWideContent();
   const isWide = useIsWide();
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
@@ -63,26 +75,26 @@ export default function Control() {
     {
       label: "Jog & Teach",
       sub: "Manually move the robot axes",
-      icon: <Gamepad2 size={20} color="#2563eb" />,
-      iconBg: "#dbeafe",
+      icon: <Gamepad2 size={20} color={colors.accent} />,
+      iconBg: colors.accentSoft,
       onPress: () => router.push("/control/jog"),
     },
     {
       label: "Home Robot",
       sub: "Run the homing sequence",
-      icon: <HomeIcon size={20} color="#16a34a" />,
-      iconBg: "#dcfce7",
+      icon: <HomeIcon size={20} color={colors.success} />,
+      iconBg: colors.successSoft,
       onPress: () => setConfirm({
         label: "Home Robot",
         sub: "The robot will move to its home position. Make sure the workspace is clear.",
-        icon: <HomeIcon size={28} color="#2563eb" />,
+        icon: <HomeIcon size={28} color={colors.accent} />,
         run: () => robotClient.sendCommand("Home"),
       }),
     },
   ];
 
   const posSection = (
-    <View style={styles.posCard}>
+    <Card>
       <View style={styles.coordRow}>
         {coords.map(({ label, value }) => (
           <View key={label} style={styles.coordCell}>
@@ -93,64 +105,53 @@ export default function Control() {
       </View>
 
       <View style={styles.badgeRow}>
-        <View style={[styles.badge, s?.wasHomed ? styles.badgeGreen : styles.badgeGray]}>
-          <View style={[styles.badgeDot, s?.wasHomed ? styles.dotGreen : styles.dotGray]} />
-          <Text style={[styles.badgeText, s?.wasHomed ? styles.badgeTextGreen : styles.badgeTextGray]}>
-            {s?.wasHomed ? "Homed" : "Not Homed"}
-          </Text>
-        </View>
+        <StatusPill
+          label={s?.wasHomed ? "Homed" : "Not Homed"}
+          tone={s?.wasHomed ? "success" : "neutral"}
+          dot
+        />
 
-        <View style={[styles.badge, s?.moving ? styles.badgeBlue : styles.badgeGray]}>
-          <View style={[styles.badgeDot, s?.moving ? styles.dotBlue : styles.dotGray]} />
-          <Text style={[styles.badgeText, s?.moving ? styles.badgeTextBlue : styles.badgeTextGray]}>
-            {s?.moving ? "Moving" : "Idle"}
-          </Text>
-        </View>
+        <StatusPill
+          label={s?.moving ? "Moving" : "Idle"}
+          tone={s?.moving ? "accent" : "neutral"}
+          dot
+        />
 
-        <View style={[styles.badge, s?.driverConnected ? styles.badgeGreen : styles.badgeGray]}>
-          <Cpu size={11} color={s?.driverConnected ? "#166534" : "#6b7280"} />
-          <Text style={[styles.badgeText, s?.driverConnected ? styles.badgeTextGreen : styles.badgeTextGray]}>
-            {s?.driverConnected ? "Driver" : "No Driver"}
-          </Text>
-        </View>
+        <StatusPill
+          label={s?.driverConnected ? "Driver" : "No Driver"}
+          tone={s?.driverConnected ? "success" : "neutral"}
+          icon={<Cpu size={11} color={s?.driverConnected ? colors.success : colors.textMuted} />}
+        />
 
         {s?.driverConnected && (
-          <View style={[styles.badge, s?.driverOk ? styles.badgeGreen : styles.badgeRed]}>
-            <View style={[styles.badgeDot, s?.driverOk ? styles.dotGreen : styles.dotRed]} />
-            <Text style={[styles.badgeText, s?.driverOk ? styles.badgeTextGreen : styles.badgeTextRed]}>
-              {s?.driverOk ? "Driver OK" : "Fault"}
-            </Text>
-          </View>
+          <StatusPill
+            label={s?.driverOk ? "Driver OK" : "Fault"}
+            tone={s?.driverOk ? "success" : "danger"}
+            dot
+          />
         )}
       </View>
-    </View>
+    </Card>
   );
 
   const actionsSection = (
     <>
-      <Text style={styles.sectionLabel}>ACTIONS</Text>
-      <View style={styles.menuCard}>
+      <SectionHeader title="Actions" style={styles.actionsHeader} />
+      <Card padded={false}>
         {actions.map((item, i) => (
-          <Pressable key={i} onPress={item.onPress}>
-            {({ pressed }) => (
-              <View style={[
-                styles.menuRow,
-                i < actions.length - 1 && styles.menuRowBorder,
-                pressed && styles.menuRowPressed,
-              ]}>
-                <View style={[styles.menuIconTile, { backgroundColor: item.iconBg }]}>
-                  {item.icon}
-                </View>
-                <View style={styles.menuTextBlock}>
-                  <Text style={styles.menuRowText}>{item.label}</Text>
-                  <Text style={styles.menuRowSub}>{item.sub}</Text>
-                </View>
-                <ChevronRight size={18} color="#c4c4c4" />
-              </View>
-            )}
-          </Pressable>
+          <View key={item.label}>
+            <ListRow
+              card={false}
+              title={item.label}
+              subtitle={item.sub}
+              icon={item.icon}
+              iconColor={item.iconBg}
+              onPress={item.onPress}
+            />
+            {i < actions.length - 1 && <Divider inset />}
+          </View>
         ))}
-      </View>
+      </Card>
     </>
   );
 
@@ -158,7 +159,7 @@ export default function Control() {
     <View style={styles.container}>
       <NotConnectedOverlay />
 
-      <ScrollView contentContainerStyle={[styles.scroll, wideContent]} showsVerticalScrollIndicator={false}>
+      <Screen>
         {isWide ? (
           // Wide: live position/status on the left, the action selectors on the right.
           <View style={styles.wideRow}>
@@ -171,26 +172,31 @@ export default function Control() {
             {actionsSection}
           </>
         )}
-      </ScrollView>
+      </Screen>
 
       {/* ── Confirmation modal ───────────────────────────────────────── */}
       <Modal visible={!!confirm} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <Pressable style={styles.modalOverlay} onPress={() => setConfirm(null)}>
-          <Pressable style={styles.confirmCard} onPress={() => {}}>
-            <View style={styles.confirmIconWrap}>{confirm?.icon}</View>
-            <Text style={styles.confirmTitle}>{confirm?.label}</Text>
-            <Text style={styles.confirmSub}>{confirm?.sub}</Text>
-            <View style={styles.confirmButtons}>
-              <Pressable style={styles.confirmCancel} onPress={() => setConfirm(null)}>
-                <Text style={styles.confirmCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={styles.confirmOk}
-                onPress={() => { confirm?.run(); setConfirm(null); }}
-              >
-                <Text style={styles.confirmOkText}>Confirm</Text>
-              </Pressable>
-            </View>
+          <Pressable onPress={() => {}}>
+            <Card style={styles.confirmCard}>
+              <View style={styles.confirmIconWrap}>{confirm?.icon}</View>
+              <Text style={styles.confirmTitle}>{confirm?.label}</Text>
+              <Text style={styles.confirmSub}>{confirm?.sub}</Text>
+              <View style={styles.confirmButtons}>
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  style={styles.confirmBtnFlex}
+                  onPress={() => setConfirm(null)}
+                />
+                <Button
+                  label="Confirm"
+                  variant="primary"
+                  style={styles.confirmBtnFlex}
+                  onPress={() => { confirm?.run(); setConfirm(null); }}
+                />
+              </View>
+            </Card>
           </Pressable>
         </Pressable>
       </Modal>
@@ -198,18 +204,19 @@ export default function Control() {
       {/* ── Homing modal ─────────────────────────────────────────────── */}
       <Modal visible={isHoming} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.homingCard}>
-            <HomeIcon size={32} color="#2563eb" />
+          <Card style={styles.homingCard}>
+            <HomeIcon size={32} color={colors.accent} />
             <Text style={styles.homingTitle}>Homing Robot</Text>
             <Text style={styles.homingState}>{homingLabel}</Text>
-            <Pressable
+            <Button
+              label="STOP"
+              variant="destructive"
+              icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
               style={styles.stopButton}
+              textStyle={styles.stopText}
               onPress={() => robotClient.sendCommand("HardStop")}
-            >
-              <OctagonX size={22} color="white" />
-              <Text style={styles.stopText}>STOP</Text>
-            </Pressable>
-          </View>
+            />
+          </Card>
         </View>
       </Modal>
     </View>
@@ -219,35 +226,19 @@ export default function Control() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
-  },
-
-  scroll: {
-    padding: 16,
-    paddingBottom: 32,
+    backgroundColor: colors.background,
   },
 
   // Wide: live position/status on a narrow left column, actions on the wider right.
-  wideRow:      { flexDirection: "row", gap: 16, alignItems: "flex-start" },
+  wideRow:      { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
   wideLeftCol:  { width: 360 },
-  wideRightCol: { flex: 1 },
+  wideRightCol: { flex: 1, gap: spacing.md },
 
   // ── Position card ────────────────────────────────────────────────────────
-  posCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-
   coordRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: spacing.md + 2,
   },
 
   coordCell: {
@@ -258,272 +249,110 @@ const styles = StyleSheet.create({
   coordLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.5,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
 
   coordValue: {
+    ...type.mono,
     fontSize: 20,
     fontWeight: "700",
-    color: "#111",
-    fontFamily: "monospace",
+    color: colors.text,
   },
 
   badgeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 2,
+    gap: spacing.sm,
   },
-
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-
-  badgeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-
-  badgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-
-  badgeGray:      { backgroundColor: "#f3f4f6" },
-  badgeGreen:     { backgroundColor: "#dcfce7" },
-  badgeBlue:      { backgroundColor: "#dbeafe" },
-  badgeRed:       { backgroundColor: "#fee2e2" },
-
-  dotGray:        { backgroundColor: "#9ca3af" },
-  dotGreen:       { backgroundColor: "#16a34a" },
-  dotBlue:        { backgroundColor: "#2563eb" },
-  dotRed:         { backgroundColor: "#dc2626" },
-
-  badgeTextGray:  { color: "#6b7280" },
-  badgeTextGreen: { color: "#166534" },
-  badgeTextBlue:  { color: "#1d4ed8" },
-  badgeTextRed:   { color: "#991b1b" },
 
   // ── Section headings ─────────────────────────────────────────────────────
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#9ca3af",
-    letterSpacing: 1,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-
-  // ── Menu card ────────────────────────────────────────────────────────────
-  menuCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    overflow: "hidden",
-    marginBottom: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-
-  menuRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-  },
-
-  menuRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-
-  menuRowPressed: {
-    backgroundColor: "#f9fafb",
-  },
-
-  menuRowDisabled: {
-    opacity: 0.5,
-  },
-
-  menuIconTile: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-    flexShrink: 0,
-  },
-
-  menuTextBlock: {
-    flex: 1,
-    marginLeft: 14,
-    justifyContent: "center",
-  },
-
-  menuRowText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111",
-  },
-
-  menuRowTextDisabled: {
-    color: "#9ca3af",
-  },
-
-  menuRowSub: {
-    fontSize: 12,
-    color: "#9ca3af",
-    marginTop: 2,
-  },
-
-  soonBadge: {
-    backgroundColor: "#f3f4f6",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-
-  soonText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9ca3af",
-  },
+  actionsHeader: { marginTop: spacing.sm },
 
   // ── Confirmation modal ───────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
   confirmCard: {
     width: 290,
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: radii.xl,
+    padding: spacing.xl,
     alignItems: "center",
-    gap: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
+    gap: spacing.sm - 2,
+    ...shadows.raised,
   },
 
   confirmIconWrap: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.background,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
 
   confirmTitle: {
+    ...type.title,
     fontSize: 17,
-    fontWeight: "700",
-    color: "#111",
   },
 
   confirmSub: {
     fontSize: 13,
-    color: "#6b7280",
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 19,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
 
   confirmButtons: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.sm + 2,
     width: "100%",
   },
 
-  confirmCancel: {
+  confirmBtnFlex: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-
-  confirmCancelText: {
-    fontSize: 15,
-    fontWeight: "500",
-    color: "#6b7280",
-  },
-
-  confirmOk: {
-    flex: 1,
-    backgroundColor: "#2563eb",
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-
-  confirmOkText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#fff",
   },
 
   // ── Homing modal ─────────────────────────────────────────────────────────
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
   homingCard: {
     width: 260,
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    paddingVertical: 32,
-    paddingHorizontal: 28,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xxl,
+    paddingHorizontal: spacing.xl,
     alignItems: "center",
-    gap: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
+    gap: spacing.sm,
+    ...shadows.raised,
   },
 
   homingTitle: {
+    ...type.title,
     fontSize: 18,
-    fontWeight: "700",
-    color: "#111",
-    marginTop: 4,
+    marginTop: spacing.xs,
   },
 
   homingState: {
     fontSize: 13,
-    color: "#6b7280",
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 19,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
 
   stopButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#dc2626",
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 36,
-    marginTop: 4,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xxl,
+    marginTop: spacing.xs,
   },
 
   stopText: {
-    color: "white",
     fontSize: 18,
-    fontWeight: "bold",
     letterSpacing: 2,
   },
 });

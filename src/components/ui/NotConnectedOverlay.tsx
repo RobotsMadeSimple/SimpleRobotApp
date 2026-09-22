@@ -1,3 +1,4 @@
+import { colors } from "@/src/components/ui/kit";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useConnected } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -20,7 +21,7 @@ export function NotConnectedOverlay() {
     <View style={styles.overlay} pointerEvents="box-none">
       <View style={styles.card}>
         <View style={styles.iconWrap}>
-          <WifiOff size={36} color="#6b7280" />
+          <WifiOff size={36} color={colors.textMuted} />
         </View>
 
         <Text style={styles.title}>Not Connected</Text>
@@ -47,7 +48,7 @@ const styles = StyleSheet.create({
 
   card: {
     width: 260,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderRadius: 20,
     paddingVertical: 32,
     paddingHorizontal: 28,
@@ -58,14 +59,14 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 8,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
+    borderColor: colors.background,
   },
 
   iconWrap: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.background,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 4,
@@ -74,19 +75,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
   },
 
   subtitle: {
     fontSize: 13,
-    color: "#6b7280",
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 19,
     marginBottom: 8,
   },
 
   button: {
-    backgroundColor: "#2563eb",
+    backgroundColor: colors.accent,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 32,
@@ -94,7 +95,7 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: "#fff",
+    color: colors.onAccent,
     fontSize: 15,
     fontWeight: "600",
   },

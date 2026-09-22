@@ -1,15 +1,15 @@
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useWideContent } from "@/src/components/ui/responsive";
-import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search, X } from "lucide-react-native";
+import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search } from "lucide-react-native";
 import { ReactNode } from "react";
 import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { EmptyState, Input, colors, radii, spacing } from "@/src/components/ui/kit";
 
 // ── Shared types & helpers ────────────────────────────────────────────────────
 
@@ -110,33 +110,26 @@ export function ProgramListLayout({
         title={title}
         right={
           <TouchableOpacity onPress={onAdd} style={[s.addBtn, { backgroundColor: accentColor }]}>
-            <Plus size={18} color="#fff" />
+            <Plus size={18} color={colors.onAccent} />
           </TouchableOpacity>
         }
       />
 
       {/* Search + sort toolbar */}
       <View style={s.toolbar}>
-        <View style={s.searchBox}>
-          <Search size={15} color="#9ca3af" />
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search…"
-            placeholderTextColor="#9ca3af"
-            value={search}
-            onChangeText={onSearchChange}
-            autoCapitalize="none"
-            returnKeyType="search"
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => onSearchChange("")} hitSlop={8}>
-              <X size={14} color="#9ca3af" />
-            </TouchableOpacity>
-          )}
-        </View>
+        <Input
+          icon={<Search size={15} color={colors.textFaint} />}
+          clearable
+          placeholder="Search…"
+          value={search}
+          onChangeText={onSearchChange}
+          autoCapitalize="none"
+          returnKeyType="search"
+          style={s.searchInput}
+        />
 
         <View style={s.sortRow}>
-          <ArrowUpDown size={13} color="#9ca3af" />
+          <ArrowUpDown size={13} color={colors.textFaint} />
           <Text style={s.sortLabel}>SORT</Text>
           {(["name", "modified"] as SortKey[]).map(key => {
             const active = sort.key === key;
@@ -159,7 +152,7 @@ export function ProgramListLayout({
                 <Text style={[s.sortChipText, active && { color: accentColor }]}>
                   {key === "name" ? "Name" : "Modified"}
                 </Text>
-                <Arrow size={12} strokeWidth={2.5} color={active ? accentColor : "#d1d5db"} />
+                <Arrow size={12} strokeWidth={2.5} color={active ? accentColor : colors.borderStrong} />
               </TouchableOpacity>
             );
           })}
@@ -172,17 +165,13 @@ export function ProgramListLayout({
         showsVerticalScrollIndicator={false}
       >
         {isEmpty ? (
-          <View style={s.empty}>
-            {emptyIcon}
-            <Text style={s.emptyTitle}>{emptyTitle}</Text>
-            <Text style={s.emptySubtitle}>{emptySubtitle}</Text>
-          </View>
+          <EmptyState icon={emptyIcon} title={emptyTitle} subtitle={emptySubtitle} />
         ) : !hasResults ? (
-          <View style={s.empty}>
-            <Search size={36} color="#d1d5db" />
-            <Text style={s.emptyTitle}>No Results</Text>
-            <Text style={s.emptySubtitle}>Nothing matches "{search}".</Text>
-          </View>
+          <EmptyState
+            icon={<Search size={32} color={colors.textFaint} />}
+            title="No Results"
+            subtitle={`Nothing matches "${search}".`}
+          />
         ) : children}
 
         <TouchableOpacity
@@ -201,67 +190,46 @@ export function ProgramListLayout({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: "#f3f4f6" },
+  root:    { flex: 1, backgroundColor: colors.background },
   scroll:  { flex: 1 },
-  content: { padding: 16, paddingBottom: 32, gap: 12 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
   addBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 32, height: 32, borderRadius: radii.pill,
     justifyContent: "center", alignItems: "center",
   },
 
   toolbar: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
-    gap: 8,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm + 2,
+    paddingBottom: spacing.sm + 2,
+    gap: spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-  },
-  searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f3f4f6",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    gap: 8,
-    height: 38,
+    borderBottomColor: colors.background,
   },
   searchInput: {
-    flex: 1,
     fontSize: 14,
-    color: "#111827",
-    paddingVertical: 0,
+    color: colors.text,
   },
-  sortRow:      { flexDirection: "row", alignItems: "center", gap: 6 },
-  sortLabel:    { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5, marginRight: 1 },
+  sortRow:      { flexDirection: "row", alignItems: "center", gap: spacing.sm - 2 },
+  sortLabel:    { fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5, marginRight: 1 },
   sortChip: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    paddingLeft: 12, paddingRight: 9, paddingVertical: 5,
-    borderRadius: 20, backgroundColor: "#f3f4f6",
+    paddingLeft: spacing.md, paddingRight: spacing.sm + 1, paddingVertical: spacing.xs + 1,
+    borderRadius: radii.pill, backgroundColor: colors.background,
   },
-  sortChipText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
+  sortChipText: { fontSize: 12, fontWeight: "600", color: colors.textMuted },
 
   addCard: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: spacing.sm,
     borderWidth: 1.5,
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md + 2,
     backgroundColor: "transparent",
   },
   addCardText: { fontSize: 14, fontWeight: "600" },
-
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 60,
-    paddingBottom: 24,
-    gap: 12,
-  },
-  emptyTitle:    { fontSize: 18, fontWeight: "700", color: "#374151" },
-  emptySubtitle: { fontSize: 13, color: "#9ca3af", textAlign: "center", paddingHorizontal: 40, lineHeight: 20 },
 });

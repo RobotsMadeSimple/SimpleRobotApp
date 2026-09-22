@@ -19,6 +19,7 @@ import {
   LineInspection,
   PolygonInspection,
 } from "@/src/models/robotModels";
+import { colors, spacing } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 
 // ── Discriminated union for all inspection kinds ──────────────────────────────
@@ -41,7 +42,7 @@ export function FormatPickerSheet({ visible, selected, onToggle, onClose }: {
 }) {
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Barcode Formats">
-      <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+      <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm }}>
         Leave all unchecked to scan every supported format
       </Text>
       <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
@@ -56,7 +57,7 @@ export function FormatPickerSheet({ visible, selected, onToggle, onClose }: {
               <View style={{ flex: 1 }}>
                 <Text style={ves.sheetRowName}>{f.label}</Text>
               </View>
-              {active && <Check size={16} color="#2563eb" />}
+              {active && <Check size={16} color={colors.accent} />}
             </TouchableOpacity>
           );
         })}
@@ -89,14 +90,14 @@ export function InspectionTypePicker({ visible, onSelect, onClose }: {
         </View>
       </TouchableOpacity>
       <TouchableOpacity style={ves.sheetRow} onPress={() => { onSelect('polygon'); onClose(); }} activeOpacity={0.75}>
-        <View style={[ves.typePickerIcon, { backgroundColor: '#fef3c7' }]}><Hexagon size={18} color="#d97706" /></View>
+        <View style={[ves.typePickerIcon, { backgroundColor: '#fef3c7' }]}><Hexagon size={18} color={colors.warning} /></View>
         <View style={{ flex: 1 }}>
           <Text style={ves.sheetRowName}>Polygon Detection</Text>
           <Text style={ves.sheetRowSub}>Find N-sided shapes and measure orientation</Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity style={ves.sheetRow} onPress={() => { onSelect('aruco'); onClose(); }} activeOpacity={0.75}>
-        <View style={[ves.typePickerIcon, { backgroundColor: '#f0fdf4' }]}><QrCode size={18} color="#16a34a" /></View>
+        <View style={[ves.typePickerIcon, { backgroundColor: colors.successSoft }]}><QrCode size={18} color={colors.success} /></View>
         <View style={{ flex: 1 }}>
           <Text style={ves.sheetRowName}>ArUco Marker</Text>
           <Text style={ves.sheetRowSub}>Detect ArUco fiducial markers and read their IDs</Text>
@@ -110,7 +111,7 @@ export function InspectionTypePicker({ visible, onSelect, onClose }: {
         </View>
       </TouchableOpacity>
       <TouchableOpacity style={ves.sheetRow} onPress={() => { onSelect('barcode'); onClose(); }} activeOpacity={0.75}>
-        <View style={[ves.typePickerIcon, { backgroundColor: '#eff6ff' }]}><Barcode size={18} color="#2563eb" /></View>
+        <View style={[ves.typePickerIcon, { backgroundColor: colors.accentSoft }]}><Barcode size={18} color={colors.accent} /></View>
         <View style={{ flex: 1 }}>
           <Text style={ves.sheetRowName}>Barcode / QR Code</Text>
           <Text style={ves.sheetRowSub}>Read QR codes, Code 128, EAN, Data Matrix and more</Text>

@@ -13,6 +13,7 @@ import { isListVariable, ProgramStep, ProgramVariable } from "@/src/models/robot
 import { VarPickerModal } from "./VarPicker";
 import type { VarType } from "./VariableEditModal";
 import { ms, svs } from "./builderStyles";
+import { colors, accents } from "@/src/components/ui/kit";
 
 // ── SetVariable helpers ───────────────────────────────────────────────────────
 
@@ -166,7 +167,7 @@ export function SetVariableFields({
         <Text style={[svs.selectBtnText, !draft.variableName && svs.selectBtnPlaceholder]}>
           {draft.variableName ? `$${draft.variableName}` : "Select variable…"}
         </Text>
-        <ChevronDown size={14} color="#7c3aed" />
+        <ChevronDown size={14} color={accents.purple} />
       </TouchableOpacity>
 
       {/* Row 2 — Operator (hidden for string vars — strings only support assign) */}
@@ -176,7 +177,7 @@ export function SetVariableFields({
           <TouchableOpacity style={svs.selectBtn} onPress={() => setOpDropOpen(true)} activeOpacity={0.75}>
             <Text style={svs.selectBtnText}>{op}</Text>
             <Text style={svs.selectBtnSub} numberOfLines={1}>{OP_LABELS[op]}</Text>
-            <ChevronDown size={14} color="#7c3aed" />
+            <ChevronDown size={14} color={accents.purple} />
           </TouchableOpacity>
         </>
       )}
@@ -187,7 +188,7 @@ export function SetVariableFields({
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STRING VALUE</Text>
           <View style={{ flexDirection: "row", gap: 6 }}>
             <TextInput
-              style={[ms.input, { flex: 1, color: "#ea580c" }]}
+              style={[ms.input, { flex: 1, color: accents.orange }]}
               value={rawVal}
               onChangeText={changeVal}
               placeholder="e.g.  Part A  or  Part $partId"
@@ -198,23 +199,23 @@ export function SetVariableFields({
             />
             {(variables ?? []).filter(v => !v.isString && !isListVariable(v)).length > 0 && (
               <TouchableOpacity
-                style={{ backgroundColor: "#fff7ed", borderWidth: 1, borderColor: "#fed7aa", borderRadius: 9, paddingHorizontal: 10, justifyContent: "center", marginTop: 6 }}
+                style={{ backgroundColor: accents.orangeSoft, borderWidth: 1, borderColor: accents.orangeBorder, borderRadius: 9, paddingHorizontal: 10, justifyContent: "center", marginTop: 6 }}
                 onPress={() => setStrVarPickerOpen(true)}
                 activeOpacity={0.75}
               >
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#ea580c" }}>$var</Text>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: accents.orange }}>$var</Text>
               </TouchableOpacity>
             )}
           </View>
           <Text style={[ms.hintText, { marginTop: 2 }]}>
-            Embed variables with <Text style={{ fontWeight: "700", color: "#ea580c" }}>$varName</Text> — replaced at runtime.
+            Embed variables with <Text style={{ fontWeight: "700", color: accents.orange }}>$varName</Text> — replaced at runtime.
           </Text>
         </>
       ) : (
         <>
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (number or expression)</Text>
           <TextInput
-            style={[ms.input, { color: "#7c3aed" }]}
+            style={[ms.input, { color: accents.purple }]}
             value={rawVal}
             onChangeText={changeVal}
             placeholder="e.g.  1  or  $speed * 2"
@@ -238,15 +239,15 @@ export function SetVariableFields({
             activeOpacity={0.7}
           >
             <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
-            {name === draft.variableName && <Check size={15} color="#7c3aed" />}
+            {name === draft.variableName && <Check size={15} color={accents.purple} />}
           </TouchableOpacity>
         ))}
         {contextVarList.length > 0 && (
           <>
             <View style={{ paddingHorizontal: 4, paddingTop: 10, paddingBottom: 4,
-              borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+              borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
               marginTop: varList.length > 0 ? 4 : 0 }}>
-              <Text style={{ fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5 }}>CALLER VARIABLES</Text>
+              <Text style={{ fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5 }}>CALLER VARIABLES</Text>
             </View>
             {contextVarList.map((name, i) => (
               <TouchableOpacity
@@ -256,19 +257,19 @@ export function SetVariableFields({
                 activeOpacity={0.7}
               >
                 <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
-                {name === draft.variableName && <Check size={15} color="#7c3aed" />}
+                {name === draft.variableName && <Check size={15} color={accents.purple} />}
               </TouchableOpacity>
             ))}
           </>
         )}
         {onCreateVariable && (
           <TouchableOpacity
-            style={[svs.optionRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb", marginTop: 4 }]}
+            style={[svs.optionRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, marginTop: 4 }]}
             onPress={() => { setVarDropOpen(false); setPendingCreate(true); onCreateVariable(); }}
             activeOpacity={0.7}
           >
-            <Plus size={14} color="#7c3aed" />
-            <Text style={[svs.optionText, { color: "#7c3aed", marginLeft: 6 }]}>Create Variable…</Text>
+            <Plus size={14} color={accents.purple} />
+            <Text style={[svs.optionText, { color: accents.purple, marginLeft: 6 }]}>Create Variable…</Text>
           </TouchableOpacity>
         )}
       </SvDropdownModal>
@@ -287,7 +288,7 @@ export function SetVariableFields({
                 <Text style={[svs.opOptionSymbol, o === op && svs.optionTextActive]}>{o}</Text>
                 <Text style={svs.opOptionDesc}>{OP_LABELS[o]}</Text>
               </View>
-              {o === op && <Check size={15} color="#7c3aed" />}
+              {o === op && <Check size={15} color={accents.purple} />}
             </TouchableOpacity>
           ))}
         </SvDropdownModal>

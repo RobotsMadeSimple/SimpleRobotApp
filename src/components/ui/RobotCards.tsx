@@ -1,16 +1,10 @@
+import { Card, colors, radii, spacing, StatusPill, type } from "@/src/components/ui/kit";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Router } from "lucide-react-native";
 import React from "react";
-import {
-  Image,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 
 const robotImages: Record<string, any> = {
   ASTRO: require("@/assets/images/ASTRO.png"),
@@ -28,7 +22,7 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
 
   return (
-    <TouchableOpacity onPress={setRobot} activeOpacity={0.75} style={styles.card}>
+    <Card onPress={setRobot} style={styles.card}>
       <View style={styles.row}>
         {/* Robot image */}
         <View style={styles.imageWrapper}>
@@ -37,44 +31,32 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
 
         {/* Info */}
         <View style={styles.info}>
-          <Text style={styles.title} numberOfLines={1}>{robot.robotName}</Text>
+          <Text style={[type.title, styles.title]} numberOfLines={1}>{robot.robotName}</Text>
           <Text style={styles.type} numberOfLines={1}>{robot.robotType}</Text>
-          <Text style={styles.subtext} numberOfLines={1}>
+          <Text style={[type.subtitle, styles.subtext]} numberOfLines={1}>
             {robot.ipAddress}:{robot.port}
           </Text>
         </View>
 
-        {/* Connect button */}
-        <View style={styles.connectBadge}>
-          <Text style={styles.connectText}>Connect</Text>
-        </View>
+        {/* Connect badge */}
+        <StatusPill label="Connect" tone="accent" style={styles.connectBadge} />
       </View>
-    </TouchableOpacity>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
+  card: { marginBottom: spacing.md },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: spacing.md,
   },
   imageWrapper: {
     width: 96,
     height: 96,
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -87,30 +69,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 2,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-  },
+  title: { fontSize: 16 },
   type: {
     fontSize: 13,
     fontWeight: "500",
-    color: "#2563eb",
+    color: colors.accent,
   },
-  subtext: {
-    fontSize: 13,
-    color: "#9ca3af",
-  },
+  subtext: { color: colors.textFaint },
   connectBadge: {
-    backgroundColor: "#eff6ff",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     alignSelf: "center",
-  },
-  connectText: {
-    color: "#2563eb",
-    fontWeight: "600",
-    fontSize: 13,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
 });

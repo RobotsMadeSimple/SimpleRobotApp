@@ -6,8 +6,9 @@ import { useCameras } from "@/src/providers/RobotProvider";
 import { router, useFocusEffect } from "expo-router";
 import { ScanSearch } from "lucide-react-native";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { Card, IconTile, colors, spacing } from "@/src/components/ui/kit";
 
 export default function VisionListScreen() {
   const [programs, setPrograms] = useState<VisionProgram[]>([]);
@@ -64,7 +65,7 @@ export default function VisionListScreen() {
   return (
     <ProgramListLayout
       title="Vision Programs"
-      accentColor="#2563eb"
+      accentColor={colors.accent}
       addLabel="New Vision Program"
       onAdd={createNew}
       search={search}
@@ -73,7 +74,7 @@ export default function VisionListScreen() {
       onSortChange={setSort}
       isEmpty={!loading && programs.length === 0}
       hasResults={loading || filtered.length > 0}
-      emptyIcon={<ScanSearch size={44} color="#d1d5db" />}
+      emptyIcon={<ScanSearch size={32} color={colors.textFaint} />}
       emptyTitle="No Vision Programs"
       emptySubtitle="Create a vision program below to get started."
     >
@@ -93,42 +94,35 @@ function VisionRow({ prog, onDelete }: { prog: VisionProgram; onDelete: () => vo
   if (prog.lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(prog.lastUpdatedUnixMs)}`);
 
   return (
-    <TouchableOpacity
-      style={s.card}
-      activeOpacity={0.8}
+    <Card
       onPress={() => router.navigate({
         pathname: "/(tabs)/program/vision-editor",
         params: { program: JSON.stringify(prog) },
       })}
+      padded={false}
+      style={s.card}
     >
-      <View style={s.cardIcon}>
-        <ScanSearch size={20} color="#2563eb" />
-      </View>
+      <IconTile size={40}>
+        <ScanSearch size={20} color={colors.accent} />
+      </IconTile>
       <View style={s.cardBody}>
         <Text style={s.cardName}>{prog.name}</Text>
         {!!prog.description && <Text style={s.cardDesc} numberOfLines={1}>{prog.description}</Text>}
         <Text style={s.cardMeta}>{metaParts.join("  ·  ")}</Text>
       </View>
       <DeleteIconButton onPress={onDelete} style={s.iconBtn} />
-    </TouchableOpacity>
+    </Card>
   );
 }
 
 const s = StyleSheet.create({
   card: {
-    backgroundColor: "#fff", borderRadius: 14,
     flexDirection: "row", alignItems: "center",
-    padding: 14, gap: 12,
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
-  },
-  cardIcon: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: "#eff6ff", justifyContent: "center", alignItems: "center",
+    padding: spacing.md + 2, gap: spacing.md,
   },
   cardBody: { flex: 1 },
-  cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  cardDesc: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 4 },
+  cardName: { fontSize: 15, fontWeight: "700", color: colors.text },
+  cardDesc: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  cardMeta: { fontSize: 11, color: colors.textFaint, marginTop: 4 },
   iconBtn:  { padding: 4 },
 });

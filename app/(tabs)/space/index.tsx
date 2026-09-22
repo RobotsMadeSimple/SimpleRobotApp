@@ -1,58 +1,58 @@
-import { useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { accents, Card, colors, Divider, ListRow, radii, Screen, SectionHeader, shadows, spacing, type } from "@/src/components/ui/kit";
 import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { ChevronRight, Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 const MENU_ITEMS = [
   {
     label: "Points",
     description: "View, move to, and manage saved robot positions",
     icon: MapPin,
-    tileColor: "#f0fdf4",
-    iconColor: "#16a34a",
+    tileColor: colors.successSoft,
+    iconColor: colors.success,
     onPress: () => router.navigate("/space/points"),
   },
   {
     label: "Tools",
     description: "Define TCP offsets and tool frame configurations",
     icon: Wrench,
-    tileColor: "#eff6ff",
-    iconColor: "#2563eb",
+    tileColor: colors.accentSoft,
+    iconColor: colors.accent,
     onPress: () => router.navigate("/space/tools"),
   },
   {
     label: "Locals",
     description: "Configure local coordinate reference frames",
     icon: Grid3x3,
-    tileColor: "#f5f3ff",
-    iconColor: "#7c3aed",
+    tileColor: accents.purpleSoft,
+    iconColor: accents.purple,
     onPress: () => router.navigate("/space/locals"),
   },
   {
     label: "Grids",
     description: "Define 2D position arrays for pick-and-place and pallet operations",
     icon: LayoutGrid,
-    tileColor: "#fef3c7",
-    iconColor: "#d97706",
+    tileColor: colors.warningSoft,
+    iconColor: colors.warning,
     onPress: () => router.navigate("/space/grids"),
   },
   {
     label: "Stacks",
     description: "Define 1D position arrays with optional round-robin indexing",
     icon: Layers,
-    tileColor: "#f3e8ff",
-    iconColor: "#7c3aed",
+    tileColor: accents.purpleSoft,
+    iconColor: accents.purple,
     onPress: () => router.navigate("/space/stacks"),
   },
 ];
 
 const SUMMARY_ITEMS = [
-  { label: "Points",  color: "#16a34a", bgColor: "#f0fdf4" },
-  { label: "Tools",   color: "#2563eb", bgColor: "#eff6ff" },
-  { label: "Grids",   color: "#d97706", bgColor: "#fef3c7" },
-  { label: "Stacks",  color: "#7c3aed", bgColor: "#f3e8ff" },
+  { label: "Points",  color: colors.success, bgColor: colors.successSoft },
+  { label: "Tools",   color: colors.accent,  bgColor: colors.accentSoft },
+  { label: "Grids",   color: colors.warning, bgColor: colors.warningSoft },
+  { label: "Stacks",  color: accents.purple, bgColor: accents.purpleSoft },
 ];
 
 export default function SpacePage() {
@@ -61,7 +61,6 @@ export default function SpacePage() {
   const grids  = useGrids();
   const stacks = useStacks();
   const tools  = useTools();
-  const wideContent = useWideContent();
 
   const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
@@ -78,14 +77,10 @@ export default function SpacePage() {
     <View style={styles.container}>
       <NotConnectedOverlay />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, wideContent]}
-        showsVerticalScrollIndicator={false}
-      >
-
+      <Screen>
         {/* ── Current position ── */}
-        <Text style={styles.sectionLabel}>CURRENT POSITION</Text>
-        <View style={styles.card}>
+        <SectionHeader title="Current position" />
+        <Card>
           <View style={styles.coordRow}>
             {coords.map(({ label, value }) => (
               <View key={label} style={styles.coordCell}>
@@ -94,10 +89,10 @@ export default function SpacePage() {
               </View>
             ))}
           </View>
-        </View>
+        </Card>
 
         {/* ── Workspace summary ── */}
-        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>WORKSPACE</Text>
+        <SectionHeader title="Workspace" style={styles.summaryHeader} />
         <View style={styles.summaryRow}>
           {SUMMARY_ITEMS.map(({ label, color, bgColor }, i) => (
             <View key={label} style={[styles.summaryCard, { borderTopColor: color, borderTopWidth: 3 }]}>
@@ -108,36 +103,27 @@ export default function SpacePage() {
         </View>
 
         {/* ── Navigation ── */}
-        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>NAVIGATE TO</Text>
-        <View style={styles.card}>
+        <SectionHeader title="Navigate to" style={styles.summaryHeader} />
+        <Card>
           {MENU_ITEMS.map((item, i) => {
             const Icon = item.icon;
             const isLast = i === MENU_ITEMS.length - 1;
             return (
-              <TouchableOpacity
-                key={i}
-                style={[styles.menuRow, !isLast && styles.menuRowBorder]}
-                onPress={item.onPress}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.iconTile, { backgroundColor: item.tileColor }]}>
-                  <Icon size={20} color={item.iconColor} />
-                </View>
-
-                <View style={styles.menuText}>
-                  <Text style={styles.menuLabel}>{item.label}</Text>
-                  <Text style={styles.menuDesc} numberOfLines={1}>
-                    {item.description}
-                  </Text>
-                </View>
-
-                <ChevronRight size={18} color="#d1d5db" />
-              </TouchableOpacity>
+              <View key={item.label}>
+                <ListRow
+                  card={false}
+                  title={item.label}
+                  subtitle={item.description}
+                  icon={<Icon size={20} color={item.iconColor} />}
+                  iconColor={item.tileColor}
+                  onPress={item.onPress}
+                />
+                {!isLast && <Divider inset />}
+              </View>
             );
           })}
-        </View>
-
-      </ScrollView>
+        </Card>
+      </Screen>
     </View>
   );
 }
@@ -145,38 +131,15 @@ export default function SpacePage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
+    backgroundColor: colors.background,
   },
 
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
-
-  // ── Card ──────────────────────────────────────────────────────────────────
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
+  summaryHeader: { marginTop: spacing.sm },
 
   // ── Position ──────────────────────────────────────────────────────────────
   coordRow: {
     flexDirection: "row",
-    paddingVertical: 16,
-    paddingHorizontal: 8,
+    paddingVertical: spacing.sm,
   },
   coordCell: {
     flex: 1,
@@ -185,34 +148,30 @@ const styles = StyleSheet.create({
   coordLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.5,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   coordValue: {
+    ...type.mono,
     fontSize: 20,
     fontWeight: "700",
-    color: "#111827",
-    fontFamily: "monospace",
+    color: colors.text,
   },
 
   // ── Summary tiles ─────────────────────────────────────────────────────────
   summaryRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.sm + 2,
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md + 2,
     alignItems: "center",
-    gap: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    gap: spacing.xs,
+    ...shadows.soft,
   },
   summaryCount: {
     fontSize: 28,
@@ -222,40 +181,7 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.4,
-  },
-
-  // ── Menu rows ─────────────────────────────────────────────────────────────
-  menuRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 14,
-  },
-  menuRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  iconTile: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  menuText: {
-    flex: 1,
-    gap: 2,
-  },
-  menuLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  menuDesc: {
-    fontSize: 12,
-    color: "#9ca3af",
   },
 });

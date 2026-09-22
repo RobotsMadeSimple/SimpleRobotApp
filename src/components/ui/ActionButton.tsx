@@ -8,6 +8,7 @@ import {
   ViewStyle,
 } from "react-native";
 import { AnimatedPressable } from "./AnimatedPressable";
+import { colors } from "@/src/components/ui/kit";
 
 /**
  * Pressable action button with a press scale/opacity animation and an inline
@@ -22,7 +23,7 @@ export function ActionButton({
   onPress,
   style,
   textStyle,
-  spinnerColor = "#fff",
+  spinnerColor = colors.onAccent,
 }: {
   label: string;
   icon?: React.ReactNode;

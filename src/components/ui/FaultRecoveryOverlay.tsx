@@ -1,3 +1,4 @@
+import { colors } from "@/src/components/ui/kit";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -27,9 +28,9 @@ const CNC_JOINTS: { index: number; label: string; unit: string }[] = [
 type Tone = "safe" | "danger" | "neutral";
 
 const TONES: Record<Tone, { color: string; activeColor: string; activeBg: string; restBg: string }> = {
-  safe:    { color: "#16a34a", activeColor: "#16a34a", activeBg: "#dcfce7", restBg: "#f0fdf4" },
-  danger:  { color: "#dc2626", activeColor: "#dc2626", activeBg: "#fee2e2", restBg: "#fef2f2" },
-  neutral: { color: "#666666", activeColor: "#2563eb", activeBg: "#dbeafe", restBg: "transparent" },
+  safe:    { color: colors.success, activeColor: colors.success, activeBg: "#dcfce7", restBg: colors.successSoft },
+  danger:  { color: colors.danger, activeColor: colors.danger, activeBg: "#fee2e2", restBg: colors.dangerSoft },
+  neutral: { color: "#666666", activeColor: colors.accent, activeBg: "#dbeafe", restBg: "transparent" },
 };
 
 function jogVec(index: number, dir: 1 | -1) {
@@ -102,7 +103,7 @@ export function FaultRecoveryOverlay() {
         <View style={styles.card}>
           <View style={styles.header}>
             <View style={styles.iconTile}>
-              <AlertTriangle size={22} color="#dc2626" />
+              <AlertTriangle size={22} color={colors.danger} />
             </View>
             <Text style={styles.title}>Joint Limit Fault</Text>
           </View>
@@ -171,8 +172,8 @@ export function FaultRecoveryOverlay() {
             <Switch
               value={bypass}
               onValueChange={toggleBypass}
-              trackColor={{ true: "#f59e0b", false: "#d1d5db" }}
-              thumbColor="#fff"
+              trackColor={{ true: "#f59e0b", false: colors.borderStrong }}
+              thumbColor={colors.onAccent}
             />
           </View>
 
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
   card: {
     width: "100%",
     maxWidth: 420,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderRadius: 18,
     padding: 20,
     shadowColor: "#000",
@@ -219,19 +220,19 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
+    backgroundColor: colors.dangerSoft,
     justifyContent: "center",
     alignItems: "center",
   },
   title: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#111827",
+    color: colors.text,
   },
   message: {
     fontSize: 14,
     lineHeight: 20,
-    color: "#374151",
+    color: colors.textSecondary,
     marginBottom: 16,
   },
   jogGrid: {
@@ -250,20 +251,20 @@ const styles = StyleSheet.create({
   jointName: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.5,
   },
   jointValue: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
     fontFamily: "monospace",
   },
   bypassRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#fffbeb",
+    backgroundColor: colors.warningSoft,
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
@@ -271,27 +272,27 @@ const styles = StyleSheet.create({
   bypassLabel: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
   },
   bypassHint: {
     fontSize: 11,
-    color: "#6b7280",
+    color: colors.textMuted,
     marginTop: 2,
   },
   clearBtn: {
-    backgroundColor: "#2563eb",
+    backgroundColor: colors.accent,
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: "center",
   },
   clearBtnText: {
-    color: "#fff",
+    color: colors.onAccent,
     fontSize: 15,
     fontWeight: "700",
   },
   clearHint: {
     fontSize: 11,
-    color: "#9ca3af",
+    color: colors.textFaint,
     textAlign: "center",
     marginTop: 8,
   },

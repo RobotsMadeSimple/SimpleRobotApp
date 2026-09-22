@@ -1,5 +1,23 @@
-import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import JogPad from "@/src/components/ui/JogPad";
+import {
+  Button,
+  buttonTextColor,
+  Card,
+  Chip,
+  ChipGroup,
+  colors,
+  Divider,
+  FormRow,
+  Input,
+  RadioRow,
+  radii,
+  SegmentedControl,
+  shadows,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -9,16 +27,13 @@ import {
   ChevronDown,
   Grid2X2,
   MousePointerClick,
-  Move,
   OctagonX,
   Plus,
-  Rotate3d,
   Search,
   Wrench,
   X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Modal,
   PanResponder,
@@ -57,7 +72,7 @@ function PickerModal({
           <View style={styles.dialogHeader}>
             <Text style={styles.dialogTitle}>{title}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color="#9ca3af" />
+              <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
 
@@ -66,19 +81,14 @@ function PickerModal({
               const active = opt === value;
               const isLast = i === options.length - 1;
               return (
-                <TouchableOpacity
-                  key={opt}
-                  style={[styles.pickerRow, !isLast && styles.pickerRowBorder, active && styles.pickerRowActive]}
-                  onPress={() => { onSelect(opt); onClose(); }}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.radioRing, active && styles.radioRingActive]}>
-                    {active && <View style={styles.radioDot} />}
-                  </View>
-                  <Text style={[styles.pickerRowText, active && styles.pickerRowTextActive]}>
-                    {opt}
-                  </Text>
-                </TouchableOpacity>
+                <View key={opt}>
+                  <RadioRow
+                    title={opt}
+                    selected={active}
+                    onPress={() => { onSelect(opt); onClose(); }}
+                  />
+                  {!isLast && <Divider />}
+                </View>
               );
             })}
           </ScrollView>
@@ -90,7 +100,7 @@ function PickerModal({
               activeOpacity={0.7}
             >
               <Text style={styles.pickerViewLinkText}>{viewLabel}</Text>
-              <ArrowRight size={14} color="#2563eb" />
+              <ArrowRight size={14} color={colors.accent} />
             </TouchableOpacity>
           )}
         </TouchableOpacity>
@@ -127,7 +137,7 @@ function Selector({
           <Text style={styles.selectorLabel}>{label}</Text>
           <View style={styles.selectorValueRow}>
             <Text style={styles.selectorValue}>{value}</Text>
-            <ChevronDown size={13} color="#9ca3af" />
+            <ChevronDown size={13} color={colors.textFaint} />
           </View>
         </View>
       </AnimatedPressable>
@@ -177,20 +187,20 @@ function TeachModal({ onClose }: { onClose: () => void }) {
             {mode === "list" ? "Teach Point" : "New Point"}
           </Text>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.7}>
-            <X size={18} color="#9ca3af" />
+            <X size={18} color={colors.textFaint} />
           </TouchableOpacity>
         </View>
 
         {mode === "list" ? (
           <>
             <View style={styles.searchRow}>
-              <Search size={15} color="#9ca3af" />
+              <Search size={15} color={colors.textFaint} />
               <TextInput
                 style={styles.searchInput}
                 value={search}
                 onChangeText={setSearch}
                 placeholder="Search points…"
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={colors.textFaint}
                 returnKeyType="search"
                 clearButtonMode="while-editing"
               />
@@ -202,47 +212,46 @@ function TeachModal({ onClose }: { onClose: () => void }) {
                   {points.length === 0 ? "No points saved yet" : "No matches"}
                 </Text>
               )}
-              {filtered.map((p) => (
-                <TouchableOpacity key={p.name} style={styles.pointRow} onPress={() => teachPoint(p.name)} activeOpacity={0.7}>
-                  <Text style={styles.pointName}>{p.name}</Text>
-                  <Text style={styles.pointCoords}>
-                    {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
-                  </Text>
-                </TouchableOpacity>
+              {filtered.map((p, i) => (
+                <View key={p.name}>
+                  <TouchableOpacity style={styles.pointRow} onPress={() => teachPoint(p.name)} activeOpacity={0.7}>
+                    <Text style={styles.pointName}>{p.name}</Text>
+                    <Text style={styles.pointCoords}>
+                      {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
+                    </Text>
+                  </TouchableOpacity>
+                  {i < filtered.length - 1 && <Divider />}
+                </View>
               ))}
             </ScrollView>
 
             <TouchableOpacity style={styles.newPointButton} onPress={() => setMode("new")} activeOpacity={0.7}>
-              <Plus size={16} color="#2563eb" />
+              <Plus size={16} color={colors.accent} />
               <Text style={styles.newPointText}>New Point</Text>
             </TouchableOpacity>
           </>
         ) : (
           <>
-            <Text style={styles.inputLabel}>Point name</Text>
-            <TextInput
-              style={styles.textInput}
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="e.g. PickUp1"
-              placeholderTextColor="#9ca3af"
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={teachNew}
-            />
+            <FormRow label="Point name" style={styles.newPointForm}>
+              <Input
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="e.g. PickUp1"
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={teachNew}
+              />
+            </FormRow>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setMode("list")} activeOpacity={0.7}>
-                <Text style={styles.modalCancelText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirm, !newName.trim() && styles.disabled]}
-                onPress={teachNew}
+              <Button label="Back" variant="secondary" style={styles.modalCancelFlex} onPress={() => setMode("list")} />
+              <Button
+                label="Teach Here"
+                variant="primary"
+                icon={<MousePointerClick size={15} color={buttonTextColor("primary")} />}
                 disabled={!newName.trim()}
-                activeOpacity={0.7}
-              >
-                <MousePointerClick size={15} color="white" />
-                <Text style={styles.modalConfirmText}>Teach Here</Text>
-              </TouchableOpacity>
+                style={styles.modalConfirmFlex}
+                onPress={teachNew}
+              />
             </View>
           </>
         )}
@@ -286,9 +295,9 @@ export default function JogScreen() {
   const speedOptions = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
 
   const jogModes = [
-    { key: "XYZ",   icon: (active: boolean) => <Move    size={17} color={active ? "#fff" : "#6b7280"} /> },
-    { key: "Tool",  icon: (active: boolean) => <Move    size={17} color={active ? "#fff" : "#6b7280"} /> },
-    { key: "Joint", icon: (active: boolean) => <Rotate3d size={17} color={active ? "#fff" : "#6b7280"} /> },
+    { label: "XYZ",   value: "XYZ" },
+    { label: "Tool",  value: "Tool" },
+    { label: "Joint", value: "Joint" },
   ];
 
   // Reload jog speeds whenever this screen comes into focus (picks up config changes immediately)
@@ -321,7 +330,7 @@ export default function JogScreen() {
   // The three pieces the layout arranges. Defined once so the single-column and
   // two-column layouts place the same controls without duplicating them.
   const configCard = (
-    <View style={styles.card}>
+    <Card>
 
       {/* Position strip */}
       <View style={styles.coordRow}>
@@ -334,7 +343,7 @@ export default function JogScreen() {
         ))}
       </View>
 
-      <View style={styles.cardSeparator} />
+      <Divider style={styles.cardSeparator} />
 
       {/* Local / Tool row */}
       <View style={styles.selectorsRow}>
@@ -343,60 +352,42 @@ export default function JogScreen() {
           value={local}
           options={localOptions}
           onSelect={setLocal}
-          icon={<Grid2X2 size={15} color="#6b7280" />}
+          icon={<Grid2X2 size={15} color={colors.textMuted} />}
           viewLabel="View Locals"
           viewRoute="/space/locals"
         />
-        <View style={styles.cardDivider} />
+        <Divider vertical style={styles.cardDivider} />
         <Selector
           label="TOOL"
           value={tool || "None"}
           options={["None", ...tools.map(t => t.name)]}
           onSelect={setTool}
-          icon={<Wrench size={15} color="#6b7280" />}
+          icon={<Wrench size={15} color={colors.textMuted} />}
           viewLabel="View Tools"
           viewRoute="/space/tools"
         />
       </View>
 
-      <View style={styles.cardSeparator} />
+      <Divider style={styles.cardSeparator} />
 
       {/* Jog mode */}
-      <View style={styles.segmentRow}>
-        {jogModes.map(({ key, icon }) => {
-          const active = mode === key;
-          return (
-            <AnimatedPressable
-              key={key}
-              style={[styles.segment, active && styles.segmentActive]}
-              onPress={() => setMode(key)}
-            >
-              {icon(active)}
-              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
-            </AnimatedPressable>
-          );
-        })}
-      </View>
+      <SegmentedControl options={jogModes} value={mode} onChange={setMode} />
 
-      <View style={styles.cardSeparator} />
+      <Divider style={styles.cardSeparator} />
 
       {/* Speed */}
-      <View style={styles.chipRow}>
-        {speedOptions.map((spd) => {
-          const active = selectedSpeed === spd;
-          return (
-            <AnimatedPressable
-              key={spd}
-              style={[styles.chip, active && styles.chipActive]}
-              onPress={() => setSelectedSpeed(spd)}
-            >
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
-            </AnimatedPressable>
-          );
-        })}
-      </View>
+      <ChipGroup>
+        {speedOptions.map((spd) => (
+          <Chip
+            key={spd}
+            label={spd}
+            selected={selectedSpeed === spd}
+            onPress={() => setSelectedSpeed(spd)}
+          />
+        ))}
+      </ChipGroup>
 
-    </View>
+    </Card>
   );
 
   const jogPad = (
@@ -407,15 +398,23 @@ export default function JogScreen() {
 
   const stopTeach = (
     <View style={styles.bottomRow}>
-      <AnimatedPressable style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")}>
-        <OctagonX size={22} color="white" />
-        <Text style={styles.stopText}>STOP</Text>
-      </AnimatedPressable>
+      <Button
+        label="STOP"
+        variant="destructive"
+        icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
+        style={styles.stopButton}
+        textStyle={styles.stopText}
+        onPress={() => robotClient.sendCommand("HardStop")}
+      />
 
-      <AnimatedPressable style={styles.teachButton} onPress={() => setTeachOpen(true)}>
-        <MousePointerClick size={18} color="#2563eb" />
-        <Text style={styles.teachButtonText}>Teach</Text>
-      </AnimatedPressable>
+      <Button
+        label="Teach"
+        variant="ghost"
+        icon={<MousePointerClick size={18} color={colors.accent} />}
+        style={styles.teachButton}
+        textStyle={styles.teachButtonText}
+        onPress={() => setTeachOpen(true)}
+      />
     </View>
   );
 
@@ -476,7 +475,7 @@ export default function JogScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.background,
   },
 
   scroll: {
@@ -484,9 +483,9 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
-    padding: 10,
-    gap: 8,
-    paddingBottom: 12,
+    padding: spacing.sm + 2,
+    gap: spacing.sm,
+    paddingBottom: spacing.md,
   },
 
   // ── Wide (tablet+) two-column layout ────────────────────────────────────────
@@ -503,11 +502,11 @@ const styles = StyleSheet.create({
     flex: 1,
     maxWidth: 440,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: "#e5e7eb",
+    borderRightColor: colors.border,
   },
   wideColContent: {
-    padding: 12,
-    gap: 8,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   // Right column: hugs the jog pad (a fixed ~405px, sized off the window) rather than
   // flexing to fill, so the pad isn't left swimming in space on a wide screen.
@@ -515,18 +514,12 @@ const styles = StyleSheet.create({
     width: 430,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
   },
 
   // ── Card ──────────────────────────────────────────────────────────────────
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 11,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+  cardSeparator: {
+    marginVertical: spacing.sm,
   },
 
   selectorsRow: {
@@ -535,24 +528,7 @@ const styles = StyleSheet.create({
   },
 
   cardDivider: {
-    width: StyleSheet.hairlineWidth,
-    alignSelf: "stretch",
-    backgroundColor: "#e5e7eb",
-    marginHorizontal: 4,
-  },
-
-  cardSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#e5e7eb",
-    marginVertical: 8,
-  },
-
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#9ca3af",
-    letterSpacing: 1,
-    marginBottom: 10,
+    marginHorizontal: spacing.xs,
   },
 
   // ── Position ──────────────────────────────────────────────────────────────
@@ -569,22 +545,22 @@ const styles = StyleSheet.create({
   coordLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
 
   coordValue: {
+    ...type.mono,
     fontSize: 16,
     fontWeight: "700",
-    color: "#111",
-    fontFamily: "monospace",
+    color: colors.text,
   },
 
   coordUnit: {
     fontSize: 10,
     fontWeight: "600",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.3,
     marginTop: 1,
   },
@@ -599,9 +575,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + 2,
   },
 
   selectorIcon: {
@@ -616,7 +592,7 @@ const styles = StyleSheet.create({
   selectorLabel: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.8,
   },
 
@@ -629,216 +605,91 @@ const styles = StyleSheet.create({
   selectorValue: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
   },
 
   // ── Picker modal ──────────────────────────────────────────────────────────
   pickerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 32,
+    padding: spacing.xxl,
   },
 
   pickerCard: {
     width: "100%",
     maxWidth: 340,
     maxHeight: "70%",
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
 
   pickerViewLink: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
+    gap: spacing.xs + 2,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: colors.border,
   },
 
   pickerViewLinkText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#2563eb",
-  },
-
-  pickerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 13,
-  },
-
-  pickerRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-
-  pickerRowActive: {
-    // no background tint needed — radio dot communicates state
-  },
-
-  pickerRowText: {
-    fontSize: 15,
-    fontWeight: "500",
-    color: "#374151",
-  },
-
-  pickerRowTextActive: {
-    fontWeight: "700",
-    color: "#2563eb",
-  },
-
-  radioRing: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#d1d5db",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  radioRingActive: {
-    borderColor: "#2563eb",
-  },
-
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#2563eb",
-  },
-
-  // ── Segmented control ─────────────────────────────────────────────────────
-  segmentRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 2,
-  },
-
-  segment: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 7,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-  },
-
-  segmentActive: {
-    backgroundColor: "#2563eb",
-  },
-
-  segmentText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-
-  segmentTextActive: {
-    color: "#fff",
-  },
-
-  // ── Speed chips ───────────────────────────────────────────────────────────
-  chipRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-
-  chip: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: "#f3f4f6",
-  },
-
-  chipActive: {
-    backgroundColor: "#2563eb",
-  },
-
-  chipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-
-  chipTextActive: {
-    color: "#fff",
+    color: colors.accent,
   },
 
   // ── JogPad ────────────────────────────────────────────────────────────────
   jogWrapper: {
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
+    marginTop: spacing.xs + 2,
   },
 
   // ── Bottom row (fixed) ────────────────────────────────────────────────────
   bottomRow: {
     flexDirection: "row",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 14,
-    backgroundColor: "#f3f4f6",
+    gap: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm + 2,
+    paddingBottom: spacing.md + 2,
+    backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: colors.border,
   },
 
+  // STOP keeps its exact hit area (paddingVertical) — only color/radius come from the kit.
   stopButton: {
     flex: 3,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#dc2626",
-    borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
   },
 
   stopText: {
-    color: "white",
     fontSize: 18,
-    fontWeight: "bold",
     letterSpacing: 2,
   },
 
   teachButton: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
+    backgroundColor: colors.accentSoft,
     borderWidth: 1.5,
-    borderColor: "#2563eb",
-    borderRadius: 12,
-    paddingVertical: 12,
-    backgroundColor: "#eff6ff",
+    borderColor: colors.accent,
+    paddingVertical: spacing.md,
   },
 
   teachButtonText: {
-    color: "#2563eb",
     fontSize: 15,
-    fontWeight: "600",
   },
 
   // ── Teach modal ───────────────────────────────────────────────────────────
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -846,45 +697,42 @@ const styles = StyleSheet.create({
   dialog: {
     width: 300,
     maxHeight: 600,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
 
   dialogHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: spacing.md + 2,
   },
 
   dialogTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
   },
 
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
     borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    marginBottom: 8,
-    backgroundColor: "#f9fafb",
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm - 1,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
   },
 
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: "#111",
+    color: colors.text,
     padding: 0,
   },
 
@@ -893,105 +741,59 @@ const styles = StyleSheet.create({
   },
 
   pointRow: {
-    paddingVertical: 11,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
+    paddingVertical: spacing.sm + 3,
   },
 
   pointName: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#111",
+    color: colors.text,
   },
 
   pointCoords: {
+    ...type.mono,
     fontSize: 12,
-    color: "#9ca3af",
-    fontFamily: "monospace",
+    color: colors.textFaint,
     marginTop: 2,
   },
 
   emptyText: {
-    color: "#9ca3af",
+    color: colors.textFaint,
     textAlign: "center",
-    paddingVertical: 20,
+    paddingVertical: spacing.lg + 4,
     fontSize: 14,
   },
 
   newPointButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 13,
+    gap: spacing.sm,
+    paddingVertical: spacing.md + 1,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
-    marginTop: 4,
+    borderTopColor: colors.border,
+    marginTop: spacing.xs,
   },
 
   newPointText: {
     fontSize: 14,
-    color: "#2563eb",
+    color: colors.accent,
     fontWeight: "600",
   },
 
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.5,
-    marginBottom: 6,
-  },
-
-  textInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#111",
-    backgroundColor: "#f9fafb",
-    marginBottom: 14,
+  newPointForm: {
+    marginBottom: spacing.md + 2,
   },
 
   modalActions: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.sm + 2,
   },
 
-  modalCancel: {
+  modalCancelFlex: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingVertical: 11,
-    alignItems: "center",
   },
 
-  modalCancelText: {
-    color: "#6b7280",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  modalConfirm: {
+  modalConfirmFlex: {
     flex: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
-    paddingVertical: 11,
-  },
-
-  modalConfirmText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  disabled: {
-    opacity: 0.4,
   },
 });

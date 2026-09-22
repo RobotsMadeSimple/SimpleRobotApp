@@ -1,4 +1,5 @@
 import { JogButton } from "@/src/components/ui/JogButton";
+import { colors } from "@/src/components/ui/kit";
 import {
   ChevronDown,
   ChevronLeft,
@@ -47,25 +48,25 @@ export function CartesianJogPanel({ onStart, onStop }: Props) {
   return (
     <View style={grid}>
       {/* Row 1 */}
-      <View style={cell}>{btn("+RZ", <UndoDot    size={iconSize} color="#666" />, "above", "rz",  1)}</View>
-      <View style={cell}>{btn("-X",  <ChevronUp  size={iconSize} color="#666" />, "above", "x",  -1)}</View>
-      <View style={cell}>{btn("-RZ", <RedoDot    size={iconSize} color="#666" />, "above", "rz", -1)}</View>
+      <View style={cell}>{btn("+RZ", <UndoDot    size={iconSize} color={colors.textMuted} />, "above", "rz",  1)}</View>
+      <View style={cell}>{btn("-X",  <ChevronUp  size={iconSize} color={colors.textMuted} />, "above", "x",  -1)}</View>
+      <View style={cell}>{btn("-RZ", <RedoDot    size={iconSize} color={colors.textMuted} />, "above", "rz", -1)}</View>
       <View style={narrow} />
-      <View style={cell}>{btn("+Z",  <ChevronUp  size={iconSize} color="#666" />, "above", "z",   1)}</View>
+      <View style={cell}>{btn("+Z",  <ChevronUp  size={iconSize} color={colors.textMuted} />, "above", "z",   1)}</View>
 
       {/* Row 2 */}
-      <View style={cell}>{btn("-Y",  <ChevronLeft  size={iconSize} color="#666" />, "left",  "y", -1)}</View>
+      <View style={cell}>{btn("-Y",  <ChevronLeft  size={iconSize} color={colors.textMuted} />, "left",  "y", -1)}</View>
       <View style={cell} />
-      <View style={cell}>{btn("+Y",  <ChevronRight size={iconSize} color="#666" />, "right", "y",  1)}</View>
+      <View style={cell}>{btn("+Y",  <ChevronRight size={iconSize} color={colors.textMuted} />, "right", "y",  1)}</View>
       <View style={narrow} />
       <View style={cell} />
 
       {/* Row 3 */}
       <View style={cell} />
-      <View style={cell}>{btn("+X",  <ChevronDown size={iconSize} color="#666" />, "below", "x",  1)}</View>
+      <View style={cell}>{btn("+X",  <ChevronDown size={iconSize} color={colors.textMuted} />, "below", "x",  1)}</View>
       <View style={cell} />
       <View style={narrow} />
-      <View style={cell}>{btn("-Z",  <ChevronDown size={iconSize} color="#666" />, "below", "z", -1)}</View>
+      <View style={cell}>{btn("-Z",  <ChevronDown size={iconSize} color={colors.textMuted} />, "below", "z", -1)}</View>
     </View>
   );
 }

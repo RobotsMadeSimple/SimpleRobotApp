@@ -1,22 +1,27 @@
-import { useWideContent } from "@/src/components/ui/responsive";
-import {
-  SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useLocals,
-  useRobotStatus } from "@/src/providers/RobotProvider";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import {
+  accents,
+  Button,
+  Card,
+  colors,
+  Divider,
+  EmptyState,
+  FormRow,
+  Input,
+  radii,
+  Screen,
+  SectionHeader,
+  shadows,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
+import { useLocals, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { Check, Edit2, Grid3x3, Plus, X } from "lucide-react-native";
+import { useRef, useState } from "react";
 import {
-  Check,
-  Edit2,
-  Grid3x3,
-  Plus,
-  Trash2,
-  X,
-  } from "lucide-react-native";
-import { useRef,
-  useState } from "react";
-import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -24,8 +29,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
@@ -53,13 +56,12 @@ function CoordField({
   return (
     <View style={styles.coordField}>
       <Text style={styles.coordFieldLabel}>{label}</Text>
-      <TextInput
+      <Input
         style={styles.coordInput}
         value={value}
         onChangeText={onChange}
         keyboardType="numeric"
         selectTextOnFocus
-        placeholderTextColor="#9ca3af"
       />
     </View>
   );
@@ -99,43 +101,41 @@ function LocalFormModal({
             {/* Header */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{title}</Text>
-              <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
-              </TouchableOpacity>
+              <Pressable onPress={onClose} hitSlop={12}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
               {/* Name */}
-              <Text style={styles.fieldLabel}>Name</Text>
-              <TextInput
-                style={styles.textInput}
-                value={draft.name}
-                onChangeText={set("name")}
-                placeholder="e.g. Workbench A"
-                placeholderTextColor="#9ca3af"
-                returnKeyType="next"
-              />
+              <FormRow label="Name" style={styles.formRow}>
+                <Input
+                  value={draft.name}
+                  onChangeText={set("name")}
+                  placeholder="e.g. Workbench A"
+                  returnKeyType="next"
+                />
+              </FormRow>
 
               {/* Description */}
-              <Text style={styles.fieldLabel}>Description</Text>
-              <TextInput
-                style={styles.textInput}
-                value={draft.description}
-                onChangeText={set("description")}
-                placeholder="Optional"
-                placeholderTextColor="#9ca3af"
-                returnKeyType="next"
-              />
+              <FormRow label="Description" style={styles.formRow}>
+                <Input
+                  value={draft.description}
+                  onChangeText={set("description")}
+                  placeholder="Optional"
+                  returnKeyType="next"
+                />
+              </FormRow>
 
               {/* Teach from current position */}
-              <TouchableOpacity style={styles.teachBtn} onPress={onTeach} activeOpacity={0.7}>
-                <Grid3x3 size={14} color="#7c3aed" />
+              <AnimatedPressable style={styles.teachBtn} onPress={onTeach}>
+                <Grid3x3 size={14} color={accents.purple} />
                 <Text style={styles.teachBtnText}>Teach from current robot position</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
 
               {/* Position */}
-              <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Offset (mm / °)</Text>
+              <Text style={[styles.fieldLabel, { marginTop: spacing.xs }]}>Offset (mm / °)</Text>
               <View style={styles.coordGrid}>
                 <CoordField label="X"  value={draft.x}  onChange={set("x")}  />
                 <CoordField label="Y"  value={draft.y}  onChange={set("y")}  />
@@ -147,18 +147,15 @@ function LocalFormModal({
 
               {/* Actions */}
               <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.modalCancel} onPress={onClose} activeOpacity={0.7}>
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalConfirm, !draft.name.trim() && styles.disabled]}
+                <Button label="Cancel" variant="secondary" onPress={onClose} style={styles.modalCancel} />
+                <Button
+                  label="Save"
+                  variant="primary"
+                  icon={<Check size={15} color={colors.onAccent} />}
                   onPress={onSave}
                   disabled={!draft.name.trim()}
-                  activeOpacity={0.7}
-                >
-                  <Check size={15} color="white" />
-                  <Text style={styles.modalConfirmText}>Save</Text>
-                </TouchableOpacity>
+                  style={styles.modalConfirm}
+                />
               </View>
 
             </ScrollView>
@@ -175,7 +172,6 @@ export default function LocalsPage() {
   const locals      = useLocals();
   const status      = useRobotStatus();
   const activeLocal = status.activeLocal;
-  const wideContent = useWideContent();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen,   setEditOpen]   = useState(false);
@@ -262,24 +258,14 @@ export default function LocalsPage() {
     <View style={styles.container}>
       <SubPageHeader title="Locals" />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, wideContent]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Section header */}
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionIconTile}>
-            <Grid3x3 size={14} color="#7c3aed" />
-          </View>
-          <Text style={styles.sectionLabel}>SAVED LOCALS</Text>
-        </View>
+      <Screen>
+        <SectionHeader title="Saved locals" />
 
         {/* No-local row — always at top */}
-        <View style={styles.card}>
-          <TouchableOpacity
+        <Card padded={false}>
+          <AnimatedPressable
             style={styles.localRow}
             onPress={() => robotClient.setActiveLocal("None")}
-            activeOpacity={0.75}
           >
             <View style={[styles.activeTile, activeLocal === "" && styles.activeTileOn]}>
               {activeLocal === "" && <View style={styles.radioDot} />}
@@ -295,88 +281,86 @@ export default function LocalsPage() {
                 <Text style={styles.activeChipText}>Active</Text>
               </View>
             )}
-          </TouchableOpacity>
-        </View>
+          </AnimatedPressable>
+        </Card>
 
         {/* Empty state */}
         {locals.length === 0 && (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconTile}>
-              <Grid3x3 size={28} color="#7c3aed" />
-            </View>
-            <Text style={styles.emptyTitle}>No locals yet</Text>
-            <Text style={styles.emptySub}>Tap below to define a coordinate system</Text>
-          </View>
+          <EmptyState
+            icon={<Grid3x3 size={28} color={colors.textFaint} />}
+            title="No locals yet"
+            subtitle="Tap below to define a coordinate system"
+          />
         )}
 
         {/* Local list */}
         {locals.length > 0 && (
-          <View style={styles.card}>
+          <Card padded={false}>
             {locals.map((local, i) => {
               const isActive = activeLocal === local.name;
               const isLast   = i === locals.length - 1;
               return (
-                <TouchableOpacity
-                  key={local.name}
-                  style={[styles.localRow, !isLast && styles.localRowBorder, isActive && styles.localRowActive]}
-                  onPress={() => toggleActiveLocal(local.name)}
-                  activeOpacity={0.75}
-                >
-                  {/* Radio button */}
-                  <View style={[styles.activeTile, isActive && styles.activeTileOn]}>
-                    {isActive && <View style={styles.radioDot} />}
-                  </View>
-
-                  {/* Name + coords (position and rotation) */}
-                  <View style={styles.localInfo}>
-                    <Text style={[styles.localName, isActive && styles.localNameActive]}>
-                      {local.name}
-                    </Text>
-                    {local.description ? (
-                      <Text style={styles.localDesc} numberOfLines={1}>{local.description}</Text>
-                    ) : null}
-                    <Text style={styles.localCoords} numberOfLines={1}>
-                      {local.x.toFixed(1)}, {local.y.toFixed(1)}, {local.z.toFixed(1)}
-                      {"  ·  R "}
-                      {local.rx.toFixed(1)}°, {local.ry.toFixed(1)}°, {local.rz.toFixed(1)}°
-                    </Text>
-                  </View>
-
-                  {isActive && (
-                    <View style={styles.activeChip}>
-                      <Text style={styles.activeChipText}>Active</Text>
-                    </View>
-                  )}
-
-                  {/* Edit */}
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    onPress={() => openEdit(local.name)}
-                    hitSlop={8}
-                    activeOpacity={0.7}
+                <View key={local.name}>
+                  <AnimatedPressable
+                    style={[styles.localRow, isActive && styles.localRowActive]}
+                    onPress={() => toggleActiveLocal(local.name)}
                   >
-                    <Edit2 size={16} color="#6b7280" />
-                  </TouchableOpacity>
+                    {/* Radio button */}
+                    <View style={[styles.activeTile, isActive && styles.activeTileOn]}>
+                      {isActive && <View style={styles.radioDot} />}
+                    </View>
 
-                  {/* Delete */}
-                  <DeleteIconButton style={styles.iconBtn} onPress={() => confirmDelete(local.name)} />
-                </TouchableOpacity>
+                    {/* Name + coords (position and rotation) */}
+                    <View style={styles.localInfo}>
+                      <Text style={[styles.localName, isActive && styles.localNameActive]}>
+                        {local.name}
+                      </Text>
+                      {local.description ? (
+                        <Text style={styles.localDesc} numberOfLines={1}>{local.description}</Text>
+                      ) : null}
+                      <Text style={styles.localCoords} numberOfLines={1}>
+                        {local.x.toFixed(1)}, {local.y.toFixed(1)}, {local.z.toFixed(1)}
+                        {"  ·  R "}
+                        {local.rx.toFixed(1)}°, {local.ry.toFixed(1)}°, {local.rz.toFixed(1)}°
+                      </Text>
+                    </View>
+
+                    {isActive && (
+                      <View style={styles.activeChip}>
+                        <Text style={styles.activeChipText}>Active</Text>
+                      </View>
+                    )}
+
+                    {/* Edit */}
+                    <Pressable
+                      style={styles.iconBtn}
+                      onPress={() => openEdit(local.name)}
+                      hitSlop={8}
+                    >
+                      <Edit2 size={16} color={colors.textMuted} />
+                    </Pressable>
+
+                    {/* Delete */}
+                    <DeleteIconButton style={styles.iconBtn} onPress={() => confirmDelete(local.name)} />
+                  </AnimatedPressable>
+                  {!isLast && <Divider />}
+                </View>
               );
             })}
-          </View>
+          </Card>
         )}
 
         {/* Add local */}
-        <TouchableOpacity
+        <Button
+          variant="dashed"
+          label="New Local"
+          icon={<Plus size={16} color={accents.purple} />}
           style={styles.addCard}
+          textStyle={styles.addCardText}
           onPress={() => { setDraft(EMPTY_DRAFT); setCreateOpen(true); }}
-          activeOpacity={0.7}
-        >
-          <Plus size={16} color="#7c3aed" />
-          <Text style={styles.addCardText}>New Local</Text>
-        </TouchableOpacity>
+        />
 
-      </ScrollView>
+      </Screen>
 
       {/* Create modal */}
       <LocalFormModal
@@ -408,76 +392,21 @@ export default function LocalsPage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
-    gap: 12,
+    backgroundColor: colors.background,
   },
 
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  sectionIconTile: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
-    backgroundColor: "#f5f3ff",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  sectionLabel: {
-    flex: 1,
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-  },
-
-  addCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1.5,
-    borderColor: "#7c3aed",
-    borderRadius: 14,
-    paddingVertical: 14,
-    backgroundColor: "transparent",
-  },
-  addCardText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#7c3aed",
-  },
-
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
+  addCard: { borderColor: accents.purple },
+  addCardText: { color: accents.purple },
 
   localRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    gap: 10,
-  },
-  localRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md + 1,
+    gap: spacing.sm + 2,
   },
   localRowActive: {
-    backgroundColor: "#faf5ff",
+    backgroundColor: accents.purpleSoft,
   },
 
   activeTile: {
@@ -485,18 +414,18 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: "#d1d5db",
+    borderColor: colors.borderStrong,
     justifyContent: "center",
     alignItems: "center",
   },
   activeTileOn: {
-    borderColor: "#7c3aed",
+    borderColor: accents.purple,
   },
   radioDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#7c3aed",
+    backgroundColor: accents.purple,
   },
 
   localInfo: {
@@ -506,68 +435,36 @@ const styles = StyleSheet.create({
   localName: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#111827",
+    color: colors.text,
   },
   localNameActive: {
-    color: "#7c3aed",
+    color: accents.purple,
   },
   localDesc: {
     fontSize: 12,
-    color: "#9ca3af",
+    color: colors.textFaint,
   },
   localCoords: {
+    ...type.mono,
     fontSize: 12,
-    color: "#9ca3af",
-    fontFamily: "monospace",
+    color: colors.textFaint,
   },
 
   activeChip: {
-    backgroundColor: "#f5f3ff",
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    backgroundColor: accents.purpleSoft,
+    borderRadius: radii.sm - 3,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
   activeChipText: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#7c3aed",
+    color: accents.purple,
     letterSpacing: 0.3,
   },
 
   iconBtn: {
-    padding: 4,
-  },
-
-  emptyCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingVertical: 36,
-    alignItems: "center",
-    gap: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  emptyIconTile: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: "#f5f3ff",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  emptySub: {
-    fontSize: 13,
-    color: "#9ca3af",
-    textAlign: "center",
+    padding: spacing.xs,
   },
 
   modalOuter: {
@@ -575,77 +472,65 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
     width: "100%",
     maxWidth: 380,
     maxHeight: "90%",
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
   },
 
   teachBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "#f5f3ff",
+    gap: spacing.xs + 2,
+    backgroundColor: accents.purpleSoft,
     borderWidth: 1,
-    borderColor: "#ddd6fe",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    marginBottom: 14,
+    borderColor: accents.purpleBorder,
+    borderRadius: radii.sm - 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 1,
+    marginBottom: spacing.md + 2,
   },
   teachBtnText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#7c3aed",
+    color: accents.purple,
   },
 
   fieldLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: spacing.xs + 2,
   },
-  textInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#111",
-    backgroundColor: "#f9fafb",
-    marginBottom: 14,
-  },
+
+  formRow: { marginBottom: spacing.md + 2 },
 
   coordGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 16,
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   coordField: {
     width: "30%",
@@ -654,57 +539,28 @@ const styles = StyleSheet.create({
   coordFieldLabel: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.6,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   coordInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: "#111",
-    backgroundColor: "#f9fafb",
+    ...type.mono,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
     textAlign: "center",
   },
 
   modalActions: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
-    marginBottom: 4,
+    gap: spacing.sm + 2,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
   },
   modalCancel: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingVertical: 11,
-    alignItems: "center",
-  },
-  modalCancelText: {
-    color: "#6b7280",
-    fontSize: 14,
-    fontWeight: "500",
   },
   modalConfirm: {
     flex: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#7c3aed",
-    borderRadius: 8,
-    paddingVertical: 11,
-  },
-  modalConfirmText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  disabled: {
-    opacity: 0.4,
+    backgroundColor: accents.purple,
   },
 });

@@ -60,6 +60,7 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { accents, colors, spacing, radii, shadows } from "@/src/components/ui/kit";
 import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
@@ -508,7 +509,7 @@ export default function VisionEditorScreen() {
           value={name}
           onChangeText={setName}
           placeholder="Program name"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={colors.textFaint}
           returnKeyType="done"
           onSubmitEditing={Keyboard.dismiss}
         />
@@ -516,11 +517,11 @@ export default function VisionEditorScreen() {
       <View style={styles.detailsDivider} />
       <TouchableOpacity style={styles.detailsRow} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
         <Text style={styles.rowLabel}>Camera</Text>
-        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? "#22c55e" : "#d1d5db" }]} />
+        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? "#22c55e" : colors.borderStrong }]} />
         <Text style={styles.cameraValue} numberOfLines={1}>
           {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
         </Text>
-        <ChevronDown size={15} color="#9ca3af" />
+        <ChevronDown size={15} color={colors.textFaint} />
       </TouchableOpacity>
     </View>
   );
@@ -548,10 +549,10 @@ export default function VisionEditorScreen() {
           disabled={!!transitioning}
         >
           {transitioning
-            ? <ActivityIndicator size="small" color="#fff" />
+            ? <ActivityIndicator size="small" color={colors.onAccent} />
             : isRunning
-              ? <EyeOff size={16} color="#fff" />
-              : <Eye size={16} color="#fff" />
+              ? <EyeOff size={16} color={colors.onAccent} />
+              : <Eye size={16} color={colors.onAccent} />
           }
           <Text style={styles.runBtnText}>
             {transitioning === 'starting' ? "Starting..."
@@ -595,6 +596,7 @@ export default function VisionEditorScreen() {
               onMove={(id, dy) => onDragMove('zone', id, dy)}
               onEnd={id => onDragEnd('zone', id)}
             />
+            {/* Cyan zone-marker dot: no kit token for this hue, kept as-is (see report). */}
             <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
             <TextInput
               style={styles.zoneNameInput}
@@ -616,11 +618,11 @@ export default function VisionEditorScreen() {
             >
               {/* Muted grey when hidden, cyan when shown. */}
               {hiddenZoneIds.has(zone.id)
-                ? <EyeOff size={14} color="#9ca3af" />
-                : <Eye size={14} color="#0891b2" />}
+                ? <EyeOff size={14} color={colors.textFaint} />
+                : <Eye size={14} color={accents.cyan} />}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
-              <Pencil size={14} color="#6b7280" />
+              <Pencil size={14} color={colors.textMuted} />
             </TouchableOpacity>
             <DeleteIconButton
               size={14}
@@ -637,9 +639,11 @@ export default function VisionEditorScreen() {
       })}
 
       <TouchableOpacity style={styles.addBtn} onPress={() => openZoneModal()} activeOpacity={0.75}>
-        <Plus size={15} color="#0891b2" />
+        <Plus size={15} color={accents.cyan} />
         <Text style={styles.addBtnText}>Add Zone</Text>
       </TouchableOpacity>
+      {/* Zone/inspection domain accents: cyan and violet map to accents.cyan/accents.purple;
+          fuchsia (#d946ef) has no matching kit token and stays literal, see report. */}
 
       {/* ── Inspections ──────────────────────────────────────────────────── */}
       <Text style={[styles.sectionLabel, { marginTop: 8 }]}>INSPECTIONS</Text>
@@ -653,8 +657,11 @@ export default function VisionEditorScreen() {
       {allInspections.map((item, index) => {
         const { kind, insp } = item;
         const linkedZone = program.zones.find(z => z.id === insp.zoneId);
-        const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
-        const iconBg     = kind === 'blob' ? '#ecfeff' : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? '#f0fdf4' : kind === 'line' ? '#f5f3ff' : kind === 'barcode' ? '#eff6ff' : '#fdf4ff';
+        // Per-kind identity colors: polygon/aruco/barcode/blob/line happen to match kit
+        // status/accent tokens exactly, so those are tokenized; color-coverage's fuchsia
+        // has no kit equivalent hue and stays literal (see report).
+        const accent     = kind === 'blob' ? accents.cyan : kind === 'polygon' ? colors.warning : kind === 'aruco' ? colors.success : kind === 'line' ? accents.purple : kind === 'barcode' ? colors.accent : '#d946ef';
+        const iconBg     = kind === 'blob' ? accents.cyanSoft : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? colors.successSoft : kind === 'line' ? accents.purpleSoft : kind === 'barcode' ? colors.accentSoft : '#fdf4ff';
         const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : kind === 'barcode' ? 'BARCODE / QR CODE' : 'COLOR COVERAGE';
         const isDragged = drag?.list === 'insp' && drag.id === insp.id;
         const dropAbove = !!(drag && drag.list === 'insp' && drag.id !== insp.id && drag.toIndex === index && drag.toIndex < drag.fromIndex);
@@ -717,7 +724,7 @@ export default function VisionEditorScreen() {
                 style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
               />
               <TouchableOpacity onPress={() => duplicateInspection(item)} hitSlop={8} style={styles.iconBtn}>
-                <Copy size={15} color="#6b7280" />
+                <Copy size={15} color={colors.textMuted} />
               </TouchableOpacity>
               <DeleteIconButton
                 size={15}
@@ -755,8 +762,8 @@ export default function VisionEditorScreen() {
       })}
 
       <TouchableOpacity style={styles.addBtn} onPress={() => setTypePicker(true)} activeOpacity={0.75}>
-        <Plus size={15} color="#7c3aed" />
-        <Text style={[styles.addBtnText, { color: '#7c3aed' }]}>Add Inspection</Text>
+        <Plus size={15} color={accents.purple} />
+        <Text style={[styles.addBtnText, { color: accents.purple }]}>Add Inspection</Text>
       </TouchableOpacity>
 
       <View style={{ height: 40 }} />
@@ -774,13 +781,13 @@ export default function VisionEditorScreen() {
         right={
           saveStatus === 'saving' ? (
             <View style={styles.saveStatusRow}>
-              <ActivityIndicator size="small" color="#6b7280" />
+              <ActivityIndicator size="small" color={colors.textMuted} />
               <Text style={styles.saveStatusText}>Saving…</Text>
             </View>
           ) : saveStatus === 'saved' ? (
             <View style={styles.saveStatusRow}>
-              <Check size={14} color="#16a34a" />
-              <Text style={[styles.saveStatusText, { color: '#16a34a' }]}>Saved</Text>
+              <Check size={14} color={colors.success} />
+              <Text style={[styles.saveStatusText, { color: colors.success }]}>Saved</Text>
             </View>
           ) : null
         }
@@ -949,11 +956,11 @@ export default function VisionEditorScreen() {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: "#f3f4f6" },
+  root:    { flex: 1, backgroundColor: colors.background },
   // Keep drag targets from turning into text selections mid-drag on web.
   noSelect: { userSelect: "none" },
   scroll:  { flex: 1 },
-  content: { padding: 14, gap: 8 },
+  content: { padding: spacing.lg, gap: spacing.sm },
 
   // ── Wide (desktop) two-pane layout ────────────────────────────────────────
   wideRow: {
@@ -965,80 +972,81 @@ const styles = StyleSheet.create({
   // In "split" mode wide.paneSplit overrides this to an even 50/50.
   widePaneLeft: {
     width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
-    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e7eb",
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border,
   },
-  widePaneLeftContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 32, gap: 8 },
+  widePaneLeftContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: spacing.xxl, gap: spacing.sm },
   widePaneRight: { flex: 1 },
   wideEditorContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 
   saveStatusRow:  { flexDirection: "row", alignItems: "center", gap: 5 },
-  saveStatusText: { fontSize: 13, color: "#6b7280" },
+  saveStatusText: { fontSize: 13, color: colors.textMuted },
 
   card: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: "#fff", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    backgroundColor: colors.surface, borderRadius: radii.md,
+    paddingHorizontal: 14, paddingVertical: spacing.md,
+    ...shadows.soft,
   },
-  rowLabel:    { fontSize: 12, fontWeight: "600", color: "#6b7280", width: 60 },
-  nameInput:   { flex: 1, fontSize: 14, color: "#111827" },
-  cameraValue: { flex: 1, fontSize: 14, color: "#111827" },
+  rowLabel:    { fontSize: 12, fontWeight: "600", color: colors.textMuted, width: 60 },
+  nameInput:   { flex: 1, fontSize: 14, color: colors.text },
+  cameraValue: { flex: 1, fontSize: 14, color: colors.text },
   dot:         { width: 8, height: 8, borderRadius: 4 },
 
   runBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    borderRadius: 12, paddingVertical: 13,
-    shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    borderRadius: radii.md, paddingVertical: 13,
+    ...shadows.soft,
   },
-  runBtnStart: { backgroundColor: "#0891b2" },
-  runBtnStop:  { backgroundColor: "#dc2626" },
-  runBtnText:  { color: "#fff", fontSize: 14, fontWeight: "700" },
+  // Cyan/red identity colors for the vision run state.
+  runBtnStart: { backgroundColor: accents.cyan },
+  runBtnStop:  { backgroundColor: colors.danger },
+  runBtnText:  { color: colors.onAccent, fontSize: 14, fontWeight: "700" },
 
-  sectionLabel: { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8, marginBottom: 2 },
+  sectionLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 2 },
 
   emptyCard: {
-    backgroundColor: "#fff", borderRadius: 12, padding: 16, alignItems: "center",
-    shadowColor: "#000", shadowOpacity: 0.03, shadowRadius: 3, elevation: 1,
+    backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.lg, alignItems: "center",
+    ...shadows.soft,
   },
-  emptyText: { fontSize: 13, color: "#9ca3af", textAlign: "center" },
+  emptyText: { fontSize: 13, color: colors.textFaint, textAlign: "center" },
 
   zoneCard: {
-    backgroundColor: "#fff", borderRadius: 12,
+    backgroundColor: colors.surface, borderRadius: radii.md,
     paddingHorizontal: 14, paddingVertical: 11,
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    ...shadows.soft,
   },
-  zoneCardRow:   { flexDirection: "row", alignItems: "center", gap: 8 },
-  zoneNameInput: { flex: 1, fontSize: 14, fontWeight: "600", color: "#111827", userSelect: "text" },
+  zoneCardRow:   { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  zoneNameInput: { flex: 1, fontSize: 14, fontWeight: "600", color: colors.text, userSelect: "text" },
 
   // Program details card (name + camera).
   detailsCard: {
-    backgroundColor: "#fff", borderRadius: 12, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    backgroundColor: colors.surface, borderRadius: radii.md, overflow: "hidden",
+    ...shadows.soft,
   },
-  detailsRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  detailsRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: spacing.md },
+  // Slightly lighter than colors.border by design — no exact kit token, kept literal (see report).
   detailsDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "#eef0f2" },
 
   // Drag-to-reorder feedback (zones + inspections). Applied to a non-elevated OUTER
   // wrapper, never the elevated card itself — Android renders a View blank when opacity
   // < 1 is set on the same view that has elevation.
   dragDim:    { opacity: 0.35 },
-  dropAbove:  { borderTopWidth: 2.5, borderTopColor: "#0891b2", borderTopLeftRadius: 12, borderTopRightRadius: 12 },
-  dropBelow:  { borderBottomWidth: 2.5, borderBottomColor: "#0891b2", borderBottomLeftRadius: 12, borderBottomRightRadius: 12 },
+  dropAbove:  { borderTopWidth: 2.5, borderTopColor: accents.cyan, borderTopLeftRadius: radii.md, borderTopRightRadius: radii.md },
+  dropBelow:  { borderBottomWidth: 2.5, borderBottomColor: accents.cyan, borderBottomLeftRadius: radii.md, borderBottomRightRadius: radii.md },
 
-  shapeBadge:    { fontSize: 11, color: "#9ca3af", backgroundColor: "#f3f4f6", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  iconBtn:       { padding: 4 },
+  shapeBadge:    { fontSize: 11, color: colors.textFaint, backgroundColor: colors.background, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  iconBtn:       { padding: spacing.xs },
 
   addBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: "#fff", borderRadius: 12,
-    paddingVertical: 13, borderWidth: 1.5, borderColor: "#e5e7eb", borderStyle: "dashed",
+    backgroundColor: colors.surface, borderRadius: radii.md,
+    paddingVertical: 13, borderWidth: 1.5, borderColor: colors.border, borderStyle: "dashed",
   },
-  addBtnText: { fontSize: 14, fontWeight: "600", color: "#0891b2" },
+  addBtnText: { fontSize: 14, fontWeight: "600", color: accents.cyan },
 
   inspStepCard: {
-    backgroundColor: "#fff", borderRadius: 14, borderLeftWidth: 4,
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    backgroundColor: colors.surface, borderRadius: radii.lg, borderLeftWidth: 4,
+    ...shadows.soft,
     overflow: "hidden",
   },
   inspStepHeader: {
@@ -1050,15 +1058,16 @@ const styles = StyleSheet.create({
   inspTapArea: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10 },
   inspStepIcon: {
     width: 36, height: 36, borderRadius: 10,
-    backgroundColor: "#ecfeff",
+    // Default fallback fill (kind-specific iconBg is applied inline per row).
+    backgroundColor: accents.cyanSoft,
     justifyContent: "center", alignItems: "center", flexShrink: 0,
   },
   inspStepText:   { flex: 1, minWidth: 0, gap: 1 },
   inspStepType:   { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
-  inspStepName:   { fontSize: 14, fontWeight: "600", color: "#111827" },
-  inspStepDetail: { fontSize: 12, color: "#6b7280" },
+  inspStepName:   { fontSize: 14, fontWeight: "600", color: colors.text },
+  inspStepDetail: { fontSize: 12, color: colors.textMuted },
   // Live result strip at the foot of an inspection card (while vision is running).
   inspResult: {
-    paddingHorizontal: 14, paddingBottom: 8,
+    paddingHorizontal: 14, paddingBottom: spacing.sm,
   },
 });

@@ -1,4 +1,3 @@
-import { useWideContent } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -10,15 +9,11 @@ import { AuxDeviceState,
   CameraState } from "@/src/models/robotModels";
 import {
   Camera,
-  ChevronRight,
   CircuitBoard,
   Cpu,
   Gauge,
   Plus,
   Radio,
-  Trash2,
-  Wifi,
-  WifiOff,
   X,
   } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
@@ -30,13 +25,26 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+
+import {
+  Button,
+  colors,
+  Divider,
+  ListRow,
+  radii,
+  Screen,
+  SectionHeader,
+  shadows,
+  spacing,
+  StatusPill,
+  type,
+} from "@/src/components/ui/kit";
 
 // ── IOConfig type ─────────────────────────────────────────────────────────────
 
@@ -68,28 +76,24 @@ function DeviceNavCard({
   onDelete?: () => void;
 }) {
   return (
-    <TouchableOpacity style={styles.navCard} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.navCardIcon, { backgroundColor: iconBg }]}>
-        {icon}
-      </View>
-      <View style={styles.navCardBody}>
-        <Text style={styles.navCardName}>{name}</Text>
-        <Text style={styles.navCardSub}>{subtitle}</Text>
-      </View>
-      <View style={[styles.connBadge, connected ? styles.connOn : styles.connOff]}>
-        {connected
-          ? <Wifi    size={11} color="#16a34a" />
-          : <WifiOff size={11} color="#dc2626" />
-        }
-        <Text style={[styles.connText, connected ? styles.connTextOn : styles.connTextOff]}>
-          {connected ? "Connected" : "Offline"}
-        </Text>
-      </View>
-      {onDelete && (
-        <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />
-      )}
-      <ChevronRight size={18} color="#9ca3af" />
-    </TouchableOpacity>
+    <ListRow
+      title={name}
+      subtitle={subtitle}
+      icon={icon}
+      iconColor={iconBg}
+      onPress={onPress}
+      chevron
+      right={
+        <View style={styles.rowAccessories}>
+          <StatusPill
+            label={connected ? "Connected" : "Offline"}
+            tone={connected ? "success" : "danger"}
+            dot
+          />
+          {onDelete && <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />}
+        </View>
+      }
+    />
   );
 }
 
@@ -99,7 +103,6 @@ export default function IoPage() {
   const nanos  = useNanoIO();
   const relay  = useRelayIO();
   const status = useRobotStatus();
-  const wideContent = useWideContent();
 
   const [ioConfig,    setIoConfig]    = useState<IOConfig | null>(null);
   const [auxDevices,  setAuxDevices]  = useState<AuxDeviceState[]>([]);
@@ -184,7 +187,7 @@ export default function IoPage() {
   const allDeviceTypes: AddableType[] = [
     {
       field: "enableNanoCards",
-      icon: <Cpu size={22} color="#4f46e5" />,
+      icon: <Cpu size={20} color="#4f46e5" />,
       iconBg: "#eef2ff",
       name: "Arduino Nano Device",
       subtitle: "Serial-connected microcontroller",
@@ -195,7 +198,7 @@ export default function IoPage() {
     },
     {
       field: "enableRelayCard",
-      icon: <Radio size={22} color="#0891b2" />,
+      icon: <Radio size={20} color="#0891b2" />,
       iconBg: "#ecfeff",
       name: "USB Relay Board",
       subtitle: "DCTTECH 4CH · HID",
@@ -206,7 +209,7 @@ export default function IoPage() {
     },
     {
       field: "enableAuxAxis",
-      icon: <Gauge size={22} color="#7c3aed" />,
+      icon: <Gauge size={20} color="#7c3aed" />,
       iconBg: "#ede9fe",
       name: "Aux Stepper Axis",
       subtitle: "External stepper driver",
@@ -217,8 +220,8 @@ export default function IoPage() {
     },
     {
       field: "enableCameras",
-      icon: <Camera size={22} color="#2563eb" />,
-      iconBg: "#eff6ff",
+      icon: <Camera size={20} color={colors.accent} />,
+      iconBg: colors.accentSoft,
       name: "USB Camera",
       subtitle: "USB camera device",
       onAdd: () => {
@@ -241,14 +244,13 @@ export default function IoPage() {
     <View style={styles.container}>
       <NotConnectedOverlay />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, wideContent]}
-        showsVerticalScrollIndicator={false}
-      >
+      <Screen>
+        <SectionHeader title="Devices" />
+
         {/* STB4100 — always visible, 1 card */}
         <DeviceNavCard
-          icon={<CircuitBoard size={22} color="#16a34a" />}
-          iconBg="#f0fdf4"
+          icon={<CircuitBoard size={20} color={colors.success} />}
+          iconBg={colors.successSoft}
           name="STB4100"
           subtitle="STB4100 · USB HID"
           connected={status.driverConnected}
@@ -259,7 +261,7 @@ export default function IoPage() {
         {ioConfig?.enableNanoCards && nanos.map((nano, idx) => (
           <DeviceNavCard
             key={nano.id}
-            icon={<Cpu size={22} color="#4f46e5" />}
+            icon={<Cpu size={20} color="#4f46e5" />}
             iconBg="#eef2ff"
             name={nano.name}
             subtitle={nano.name}
@@ -272,7 +274,7 @@ export default function IoPage() {
         {/* Relay board — 1 card */}
         {ioConfig?.enableRelayCard && (
           <DeviceNavCard
-            icon={<Radio size={22} color="#0891b2" />}
+            icon={<Radio size={20} color="#0891b2" />}
             iconBg="#ecfeff"
             name="USB Relay Board"
             subtitle="DCTTECH 4CH · HID"
@@ -286,7 +288,7 @@ export default function IoPage() {
         {ioConfig?.enableAuxAxis && auxDevices.map((dev, idx) => (
           <DeviceNavCard
             key={dev.deviceId}
-            icon={<Gauge size={22} color="#7c3aed" />}
+            icon={<Gauge size={20} color="#7c3aed" />}
             iconBg="#ede9fe"
             name={dev.deviceName}
             subtitle={`${dev.deviceId}${dev.portName ? ` · ${dev.portName}` : ""}`}
@@ -300,8 +302,8 @@ export default function IoPage() {
         {ioConfig?.enableCameras && cameras.map(cam => (
           <DeviceNavCard
             key={cam.id}
-            icon={<Camera size={22} color="#2563eb" />}
-            iconBg="#eff6ff"
+            icon={<Camera size={20} color={colors.accent} />}
+            iconBg={colors.accentSoft}
             name={cam.name}
             subtitle={`Device ${cam.deviceIndex} · ${cam.width}×${cam.height} · ${cam.targetFps}fps`}
             connected={cam.connected}
@@ -311,11 +313,13 @@ export default function IoPage() {
         ))}
 
         {/* Add Device button */}
-        <TouchableOpacity style={styles.addBtn} onPress={() => setAddModal(true)}>
-          <Plus size={15} color="#2563eb" />
-          <Text style={styles.addBtnText}>Add Device</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        <Button
+          variant="dashed"
+          label="Add Device"
+          icon={<Plus size={15} color={colors.accent} />}
+          onPress={() => setAddModal(true)}
+        />
+      </Screen>
 
       {/* Add Device — centered modal */}
       <Modal
@@ -329,7 +333,7 @@ export default function IoPage() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Device</Text>
               <TouchableOpacity onPress={() => setAddModal(false)} hitSlop={8}>
-                <X size={20} color="#6b7280" />
+                <X size={20} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -342,28 +346,22 @@ export default function IoPage() {
                 <Text style={styles.allAddedText}>All device types are already added.</Text>
               </View>
             ) : (
-              addableTypes.map((type, idx, arr) => {
-                const busy = enabling === type.field;
+              addableTypes.map((devType, idx, arr) => {
+                const busy = enabling === devType.field;
                 return (
-                  <TouchableOpacity
-                    key={type.field}
-                    style={[styles.typeRow, idx < arr.length - 1 && styles.typeRowBorder]}
-                    onPress={type.onAdd}
-                    activeOpacity={0.7}
-                    disabled={!!enabling}
-                  >
-                    <View style={[styles.typeIcon, { backgroundColor: type.iconBg }]}>
-                      {type.icon}
-                    </View>
-                    <View style={styles.typeRowBody}>
-                      <Text style={styles.typeRowName}>{type.name}</Text>
-                      <Text style={styles.typeRowSub}>{type.subtitle}</Text>
-                    </View>
-                    {busy
-                      ? <ActivityIndicator size="small" color="#2563eb" />
-                      : <ChevronRight size={18} color="#9ca3af" />
-                    }
-                  </TouchableOpacity>
+                  <View key={devType.field}>
+                    <ListRow
+                      card={false}
+                      title={devType.name}
+                      subtitle={devType.subtitle}
+                      icon={devType.icon}
+                      iconColor={devType.iconBg}
+                      onPress={devType.onAdd}
+                      chevron={!busy}
+                      right={busy ? <ActivityIndicator size="small" color={colors.accent} /> : undefined}
+                    />
+                    {idx < arr.length - 1 && <Divider inset />}
+                  </View>
                 );
               })
             )}
@@ -377,127 +375,36 @@ export default function IoPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
-  content:   { padding: 16, paddingBottom: 40, gap: 10 },
+  container: { flex: 1, backgroundColor: colors.background },
 
-  // ── Nav cards ──────────────────────────────────────────────────────────────
-  navCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  navCardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  navCardBody: { flex: 1 },
-  navCardName: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  navCardSub:  { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-
-  connBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  connOn:      { backgroundColor: "#f0fdf4" },
-  connOff:     { backgroundColor: "#fef2f2" },
-  connText:    { fontSize: 11, fontWeight: "600" },
-  connTextOn:  { color: "#16a34a" },
-  connTextOff: { color: "#dc2626" },
-
-  deleteBtn: {
-    padding: 6,
-    marginLeft: 4,
-  },
-
-  // ── Add Device button ──────────────────────────────────────────────────────
-  addBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#bfdbfe",
-    borderStyle: "dashed",
-    backgroundColor: "#f0f9ff",
-    marginTop: 4,
-  },
-  addBtnText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+  rowAccessories: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  deleteBtn: { padding: spacing.xs + 2, marginLeft: 0 },
 
   // ── Add Device modal ───────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
     width: "100%",
     maxWidth: 400,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: "#9ca3af",
-    marginBottom: 12,
-    lineHeight: 18,
-  },
+  modalTitle:    type.pageTitle,
+  modalSubtitle: { ...type.subtitle, marginBottom: spacing.md, lineHeight: 18 },
 
-  typeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 13,
-  },
-  typeRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
-  },
-  typeIcon: {
-    width: 44, height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  typeRowBody: { flex: 1 },
-  typeRowName: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  typeRowSub:  { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-
-  allAddedRow: { paddingVertical: 16, alignItems: "center" },
-  allAddedText: { fontSize: 14, color: "#9ca3af" },
+  allAddedRow: { paddingVertical: spacing.lg, alignItems: "center" },
+  allAddedText: { fontSize: 14, color: colors.textFaint },
 });

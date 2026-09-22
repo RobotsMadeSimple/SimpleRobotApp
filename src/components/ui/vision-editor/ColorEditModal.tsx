@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Modal, PanResponder, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ColorEntry } from "@/src/models/robotModels";
+import { colors, spacing, radii, shadows, accents } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 import { ColorPickModal } from "./ColorPickModal";
 
@@ -37,8 +38,8 @@ function ChannelRow({ label, value, onChange, accent }: {
   const frac = value / 255;
 
   return (
-    <View style={{ marginBottom: 10 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+    <View style={{ marginBottom: spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs }}>
         <Text style={{ fontSize: 12, fontWeight: '700', color: accent, width: 16 }}>{label}</Text>
         <View
           style={{ flex: 1, height: ROW_H, position: 'relative' }}
@@ -48,7 +49,7 @@ function ChannelRow({ label, value, onChange, accent }: {
           <View style={{
             position: 'absolute', left: 0, right: 0,
             top: (ROW_H - 5) / 2, height: 5, borderRadius: 3,
-            backgroundColor: '#e5e7eb', overflow: 'hidden',
+            backgroundColor: colors.border, overflow: 'hidden',
           }}>
             <View style={{ width: `${frac * 100}%`, height: '100%', borderRadius: 3, backgroundColor: accent }} />
           </View>
@@ -57,15 +58,14 @@ function ChannelRow({ label, value, onChange, accent }: {
             width: THUMB_D, height: ROW_H, marginLeft: -THUMB_D / 2,
             justifyContent: 'center', alignItems: 'center',
           }}>
-            <View style={{
+            <View style={[{
               width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
-              backgroundColor: '#fff', borderWidth: 2, borderColor: accent,
-              shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
-            }} />
+              backgroundColor: colors.surface, borderWidth: 2, borderColor: accent,
+            }, shadows.soft]} />
           </View>
         </View>
         <TextInput
-          style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 4, fontSize: 13, color: '#111827', width: 52, textAlign: 'right' }}
+          style={{ borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, fontSize: 13, color: colors.text, width: 52, textAlign: 'right' }}
           keyboardType="numeric"
           value={text}
           onChangeText={t => {
@@ -136,30 +136,30 @@ export function ColorEditModal({ visible, entry, onSave, onClose, snapshotUri, o
     <>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
         <TouchableOpacity style={ves.backdrop} activeOpacity={1} onPress={onClose}>
-          <TouchableOpacity style={[ves.sheet, { paddingBottom: 20 }]} activeOpacity={1} onPress={() => {}}>
+          <TouchableOpacity style={[ves.sheet, { paddingBottom: spacing.xl }]} activeOpacity={1} onPress={() => {}}>
             <Text style={ves.sheetTitle}>Color Entry</Text>
 
             {/* Preview swatch + pick button */}
-            <View style={{ alignSelf: 'center', marginBottom: 14, gap: 8, alignItems: 'center' }}>
-              <View style={{ width: 64, height: 64, borderRadius: 16, backgroundColor: `rgb(${r},${g},${b})`,
-                borderWidth: 1, borderColor: '#e5e7eb', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 6, elevation: 3 }} />
+            <View style={{ alignSelf: 'center', marginBottom: spacing.lg, gap: spacing.sm, alignItems: 'center' }}>
+              <View style={[{ width: 64, height: 64, borderRadius: radii.lg + 2, backgroundColor: `rgb(${r},${g},${b})`,
+                borderWidth: 1, borderColor: colors.border }, shadows.soft]} />
               <TouchableOpacity onPress={openPick} activeOpacity={0.75}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 5,
-                  backgroundColor: '#0891b2', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Pick from Camera</Text>
+                style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+                  backgroundColor: accents.cyan, borderRadius: radii.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
+                <Text style={{ color: colors.onAccent, fontSize: 12, fontWeight: '700' }}>Pick from Camera</Text>
               </TouchableOpacity>
             </View>
 
-            <ChannelRow label="R" value={r} onChange={setR} accent="#dc2626" />
-            <ChannelRow label="G" value={g} onChange={setG} accent="#16a34a" />
-            <ChannelRow label="B" value={b} onChange={setB} accent="#2563eb" />
+            <ChannelRow label="R" value={r} onChange={setR} accent={colors.danger} />
+            <ChannelRow label="G" value={g} onChange={setG} accent={colors.success} />
+            <ChannelRow label="B" value={b} onChange={setB} accent={colors.accent} />
 
             {/* Tolerance slider */}
             <View style={{ marginTop: 2 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#6b7280', width: 70 }}>Tolerance</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textMuted, width: 70 }}>Tolerance</Text>
                 <TextInput
-                  style={{ flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, fontSize: 13, color: '#111827' }}
+                  style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontSize: 13, color: colors.text }}
                   keyboardType="numeric"
                   value={tolText}
                   onChangeText={t => {
@@ -171,7 +171,7 @@ export function ColorEditModal({ visible, entry, onSave, onClose, snapshotUri, o
                     if (tolText.trim() === '' || isNaN(parseInt(tolText, 10))) setTolText(String(tol));
                   }}
                 />
-                <Text style={{ fontSize: 11, color: '#9ca3af' }}>/ 100</Text>
+                <Text style={{ fontSize: 11, color: colors.textFaint }}>/ 100</Text>
               </View>
               <View
                 style={{ height: TROW_H, position: 'relative', marginBottom: 2 }}
@@ -181,37 +181,36 @@ export function ColorEditModal({ visible, entry, onSave, onClose, snapshotUri, o
                 <View style={{
                   position: 'absolute', left: 0, right: 0,
                   top: (TROW_H - 5) / 2, height: 5, borderRadius: 3,
-                  backgroundColor: '#e5e7eb', overflow: 'hidden',
+                  backgroundColor: colors.border, overflow: 'hidden',
                 }}>
-                  <View style={{ width: `${tolFrac * 100}%`, height: '100%', borderRadius: 3, backgroundColor: '#6b7280' }} />
+                  <View style={{ width: `${tolFrac * 100}%`, height: '100%', borderRadius: 3, backgroundColor: colors.textMuted }} />
                 </View>
                 <View style={{
                   position: 'absolute', left: `${tolFrac * 100}%`, top: 0,
                   width: TTHUMB, height: TROW_H, marginLeft: -TTHUMB / 2,
                   justifyContent: 'center', alignItems: 'center',
                 }}>
-                  <View style={{
+                  <View style={[{
                     width: TTHUMB, height: TTHUMB, borderRadius: TTHUMB / 2,
-                    backgroundColor: '#fff', borderWidth: 2, borderColor: '#6b7280',
-                    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
-                  }} />
+                    backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.textMuted,
+                  }, shadows.soft]} />
                 </View>
               </View>
             </View>
-            <Text style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, marginBottom: 14 }}>
+            <Text style={{ fontSize: 11, color: colors.textFaint, marginTop: 2, marginBottom: spacing.lg }}>
               0 = exact match · 100 = very loose
             </Text>
 
-            <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <TouchableOpacity onPress={onClose} activeOpacity={0.75}
-                style={{ flex: 1, paddingVertical: 9, borderRadius: 8, backgroundColor: '#f3f4f6', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#6b7280' }}>Cancel</Text>
+                style={{ flex: 1, paddingVertical: spacing.sm, borderRadius: radii.md, backgroundColor: colors.background, alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textMuted }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => { if (entry) onSave({ ...entry, r, g, b, tolerance: tol }); onClose(); }}
                 activeOpacity={0.75}
-                style={{ flex: 1, paddingVertical: 9, borderRadius: 8, backgroundColor: '#0891b2', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Save</Text>
+                style={{ flex: 1, paddingVertical: spacing.sm, borderRadius: radii.md, backgroundColor: accents.cyan, alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.onAccent }}>Save</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

@@ -33,6 +33,7 @@ import {
 } from "lucide-react-native";
 import React from "react";
 import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
+import { colors } from "@/src/components/ui/kit";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -183,7 +184,7 @@ export function stepLabel(step: ProgramStep): string {
 
 // ── Step icon ─────────────────────────────────────────────────────────────────
 
-export function StepIcon({ type, size = 16, color = "#6b7280" }: { type: StepType; size?: number; color?: string }) {
+export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: StepType; size?: number; color?: string }) {
   switch (type) {
     case "MoveL":
     case "MoveJ":        return <ArrowRight    size={size} color={color} />;

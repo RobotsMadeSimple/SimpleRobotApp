@@ -8,6 +8,7 @@ import {
 import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
 import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
+import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
@@ -30,13 +31,13 @@ export function InsertDivider({
       <View style={sharedStyles.insertLine} />
       <TouchableOpacity onPress={disabled ? undefined : onPress} activeOpacity={disabled ? 1 : 0.6} hitSlop={4} disabled={disabled}>
         <View style={sharedStyles.insertBtn}>
-          <Plus size={10} color={disabled ? "#d1d5db" : "#2563eb"} />
+          <Plus size={10} color={disabled ? colors.borderStrong : colors.accent} />
         </View>
       </TouchableOpacity>
       {onPaste && (
         <TouchableOpacity onPress={disabled ? undefined : onPaste} activeOpacity={disabled ? 1 : 0.6} hitSlop={4} disabled={disabled}>
           <View style={sharedStyles.insertPasteBtn}>
-            <ClipboardPaste size={10} color={disabled ? "#d1d5db" : "#7c3aed"} />
+            <ClipboardPaste size={10} color={disabled ? colors.borderStrong : accents.purple} />
           </View>
         </TouchableOpacity>
       )}
@@ -80,7 +81,7 @@ export function DragHandle({
 
   return (
     <View {...responder.panHandlers} style={sharedStyles.dragHandle} hitSlop={6}>
-      <GripVertical size={16} color="#d1d5db" />
+      <GripVertical size={16} color={colors.borderStrong} />
     </View>
   );
 }
@@ -173,7 +174,7 @@ export function StepRow({
           {selectMode ? (
             <View style={sharedStyles.dragHandle}>
               <View style={[sharedStyles.selectCheckbox, selected && sharedStyles.selectCheckboxOn]}>
-                {selected && <Check size={13} color="#fff" strokeWidth={3} />}
+                {selected && <Check size={13} color={colors.onAccent} strokeWidth={3} />}
               </View>
             </View>
           ) : (
@@ -204,7 +205,7 @@ export function StepRow({
           {!selectMode && (
             <>
               <TouchableOpacity onPress={onCopy}   hitSlop={8} style={sharedStyles.cardAction} activeOpacity={0.7}>
-                <Copy   size={15} color="#9ca3af" />
+                <Copy   size={15} color={colors.textFaint} />
               </TouchableOpacity>
               <DeleteIconButton onPress={onDelete} size={15} style={sharedStyles.cardAction} />
             </>
@@ -230,7 +231,7 @@ export function StepRow({
               onPress={() => selectMode ? onToggleSelect?.() : onEnterRoutine(step.routineName!)}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>{step.routineName}</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>{step.routineName}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Enter</Text>
                 <ArrowRight size={13} color={theme.iconColor} />
@@ -247,7 +248,7 @@ export function StepRow({
               onPress={() => selectMode ? onToggleSelect?.() : onEnterScope({ kind: "loop", stepId: step.id, label: stepLabel(step) })}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>
                 {innerSteps.length} step{innerSteps.length !== 1 ? "s" : ""} inside
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -267,7 +268,7 @@ export function StepRow({
               activeOpacity={0.7}
             >
               {/* Counts and file live in the detail rows above — this is just the door */}
-              <Text style={{ fontSize: 12, color: "#64748b" }}>Edit toolpath</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>Edit toolpath</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Open</Text>
                 <ArrowRight size={13} color={theme.iconColor} />

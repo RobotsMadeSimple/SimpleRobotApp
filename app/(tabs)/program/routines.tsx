@@ -7,8 +7,13 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import { Box, Repeat2 } from "lucide-react-native";
 import { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { Card, IconTile, accents, colors, spacing } from "@/src/components/ui/kit";
+
+// Routines' brand tint, via the kit's purple accent family (kept consistent
+// with the same purple used for on-device/local programs elsewhere).
+const ROUTINE_TINT = accents.purple;
 
 export default function RoutinesScreen() {
   const allPrograms = useBuiltPrograms();
@@ -33,7 +38,7 @@ export default function RoutinesScreen() {
   return (
     <ProgramListLayout
       title="Routines"
-      accentColor="#7c3aed"
+      accentColor={ROUTINE_TINT}
       addLabel="New Routine"
       onAdd={() => router.push("/program/builder?isRoutine=1")}
       search={search}
@@ -42,7 +47,7 @@ export default function RoutinesScreen() {
       onSortChange={setSort}
       isEmpty={routines.length === 0}
       hasResults={filtered.length > 0}
-      emptyIcon={<Box size={44} color="#d1d5db" />}
+      emptyIcon={<Box size={32} color={colors.textFaint} />}
       emptyTitle="No Routines"
       emptySubtitle="Routines are reusable step sequences that can be called from any program."
       topOverlay={<NotConnectedOverlay />}
@@ -60,39 +65,32 @@ function RoutineRow({ routine: r, onDelete }: { routine: BuiltProgram; onDelete:
   if (r.lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(r.lastUpdatedUnixMs)}`);
 
   return (
-    <TouchableOpacity
-      style={s.card}
+    <Card
       onPress={() => router.push(`/program/builder?name=${encodeURIComponent(r.name)}`)}
-      activeOpacity={0.75}
+      padded={false}
+      style={s.card}
     >
-      <View style={s.cardIcon}>
-        <Repeat2 size={20} color="#7c3aed" />
-      </View>
+      <IconTile size={40} color={accents.purpleSoft}>
+        <Repeat2 size={20} color={ROUTINE_TINT} />
+      </IconTile>
       <View style={s.cardBody}>
         <Text style={s.cardName} numberOfLines={1}>{r.name}</Text>
         {!!r.description && <Text style={s.cardDesc} numberOfLines={2}>{r.description}</Text>}
         <Text style={s.cardMeta}>{metaParts.join("  ·  ")}</Text>
       </View>
       <DeleteIconButton onPress={onDelete} style={s.deleteBtn} />
-    </TouchableOpacity>
+    </Card>
   );
 }
 
 const s = StyleSheet.create({
   card: {
-    backgroundColor: "#fff", borderRadius: 14,
     flexDirection: "row", alignItems: "center",
-    padding: 14, gap: 12,
-    shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 }, elevation: 3,
-  },
-  cardIcon: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: "#f5f3ff", justifyContent: "center", alignItems: "center",
+    padding: spacing.md + 2, gap: spacing.md,
   },
   cardBody: { flex: 1, gap: 2 },
-  cardName: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  cardDesc: { fontSize: 13, color: "#6b7280", lineHeight: 18 },
-  cardMeta: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+  cardName: { fontSize: 15, fontWeight: "700", color: colors.text },
+  cardDesc: { fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  cardMeta: { fontSize: 11, color: colors.textFaint, marginTop: 2 },
   deleteBtn: { padding: 6 },
 });

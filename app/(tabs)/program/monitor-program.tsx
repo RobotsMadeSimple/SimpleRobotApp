@@ -54,20 +54,26 @@ import { Image as ExpoImage } from "expo-image";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
+import { accents, colors, spacing, radii, StatusPill } from "@/src/components/ui/kit";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
 type StatusTheme = { bg: string; text: string; bar: string };
 
+// Note: Running/Finishing/Complete's brighter green bar (#22c55e), Complete's own
+// bg/text shades (#dcfce7/#15803d), Stopping's orange (#fff7ed/#ea580c/#f97316) and
+// Error's bar red (#ef4444) have no matching kit token (kit only defines one shade
+// each of success/warning/danger) — left as literals rather than flattening seven
+// distinct statuses onto three tones.
 const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
-  Ready:     { bg: "#f3f4f6", text: "#6b7280", bar: "#9ca3af" },
-  Starting:  { bg: "#eff6ff", text: "#2563eb", bar: "#3b82f6" },
-  Running:   { bg: "#f0fdf4", text: "#16a34a", bar: "#22c55e" },
-  Finishing: { bg: "#f0fdf4", text: "#16a34a", bar: "#22c55e" },
-  Stopping:  { bg: "#fff7ed", text: "#ea580c", bar: "#f97316" },
-  Stopped:   { bg: "#f3f4f6", text: "#6b7280", bar: "#9ca3af" },
-  Complete:  { bg: "#dcfce7", text: "#15803d", bar: "#22c55e" },
-  Error:     { bg: "#fef2f2", text: "#dc2626", bar: "#ef4444" },
+  Ready:     { bg: colors.background,  text: colors.textMuted, bar: colors.textFaint },
+  Starting:  { bg: colors.accentSoft,  text: colors.accent,    bar: colors.accentBright },
+  Running:   { bg: colors.successSoft, text: colors.success,   bar: "#22c55e" },
+  Finishing: { bg: colors.successSoft, text: colors.success,   bar: "#22c55e" },
+  Stopping:  { bg: "#fff7ed",          text: "#ea580c",        bar: "#f97316" },
+  Stopped:   { bg: colors.background,  text: colors.textMuted, bar: colors.textFaint },
+  Complete:  { bg: "#dcfce7",          text: "#15803d",        bar: "#22c55e" },
+  Error:     { bg: colors.dangerSoft,  text: colors.danger,    bar: "#ef4444" },
 };
 
 // ── Action buttons ────────────────────────────────────────────────────────────
@@ -79,24 +85,24 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   switch (status) {
     case "Ready":
       return [
-        { label: "Start",    bg: "#16a34a", onPress: () => robotClient.startProgram(name) },
+        { label: "Start",    bg: colors.success, onPress: () => robotClient.startProgram(name) },
       ];
     case "Starting":
     case "Running":
     case "Finishing":
       return [
-        { label: "Stop",     bg: "#dc2626", onPress: () => robotClient.stopProgram(name) },
+        { label: "Stop",     bg: colors.danger, onPress: () => robotClient.stopProgram(name) },
       ];
     case "Stopped":
       return [
-        { label: "Continue", bg: "#2563eb", onPress: () => robotClient.startProgram(name) },
-        { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
+        { label: "Continue", bg: colors.accent,        onPress: () => robotClient.startProgram(name) },
+        { label: "Exit",     bg: colors.textSecondary, onPress: () => robotClient.abortProgram(name) },
       ];
     case "Complete":
       return [
         {
           label: "Run Again",
-          bg: "#16a34a",
+          bg: colors.success,
           onPress: () => {
             robotClient.resetProgram(name);
             if (isBuilt) {
@@ -106,11 +112,11 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
             }
           },
         },
-        { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
+        { label: "Exit",     bg: colors.textSecondary, onPress: () => robotClient.abortProgram(name) },
       ];
     case "Error":
       return [
-        { label: "Exit",     bg: "#dc2626", onPress: () => robotClient.abortProgram(name) },
+        { label: "Exit",     bg: colors.danger, onPress: () => robotClient.abortProgram(name) },
       ];
     default:
       return [];
@@ -521,7 +527,7 @@ export default function MonitorProgramScreen() {
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
         <SubPageHeader title={programName} />
         <View style={styles.centerState}>
-          <ActivityIndicator size="large" color="#2563eb" />
+          <ActivityIndicator size="large" color={colors.accent} />
           <Text style={styles.centerTitle}>{programName}</Text>
           <Text style={styles.centerSub}>Loading from controller…</Text>
         </View>
@@ -535,7 +541,7 @@ export default function MonitorProgramScreen() {
         <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
         <SubPageHeader title={programName} />
         <View style={styles.centerState}>
-          <Box size={40} color="#d1d5db" />
+          <Box size={40} color={colors.borderStrong} />
           <Text style={styles.centerTitle}>Program not found</Text>
           <Text style={styles.centerSub}>"{programName}" is not registered in the controller.</Text>
         </View>
@@ -566,7 +572,7 @@ export default function MonitorProgramScreen() {
   // Alert banner derived values
   const hasAlert   = !!(pinnedError || pinnedWarning);
   const isError    = !!pinnedError;
-  const alertColor = isError ? '#dc2626' : '#d97706';
+  const alertColor = isError ? colors.danger : colors.warning;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -597,8 +603,8 @@ export default function MonitorProgramScreen() {
       {hasAlert && (
         <View style={[styles.alertBanner, { backgroundColor: alertColor }]}>
           {isError
-            ? <XCircle size={16} color="#fff" />
-            : <AlertTriangle size={16} color="#fff" />
+            ? <XCircle size={16} color={colors.onAccent} />
+            : <AlertTriangle size={16} color={colors.onAccent} />
           }
           <MarqueeText text={pinnedError || pinnedWarning} style={styles.alertBannerText} />
           <TouchableOpacity
@@ -606,6 +612,7 @@ export default function MonitorProgramScreen() {
             style={styles.alertDismiss}
             activeOpacity={0.7}
           >
+            {/* No token for a translucent-white icon tint; kept literal. */}
             <XCircle size={20} color="rgba(255,255,255,0.75)" />
           </TouchableOpacity>
         </View>
@@ -629,15 +636,9 @@ export default function MonitorProgramScreen() {
               </Text>
             </View>
             {isBackground ? (
-              <View style={[styles.builtChip, styles.bgChip]}>
-                <Layers size={11} color="#16a34a" />
-                <Text style={[styles.builtChipText, { color: "#16a34a" }]}>BACKGROUND</Text>
-              </View>
+              <StatusPill label="BACKGROUND" tone="success" icon={<Layers size={11} color={colors.success} />} />
             ) : isBuilt ? (
-              <View style={styles.builtChip}>
-                <Cpu size={11} color="#2563eb" />
-                <Text style={styles.builtChipText}>BUILT</Text>
-              </View>
+              <StatusPill label="BUILT" tone="accent" icon={<Cpu size={11} color={colors.accent} />} />
             ) : null}
           </View>
 
@@ -704,18 +705,18 @@ export default function MonitorProgramScreen() {
               {bgRunning ? (
                 <ActionButton
                   label="Stop"
-                  icon={<Square size={14} color="#fff" fill="#fff" />}
+                  icon={<Square size={14} color={colors.onAccent} fill={colors.onAccent} />}
                   loading={pending === "Stop"}
-                  style={[styles.actionBtn, { backgroundColor: "#dc2626" }]}
+                  style={[styles.actionBtn, { backgroundColor: colors.danger }]}
                   textStyle={styles.actionBtnText}
                   onPress={() => { setPending("Stop"); robotClient.stopBackgroundProgram(programName).catch(() => {}); }}
                 />
               ) : (
                 <ActionButton
                   label="Start"
-                  icon={<Play size={15} color="#fff" />}
+                  icon={<Play size={15} color={colors.onAccent} />}
                   loading={pending === "Start"}
-                  style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
+                  style={[styles.actionBtn, { backgroundColor: colors.success }]}
                   textStyle={styles.actionBtnText}
                   onPress={() => { setPending("Start"); robotClient.startBackgroundProgram(programName).catch(() => {}); }}
                 />
@@ -726,10 +727,10 @@ export default function MonitorProgramScreen() {
               {isRunnable ? (
                 <ActionButton
                   label={anotherBuiltRunning ? "Another Program Running" : "Run Program"}
-                  icon={<Play size={15} color="#fff" />}
+                  icon={<Play size={15} color={colors.onAccent} />}
                   loading={pending === "Run Program"}
                   disabled={anotherBuiltRunning}
-                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? "#9ca3af" : "#16a34a" }]}
+                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? colors.textFaint : colors.success }]}
                   textStyle={styles.actionBtnText}
                   onPress={() => { setPending("Run Program"); robotClient.executeBuiltProgram(programName).catch(() => {}); }}
                 />
@@ -743,7 +744,7 @@ export default function MonitorProgramScreen() {
                       label={blocked ? "Another Program Running" : btn.label}
                       loading={pending === btn.label}
                       disabled={blocked || (pending !== null && pending !== btn.label)}
-                      style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
+                      style={[styles.actionBtn, { backgroundColor: blocked ? colors.textFaint : btn.bg }]}
                       textStyle={styles.actionBtnText}
                       onPress={() => { setPending(btn.label); btn.onPress(); }}
                     />
@@ -758,20 +759,20 @@ export default function MonitorProgramScreen() {
             <View style={[styles.managementRow, { marginTop: 10 }]}>
               <ActionButton
                 label="Edit"
-                icon={<Edit2 size={15} color="#2563eb" />}
+                icon={<Edit2 size={15} color={colors.accent} />}
                 style={styles.editBtn}
                 textStyle={styles.editBtnText}
-                spinnerColor="#2563eb"
+                spinnerColor={colors.accent}
                 onPress={handleEditPress}
               />
               <ActionButton
                 label="Delete"
-                icon={<Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : "#dc2626"} />}
+                icon={<Trash2 size={15} color={isActivelyRunning ? "#fca5a5" : colors.danger} />}
                 loading={deleting}
                 disabled={isActivelyRunning}
                 style={[styles.deleteBtn, isActivelyRunning && styles.deleteBtnDisabled]}
                 textStyle={[styles.deleteBtnText, isActivelyRunning && styles.deleteBtnTextDisabled]}
-                spinnerColor="#dc2626"
+                spinnerColor={colors.danger}
                 onPress={() =>
                   appAlert(
                     "Delete Program",
@@ -810,7 +811,7 @@ export default function MonitorProgramScreen() {
                   return (
                     <View key={v.name} style={styles.varCell}>
                       <Text style={styles.varCellName} numberOfLines={1}>${v.name}</Text>
-                      <Text style={[styles.varCellValue, v.isBoolean && { color: v.value !== 0 ? "#16a34a" : "#dc2626" }]}
+                      <Text style={[styles.varCellValue, v.isBoolean && { color: v.value !== 0 ? colors.success : colors.danger }]}
                         numberOfLines={1}>{display}</Text>
                     </View>
                   );
@@ -955,13 +956,13 @@ export default function MonitorProgramScreen() {
               <TouchableOpacity style={styles.speedOverrideRow} onPress={() => setSpeedModalOpen(true)} activeOpacity={0.7}>
                 {(() => {
                   const pct   = s?.speedOverridePercent ?? 100;
-                  const color = pct > 100 ? "#dc2626" : pct < 50 ? "#d97706" : "#2563eb";
+                  const color = pct > 100 ? colors.danger : pct < 50 ? colors.warning : colors.accent;
                   return (
                     <>
                       <Gauge size={16} color={color} />
-                      <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Speed Override</Text>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary, flex: 1 }}>Speed Override</Text>
                       <Text style={{ fontSize: 16, fontWeight: "700", color }}>{Math.round(pct)}%</Text>
-                      <ChevronRight size={16} color="#d1d5db" />
+                      <ChevronRight size={16} color={colors.borderStrong} />
                     </>
                   );
                 })()}
@@ -975,17 +976,17 @@ export default function MonitorProgramScreen() {
           <>
             <View style={styles.gapBand} />
             <View style={styles.section}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                <Layers size={12} color="#16a34a" />
-                <Text style={[styles.sectionLabel, { color: "#16a34a" }]}>BACKGROUND PROGRAMS</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.sm }}>
+                <Layers size={12} color={colors.success} />
+                <Text style={[styles.sectionLabel, { color: colors.success }]}>BACKGROUND PROGRAMS</Text>
               </View>
               {(robotStatus.backgroundPrograms ?? []).map(bg => (
-                <View key={bg.name} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb" }}>
+                <View key={bg.name} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
                   <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>{bg.name}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>{bg.name}</Text>
                     {!!bg.currentStep && (
-                      <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 1 }} numberOfLines={1}>{bg.currentStep}</Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }} numberOfLines={1}>{bg.currentStep}</Text>
                     )}
                   </View>
                 </View>
@@ -1000,7 +1001,7 @@ export default function MonitorProgramScreen() {
             <View style={styles.gapBand} />
             <View style={styles.section}>
               <View style={styles.snapshotHeader}>
-                <Camera size={12} color="#9ca3af" />
+                <Camera size={12} color={colors.textFaint} />
                 <Text style={styles.sectionLabel}>VISION DEBUG FRAMES</Text>
               </View>
               {visionSteps.map(({ id, name }) => {
@@ -1020,7 +1021,7 @@ export default function MonitorProgramScreen() {
                       />
                     ) : (
                       <View style={styles.snapshotPlaceholder}>
-                        <Camera size={24} color="#d1d5db" />
+                        <Camera size={24} color={colors.borderStrong} />
                         <Text style={styles.snapshotPlaceholderText}>
                           {isActivelyRunning ? 'Waiting for vision frame…' : 'No debug frame yet'}
                         </Text>
@@ -1097,7 +1098,7 @@ export default function MonitorProgramScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: "#f3f4f6" },
+  root:   { flex: 1, backgroundColor: colors.background },
 
   // ── Wide (desktop) three-column layout ──────────────────────────────────────
   // flexGrow makes the content fill the viewport height (the outer ScrollView has
@@ -1115,50 +1116,43 @@ const styles = StyleSheet.create({
   },
   wideCol: { flex: 1 },
   // Scroll content for the left/middle data columns (ScrollViews on desktop).
-  wideColContent: { paddingBottom: 16 },
+  wideColContent: { paddingBottom: spacing.lg },
 
   // Speed override, merged onto the foot of the position card with a divider above it.
   speedOverrideRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: colors.border,
   },
   scroll: { flex: 1 },
 
   // ── Center states (loading / not-found) ───────────────────────────────────
   centerState: {
     flex: 1, alignItems: "center", justifyContent: "center",
-    gap: 12, padding: 32,
+    gap: spacing.md, padding: spacing.xxl,
   },
-  centerTitle: { fontSize: 17, fontWeight: "700", color: "#111827", textAlign: "center" },
-  centerSub:   { fontSize: 13, color: "#9ca3af", textAlign: "center", lineHeight: 20 },
+  centerTitle: { fontSize: 17, fontWeight: "700", color: colors.text, textAlign: "center" },
+  centerSub:   { fontSize: 13, color: colors.textFaint, textAlign: "center", lineHeight: 20 },
 
   // ── Hero ───────────────────────────────────────────────────────────────────
   heroTopRow: {
-    flexDirection: "row", alignItems: "center", gap: 8,
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
   },
   statusBadge: {
     flexDirection: "row", alignItems: "center",
-    gap: 7, borderWidth: 1, borderRadius: 20,
-    paddingHorizontal: 12, paddingVertical: 5,
+    gap: 7, borderWidth: 1, borderRadius: radii.xl,
+    paddingHorizontal: spacing.md, paddingVertical: 5,
   },
   statusDot:       { width: 7, height: 7, borderRadius: 4 },
   statusBadgeText: { fontSize: 13, fontWeight: "700", letterSpacing: 0.2 },
-  builtChip: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "#dbeafe", borderRadius: 20,
-    paddingHorizontal: 10, paddingVertical: 5,
-  },
-  builtChipText: { fontSize: 11, fontWeight: "700", color: "#2563eb", letterSpacing: 0.5 },
-  bgChip: { backgroundColor: "#dcfce7" },
 
-  heroIdentity: { flexDirection: "row", gap: 16, alignItems: "center" },
+  heroIdentity: { flexDirection: "row", gap: spacing.lg, alignItems: "center" },
   imageWrap: {
-    width: 72, height: 72, borderRadius: 14,
+    width: 72, height: 72, borderRadius: radii.lg,
     overflow: "hidden", borderWidth: 1.5,
   },
   image:        { width: 72, height: 72 },
@@ -1166,47 +1160,47 @@ const styles = StyleSheet.create({
     width: 72, height: 72,
     justifyContent: "center", alignItems: "center",
   },
-  heroInfo:  { flex: 1, gap: 4 },
-  heroName:  { fontSize: 20, fontWeight: "700", color: "#111827", lineHeight: 26 },
-  heroDesc:  { fontSize: 13, color: "#6b7280", lineHeight: 18 },
+  heroInfo:  { flex: 1, gap: spacing.xs },
+  heroName:  { fontSize: 20, fontWeight: "700", color: colors.text, lineHeight: 26 },
+  heroDesc:  { fontSize: 13, color: colors.textMuted, lineHeight: 18 },
 
   // ── Persistent alert banner ────────────────────────────────────────────────
   alertBanner: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 14, paddingVertical: 12,
+    paddingHorizontal: 14, paddingVertical: spacing.md,
     gap: 10,
   },
   alertBannerText: {
-    flex: 1, fontSize: 13, fontWeight: "700", color: "#fff",
+    flex: 1, fontSize: 13, fontWeight: "700", color: colors.onAccent,
     lineHeight: 18,
   },
   alertDismiss: {
-    paddingLeft: 4, flexShrink: 0,
+    paddingLeft: spacing.xs, flexShrink: 0,
   },
 
   // ── Generic section (white bg) ─────────────────────────────────────────────
   section: {
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     paddingHorizontal: 20, paddingVertical: 18,
-    gap: 12,
+    gap: spacing.md,
   },
   sectionLabel: {
-    fontSize: 10, fontWeight: "700", color: "#9ca3af",
+    fontSize: 10, fontWeight: "700", color: colors.textFaint,
     letterSpacing: 1, textTransform: "uppercase",
   },
 
   // ── Gap band (gray strip between major sections) ───────────────────────────
-  gapBand: { height: 10, backgroundColor: "#f3f4f6" },
+  gapBand: { height: 10, backgroundColor: colors.background },
 
   // ── Progress ───────────────────────────────────────────────────────────────
   progressHeader: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
   },
-  progressMeta:     { fontSize: 13, color: "#9ca3af" },
+  progressMeta:     { fontSize: 13, color: colors.textFaint },
   progressMetaBold: { fontWeight: "700" },
   progressMetaMuted:{},
   progressTrack: {
-    height: 10, backgroundColor: "#e5e7eb", borderRadius: 5, overflow: "hidden",
+    height: 10, backgroundColor: colors.border, borderRadius: 5, overflow: "hidden",
   },
   progressFill:  { height: 10, borderRadius: 5 },
   progressPct:   { fontSize: 13, fontWeight: "700", textAlign: "right" },
@@ -1214,14 +1208,15 @@ const styles = StyleSheet.create({
   stepDescRow: {
     borderLeftWidth: 3, borderRadius: 2,
     paddingLeft: 10, paddingVertical: 6,
-    backgroundColor: "#f9fafb", gap: 3,
+    backgroundColor: colors.surfaceMuted, gap: 3,
   },
   stepDescLabel: {
-    fontSize: 9, fontWeight: "700", color: "#9ca3af",
+    fontSize: 9, fontWeight: "700", color: colors.textFaint,
     letterSpacing: 0.8, textTransform: "uppercase",
   },
+  // Between colors.text and colors.textSecondary with no exact token; left literal.
   stepDescText:        { fontSize: 14, color: "#1f2937", lineHeight: 20 },
-  stepDescPlaceholder: { color: "#d1d5db" },
+  stepDescPlaceholder: { color: colors.borderStrong },
 
   // ── Inline actions (inside progress section) ──────────────────────────────
   inlineActions: {
@@ -1231,51 +1226,53 @@ const styles = StyleSheet.create({
     flex: 1, flexDirection: "row", paddingVertical: 13,
     borderRadius: 11, alignItems: "center", justifyContent: "center", gap: 6,
   },
-  actionBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  actionBtnText: { color: colors.onAccent, fontSize: 14, fontWeight: "700" },
 
   // ── Variables ─────────────────────────────────────────────────────────────
   varGrid: {
-    flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6,
+    flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: 6,
   },
   varCell: {
     minWidth: 120, flex: 1,
-    backgroundColor: "#f9fafb", borderRadius: 10,
-    borderWidth: 1, borderColor: "#e5e7eb",
-    paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: colors.surfaceMuted, borderRadius: 10,
+    borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.md, paddingVertical: 10,
     gap: 3,
   },
-  varCellName:  { fontSize: 11, fontWeight: "600", color: "#6b7280" },
-  varCellValue: { fontSize: 18, fontWeight: "700", color: "#111827" },
+  varCellName:  { fontSize: 11, fontWeight: "600", color: colors.textMuted },
+  varCellValue: { fontSize: 18, fontWeight: "700", color: colors.text },
 
-  imgCell: { marginTop: 8, gap: 4 },
+  imgCell: { marginTop: spacing.sm, gap: spacing.xs },
   // Square, because the thing most likely to end up here is a camera frame or a board
   // and neither wants cropping. contentFit="contain" does the rest.
   varImage: {
     width: "100%", aspectRatio: 1, borderRadius: 10,
-    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted,
   },
   varImageEmpty: {
     width: "100%", aspectRatio: 1, borderRadius: 10,
-    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted,
     alignItems: "center", justifyContent: "center",
   },
-  varImageEmptyText: { fontSize: 12, color: "#9ca3af" },
+  varImageEmptyText: { fontSize: 12, color: colors.textFaint },
 
   // ── Management (edit / delete) ─────────────────────────────────────────────
   managementRow: { flexDirection: "row", gap: 10 },
   editBtn: {
-    flex: 1, flexDirection: "row", paddingVertical: 12,
+    flex: 1, flexDirection: "row", paddingVertical: spacing.md,
     borderRadius: 10, alignItems: "center", justifyContent: "center", gap: 6,
-    borderWidth: 1.5, borderColor: "#93c5fd", backgroundColor: "#eff6ff",
+    borderWidth: 1.5, borderColor: colors.accentFaded, backgroundColor: colors.accentSoft,
   },
-  editBtnText: { color: "#2563eb", fontSize: 14, fontWeight: "700" },
+  editBtnText: { color: colors.accent, fontSize: 14, fontWeight: "700" },
   deleteBtn: {
-    flex: 1, flexDirection: "row", paddingVertical: 12,
+    flex: 1, flexDirection: "row", paddingVertical: spacing.md,
     borderRadius: 10, alignItems: "center", justifyContent: "center", gap: 6,
-    borderWidth: 1.5, borderColor: "#fca5a5", backgroundColor: "#fef2f2",
+    // No token for this lighter danger border shade (danger/dangerSoft are the only
+    // danger tokens); left literal.
+    borderWidth: 1.5, borderColor: "#fca5a5", backgroundColor: colors.dangerSoft,
   },
   deleteBtnDisabled: { opacity: 0.5 },
-  deleteBtnText:         { color: "#dc2626", fontSize: 14, fontWeight: "700" },
+  deleteBtnText:         { color: colors.danger, fontSize: 14, fontWeight: "700" },
   deleteBtnTextDisabled: { color: "#fca5a5" },
 
   // ── Position ───────────────────────────────────────────────────────────────
@@ -1288,46 +1285,51 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   coordLabel: {
-    fontSize: 11, fontWeight: "600", color: "#9ca3af",
-    letterSpacing: 0.5, marginBottom: 4,
+    fontSize: 11, fontWeight: "600", color: colors.textFaint,
+    letterSpacing: 0.5, marginBottom: spacing.xs,
   },
   coordValue: {
-    fontSize: 20, fontWeight: "700", color: "#111827",
+    fontSize: 20, fontWeight: "700", color: colors.text,
     fontFamily: "monospace",
   },
 
   // ── Position ───────────────────────────────────────────────────────────────
   coordRowTarget:   { marginTop: 6 },
-  coordLabelTarget: { fontSize: 11, fontWeight: "600", color: "#c4b5fd", letterSpacing: 0.5, marginBottom: 4 },
-  coordValueTarget: { fontSize: 16, fontWeight: "600", color: "#7c3aed", fontFamily: "monospace" },
+  // Purple target-position accent has no kit token; left literal.
+  coordLabelTarget: { fontSize: 11, fontWeight: "600", color: "#c4b5fd", letterSpacing: 0.5, marginBottom: spacing.xs },
+  coordValueTarget: { fontSize: 16, fontWeight: "600", color: accents.purple, fontFamily: "monospace" },
 
   posSubRow: {
     flexDirection: "row", alignItems: "center", flexWrap: "wrap",
-    gap: 4, paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+    gap: spacing.xs, paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   posSubLabel: {
-    fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5,
+    fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5,
   },
   posSubValue: {
-    fontSize: 12, fontWeight: "600", color: "#374151",
+    fontSize: 12, fontWeight: "600", color: colors.textSecondary,
   },
-  posSubPlaceholder: { color: "#d1d5db" },
-  posSubDot: { fontSize: 10, color: "#d1d5db" },
+  posSubPlaceholder: { color: colors.borderStrong },
+  posSubDot: { fontSize: 10, color: colors.borderStrong },
 
   // ── Vision Snapshots ───────────────────────────────────────────────────────
   snapshotHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  snapshotItem: { gap: 8 },
-  snapshotName: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  snapshotItem: { gap: spacing.sm },
+  snapshotName: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   snapshotImage: { width: '100%', height: 200, borderRadius: 8, backgroundColor: '#000' },
   snapshotPlaceholder: {
     height: 120, borderRadius: 8,
-    backgroundColor: '#f9fafb', borderWidth: 1, borderColor: '#e5e7eb',
-    alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
   },
-  snapshotPlaceholderText: { fontSize: 12, color: '#9ca3af' },
+  snapshotPlaceholderText: { fontSize: 12, color: colors.textFaint },
 
   // ── Logs ───────────────────────────────────────────────────────────────────
+  // Deliberate dark terminal look for the log console — distinct from the rest of the
+  // page and outside the light-surface token palette, so these slate shades and the
+  // translucent-white overlays below are left as literals rather than forced onto
+  // colors.* tokens meant for the light UI.
   logsSection: {
     backgroundColor: "#0f172a",
     paddingHorizontal: 16, paddingTop: 14, paddingBottom: 16,
@@ -1342,7 +1344,7 @@ const styles = StyleSheet.create({
   },
   logCountBadge: {
     backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 10,
-    paddingHorizontal: 8, paddingVertical: 2,
+    paddingHorizontal: spacing.sm, paddingVertical: 2,
   },
   logCountText: { fontSize: 11, fontWeight: "600", color: "#64748b" },
   logsScroll: {

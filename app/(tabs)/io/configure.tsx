@@ -1,17 +1,14 @@
-import { useWideContent } from "@/src/components/ui/responsive";
+import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoPinState, PinType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
-  ArrowLeft,
   Check,
   ChevronDown,
-  Cpu,
 } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -19,10 +16,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+
+import { useWideContent } from "@/src/components/ui/responsive";
+import { accents, Button, colors, Input, radii, shadows, spacing } from "@/src/components/ui/kit";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Arduino Nano pin definitions — D0-D13, A0-A5
@@ -73,11 +72,13 @@ const TYPE_OPTIONS: Array<PinType | "Unconfigured"> = [
   "Unconfigured", "Input", "Output", "Neopixel",
 ];
 
+// Pin-type colors: Input/Neopixel map onto kit tokens; Output keeps the
+// purple device-type tint used for outputs across this section (ioShared).
 function typeColor(type: PinType | "Unconfigured") {
-  if (type === "Input")    return { fg: "#2563eb", bg: "#eff6ff" };
-  if (type === "Output")   return { fg: "#7c3aed", bg: "#f5f3ff" };
-  if (type === "Neopixel") return { fg: "#d97706", bg: "#fffbeb" };
-  return { fg: "#9ca3af", bg: "#f3f4f6" };
+  if (type === "Input")    return { fg: colors.accent,  bg: colors.accentSoft };
+  if (type === "Output")   return { fg: accents.purple, bg: accents.purpleSoft };
+  if (type === "Neopixel") return { fg: colors.warning, bg: colors.warningSoft };
+  return { fg: colors.textFaint, bg: colors.background };
 }
 
 function typeLabel(type: PinType | "Unconfigured") {
@@ -169,12 +170,11 @@ function PinRow({
 
       {/* Name input — only shown when configured */}
       {isConfigured ? (
-        <TextInput
+        <Input
           style={styles.nameInput}
           value={edit.name}
           onChangeText={v => onChange({ name: v, dirty: true })}
           placeholder="Label…"
-          placeholderTextColor="#c4c9d4"
         />
       ) : (
         <View style={styles.nameInputPlaceholder} />
@@ -182,13 +182,12 @@ function PinRow({
 
       {/* Pixel count — Neopixel only */}
       {edit.type === "Neopixel" && (
-        <TextInput
+        <Input
           style={styles.pixelInput}
           value={edit.pixelCount}
           onChangeText={v => onChange({ pixelCount: v, dirty: true })}
           keyboardType="numeric"
           placeholder="px"
-          placeholderTextColor="#c4c9d4"
         />
       )}
     </View>
@@ -288,32 +287,22 @@ export default function ConfigurePage() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.container}>
-        {/* ── Top bar ── */}
-        <View style={styles.topBar}>
-          <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
-            <ArrowLeft size={20} color="#111827" />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.topTitle}>Configure Pins</Text>
-            <View style={styles.topSubRow}>
-              <Cpu size={11} color="#9ca3af" />
-              <Text style={styles.topSub}>{nano.name}</Text>
-            </View>
-          </View>
-          <Pressable
-            style={[styles.saveBtn, (saving || dirtyCount === 0) && styles.saveBtnDim]}
-            onPress={saveAll}
-            disabled={saving || dirtyCount === 0}
-          >
-            {saving
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Check size={16} color="#fff" />
-            }
-            <Text style={styles.saveBtnText}>
-              {saving ? "Saving…" : dirtyCount > 0 ? `Save (${dirtyCount})` : "Save"}
-            </Text>
-          </Pressable>
-        </View>
+        <SubPageHeader
+          title="Configure Pins"
+          subtitle={nano.name}
+          right={
+            <Button
+              variant="primary"
+              size="sm"
+              label={dirtyCount > 0 ? `Save (${dirtyCount})` : "Save"}
+              icon={<Check size={16} color={colors.onAccent} />}
+              loading={saving}
+              disabled={dirtyCount === 0}
+              onPress={saveAll}
+              style={{ backgroundColor: "#4f46e5" }}
+            />
+          }
+        />
 
         {/* ── Column headers ── */}
         <View style={[styles.colHeaders, wideContent]}>
@@ -348,80 +337,45 @@ export default function ConfigurePage() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
+  container: { flex: 1, backgroundColor: colors.background },
 
   centred: { flex: 1, justifyContent: "center", alignItems: "center" },
-  notFound: { fontSize: 15, color: "#6b7280" },
-
-  // ── Top bar ────────────────────────────────────────────────────────────────
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  topTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  topSubRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
-  topSub: { fontSize: 11, color: "#9ca3af" },
-  saveBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#4f46e5",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  saveBtnDim: { opacity: 0.4 },
-  saveBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  notFound: { fontSize: 15, color: colors.textMuted },
 
   // ── Column headers ─────────────────────────────────────────────────────────
   colHeaders: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-    backgroundColor: "#f3f4f6",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+    backgroundColor: colors.background,
   },
   colHeader: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.6,
   },
 
   // ── Pin list ───────────────────────────────────────────────────────────────
   listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 32,
-    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xxl,
+    gap: spacing.xs + 2,
   },
 
   // ── Pin row ────────────────────────────────────────────────────────────────
   pinRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radii.sm + 1,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm + 1,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: colors.border,
   },
   pinRowDirty: {
     borderColor: "#a5b4fc",
@@ -430,8 +384,8 @@ const styles = StyleSheet.create({
 
   // ── Pin label ──────────────────────────────────────────────────────────────
   pinLabelWrap: { width: 44 },
-  pinLabel: { fontSize: 13, fontWeight: "700", color: "#111827" },
-  pinNote:  { fontSize: 9, color: "#9ca3af", marginTop: 1 },
+  pinLabel: { fontSize: 13, fontWeight: "700", color: colors.text },
+  pinNote:  { fontSize: 9, color: colors.textFaint, marginTop: 1 },
 
   // ── Type chip + dropdown ───────────────────────────────────────────────────
   typeChip: {
@@ -448,68 +402,59 @@ const styles = StyleSheet.create({
 
   typeModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
   typeMenuCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
     width: 200,
-    paddingVertical: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    paddingVertical: spacing.xs + 2,
+    ...shadows.raised,
   },
   typeMenuItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginHorizontal: 4,
+    gap: spacing.sm + 2,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radii.sm,
+    marginHorizontal: spacing.xs,
   },
   typeMenuChip: {
     width: 36,
     height: 22,
-    borderRadius: 5,
+    borderRadius: radii.sm - 4,
     borderWidth: 1.5,
     justifyContent: "center",
     alignItems: "center",
   },
   typeMenuChipText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.4 },
-  typeMenuLabel: { flex: 1, fontSize: 14, color: "#374151" },
+  typeMenuLabel: { flex: 1, fontSize: 14, color: colors.textSecondary },
   typeMenuDot: { width: 7, height: 7, borderRadius: 4 },
 
   // ── Name input ─────────────────────────────────────────────────────────────
   nameInput: {
     flex: 1,
     minWidth: 0,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 7,
+    minHeight: 0,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs + 2,
     fontSize: 13,
-    color: "#111827",
-    backgroundColor: "#f9fafb",
   },
   nameInputPlaceholder: { flex: 1, minWidth: 0 },
 
   // ── Pixel count ────────────────────────────────────────────────────────────
   pixelInput: {
     width: 42,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: "#fde68a",
-    borderRadius: 7,
+    minHeight: 0,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: spacing.xs + 2,
+    borderColor: colors.warningBorder,
     fontSize: 13,
     color: "#92400e",
-    backgroundColor: "#fffbeb",
+    backgroundColor: colors.warningSoft,
     textAlign: "center",
   },
 });

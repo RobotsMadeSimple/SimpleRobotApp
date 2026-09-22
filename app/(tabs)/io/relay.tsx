@@ -1,4 +1,3 @@
-import { useWideContent } from "@/src/components/ui/responsive";
 import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRelayIO } from "@/src/providers/RobotProvider";
@@ -6,7 +5,10 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { Settings2 } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React from "react";
+import { View } from "react-native";
+
+import { Button, buttonTextColor, Card, colors, Divider, Screen, SectionHeader } from "@/src/components/ui/kit";
 
 export default function RelayPage() {
   const relay     = useRelayIO();
@@ -14,7 +16,6 @@ export default function RelayPage() {
   const relays    = relay?.relays ?? [false, false, false, false];
   const names     = relay?.names  ?? ["Relay 1", "Relay 2", "Relay 3", "Relay 4"];
   const serial    = relay?.serial ?? "";
-  const wideContent = useWideContent();
 
   // Refresh live IO on entry. relayIO is otherwise only updated on connect or
   // after the app's own toggle actions, so a relay changed by a running program
@@ -26,61 +27,37 @@ export default function RelayPage() {
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <SubPageHeader
         title="USB Relay Board"
         subtitle={`DCTTECH 4CH · HID${serial ? ` · ${serial}` : ""} · ${connected ? "Connected" : "Offline"}`}
         right={
-          <TouchableOpacity
+          <Button
+            variant="secondary"
+            size="sm"
+            label="Configure"
+            icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
             onPress={() => router.push("/(tabs)/io/configure-relay")}
-            hitSlop={8}
-            style={styles.configBtn}
-          >
-            <Settings2 size={18} color="#6b7280" />
-          </TouchableOpacity>
+          />
         }
       />
-      <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
-        showsVerticalScrollIndicator={false}
-      >
-        <View>
-          <Text style={styles.sectionLabel}>RELAYS</Text>
-          <View style={styles.sectionBody}>
-            {[0, 1, 2, 3].map((i) => (
+      <Screen>
+        <SectionHeader title="Relays" />
+        <Card padded={false}>
+          {[0, 1, 2, 3].map((i) => (
+            <React.Fragment key={i}>
               <IORow
-                key={i}
                 label={names[i] ?? `Relay ${i + 1}`}
                 sublabel={`Channel ${i + 1}`}
                 type="Output"
                 value={relays[i] ?? false}
-                last={i === 3}
                 onToggle={() => robotClient.setRelay(i + 1, !(relays[i] ?? false))}
               />
-            ))}
-          </View>
-        </View>
-      </ScrollView>
+              {i < 3 && <Divider inset />}
+            </React.Fragment>
+          ))}
+        </Card>
+      </Screen>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", letterSpacing: 0.8,
-    color: "#6b7280", marginBottom: 6, paddingHorizontal: 16,
-  },
-  sectionBody: {
-    backgroundColor: "#fff",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-  },
-  configBtn: {
-    width: 36, height: 36,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-});

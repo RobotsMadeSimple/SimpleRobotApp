@@ -18,12 +18,27 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 
+import {
+  Button,
+  Card,
+  colors,
+  Divider,
+  FormRow,
+  Input,
+  radii,
+  Screen,
+  SectionHeader,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
+
 // ── Camera HTML builder ───────────────────────────────────────────────────────
+// Unchanged: this builds the WebView's live decode/draw loop for the camera's
+// MJPEG-over-WebSocket feed. Not part of the restyle.
 
 function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
   const viewport = zoomable
@@ -49,6 +64,8 @@ function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
 }
 
 // ── CameraWebSocketFeed ───────────────────────────────────────────────────────
+// Unchanged feed/socket logic (web canvas decode loop + native WebView path).
+// Only the placeholder chrome (colors/text) below is restyled.
 
 function CameraWebSocketFeed({ cameraId, onTap }: { cameraId: string; onTap?: () => void }) {
   const [hasFrame, setHasFrame] = useState(false);
@@ -125,6 +142,7 @@ function CameraWebSocketFeed({ cameraId, onTap }: { cameraId: string; onTap?: ()
 }
 
 // ── CameraFullscreenModal ─────────────────────────────────────────────────────
+// Unchanged orientation/feed logic; only the close affordance is restyled.
 
 function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClose: () => void }) {
   useEffect(() => {
@@ -143,7 +161,7 @@ function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClo
           style={{ flex: 1 }}
         />
         <TouchableOpacity style={styles.fullscreenClose} onPress={onClose} activeOpacity={0.8}>
-          <X size={18} color="#fff" />
+          <X size={18} color={colors.onAccent} />
         </TouchableOpacity>
       </View>
     </Modal>
@@ -186,20 +204,22 @@ function ResolutionSheet({
         <View style={styles.sheetHandle} />
         <Text style={styles.sheetTitle}>Select Resolution</Text>
         <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
-          {options.map((r) => {
+          {options.map((r, i) => {
             const sel = !isCustom && String(r.width) === selectedWidth && String(r.height) === selectedHeight;
             return (
-              <TouchableOpacity
-                key={`${r.width}x${r.height}`}
-                style={[styles.sheetRow, styles.rowBorder]}
-                onPress={() => { onSelect(r); onClose(); }}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.sheetRowText, sel && styles.sheetRowTextSelected]}>
-                  {r.width} × {r.height}
-                </Text>
-                {sel && <Check size={16} color="#2563eb" />}
-              </TouchableOpacity>
+              <React.Fragment key={`${r.width}x${r.height}`}>
+                <TouchableOpacity
+                  style={styles.sheetRow}
+                  onPress={() => { onSelect(r); onClose(); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.sheetRowText, sel && styles.sheetRowTextSelected]}>
+                    {r.width} × {r.height}
+                  </Text>
+                  {sel && <Check size={16} color={colors.accent} />}
+                </TouchableOpacity>
+                <Divider />
+              </React.Fragment>
             );
           })}
           <TouchableOpacity
@@ -210,7 +230,7 @@ function ResolutionSheet({
             <Text style={[styles.sheetRowText, isCustom && styles.sheetRowTextSelected]}>
               Custom
             </Text>
-            {isCustom && <Check size={16} color="#2563eb" />}
+            {isCustom && <Check size={16} color={colors.accent} />}
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -245,123 +265,102 @@ function CameraConfigFields({
 
   return (
     <View>
-      <Text style={styles.sectionLabel}>CONFIGURATION</Text>
-      <View style={styles.sectionBody}>
-
-        <View style={[styles.formRow, styles.rowBorder]}>
-          <Text style={styles.formLabel}>Name</Text>
-          <TextInput
-            style={styles.formInput}
+      <SectionHeader title="Configuration" />
+      <Card>
+        <FormRow label="Name">
+          <Input
             value={name}
             onChangeText={setName}
             placeholder="Camera"
-            placeholderTextColor="#9ca3af"
             returnKeyType="done"
-            textAlign="right"
           />
-        </View>
+        </FormRow>
 
-        <View style={[styles.formRow, styles.rowBorder]}>
-          <Text style={styles.formLabel}>Device Index</Text>
-          <TextInput
-            style={styles.formInput}
+        <FormRow label="Device Index" style={styles.fieldGap}>
+          <Input
             value={deviceIndex}
             onChangeText={setDeviceIndex}
             placeholder="0"
-            placeholderTextColor="#9ca3af"
             keyboardType="numeric"
             returnKeyType="done"
-            textAlign="right"
           />
-        </View>
+        </FormRow>
 
         {/* Resolution row — tappable when options exist */}
-        {hasOptions ? (
-          <TouchableOpacity
-            style={[styles.formRow, styles.rowBorder]}
-            onPress={() => setSheetOpen(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.formLabel}>Resolution</Text>
-            <Text style={styles.dropdownValue}>
-              {isCustom ? "Custom" : `${matchedOption!.width} × ${matchedOption!.height}`}
-            </Text>
-            <ChevronDown size={16} color="#6b7280" style={{ marginLeft: 6 }} />
-          </TouchableOpacity>
-        ) : (
-          <View style={[styles.formRow, styles.rowBorder]}>
-            <Text style={styles.formLabel}>Resolution</Text>
+        <FormRow label="Resolution" style={styles.fieldGap}>
+          {hasOptions ? (
+            <TouchableOpacity
+              style={styles.dropdownRow}
+              onPress={() => setSheetOpen(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.dropdownValue}>
+                {isCustom ? "Custom" : `${matchedOption!.width} × ${matchedOption!.height}`}
+              </Text>
+              <ChevronDown size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
+            </TouchableOpacity>
+          ) : (
             <View style={styles.resolutionRow}>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
+              <Input
+                style={styles.resolutionInput}
                 value={width}
                 onChangeText={setWidth}
                 placeholder="640"
-                placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
                 returnKeyType="done"
-                textAlign="right"
+                textAlign="center"
               />
               <Text style={styles.resolutionSep}>×</Text>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
+              <Input
+                style={styles.resolutionInput}
                 value={height}
                 onChangeText={setHeight}
                 placeholder="480"
-                placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
                 returnKeyType="done"
-                textAlign="right"
+                textAlign="center"
               />
             </View>
-          </View>
-        )}
+          )}
+        </FormRow>
 
         {/* Custom W×H inputs — sub-row visually attached to Resolution row above */}
         {hasOptions && isCustom && (
-          <View style={[styles.formRow, styles.rowBorder, styles.customResolutionRow]}>
-            <Text style={styles.formLabel}>W × H</Text>
+          <FormRow label="W × H" style={styles.fieldGap}>
             <View style={styles.resolutionRow}>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
+              <Input
+                style={styles.resolutionInput}
                 value={width}
                 onChangeText={setWidth}
                 placeholder="640"
-                placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
                 returnKeyType="done"
-                textAlign="right"
+                textAlign="center"
               />
               <Text style={styles.resolutionSep}>×</Text>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
+              <Input
+                style={styles.resolutionInput}
                 value={height}
                 onChangeText={setHeight}
                 placeholder="480"
-                placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
                 returnKeyType="done"
-                textAlign="right"
+                textAlign="center"
               />
             </View>
-          </View>
+          </FormRow>
         )}
 
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Target FPS</Text>
-          <TextInput
-            style={styles.formInput}
+        <FormRow label="Target FPS" style={styles.fieldGap}>
+          <Input
             value={targetFps}
             onChangeText={setTargetFps}
             placeholder="15"
-            placeholderTextColor="#9ca3af"
             keyboardType="numeric"
             returnKeyType="done"
-            textAlign="right"
           />
-        </View>
-
-      </View>
+        </FormRow>
+      </Card>
 
       <ResolutionSheet
         visible={sheetOpen}
@@ -378,6 +377,9 @@ function CameraConfigFields({
 }
 
 // ── CameraDetailPage ──────────────────────────────────────────────────────────
+// Two-pane on wide screens (settings left, live feed right) — kept as a manual
+// useIsWide/useWideContent screen per the kit README (Screen only supports a
+// single scrolling column).
 
 function CameraDetailPage({ camera }: { camera: CameraState }) {
   const wideContent = useWideContent();
@@ -406,7 +408,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       {fullscreen && Platform.OS !== 'web' && (
         <CameraFullscreenModal camera={camera} onClose={() => setFullscreen(false)} />
       )}
@@ -433,14 +435,11 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
               targetFps={targetFps}     setTargetFps={setTargetFps}
               savedResolutions={camera.supportedResolutions ?? []}
             />
-            <TouchableOpacity
-              style={[styles.saveBtn, saving && { opacity: 0.5 }]}
+            <Button
+              label={saving ? "Saving…" : "Save"}
+              loading={saving}
               onPress={save}
-              disabled={saving}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.saveBtnText}>{saving ? "Saving…" : "Save"}</Text>
-            </TouchableOpacity>
+            />
           </>
         );
 
@@ -451,7 +450,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
             <View style={styles.camWideRow}>
               <ScrollView
                 style={{ flex: 1 }}
-                contentContainerStyle={{ paddingTop: 20, paddingBottom: 40, gap: 20 }}
+                contentContainerStyle={styles.camWideScrollContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
@@ -463,7 +462,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
         }
         return (
           <ScrollView
-            contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
+            contentContainerStyle={[styles.scrollContent, wideContent]}
             showsVerticalScrollIndicator={false}
           >
             {feed}
@@ -478,7 +477,6 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
 // ── NewCameraPage ─────────────────────────────────────────────────────────────
 
 function NewCameraPage() {
-  const wideContent = useWideContent();
   const [name,        setName]        = useState("Camera");
   const [deviceIndex, setDeviceIndex] = useState("0");
   const [width,       setWidth]       = useState("640");
@@ -505,12 +503,9 @@ function NewCameraPage() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <SubPageHeader title="New Camera" subtitle="USB Camera" />
-      <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wideContent]}
-        showsVerticalScrollIndicator={false}
-      >
+      <Screen>
         <CameraConfigFields
           name={name}               setName={setName}
           deviceIndex={deviceIndex} setDeviceIndex={setDeviceIndex}
@@ -520,15 +515,12 @@ function NewCameraPage() {
           savedResolutions={[]}
         />
 
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && { opacity: 0.5 }]}
+        <Button
+          label={saving ? "Adding…" : "Add Camera"}
+          loading={saving}
           onPress={add}
-          disabled={saving}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.saveBtnText}>{saving ? "Adding…" : "Add Camera"}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        />
+      </Screen>
     </View>
   );
 }
@@ -550,7 +542,7 @@ export default function CamerasPage() {
     const camera = cameras.find(c => c.id === cameraId) ?? null;
     if (!camera) {
       return (
-        <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
           <SubPageHeader title="Camera" subtitle="Loading…" />
         </View>
       );
@@ -564,53 +556,28 @@ export default function CamerasPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", letterSpacing: 0.8,
-    color: "#6b7280", marginBottom: 6, paddingHorizontal: 16,
-  },
-  sectionBody: {
-    backgroundColor: "#fff",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-  },
+  scrollContent: { paddingTop: spacing.lg + 8, paddingBottom: spacing.xxl + 8, paddingHorizontal: spacing.lg, gap: spacing.xl },
+  fieldGap: { marginTop: spacing.md + 2 },
 
-  formRow: {
+  dropdownRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
-    minHeight: 48,
   },
-  rowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  formLabel: { fontSize: 15, color: "#111827", flex: 1 },
-  formInput: {
-    fontSize: 15,
-    color: "#374151",
-    flex: 1,
-    paddingVertical: 0,
-  },
+  dropdownValue: { fontSize: 15, color: colors.textSecondary },
 
-  resolutionRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  resolutionRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
   resolutionInput: { flex: 0, width: 52 },
-  resolutionSep: { fontSize: 14, color: "#6b7280" },
-
-  dropdownValue: { fontSize: 15, color: "#374151" },
-  customResolutionRow: { backgroundColor: "#f9fafb", paddingLeft: 28 },
+  resolutionSep: { fontSize: 14, color: colors.textMuted },
 
   sheetBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: colors.overlay,
   },
   sheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 32,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.md + 2,
+    borderTopRightRadius: radii.md + 2,
+    paddingBottom: spacing.xl,
     maxHeight: "60%",
   },
   sheetHandle: {
@@ -618,60 +585,51 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#d1d5db",
-    marginTop: 10,
-    marginBottom: 4,
+    backgroundColor: colors.borderStrong,
+    marginTop: spacing.sm + 2,
+    marginBottom: spacing.xs,
   },
   sheetTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#6b7280",
+    ...type.sectionLabel,
     textAlign: "center",
-    paddingVertical: 10,
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
+    paddingVertical: spacing.sm + 2,
   },
   sheetRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
+    paddingHorizontal: spacing.xl - 4,
+    paddingVertical: spacing.md + 2,
+    backgroundColor: colors.surface,
   },
-  sheetRowText: { fontSize: 16, color: "#111827", flex: 1 },
-  sheetRowTextSelected: { color: "#2563eb", fontWeight: "600" },
-
-  saveBtn: {
-    marginHorizontal: 16,
-    backgroundColor: "#2563eb",
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-  saveBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
-
+  sheetRowText: { fontSize: 16, color: colors.text, flex: 1 },
+  sheetRowTextSelected: { color: colors.accent, fontWeight: "600" },
 
   cameraFeed: {
     width: "100%",
     aspectRatio: 4 / 3,
     backgroundColor: "#000",
+    borderRadius: radii.lg,
+    overflow: "hidden",
   },
   feedPlaceholder: {
     width: "100%",
     aspectRatio: 4 / 3,
-    backgroundColor: "#111827",
+    backgroundColor: colors.text,
     justifyContent: "center",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
+    borderRadius: radii.lg,
+    overflow: "hidden",
   },
-  feedPlaceholderText: { fontSize: 13, color: "#6b7280" },
+  feedPlaceholderText: { fontSize: 13, color: colors.textMuted },
 
   // Wide (desktop) camera edit layout: frame left, settings right.
   camWideRow: { flex: 1, flexDirection: "row" },
+  camWideScrollContent: { paddingTop: spacing.lg + 4, paddingBottom: spacing.xxl, gap: spacing.xl, paddingHorizontal: spacing.lg },
   camFeedPane: {
     width: "48%", minWidth: 380, maxWidth: 820,
-    padding: 16,
-    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e7eb",
+    padding: spacing.lg,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border,
   },
 
   fullscreenClose: {
