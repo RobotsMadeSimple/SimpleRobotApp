@@ -414,29 +414,35 @@ export function ExpressionField({
 
   return (
     <View>
-      <TouchableOpacity
-        style={[style, s.fieldBox]}
-        onPress={() => setOpen(true)}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel={`${title}: ${shown || "empty"}. Opens the expression editor.`}
-      >
-        <Text
-          style={[s.fieldText, !shown && { color: colors.textFaint }, shown && isExpr && { color: accent }]}
-          numberOfLines={1}
+      {/* The clear × is a SIBLING of the open-editor touchable, not a child —
+          nesting role="button" inside role="button" renders <button><button>
+          on web (react-native-web maps the role to a real element), which
+          React DOM rejects as invalid nesting at hydration. */}
+      <View style={[style, s.fieldBox]}>
+        <TouchableOpacity
+          style={s.fieldMain}
+          onPress={() => setOpen(true)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`${title}: ${shown || "empty"}. Opens the expression editor.`}
         >
-          {shown || placeholder || "0"}
-        </Text>
-        {/* The affordance: faint on a plain value (this field can take an expression),
-            in the accent once it holds one. */}
-        <Text style={[s.fx, { color: isExpr && shown ? accent : colors.textFaint }]}>fx</Text>
+          <Text
+            style={[s.fieldText, !shown && { color: colors.textFaint }, shown && isExpr && { color: accent }]}
+            numberOfLines={1}
+          >
+            {shown || placeholder || "0"}
+          </Text>
+          {/* The affordance: faint on a plain value (this field can take an expression),
+              in the accent once it holds one. */}
+          <Text style={[s.fx, { color: isExpr && shown ? accent : colors.textFaint }]}>fx</Text>
+        </TouchableOpacity>
         {clearable && shown.length > 0 && (
           <TouchableOpacity onPress={() => onChange("")} hitSlop={8} activeOpacity={0.7} style={s.fieldClear}
             accessibilityRole="button" accessibilityLabel={`Clear ${title}`}>
             <X size={13} color={colors.textFaint} />
           </TouchableOpacity>
         )}
-      </TouchableOpacity>
+      </View>
 
       <ExpressionEditorModal
         visible={open}
@@ -569,6 +575,8 @@ const s = StyleSheet.create({
 
   // The field that opens the editor
   fieldBox:   { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  // The pressable part of the field row (text + fx); the clear × sits beside it.
+  fieldMain:  { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm },
   fieldText:  { flex: 1, fontSize: 14, color: colors.text },
   fx:         { fontSize: 12, fontWeight: "700", fontStyle: "italic" },
   fieldClear: { paddingLeft: 2 },
