@@ -777,6 +777,14 @@ export type ProgramStep = {
   id: string;
   type: StepType;
   name?: string;
+  /**
+   * `false` = the executor skips this step (still counted for progress, logged as
+   * "[Skipped — disabled] …"). Absent or `true` runs it, so the editor only ever
+   * writes `false` and clears the field otherwise.
+   */
+  enabled?: boolean;
+  /** Free text shown under the step in the editor. Never executed. */
+  comment?: string;
   pointName?: string;
   speed?: number;
   accel?: number;
@@ -1005,6 +1013,73 @@ export type BuiltProgram = {
   isBackground?: boolean;
   /** When true, all running background programs are stopped when this program finishes. */
   killBackgroundOnStop?: boolean;
+};
+
+// ── Program-editor services (docs/expressions-and-variables.md) ──────────────
+
+export type ValidationSeverity = "error" | "warning";
+
+/** Codes the controller documents today. Others may appear later, so `code` stays a string. */
+export type KnownValidationCode =
+  | "unknownPoint" | "unknownTool" | "unknownLocal" | "unknownRoutine" | "unknownVisionProgram"
+  | "unknownGrid" | "unknownStack" | "unknownLabel" | "duplicateLabel" | "unknownVariable"
+  | "unknownProperty" | "expressionSyntax" | "emptyLoop" | "emptyBranch" | "missingField"
+  | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable";
+
+/** One problem reported by `ValidateBuiltProgram`. */
+export type ValidationProblem = {
+  /** The step the problem is on. Empty for program-level problems (e.g. unusedVariable). */
+  stepId: string;
+  /** Human-readable location of the step in the tree, as the controller renders it. */
+  stepPath: string;
+  /** The step field at fault, when the problem is about one field. */
+  field?: string;
+  severity: ValidationSeverity;
+  code: KnownValidationCode | (string & {});
+  message: string;
+};
+
+export type ExpressionVariableKind = "number" | "boolean" | "string" | "image" | "list";
+
+export type ExpressionSymbolVariable = {
+  name: string;
+  kind: ExpressionVariableKind;
+  elementType?: ListElementType;
+  isGlobal: boolean;
+  isPersistent: boolean;
+  value?: number | string | boolean | null;
+};
+
+/** A read-only system variable such as `robot.x` (stored without the `$`). */
+export type ExpressionProperty = { name: string; description: string; type: string };
+export type ExpressionFunction = { name: string; signature: string; description: string };
+/** An IO name such as `stb.in1` (stored without the `$`). */
+export type ExpressionIoSymbol = { name: string; description: string };
+
+/** What `GetExpressionSymbols` answers: everything an expression may reference. */
+export type ExpressionSymbols = {
+  variables: ExpressionSymbolVariable[];
+  properties: ExpressionProperty[];
+  functions: ExpressionFunction[];
+  io: ExpressionIoSymbol[];
+};
+
+/** Result of `EvaluateExpression`. `ok: false` carries the evaluator's error text. */
+export type ExpressionEvaluation = {
+  ok: boolean;
+  value?: number;
+  error?: string;
+  isBoolean?: boolean;
+};
+
+/** One stored revision of a built program, newest first from `GetBuiltProgramRevisions`. */
+export type ProgramRevision = {
+  /** The unix-ms file stem, kept as a string so it round-trips exactly. */
+  id: string;
+  savedUnixMs: number;
+  stepCount: number;
+  variableCount: number;
+  note?: string;
 };
 
 export type BackgroundProgramStatus = {

@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CameraState, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CameraState, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -890,8 +890,9 @@ export class RobotConnectService {
     return this.sendCommand("GetBuiltPrograms");
   }
 
-  public saveBuiltProgram(program: BuiltProgram) {
-    return this.sendCommand("SaveBuiltProgram", {
+  /** The wire shape of a program, shared by SaveBuiltProgram and ValidateBuiltProgram. */
+  private builtProgramParams(program: BuiltProgram) {
+    return {
       id:                  program.id ?? '',
       name:                program.name,
       description:         program.description,
@@ -900,11 +901,117 @@ export class RobotConnectService {
       isRoutine:           program.isRoutine           ?? false,
       isBackground:        program.isBackground        ?? false,
       killBackgroundOnStop: program.killBackgroundOnStop ?? true,
-    });
+    };
+  }
+
+  public saveBuiltProgram(program: BuiltProgram) {
+    return this.sendCommand("SaveBuiltProgram", this.builtProgramParams(program));
   }
 
   public deleteBuiltProgram(name: string) {
     return this.sendCommand("DeleteBuiltProgram", { name });
+  }
+
+  // ── Program-editor services (docs/expressions-and-variables.md) ───────────
+  //
+  // Newer controller commands. An older controller answers them with
+  // ok:false / "unknownCommand", which surfaces here as UnsupportedCommandError
+  // so a caller can hide the feature instead of reporting a failure.
+
+  /**
+   * Send a command and return its ACK, turning `ok: false` into a thrown error.
+   * Works whether sendCommand resolves failed ACKs or rejects them.
+   */
+  private async request(command: string, params: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>> {
+    let data: unknown;
+    try {
+      data = await this.sendCommand(command, params, timeoutMs);
+    } catch (e) {
+      throw toCommandError(command, e);
+    }
+    const ack = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+    if (ack.ok === false) throw toCommandError(command, ack.error);
+    return ack;
+  }
+
+  /** Check a (possibly unsaved) program. Resolves the problem list; empty = clean. */
+  public async validateBuiltProgram(program: BuiltProgram): Promise<ValidationProblem[]> {
+    const ack = await this.request("ValidateBuiltProgram", { program: this.builtProgramParams(program) });
+    return wireArray(ack.problems).map(normalizeProblem).filter((p): p is ValidationProblem => p !== null);
+  }
+
+  /**
+   * Evaluate an expression against the named running program (or globals + IO +
+   * properties when none). An evaluation error is a normal result (`ok: false`);
+   * only an unsupported command or a transport failure throws.
+   */
+  public async evaluateExpression(expression: string, programName?: string): Promise<ExpressionEvaluation> {
+    try {
+      const ack = await this.request("EvaluateExpression", programName ? { expression, programName } : { expression });
+      const value = typeof ack.value === "number" ? ack.value : Number(ack.value);
+      return Number.isFinite(value) && ack.value !== null && ack.value !== undefined
+        ? { ok: true, value, isBoolean: ack.isBoolean === true }
+        : { ok: false, error: typeof ack.error === "string" && ack.error ? ack.error : "No value" };
+    } catch (e) {
+      if (e instanceof CommandFailedError) return { ok: false, error: e.message };
+      throw e;
+    }
+  }
+
+  /** Variables, read-only properties, functions and IO names an expression may use. */
+  public async getExpressionSymbols(programName?: string): Promise<ExpressionSymbols> {
+    const ack = await this.request("GetExpressionSymbols", programName ? { programName } : {});
+    return {
+      variables: wireArray(ack.variables).filter(isNamed).map(v => ({
+        name:         stripSigil(v.name),
+        kind:         VARIABLE_KINDS.find(k => k === v.kind) ?? "number",
+        elementType:  ELEMENT_TYPES.find(k => k === v.elementType),
+        isGlobal:     v.isGlobal === true,
+        isPersistent: v.isPersistent === true,
+        value:        typeof v.value === "number" || typeof v.value === "string" || typeof v.value === "boolean" ? v.value : undefined,
+      })),
+      properties: wireArray(ack.properties).filter(isNamed).map(p => ({
+        name: stripSigil(p.name), description: str(p.description), type: str(p.type),
+      })),
+      functions: wireArray(ack.functions).filter(isNamed).map(f => ({
+        name: f.name, signature: str(f.signature) || `${f.name}()`, description: str(f.description),
+      })),
+      io: wireArray(ack.io).filter(isNamed).map(i => ({
+        name: stripSigil(i.name), description: str(i.description),
+      })),
+    };
+  }
+
+  /** Stored revisions of a program, newest first. */
+  public async getBuiltProgramRevisions(name: string): Promise<ProgramRevision[]> {
+    const ack = await this.request("GetBuiltProgramRevisions", { name });
+    return wireArray(ack.revisions)
+      .filter(r => r.id !== undefined && r.id !== null && r.id !== "")
+      .map(r => ({
+        id:            String(r.id),
+        savedUnixMs:   Number(r.savedUnixMs ?? r.id) || 0,
+        stepCount:     Number(r.stepCount) || 0,
+        variableCount: Number(r.variableCount) || 0,
+        note:          typeof r.note === "string" && r.note ? r.note : undefined,
+      }))
+      .sort((a, b) => b.savedUnixMs - a.savedUnixMs);
+  }
+
+  /** The full content of one stored revision. */
+  public async getBuiltProgramRevision(name: string, id: string): Promise<BuiltProgram> {
+    const ack = await this.request("GetBuiltProgramRevision", { name, id });
+    return wireProgram(ack.program, name);
+  }
+
+  /**
+   * Make a stored revision the current program (the controller records the
+   * replaced content as a new revision first). Refreshes the program list and
+   * resolves the restored program.
+   */
+  public async restoreBuiltProgramRevision(name: string, id: string): Promise<BuiltProgram> {
+    const ack = await this.request("RestoreBuiltProgramRevision", { name, id });
+    this.getBuiltPrograms().catch(() => {});
+    return wireProgram(ack.program, name);
   }
 
   // ── Grid repository ───────────────────────────────────────────────────────
@@ -1411,6 +1518,96 @@ export class RobotConnectService {
     const base = this.httpBaseUrl();
     return base ? `${base}/dxf/${encodeURIComponent(name)}` : null;
   }
+}
+
+// ── Wire helpers for the program-editor commands ─────────────────────────────
+
+/** The controller does not know the command (an older build). Hide the feature. */
+export class UnsupportedCommandError extends Error {
+  constructor(public readonly command: string) {
+    super(`${command} is not supported by this controller`);
+    this.name = "UnsupportedCommandError";
+  }
+}
+
+/** The controller ran the command and reported `ok: false` with this message. */
+export class CommandFailedError extends Error {
+  constructor(public readonly command: string, message: string) {
+    super(message);
+    this.name = "CommandFailedError";
+  }
+}
+
+export function isUnsupportedCommand(e: unknown): e is UnsupportedCommandError {
+  return e instanceof UnsupportedCommandError;
+}
+
+// sendCommand's own rejections. Those say nothing about whether the command
+// exists, so they stay plain errors rather than CommandFailedError.
+const TRANSPORT_FAILURE = /^(Not connected|Command ".*" timed out)$/;
+
+function toCommandError(command: string, reason: unknown): Error {
+  if (reason instanceof Error) return reason;
+  const text = typeof reason === "string" ? reason : reason == null ? "" : String(reason);
+  if (/unknown\s*command/i.test(text)) return new UnsupportedCommandError(command);
+  if (TRANSPORT_FAILURE.test(text)) return new Error(text);
+  return new CommandFailedError(command, text || `${command} failed`);
+}
+
+const VARIABLE_KINDS = ["number", "boolean", "string", "image", "list"] as const;
+const ELEMENT_TYPES  = ["Number", "Boolean", "Point", "Record"] as const;
+
+type WireRecord = Record<string, unknown>;
+
+/** Arrays may arrive as JSON strings, the way GetBuiltPrograms sends its list. */
+function wireArray(v: unknown): WireRecord[] {
+  let parsed = v;
+  if (typeof v === "string") {
+    try { parsed = JSON.parse(v); } catch { return []; }
+  }
+  return Array.isArray(parsed)
+    ? parsed.filter((x): x is WireRecord => !!x && typeof x === "object")
+    : [];
+}
+
+function isNamed(r: WireRecord): r is WireRecord & { name: string } {
+  return typeof r.name === "string" && r.name.length > 0;
+}
+
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/** Symbols are stored without their `$` whichever way the controller spells them. */
+const stripSigil = (name: string): string => name.replace(/^\$/, "");
+
+function normalizeProblem(r: WireRecord): ValidationProblem | null {
+  const message = str(r.message);
+  if (!message) return null;
+  // The contract does not pin stepPath's shape; accept a string or an array of segments.
+  const path = Array.isArray(r.stepPath) ? r.stepPath.map(String).join(" › ") : str(r.stepPath);
+  return {
+    stepId:   r.stepId == null ? "" : String(r.stepId),
+    stepPath: path,
+    field:    str(r.field) || undefined,
+    severity: r.severity === "warning" ? "warning" : "error",
+    code:     str(r.code),
+    message,
+  };
+}
+
+function wireProgram(v: unknown, fallbackName: string): BuiltProgram {
+  let parsed = v;
+  if (typeof v === "string") {
+    try { parsed = JSON.parse(v); } catch { parsed = null; }
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("The controller returned no program");
+  const p = parsed as Partial<BuiltProgram>;
+  return {
+    ...p,
+    name:              p.name ?? fallbackName,
+    description:       p.description ?? "",
+    steps:             Array.isArray(p.steps) ? p.steps : [],
+    lastUpdatedUnixMs: p.lastUpdatedUnixMs ?? Date.now(),
+  };
 }
 
 
