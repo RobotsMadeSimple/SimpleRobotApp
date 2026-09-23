@@ -16,6 +16,8 @@ import {
   ClipboardPaste,
   Copy,
   Cpu,
+  Eye,
+  EyeOff,
   ImagePlus,
   Plus,
   Repeat,
@@ -56,6 +58,7 @@ import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
 import { EditorToolbar, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
+import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
 import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
 /**
@@ -361,6 +364,23 @@ export default function BuilderScreen() {
       });
       if (firstIdx < 0) rebuilt.push(loop);
       return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
+    });
+    exitSelect();
+  }
+
+  // Every selected step is already off → the action switches them back on;
+  // otherwise it switches them all off.
+  function selectionAllDisabled(): boolean {
+    const sel = selectedInOrder();
+    return sel.length > 0 && sel.every(s => !isStepEnabled(s));
+  }
+
+  function setSelectedEnabled(enabled: boolean) {
+    if (selectedIds.length === 0) return;
+    setSteps(prev => {
+      const scoped = getStepsAtScope(prev, scopeStackRef.current)
+        .map(s => selectedIds.includes(s.id) ? withStepEnabled(s, enabled) : s);
+      return setStepsAtScope(prev, scopeStackRef.current, scoped);
     });
     exitSelect();
   }
@@ -1428,6 +1448,19 @@ export default function BuilderScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={() => setSelectedEnabled(selectionAllDisabled())}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            {selectionAllDisabled()
+              ? <Eye size={16} color={colors.textSecondary} />
+              : <EyeOff size={16} color={colors.textSecondary} />}
+            <Text style={[styles.selectActionText, { color: colors.textSecondary }]}>
+              {selectionAllDisabled() ? "Enable" : "Disable"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
             onPress={deleteSelected}
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
@@ -1475,7 +1508,7 @@ export default function BuilderScreen() {
                     <Text style={styles.sectionLabel}>STEPS</Text>
                     <Text style={styles.sectionCount}>{currentSteps.length}</Text>
                     <View style={{ flex: 1 }} />
-                    <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, wrap them in a loop, or save them as a routine." />
+                    <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, disable, wrap them in a loop, or save them as a routine." />
                   </View>
                 )}
                 {stepsSection}
@@ -1531,7 +1564,7 @@ export default function BuilderScreen() {
           <Text style={styles.sectionLabel}>STEPS</Text>
           <Text style={styles.sectionCount}>{currentSteps.length}</Text>
           <View style={{ flex: 1 }} />
-          <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, wrap them in a loop, or save them as a routine." />
+          <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, disable, wrap them in a loop, or save them as a routine." />
         </View>
         {stepsSection}
       </ScrollView>

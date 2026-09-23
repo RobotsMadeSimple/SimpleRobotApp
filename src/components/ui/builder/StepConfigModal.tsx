@@ -61,6 +61,7 @@ import { SaveImageFields } from "./SaveImageFields";
 import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType, VariableEditModal } from "./VariableEditModal";
+import { StepMetaFields } from "./StepMetaFields";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
 
@@ -3095,6 +3096,9 @@ export function StepConfigModal({
                   ) : (
                     renderMainBody()
                   )}
+
+                  {/* Enabled + comment — every step type */}
+                  <StepMetaFields step={draft!} onChange={setDraft} />
                 </>
               )}
             </ScrollView>

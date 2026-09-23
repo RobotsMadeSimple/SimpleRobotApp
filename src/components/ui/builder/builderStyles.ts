@@ -272,10 +272,15 @@ export const sharedStyles = StyleSheet.create({
 
   stepCardText:   { flex: 1, minWidth: 0, gap: 1 },
   stepCardType:   { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
+  stepCardTypeRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   stepCardName:   { fontSize: 14, fontWeight: "600", color: colors.text },
   stepCardDetail: { fontSize: 12, color: colors.textMuted },
   stepCardStatus: { fontSize: 12, color: colors.accentFaded, fontStyle: "italic" },
   cardAction:     { padding: 4 },
+
+  // A disabled step (enabled: false) — dimmed, title struck through.
+  stepCardDisabled: { opacity: 0.6 },
+  stepCardStruck:   { textDecorationLine: "line-through" },
 
   // Multi-select mode
   stepCardSelected: {

@@ -12,6 +12,7 @@ import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
+import { DisabledPill, StepComment } from "./StepAnnotations";
 
 // ── Insert divider ────────────────────────────────────────────────────────────
 
@@ -155,6 +156,10 @@ export function StepRow({
   const category      = categoryForStep(step.type);
   const detail        = stepDetail(step);
   const detailLines   = detail ? detail.split("\n") : [];
+  // Disabled steps stay fully editable and draggable; they only read as switched off.
+  const disabled      = step.enabled === false;
+  const showName      = !(isSetSpeed || isIfCondition) || !!step.name;
+  const strike        = disabled ? sharedStyles.stepCardStruck : null;
 
   return (
     <View
@@ -165,7 +170,7 @@ export function StepRow({
         isDropBelow    && sharedStyles.dropTargetItemBottom,
       ]}
     >
-      <View style={[sharedStyles.stepCard, { borderLeftColor: category.color }, selected && sharedStyles.stepCardSelected]}>
+      <View style={[sharedStyles.stepCard, { borderLeftColor: category.color }, selected && sharedStyles.stepCardSelected, disabled && sharedStyles.stepCardDisabled]}>
 
         {/* Card header row */}
         <TouchableOpacity
@@ -190,11 +195,14 @@ export function StepRow({
           </View>
 
           <View style={sharedStyles.stepCardText}>
-            <Text style={[sharedStyles.stepCardType, { color: theme.accent }]}>
-              {index + 1} · {theme.label.toUpperCase()}
-            </Text>
-            {(!(isSetSpeed || isIfCondition) || !!step.name) && (
-              <Text style={sharedStyles.stepCardName} numberOfLines={1}>
+            <View style={sharedStyles.stepCardTypeRow}>
+              <Text style={[sharedStyles.stepCardType, { color: theme.accent }, !showName && strike]}>
+                {index + 1} · {theme.label.toUpperCase()}
+              </Text>
+              {disabled && <DisabledPill />}
+            </View>
+            {showName && (
+              <Text style={[sharedStyles.stepCardName, strike]} numberOfLines={1}>
                 {step.name || detailLines[0] || step.type}
               </Text>
             )}
@@ -204,6 +212,7 @@ export function StepRow({
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
               <Text style={sharedStyles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
             )}
+            {!!step.comment && <StepComment text={step.comment} />}
           </View>
 
           {!selectMode && (
