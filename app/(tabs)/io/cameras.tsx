@@ -3,6 +3,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraState } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { CameraLiveFeed, makeCameraHtml } from "@/src/components/vision/CameraLiveFeed";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
@@ -38,111 +39,6 @@ import {
   StatusPill,
   type,
 } from "@/src/components/ui/kit";
-
-// ── Camera HTML builder ───────────────────────────────────────────────────────
-// Unchanged: this builds the WebView's live decode/draw loop for the camera's
-// MJPEG-over-WebSocket feed. Not part of the restyle.
-
-function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
-  const viewport = zoomable
-    ? 'width=device-width,initial-scale=1,maximum-scale=10,user-scalable=yes'
-    : 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no';
-  const tapScript = zoomable ? '' :
-    `document.addEventListener('click',function(){try{window.ReactNativeWebView.postMessage('tap');}catch(e){}});`;
-  return `<!DOCTYPE html><html>
-<head>
-  <meta name="viewport" content="${viewport}">
-  <style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}canvas{width:100%;height:100%;object-fit:contain;display:block}</style>
-</head>
-<body>
-  <canvas id="c"></canvas>
-  <script>
-    var c=document.getElementById('c'),x=c.getContext('2d'),dec=false,pend=null;
-    function draw(src){dec=true;var i=new Image();i.onload=function(){if(c.width!==i.naturalWidth||c.height!==i.naturalHeight){c.width=i.naturalWidth;c.height=i.naturalHeight;}x.drawImage(i,0,0,c.width,c.height);dec=false;if(pend!==null){var n=pend;pend=null;draw(n);}};i.src=src;}
-    var ws=new WebSocket(${JSON.stringify(wsUrl)});
-    ws.onmessage=function(e){if(dec){pend=e.data;}else{draw(e.data);}};
-    ${tapScript}
-  <\/script>
-</body></html>`;
-}
-
-// ── CameraWebSocketFeed ───────────────────────────────────────────────────────
-// Unchanged feed/socket logic (web canvas decode loop + native WebView path).
-// Only the placeholder chrome (colors/text) below is restyled.
-
-function CameraWebSocketFeed({ cameraId, onTap }: { cameraId: string; onTap?: () => void }) {
-  const [hasFrame, setHasFrame] = useState(false);
-  const canvasRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const wsUrl = robotClient.cameraWsUrl(cameraId);
-    if (!wsUrl) return;
-    let cancelled = false;
-    let decoding  = false;
-    let pending: string | null = null;
-    function decode(data: string) {
-      decoding = true;
-      const img = new (window as any).Image() as HTMLImageElement;
-      img.onload = () => {
-        if (cancelled) { decoding = false; return; }
-        const canvas = canvasRef.current;
-        if (canvas) {
-          if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-            canvas.width  = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-          }
-          canvas.getContext('2d')?.drawImage(img, 0, 0);
-          setHasFrame(true);
-        }
-        decoding = false;
-        if (pending !== null) { const next = pending; pending = null; decode(next); }
-      };
-      img.src = data;
-    }
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (e) => { if (decoding) { pending = e.data as string; } else { decode(e.data as string); } };
-    ws.onerror = () => {};
-    return () => { cancelled = true; ws.close(); };
-  }, [cameraId]);
-
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.cameraFeed}>
-        {/* @ts-ignore */}
-        <canvas
-          ref={canvasRef}
-          onClick={() => canvasRef.current?.requestFullscreen?.()}
-          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', backgroundColor: '#000', cursor: 'pointer' }}
-        />
-        {!hasFrame && (
-          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#000' }]}>
-            <Camera size={28} color="#4b5563" />
-            <Text style={styles.feedPlaceholderText}>Connecting…</Text>
-          </View>
-        )}
-      </View>
-    );
-  }
-
-  const wsUrl = robotClient.cameraWsUrl(cameraId);
-  if (!wsUrl) {
-    return (
-      <View style={styles.feedPlaceholder}>
-        <Camera size={28} color="#4b5563" />
-        <Text style={styles.feedPlaceholderText}>Not connected</Text>
-      </View>
-    );
-  }
-
-  return (
-    <VisionCanvas
-      html={makeCameraHtml(wsUrl, false)}
-      style={styles.cameraFeed}
-      onMessage={(e) => { if (e.nativeEvent.data === 'tap') onTap?.(); }}
-    />
-  );
-}
 
 // ── CameraFullscreenModal ─────────────────────────────────────────────────────
 // Unchanged orientation/feed logic; only the close affordance is restyled.
@@ -438,7 +334,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       />
       {(() => {
         const feed = camera.connected
-          ? <CameraWebSocketFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />
+          ? <CameraLiveFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />
           : (
             <View style={styles.feedPlaceholder}>
               <Camera size={28} color="#4b5563" />

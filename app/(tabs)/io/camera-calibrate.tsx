@@ -105,6 +105,7 @@ export default function CameraCalibrateScreen() {
   } else if (step === 1 || !cal.session) {
     body = (
       <DetectStep
+        cameraId={cameraId}
         session={cal.session}
         imageUri={imageUri}
         selected={selected}

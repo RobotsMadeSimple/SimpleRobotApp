@@ -4,6 +4,7 @@ import { ScanSearch } from "lucide-react-native";
 import { buttonTextColor, Card, Chip, ChipGroup, FormRow, Input, SegmentedControl, StatusPill } from "@/src/components/ui/kit";
 import { relativeTime } from "@/src/components/ui/builder/RevisionsSheet";
 import { CameraCalibration, CameraState, Tool } from "@/src/models/robotModels";
+import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { cs } from "./calibrationStyles";
 import { Notice } from "./Notice";
 import { Attention, Requirement, StepFooter } from "./StepRequirements";
@@ -65,6 +66,12 @@ export function SetupStep({
             dot
           />
         </View>
+        {camera?.connected && (
+          <>
+            <CameraLiveFeed cameraId={camera.id} />
+            <Text style={cs.caption}>Live view — get the whole dot sheet inside the frame before detecting.</Text>
+          </>
+        )}
         {existing && (
           <Text style={cs.body}>
             Calibrated {relativeTime(existing.calibratedUnixMs)} with a {existing.dotPitchMm} mm pitch

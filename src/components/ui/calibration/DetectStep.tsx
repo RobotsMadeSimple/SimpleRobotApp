@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { RefreshCw } from "lucide-react-native";
 
-import { Button, buttonTextColor, Card, colors, StatusPill } from "@/src/components/ui/kit";
+import { Button, buttonTextColor, Card, colors, SegmentedControl, StatusPill } from "@/src/components/ui/kit";
+import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { CalibrationDot, CalibrationSession } from "@/src/models/robotModels";
 import { CalibrationProblem } from "./calibrationErrors";
 import { cs } from "./calibrationStyles";
@@ -10,6 +12,7 @@ import { Notice } from "./Notice";
 import { Requirement, StepFooter } from "./StepRequirements";
 
 type Props = {
+  cameraId: string;
   session: CalibrationSession | null;
   imageUri: string | null;
   selected: CalibrationDot | null;
@@ -26,8 +29,13 @@ export const dotLabel = (d: CalibrationDot) => `Dot #${d.index} (${d.i}, ${d.j})
 
 /** Step 2 — the annotated frame, grid summary, warnings and Re-detect. */
 export function DetectStep({
-  session, imageUri, selected, onSelect, taughtIndices, detecting, problem, onRedetect, onBack, onNext,
+  cameraId, session, imageUri, selected, onSelect, taughtIndices, detecting, problem, onRedetect, onBack, onNext,
 }: Props) {
+  // After a detection the user can flip between the frozen, annotated frame and the
+  // live camera to re-position the sheet before pressing Re-detect.
+  const [view, setView] = useState<"detected" | "live">("detected");
+  const showLive = !session || view === "live";
+
   const redetect = (
     <Button
       label={detecting ? "Detecting…" : session ? "Re-detect" : "Detect"}
@@ -43,24 +51,45 @@ export function DetectStep({
     <View style={cs.step}>
       {problem && <Notice tone="danger" title={problem.title} action={redetect}>{problem.detail}</Notice>}
 
-      {!session && detecting && (
-        <Card style={[cs.cardGap, { alignItems: "center" }]}>
-          <ActivityIndicator color={colors.accent} />
-          <Text style={cs.body}>Grabbing a frame and fitting the dot grid…</Text>
+      {session && (
+        <SegmentedControl
+          options={[{ label: "Detected frame", value: "detected" }, { label: "Live camera", value: "live" }]}
+          value={view}
+          onChange={setView}
+        />
+      )}
+
+      {showLive && (
+        <Card style={cs.cardGap}>
+          <CameraLiveFeed cameraId={cameraId} />
+          <Text style={cs.caption}>
+            {session
+              ? "Live view. Adjust the sheet or the camera, then press Re-detect to grab a new frame."
+              : "Live view. Lay the sheet flat, fully inside the frame and evenly lit, then press Detect."}
+          </Text>
+          {detecting && (
+            <View style={cs.row}>
+              <ActivityIndicator color={colors.accent} />
+              <Text style={cs.body}>Grabbing a frame and fitting the dot grid…</Text>
+            </View>
+          )}
         </Card>
+      )}
+
+      {session && !showLive && (
+        <DotImage
+          uri={imageUri}
+          imageWidth={session.imageWidth}
+          imageHeight={session.imageHeight}
+          dots={session.dots}
+          selectedIndex={selected?.index ?? null}
+          taughtIndices={taughtIndices}
+          onSelect={onSelect}
+        />
       )}
 
       {session && (
         <>
-          <DotImage
-            uri={imageUri}
-            imageWidth={session.imageWidth}
-            imageHeight={session.imageHeight}
-            dots={session.dots}
-            selectedIndex={selected?.index ?? null}
-            taughtIndices={taughtIndices}
-            onSelect={onSelect}
-          />
 
           <Card style={cs.cardGap}>
             <View style={cs.rowBetween}>
