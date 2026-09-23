@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import {
   PanResponder,
   Text,
@@ -12,7 +12,8 @@ import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
-import { DisabledPill, StepComment } from "./StepAnnotations";
+import { DisabledPill, ProblemDot, ProblemMessage, StepComment } from "./StepAnnotations";
+import type { StepProblems } from "./useProgramValidation";
 
 // ── Insert divider ────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ export function StepRow({
   selected,
   onLongPress,
   onToggleSelect,
+  problems,
 }: {
   step: ProgramStep;
   index: number;
@@ -143,7 +145,10 @@ export function StepRow({
   selected?: boolean;
   onLongPress?: () => void;
   onToggleSelect?: () => void;
+  /** Validation problems on this step or nested inside it. */
+  problems?: StepProblems;
 }) {
+  const [showProblem, setShowProblem] = useState(false);
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
   const isSetSpeed    = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
@@ -213,7 +218,10 @@ export function StepRow({
               <Text style={sharedStyles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
             )}
             {!!step.comment && <StepComment text={step.comment} />}
+            {problems && showProblem && <ProblemMessage problems={problems} />}
           </View>
+
+          {problems && <ProblemDot problems={problems} onPress={() => setShowProblem(v => !v)} />}
 
           {!selectMode && (
             <>

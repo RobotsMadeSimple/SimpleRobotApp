@@ -5,7 +5,7 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, imageDataUri, variableList } from "@/src/models/robotModels";
+import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
@@ -59,6 +59,8 @@ import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHisto
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
 import { EditorToolbar, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
+import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
+import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
 import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
 /**
@@ -883,6 +885,9 @@ export default function BuilderScreen() {
   }, []));
 
   async function handleRun() {
+    // Errors would stop the run on the controller anyway; show them instead.
+    // Saving stays allowed with errors (see handleSave).
+    if (validation.errorCount > 0) { setProblemsOpen(true); return; }
     if (!(await save())) return;
     const name = programName.trim();
     await robotClient.executeBuiltProgram(name).catch(() => {});
@@ -939,17 +944,40 @@ export default function BuilderScreen() {
   function undo() { exitSelect(); history.undo(); }
   function redo() { exitSelect(); history.redo(); }
 
-  // Keyboard shortcuts act on the program only while no dialog is on top of it.
-  const dialogOpen = configOpen || varModalOpen || typePickerOpen || makeRoutineOpen
-    || contextPickerOpen || settingsModalOpen;
-  useUndoShortcuts({ enabled: !dialogOpen && !localLoading, onUndo: undo, onRedo: redo });
-
   // An undo can remove the block the user is inside; step back out to the
   // deepest scope that still exists.
   useEffect(() => {
     const depth = validScopeDepth(steps, scopeStackRef.current);
     if (depth < scopeStackRef.current.length) setScopeStack(prev => prev.slice(0, depth));
   }, [steps]);
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  // The controller checks the unsaved document (debounced) so problems show up
+  // while editing. A controller without ValidateBuiltProgram hides all of it.
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const validationProgram = useMemo(() => buildProg(), [doc, programId]);
+  const validation   = useProgramValidation(validationProgram, connected);
+  const problemIndex = useMemo(() => indexProblems(steps, validation.problems), [steps, validation.problems]);
+  const [problemsOpen, setProblemsOpen] = useState(false);
+
+  // Keyboard shortcuts act on the program only while no dialog is on top of it.
+  const dialogOpen = configOpen || varModalOpen || typePickerOpen || makeRoutineOpen
+    || contextPickerOpen || settingsModalOpen || problemsOpen;
+  useUndoShortcuts({ enabled: !dialogOpen && !localLoading, onUndo: undo, onRedo: redo });
+
+  // Jump to the step a problem is on: enter its block and open its config.
+  function openProblem(p: ValidationProblem) {
+    setProblemsOpen(false);
+    const loc = findStepLocation(steps, p.stepId);
+    if (!loc) return;
+    exitSelect();
+    scrollYRef.current = 0;
+    setScopeStack(loc.scope);
+    // Let the sheet finish closing first: iOS will not present a modal while
+    // another one is still dismissing.
+    setTimeout(() => { setEditingStep(loc.step); setConfigOpen(true); }, 350);
+  }
 
   const editorTools = (variant: "header" | "bar") => (
     <EditorToolbar
@@ -958,7 +986,15 @@ export default function BuilderScreen() {
       canRedo={history.canRedo}
       onUndo={undo}
       onRedo={redo}
-    />
+    >
+      {validation.supported && (
+        <ProblemsPill
+          errorCount={validation.errorCount}
+          warningCount={validation.warningCount}
+          onPress={() => setProblemsOpen(true)}
+        />
+      )}
+    </EditorToolbar>
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1284,6 +1320,7 @@ export default function BuilderScreen() {
                 router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
               } : undefined}
               onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
+              problems={problemIndex.get(step.id)}
             />
           ))}
         </View>
@@ -1622,6 +1659,12 @@ export default function BuilderScreen() {
           setConfigOpen(false);
           router.push({ pathname: "/(tabs)/program/builder", params: { isRoutine: "1" } });
         }}
+      />
+      <ValidationPanel
+        visible={problemsOpen}
+        problems={validation.problems}
+        onClose={() => setProblemsOpen(false)}
+        onSelect={openProblem}
       />
       <VariableEditModal
         visible={varModalOpen}
