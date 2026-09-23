@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CameraState, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraState, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -1024,6 +1024,84 @@ export class RobotConnectService {
     return wireProgram(ack.program, name);
   }
 
+  // ── Camera-to-robot calibration (docs/camera-calibration.md) ──────────────
+  //
+  // All additive: an older controller answers "unknownCommand", which surfaces as
+  // UnsupportedCommandError so the UI can hide Calibrate instead of failing.
+  // Other failures are CommandFailedError whose message is the contract's error
+  // code (noDotsFound, gridNotFound, notEnoughTaught, …).
+
+  /** The saved calibration for a camera, or null when it has none. */
+  public async getCameraCalibration(cameraId: string): Promise<CameraCalibration | null> {
+    const ack = await this.request("GetCameraCalibration", { cameraId });
+    return wireCalibration(ack.calibration);
+  }
+
+  public async deleteCameraCalibration(cameraId: string): Promise<void> {
+    await this.request("DeleteCameraCalibration", { cameraId });
+  }
+
+  /** Grab a frame, detect the dot grid and open a session. */
+  public async calibrationStart(cameraId: string, dotPitchMm: number, options: CalibrationDetectOptions = {}): Promise<CalibrationSession> {
+    const ack = await this.request("CalibrationStart", { cameraId, dotPitchMm, ...detectParams(options) }, 30000);
+    return wireSession(ack);
+  }
+
+  /** New frame, same session; taught dots whose index still matches are kept. */
+  public async calibrationRedetect(sessionId: string, options: CalibrationDetectOptions = {}): Promise<CalibrationSession> {
+    const ack = await this.request("CalibrationRedetect", { sessionId, ...detectParams(options) }, 30000);
+    return wireSession(ack, sessionId);
+  }
+
+  /** Record the current TCP position for a dot. Resolves the full taught list. */
+  public async calibrationTeachDot(sessionId: string, dotIndex: number): Promise<CalibrationTaughtDot[]> {
+    const ack = await this.request("CalibrationTeachDot", { sessionId, dotIndex });
+    return wireTaught(ack.taught);
+  }
+
+  public async calibrationUnteachDot(sessionId: string, dotIndex: number): Promise<CalibrationTaughtDot[]> {
+    const ack = await this.request("CalibrationUnteachDot", { sessionId, dotIndex });
+    return wireTaught(ack.taught);
+  }
+
+  /** Fit sheet → robot from the taught dots; saves it as the camera's calibration unless `save` is false. */
+  public async calibrationSolve(sessionId: string, save = true): Promise<CalibrationSolveResult> {
+    const ack = await this.request("CalibrationSolve", { sessionId, save });
+    const calibration = wireCalibration(ack.calibration);
+    if (!calibration) throw new Error("The controller returned no calibration");
+    return {
+      calibration,
+      taughtRmsMm:        num(ack.taughtRmsMm, calibration.taughtRmsMm),
+      taughtMaxMm:        num(ack.taughtMaxMm, calibration.taughtMaxMm),
+      pitchScaleEstimate: num(ack.pitchScaleEstimate, calibration.pitchScaleEstimate),
+      warnings:           strArray(ack.warnings),
+    };
+  }
+
+  /** Map a normalized image point to robot X/Y/Z via a saved calibration (cameraId) or a solved session. */
+  public async calibrationPredict(source: { cameraId: string } | { sessionId: string }, u: number, v: number): Promise<CalibrationRobotPoint> {
+    const ack = await this.request("CalibrationPredict", { ...source, u, v });
+    const robot = wirePoint(parseMaybeJson(ack.robot));
+    if (!robot) throw new Error("The controller returned no prediction");
+    return robot;
+  }
+
+  public async calibrationDiscard(sessionId: string): Promise<void> {
+    await this.request("CalibrationDiscard", { sessionId });
+  }
+
+  /** Absolute URL for a server-relative path such as a session's `imageUrl`. */
+  public calibrationImageUrl(imageUrl: string): string | null {
+    if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+    const base = this.httpBaseUrl();
+    return base ? `${base}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}` : null;
+  }
+
+  /** Straight-line move to a Cartesian target (same wire shape the jog page's type-a-position move sends). */
+  public moveL(target: { x: number; y: number; z: number; rz: number }, speed?: number) {
+    return this.sendCommand("MoveL", { X: target.x, Y: target.y, Z: target.z, RZ: target.rz, Speed: speed });
+  }
+
   // ── Grid repository ───────────────────────────────────────────────────────
 
   public getGrids() {
@@ -1620,6 +1698,106 @@ function wireProgram(v: unknown, fallbackName: string): BuiltProgram {
     description:       p.description ?? "",
     steps:             Array.isArray(p.steps) ? p.steps : [],
     lastUpdatedUnixMs: p.lastUpdatedUnixMs ?? Date.now(),
+  };
+}
+
+// ── Wire helpers for the calibration commands ────────────────────────────────
+
+const num = (v: unknown, fallback = 0): number => {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const strArray = (v: unknown): string[] => {
+  const parsed = parseMaybeJson(v);
+  return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+};
+
+/** Objects may arrive as JSON strings, the way GetCameras sends its list. */
+function parseMaybeJson(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+function wirePoint(v: unknown): CalibrationRobotPoint | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as WireRecord;
+  return { x: num(r.x), y: num(r.y), z: num(r.z) };
+}
+
+function wireMatrix(v: unknown): Matrix3 {
+  const rows = Array.isArray(v) ? v : [];
+  const row = (k: number): [number, number, number] => {
+    const r = Array.isArray(rows[k]) ? (rows[k] as unknown[]) : [];
+    return [num(r[0], k === 0 ? 1 : 0), num(r[1], k === 1 ? 1 : 0), num(r[2], k === 2 ? 1 : 0)];
+  };
+  return [row(0), row(1), row(2)];
+}
+
+function wireTaught(v: unknown): CalibrationTaughtDot[] {
+  return wireArray(v).map(t => ({
+    dotIndex: num(t.dotIndex, -1),
+    i:        num(t.i),
+    j:        num(t.j),
+    robot:    wirePoint(t.robot) ?? { x: 0, y: 0, z: 0 },
+  })).filter(t => t.dotIndex >= 0);
+}
+
+function detectParams(o: CalibrationDetectOptions): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  if (o.minDotAreaPx !== undefined) p.minDotAreaPx = o.minDotAreaPx;
+  if (o.maxDotAreaPx !== undefined) p.maxDotAreaPx = o.maxDotAreaPx;
+  if (o.darkDots !== undefined) p.darkDots = o.darkDots;
+  return p;
+}
+
+function wireSession(ack: WireRecord, fallbackSessionId = ""): CalibrationSession {
+  const sessionId = str(ack.sessionId) || fallbackSessionId;
+  return {
+    sessionId,
+    imageWidth:  num(ack.imageWidth),
+    imageHeight: num(ack.imageHeight),
+    dots: wireArray(ack.dots).map(d => ({
+      index: num(d.index), i: num(d.i), j: num(d.j), u: num(d.u), v: num(d.v), areaPx: num(d.areaPx),
+    })),
+    gridRows:  num(ack.gridRows),
+    gridCols:  num(ack.gridCols),
+    gridRmsPx: num(ack.gridRmsPx),
+    warnings:  strArray(ack.warnings),
+    imageUrl:  str(ack.imageUrl) || `/calibration/${sessionId}/image`,
+    taught:    ack.taught === undefined ? undefined : wireTaught(ack.taught),
+  };
+}
+
+function wireCalibration(v: unknown): CameraCalibration | null {
+  const parsed = parseMaybeJson(v);
+  if (!parsed || typeof parsed !== "object") return null;
+  const c = parsed as WireRecord;
+  const s2r = (c.sheetToRobot && typeof c.sheetToRobot === "object" ? c.sheetToRobot : {}) as WireRecord;
+  return {
+    cameraId:     str(c.cameraId),
+    imageWidth:   num(c.imageWidth),
+    imageHeight:  num(c.imageHeight),
+    dotPitchMm:   num(c.dotPitchMm),
+    pixelToSheet: wireMatrix(c.pixelToSheet),
+    sheetToRobot: { cos: num(s2r.cos, 1), sin: num(s2r.sin), tx: num(s2r.tx), ty: num(s2r.ty) },
+    pixelToRobot: wireMatrix(c.pixelToRobot),
+    planeZ:       num(c.planeZ),
+    taughtDots: wireArray(c.taughtDots).map(t => ({
+      i: num(t.i), j: num(t.j), u: num(t.u), v: num(t.v),
+      robot: wirePoint(t.robot) ?? { x: 0, y: 0, z: 0 },
+      residualMm: t.residualMm === undefined ? undefined : num(t.residualMm),
+    })),
+    gridRows:           num(c.gridRows),
+    gridCols:           num(c.gridCols),
+    dotCount:           num(c.dotCount),
+    gridRmsPx:          num(c.gridRmsPx),
+    taughtRmsMm:        num(c.taughtRmsMm),
+    taughtMaxMm:        num(c.taughtMaxMm),
+    pitchScaleEstimate: num(c.pitchScaleEstimate, 1),
+    mirrored:           c.mirrored === true,
+    activeTool:         str(c.activeTool),
+    calibratedUnixMs:   num(c.calibratedUnixMs),
   };
 }
 

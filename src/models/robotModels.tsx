@@ -70,7 +70,108 @@ export type CameraState = {
   targetFps: number;
   enabled: boolean;
   supportedResolutions: { width: number; height: number }[];
+  /** Has a saved camera-to-robot calibration (docs/camera-calibration.md). Absent on older controllers. */
+  calibrated?: boolean;
 };
+
+// ── Camera-to-robot calibration (docs/camera-calibration.md) ─────────────────
+
+export type CalibrationRobotPoint = { x: number; y: number; z: number };
+
+/** A dot found on the calibration sheet. `u, v` are normalized image coordinates (0–1). */
+export type CalibrationDot = {
+  index: number;
+  i: number;
+  j: number;
+  u: number;
+  v: number;
+  areaPx: number;
+};
+
+/** A dot the robot tip was taught on, as the session reports it. */
+export type CalibrationTaughtDot = {
+  dotIndex: number;
+  i: number;
+  j: number;
+  robot: CalibrationRobotPoint;
+};
+
+/** A taught dot as stored in the saved calibration. */
+export type CalibrationStoredDot = {
+  i: number;
+  j: number;
+  u: number;
+  v: number;
+  robot: CalibrationRobotPoint;
+  /** Residual after the rigid fit, when the controller reports it per dot. */
+  residualMm?: number;
+};
+
+export type Matrix3 = [[number, number, number], [number, number, number], [number, number, number]];
+
+/** Persisted `cameraCalibrations/<cameraId>.json`. */
+export type CameraCalibration = {
+  cameraId: string;
+  imageWidth: number;
+  imageHeight: number;
+  dotPitchMm: number;
+  /** Pixel (px) → sheet mm homography. */
+  pixelToSheet: Matrix3;
+  /** Sheet mm → robot XY rigid transform. */
+  sheetToRobot: { cos: number; sin: number; tx: number; ty: number };
+  /** Composed pixel (px) → robot mm homography. */
+  pixelToRobot: Matrix3;
+  planeZ: number;
+  taughtDots: CalibrationStoredDot[];
+  gridRows: number;
+  gridCols: number;
+  dotCount: number;
+  gridRmsPx: number;
+  taughtRmsMm: number;
+  taughtMaxMm: number;
+  /** > 1 means the taught distances are longer than the pitch implies. */
+  pitchScaleEstimate: number;
+  /** The sheet→robot fit needed a reflection (grid axes assigned mirrored). */
+  mirrored?: boolean;
+  /** Tool that was active while teaching. */
+  activeTool: string;
+  calibratedUnixMs: number;
+};
+
+/** A detection pass: CalibrationStart / CalibrationRedetect. */
+export type CalibrationSession = {
+  sessionId: string;
+  imageWidth: number;
+  imageHeight: number;
+  dots: CalibrationDot[];
+  gridRows: number;
+  gridCols: number;
+  gridRmsPx: number;
+  warnings: string[];
+  /** Server-relative path of the annotated JPEG (`/calibration/{sessionId}/image`). */
+  imageUrl: string;
+  /** Taught dots kept across a re-detect, when the controller reports them. */
+  taught?: CalibrationTaughtDot[];
+};
+
+export type CalibrationDetectOptions = {
+  minDotAreaPx?: number;
+  maxDotAreaPx?: number;
+  /** Dark dots on white (default true) or white on dark. */
+  darkDots?: boolean;
+};
+
+/** CalibrationSolve result. */
+export type CalibrationSolveResult = {
+  calibration: CameraCalibration;
+  taughtRmsMm: number;
+  taughtMaxMm: number;
+  pitchScaleEstimate: number;
+  warnings: string[];
+};
+
+/** RunVision output coordinate frame. Absent = the controller's default (today's behaviour). */
+export type VisionOutputFrame = "pixel" | "normalized" | "robot";
 
 // ── USB Relay ─────────────────────────────────────────────────────────────────
 
@@ -874,6 +975,8 @@ export type ProgramStep = {
   visionZoneId?: string;
   visionZoneVar?: string;
   visionOutputs?: VisionStepOutput[];
+  /** Coordinate frame point outputs are written in ("robot" needs a calibrated camera). */
+  outputFrame?: VisionOutputFrame;
   colorOutputs?: ColorVisionStepOutput[];
   polygonOutputs?: PolygonVisionStepOutput[];
   arucoOutputs?: ArucoVisionStepOutput[];
