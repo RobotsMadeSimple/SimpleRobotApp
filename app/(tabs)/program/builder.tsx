@@ -29,7 +29,7 @@ import {
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
   Dimensions,
@@ -53,6 +53,9 @@ import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, Drag
 import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
+import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
+import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
+import { EditorToolbar, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
 /**
@@ -109,36 +112,44 @@ export default function BuilderScreen() {
     ? builtPrograms.find(p => p.name === editName) ?? null
     : null;
 
-  const [isRoutineMode, setIsRoutineMode] = useState(
-    () => isRoutineParam === "1" || (!isLocalMode && builtPrograms.find(p => p.name === editName)?.isRoutine === true)
-  );
-  const [isBackgroundMode,   setIsBackgroundMode]   = useState(
-    () => !isLocalMode && builtPrograms.find(p => p.name === editName)?.isBackground === true
-  );
-  const [killBackgroundOnStop, setKillBackgroundOnStop] = useState(
-    () => !isLocalMode ? (builtPrograms.find(p => p.name === editName)?.killBackgroundOnStop ?? true) : true
-  );
+  // ── Editable document + undo history ────────────────────────────────────
+  // Everything the user can edit lives in one EditorDoc so undo/redo and the
+  // unsaved-changes check see the same value. The setters below are the only
+  // way to change it, and every one routes through history.commit.
+  const history = useDocumentHistory<EditorDoc>(() => {
+    const isRoutine = isRoutineParam === "1" || existing?.isRoutine === true;
+    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine };
+  }, { limit: 100 });
+  const { doc, commit } = history;
+  const {
+    name: programName, description, steps, variables,
+    isRoutine: isRoutineMode, isBackground: isBackgroundMode, killBackgroundOnStop,
+  } = doc;
+
+  const setSteps = useCallback((u: SetStateAction<ProgramStep[]>) =>
+    commit(d => ({ ...d, steps: typeof u === "function" ? u(d.steps) : u })), [commit]);
+  const setVariables = useCallback((u: SetStateAction<ProgramVariable[]>) =>
+    commit(d => ({ ...d, variables: typeof u === "function" ? u(d.variables) : u })), [commit]);
+  // Typing coalesces, so one undo reverts a burst of keystrokes rather than one letter.
+  const setProgramName = (name: string) => commit(d => ({ ...d, name }), { coalesceKey: "name" });
+  const setDescription = (description: string) => commit(d => ({ ...d, description }), { coalesceKey: "description" });
+  const setIsRoutineMode        = (isRoutine: boolean)            => commit(d => ({ ...d, isRoutine }));
+  const setIsBackgroundMode     = (isBackground: boolean)         => commit(d => ({ ...d, isBackground }));
+  const setKillBackgroundOnStop = (killBackgroundOnStop: boolean) => commit(d => ({ ...d, killBackgroundOnStop }));
 
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [contextProgramName, setContextProgramName] = useState<string | undefined>(callerNameParam ?? undefined);
   const [contextPickerOpen,  setContextPickerOpen]  = useState(false);
 
-  const [programName, setProgramName] = useState(existing?.name ?? "");
   const [programId, setProgramId]     = useState<string | undefined>(existing?.id);
-  const [description, setDescription] = useState(existing?.description ?? "");
-  const [steps, setSteps]             = useState<ProgramStep[]>(existing?.steps ?? []);
-  const [variables, setVariables]     = useState<ProgramVariable[]>(existing?.variables ?? []);
   const [coverImage, setCoverImage]   = useState<string | null>(null);
   const [localLoading, setLocalLoading] = useState(isLocalMode && !!editName);
 
-  // Snapshot of the last-saved state used to detect unsaved changes.
-  const [savedSnapshot, setSavedSnapshot] = useState(() =>
-    JSON.stringify({ name: existing?.name ?? "", description: existing?.description ?? "", steps: existing?.steps ?? [], variables: existing?.variables ?? [] })
-  );
-  const isDirty = useMemo(
-    () => JSON.stringify({ name: programName.trim(), description, steps, variables }) !== savedSnapshot,
-    [programName, description, steps, variables, savedSnapshot]
-  );
+  // Snapshot of the last-saved document used to detect unsaved changes. Undoing
+  // back to it reads as clean again.
+  const [savedSnapshot, setSavedSnapshot] = useState(() => docSnapshot(history.doc));
+  const markSaved = (d: EditorDoc) => setSavedSnapshot(docSnapshot(d));
+  const isDirty = useMemo(() => docSnapshot(doc) !== savedSnapshot, [doc, savedSnapshot]);
 
   const contextVariables = useMemo(() => {
     if (!isRoutineMode || !contextProgramName) return [];
@@ -154,17 +165,10 @@ export default function BuilderScreen() {
     ]).then(([programs, img]) => {
       const prog = programs.find(p => p.name === editName);
       if (prog) {
-        const hydratedSteps = rehydrateIds(prog.steps);
-        const loadedVars    = prog.variables ?? [];
-        setProgramName(prog.name);
-        setDescription(prog.description);
-        setSteps(hydratedSteps);
-        setVariables(loadedVars);
-        setIsRoutineMode(prog.isRoutine ?? false);
-        setIsBackgroundMode(prog.isBackground ?? false);
-        setKillBackgroundOnStop(prog.killBackgroundOnStop ?? true);
+        const loaded = docFromProgram(prog);
+        history.reset(loaded);
+        markSaved(loaded);
         if (prog.id) setProgramId(prog.id);
-        setSavedSnapshot(JSON.stringify({ name: prog.name, description: prog.description, steps: hydratedSteps, variables: loadedVars }));
       }
       if (img) setCoverImage(img);
       setLocalLoading(false);
@@ -179,27 +183,15 @@ export default function BuilderScreen() {
       .catch(() => {});
   }, [editName]);
 
-  // Assign fresh IDs to any steps that lost theirs during server round-trip
-  function rehydrateIds(src: ProgramStep[]): ProgramStep[] {
-    return src.map(s => ({
-      ...s,
-      id: s.id || newId(),
-      loopSteps:      s.loopSteps      ? rehydrateIds(s.loopSteps)      : s.loopSteps,
-      ifSteps:        s.ifSteps        ? rehydrateIds(s.ifSteps)        : s.ifSteps,
-      elseSteps:      s.elseSteps      ? rehydrateIds(s.elseSteps)      : s.elseSteps,
-      elseIfBranches: s.elseIfBranches ? s.elseIfBranches.map(b => ({ ...b, id: b.id || newId(), steps: rehydrateIds(b.steps) })) : s.elseIfBranches,
-    }));
-  }
-
+  // (Re)load the robot program when it becomes available. Loading is not an
+  // edit: it replaces the history and becomes the saved state.
   useEffect(() => {
     if (existing) {
-      setProgramName(existing.name);
-      setDescription(existing.description);
-      setSteps(rehydrateIds(existing.steps));
-      setVariables(existing.variables ?? []);
-      setIsBackgroundMode(existing.isBackground ?? false);
-      setKillBackgroundOnStop(existing.killBackgroundOnStop ?? true);
+      const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true });
+      history.reset(loaded);
+      markSaved(loaded);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing?.name]);
 
   // ── Cover image helpers ────────────────────────────────────────────────────
@@ -730,6 +722,9 @@ export default function BuilderScreen() {
   }
 
   async function save(): Promise<boolean> {
+    // The document as it is being saved: edits made while the save is in
+    // flight must still read as unsaved afterwards.
+    const savedDoc = doc;
     const name = programName.trim();
     if (!name) {
       appAlert("Name required", "Please give the program a name.");
@@ -768,7 +763,7 @@ export default function BuilderScreen() {
       }
       if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
     }
-    setSavedSnapshot(JSON.stringify({ name, description: description.trim(), steps, variables }));
+    markSaved(savedDoc);
     return true;
   }
 
@@ -911,12 +906,40 @@ export default function BuilderScreen() {
     if (!savedStep) return;
     const next = applyCncFieldsById(steps, stepId, savedStep);
     if (JSON.stringify(next) === JSON.stringify(steps)) return;
-    setSteps(next);
+    const nextDoc = { ...doc, steps: next };
+    commit(nextDoc);
     // The robot copy was saved just before the handoff, so after pulling the
     // toolpath back the local state matches the robot again.
-    setSavedSnapshot(JSON.stringify({ name: programName.trim(), description, steps: next, variables }));
+    markSaved(nextDoc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builtPrograms, steps, programName, description, variables, isLocalMode]));
+  }, [builtPrograms, doc, isLocalMode]));
+
+  // ── Undo / redo ───────────────────────────────────────────────────────────
+
+  function undo() { exitSelect(); history.undo(); }
+  function redo() { exitSelect(); history.redo(); }
+
+  // Keyboard shortcuts act on the program only while no dialog is on top of it.
+  const dialogOpen = configOpen || varModalOpen || typePickerOpen || makeRoutineOpen
+    || contextPickerOpen || settingsModalOpen;
+  useUndoShortcuts({ enabled: !dialogOpen && !localLoading, onUndo: undo, onRedo: redo });
+
+  // An undo can remove the block the user is inside; step back out to the
+  // deepest scope that still exists.
+  useEffect(() => {
+    const depth = validScopeDepth(steps, scopeStackRef.current);
+    if (depth < scopeStackRef.current.length) setScopeStack(prev => prev.slice(0, depth));
+  }, [steps]);
+
+  const editorTools = (variant: "header" | "bar") => (
+    <EditorToolbar
+      variant={variant}
+      canUndo={history.canUndo}
+      canRedo={history.canRedo}
+      onUndo={undo}
+      onRedo={redo}
+    />
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1273,6 +1296,7 @@ export default function BuilderScreen() {
   // builder must still go through the unsaved-changes prompt.
   const headerActions = isWide ? (
     <View style={{ flexDirection: "row", gap: spacing.sm }}>
+      {editorTools("header")}
       <ActionButton
         label={inScope ? "Leave Block" : "Exit"}
         icon={<ArrowLeft size={14} color={colors.textSecondary} />}
@@ -1350,6 +1374,7 @@ export default function BuilderScreen() {
           onBack={handleBack}
         />
       )}
+      {!isWide && editorTools("bar")}
 
       {/* Multi-select toolbar */}
       {selectMode && (
