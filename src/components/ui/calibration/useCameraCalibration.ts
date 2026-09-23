@@ -68,16 +68,19 @@ export function useCameraCalibration(cameraId: string | null | undefined, calibr
   const stale = cached && calibratedFlag !== undefined && (cached.state === "calibrated") !== calibratedFlag;
   const needsFetch = !!cameraId && calibratedFlag !== false && (!cached || stale);
 
+  // Re-evaluated on every render (camera lists poll), so a lookup skipped while
+  // disconnected happens once the connection is up.
+  const connected = robotClient.connected;
   useEffect(() => {
-    if (!cameraId || !needsFetch || !robotClient.connected) return;
+    if (!cameraId || !needsFetch || !connected) return;
     if (stale) cache.delete(keyFor(cameraId));
     load(cameraId);
-  }, [cameraId, needsFetch, stale]);
+  }, [cameraId, needsFetch, stale, connected]);
 
   if (!cameraId) return { state: "unknown", calibration: null };
   if (calibratedFlag === false) return { state: "none", calibration: null };
   if (cached && !stale) return cached;
   // Flag says calibrated: show it now, the date follows once the lookup lands.
   if (calibratedFlag === true) return { state: "calibrated", calibration: null };
-  return { state: robotClient.connected ? "loading" : "unknown", calibration: null };
+  return { state: connected ? "loading" : "unknown", calibration: null };
 }
