@@ -612,6 +612,29 @@ function drawZones(){
   ctx.restore();
 }
 
+// Tap-to-select: report a tap's position in normalized (0-1) image coordinates, so the
+// host can hit-test it against zone geometry (that logic stays out of this shared feed
+// document — see VisionFeedViewer's onTapImagePoint and InspectionConfigModal.tsx).
+// canvas{object-fit:contain} lets the browser scale the buffer (c.width/c.height, i.e. the
+// image's natural pixels) into the element's box, letterboxing to preserve aspect ratio —
+// the same "contain" math ZoneDrawModal's imgRect() computes by hand against its own,
+// differently-sized buffer (see makeZoneDrawHtml above). A tap landing in the letterbox
+// bars (outside the scaled image) is reported as no tap at all.
+function feedTapPoint(clientX,clientY){
+  var rect=c.getBoundingClientRect();
+  if(!c.width||!c.height||!rect.width||!rect.height) return null;
+  var scale=Math.min(rect.width/c.width,rect.height/c.height);
+  var dispW=c.width*scale,dispH=c.height*scale;
+  var offX=(rect.width-dispW)/2,offY=(rect.height-dispH)/2;
+  var px=clientX-rect.left-offX,py=clientY-rect.top-offY;
+  if(px<0||py<0||px>dispW||py>dispH) return null;
+  return{x:px/dispW,y:py/dispH};
+}
+c.addEventListener('pointerup',function(e){
+  var p=feedTapPoint(e.clientX,e.clientY);
+  if(p){try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedTap',x:p.x,y:p.y}));}catch(err){}}
+},{passive:true});
+
 // Each setFeed bumps the generation; only the current generation is allowed to
 // draw, so a just-closed feed (e.g. the raw camera socket while switching to the
 // annotated vision socket) can't paint stale frames and cause flicker.

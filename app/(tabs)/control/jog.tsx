@@ -15,6 +15,7 @@ import {
   PageHeader,
   PositionReadout,
   RadioRow,
+  type ReadoutAxis,
   radii,
   SegmentedControl,
   shadows,
@@ -35,6 +36,7 @@ import {
   MousePointerClick,
   Navigation,
   OctagonX,
+  Pencil,
   Plus,
   RotateCw,
   Search,
@@ -161,6 +163,7 @@ function Selector({
   icon,
   viewLabel,
   viewRoute,
+  mutedValue,
 }: {
   label: string;
   value: string;
@@ -169,6 +172,8 @@ function Selector({
   icon?: React.ReactNode;
   viewLabel?: string;
   viewRoute?: string;
+  /** Dim the value text — set by call sites for an unset "None" value. */
+  mutedValue?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -179,7 +184,7 @@ function Selector({
         <View style={styles.selectorTextStack}>
           <Text style={styles.selectorLabel}>{label}</Text>
           <View style={styles.selectorValueRow}>
-            <Text style={styles.selectorValue}>{value}</Text>
+            <Text style={[styles.selectorValue, mutedValue && styles.selectorValueMuted]}>{value}</Text>
             <ChevronDown size={13} color={colors.textFaint} />
           </View>
         </View>
@@ -212,6 +217,7 @@ function GridSelectorTile({
   footnote,
   viewLabel,
   viewRoute,
+  mutedValue,
 }: {
   label: string;
   value: string;
@@ -221,6 +227,8 @@ function GridSelectorTile({
   footnote?: string;
   viewLabel?: string;
   viewRoute?: string;
+  /** Dim the value text — set by call sites for an unset "None" value. */
+  mutedValue?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -229,7 +237,7 @@ function GridSelectorTile({
       <Card onPress={() => setOpen(true)} style={styles.gridTile}>
         <Text style={styles.selectorLabel}>{label}</Text>
         <View style={styles.gridTileValueRow}>
-          <Text style={styles.gridTileValue} numberOfLines={1}>{value}</Text>
+          <Text style={[styles.gridTileValue, mutedValue && styles.gridTileValueMuted]} numberOfLines={1}>{value}</Text>
           <ChevronDown size={14} color={colors.textFaint} />
         </View>
       </Card>
@@ -479,6 +487,8 @@ export default function JogScreen() {
   const [movingFromPage, setMovingFromPage] = useState(false);
   const [movingToName, setMovingToName]   = useState<string | null>(null);
   const [alreadyHere, setAlreadyHere]     = useState<string | null>(null);
+  /** Move overlay wording: axis moves aren't "to a point". */
+  const [movingIsAxis, setMovingIsAxis]   = useState(false);
 
   const AT_THRESHOLD = 0.5;
 
@@ -495,6 +505,7 @@ export default function JogScreen() {
     if (movingFromPage && !status.moving) {
       setMovingFromPage(false);
       setMovingToName(null);
+      setMovingIsAxis(false);
     }
   }, [status.moving]);
 
@@ -512,6 +523,112 @@ export default function JogScreen() {
   const filteredPoints = points.filter((p) =>
     p.name.toLowerCase().includes(pointSearch.trim().toLowerCase())
   );
+
+  // ── Point actions (tap a point row) ─────────────────────────────────────────
+  // A tap opens an actions dialog — Move To / Edit Position / Teach Here —
+  // instead of going straight to the move confirm. Each action closes this
+  // dialog before opening its own stage, so two Modals are never on screen at
+  // once (same sequencing the rest of the screen uses).
+  const [actionTarget, setActionTarget] = useState<Point | null>(null);
+  const [editTarget, setEditTarget]     = useState<Point | null>(null);
+  const [editDraft, setEditDraft]       = useState({ x: "", y: "", z: "", rz: "" });
+  const [teachTarget, setTeachTarget]   = useState<Point | null>(null);
+
+  const editFields = ["x", "y", "z", "rz"] as const;
+  const editValid  = editFields.every((f) => {
+    const raw = editDraft[f].trim();
+    return raw !== "" && Number.isFinite(Number(raw));
+  });
+
+  function openEditPoint(p: Point) {
+    setEditDraft({
+      x:  p.x.toString(),
+      y:  p.y.toString(),
+      z:  p.z.toString(),
+      rz: p.rz.toString(),
+    });
+    setActionTarget(null);
+    setEditTarget(p);
+  }
+
+  /** Same client call Space › Points uses; the points list refreshes itself off
+   *  the status stream's lastPointUpdate, so there's nothing to reload here. */
+  function saveEditPoint() {
+    const p = editTarget;
+    if (!p || !editValid) return;
+    robotClient.editPoint(p.name, {
+      x:  Number(editDraft.x),
+      y:  Number(editDraft.y),
+      z:  Number(editDraft.z),
+      rz: Number(editDraft.rz),
+    });
+    setEditTarget(null);
+  }
+
+  /** Same command the Teach modal sends — overwrites the point in place. */
+  function teachOverPoint() {
+    const p = teachTarget;
+    if (!p) return;
+    robotClient.sendCommand("TeachPoint", { name: p.name });
+    setTeachTarget(null);
+  }
+
+  // ── Type a target position (tap an axis in the DRO) ─────────────────────────
+  // Sends an absolute cartesian MoveL built from the robot's CURRENT base-frame
+  // vector with only the tapped axis replaced by the typed value.
+  //
+  // Frame safety: a raw-vector MoveL is interpreted in the BASE frame by the
+  // controller (only named-point moves get local-frame transforms), while this
+  // DRO shows the LOCAL-frame position (status.localX/…). Those agree only when
+  // no local is active, so the feature is gated on local === "None" rather than
+  // doing frame math in the app. Joint mode is gated too: the controller has no
+  // absolute single-joint move command (MoveL/MoveJ/OffsetL/Jog* only).
+  type AxisKey = "X" | "Y" | "Z" | "RZ";
+  const AXIS_KEYS: AxisKey[] = ["X", "Y", "Z", "RZ"];
+
+  const [axisTarget, setAxisTarget] = useState<{ key: AxisKey; unit?: string; current: string } | null>(null);
+  const [axisInput, setAxisInput]   = useState("");
+  const [axisNotice, setAxisNotice] = useState<string | null>(null);
+
+  const axisInputValid = Number.isFinite(Number(axisInput.trim())) && axisInput.trim() !== "";
+
+  function openAxisTarget(axis: ReadoutAxis) {
+    if (mode === "Joint") {
+      setAxisNotice("Joint targets aren't supported — use the jog buttons to move a single joint.");
+      return;
+    }
+    if (local !== "None") {
+      setAxisNotice("Deactivate the Local frame to type target positions.");
+      return;
+    }
+    const key = AXIS_KEYS.find((k) => k === axis.label);
+    if (!key) return;
+    const current = String(axis.value);
+    setAxisInput(current);
+    setAxisTarget({ key, unit: axis.unit, current });
+  }
+
+  /** Absolute line move to the current vector with one axis overridden. */
+  function moveAxisTo() {
+    const t = axisTarget;
+    if (!t) return;
+    const v = Number(axisInput.trim());
+    if (!Number.isFinite(v) || axisInput.trim() === "") return;
+
+    const vector: Record<AxisKey, number> = {
+      X:  s?.x  ?? 0,
+      Y:  s?.y  ?? 0,
+      Z:  s?.z  ?? 0,
+      RZ: s?.rz ?? 0,
+    };
+    vector[t.key] = v;
+
+    setMovingToName(`${t.key} ${v.toFixed(1)}${t.unit ? ` ${t.unit}` : ""}`);
+    setMovingIsAxis(true);
+    robotClient.sendCommand("MoveL", { ...vector, Speed: jogSpeeds?.[moveSpeed] });
+    setAxisTarget(null);
+    setMovingFromPage(true);
+  }
 
   // The pieces the layout arranges. Defined once so every layout places the same
   // controls without duplicating them.
@@ -554,6 +671,7 @@ export default function JogScreen() {
           icon={<Grid2X2 size={15} color={colors.textMuted} />}
           viewLabel="View Locals"
           viewRoute="/space/locals"
+          mutedValue={local === "None"}
         />
         <Divider vertical style={styles.cardDivider} />
         <Selector
@@ -564,6 +682,7 @@ export default function JogScreen() {
           icon={<Wrench size={15} color={colors.textMuted} />}
           viewLabel="View Tools"
           viewRoute="/space/tools"
+          mutedValue={(tool || "None") === "None"}
         />
       </View>
     </Card>
@@ -596,6 +715,7 @@ export default function JogScreen() {
         onSelect={setLocal}
         viewLabel="View Locals"
         viewRoute="/space/locals"
+        mutedValue={local === "None"}
       />
       <GridSelectorTile
         label="TOOL"
@@ -604,13 +724,24 @@ export default function JogScreen() {
         onSelect={setTool}
         viewLabel="View Tools"
         viewRoute="/space/tools"
+        mutedValue={(tool || "None") === "None"}
       />
     </View>
   );
 
   // CNC-style DRO — the axis list replaces the old 4-across coordinate strip.
+  // Wide layout only; kept at its established "lg" size.
+  // Rows are tappable: a tap opens the type-a-target dialog (or a notice when
+  // the frame/mode guards block it — see openAxisTarget).
   const dro = (
-    <PositionReadout axes={coords} size={wideLayout ? "lg" : "md"} />
+    <PositionReadout axes={coords} size="lg" onAxisPress={openAxisTarget} />
+  );
+
+  // Narrow-only replacement for dro: a single-row inline strip (axis tile +
+  // value per axis, no targets) so the DRO doesn't push the pinned jog pad
+  // below the fold on phone widths.
+  const droInline = (
+    <PositionReadout axes={coords} inline onAxisPress={openAxisTarget} />
   );
 
   const jogPad = (
@@ -642,7 +773,13 @@ export default function JogScreen() {
   );
 
   // ── Points panel ────────────────────────────────────────────────────────────
-  const pointRows = (
+  // Parameterized by onPick/onMove so each host (wide panel, twoColumn
+  // collapsible, narrow modal) controls what happens when a point is chosen —
+  // the narrow modal closes itself first (see pointsModal) so it never stacks
+  // on top of the dialog that follows.
+  //   onPick — row tap: opens the point actions dialog.
+  //   onMove — the row's "Move To" button: shortcut straight to move-confirm.
+  const renderPointRows = (onPick: (p: Point) => void, onMove: (p: Point) => void) => (
     <>
       <View style={styles.pointsSearchWrap}>
         <Input
@@ -669,7 +806,7 @@ export default function JogScreen() {
       ) : (
         filteredPoints.map((p, i) => (
           <View key={p.name}>
-            <Pressable style={styles.pointListRow} onPress={() => setMoveTarget(p)}>
+            <Pressable style={styles.pointListRow} onPress={() => onPick(p)}>
               <View style={styles.pointListText}>
                 <Text style={styles.pointName} numberOfLines={1}>{p.name}</Text>
                 <Text style={styles.pointCoords} numberOfLines={1}>
@@ -681,7 +818,7 @@ export default function JogScreen() {
                 variant="secondary"
                 size="sm"
                 icon={<Navigation size={14} color={buttonTextColor("secondary")} />}
-                onPress={() => setMoveTarget(p)}
+                onPress={() => onMove(p)}
               />
             </Pressable>
             {i < filteredPoints.length - 1 && <Divider />}
@@ -704,7 +841,7 @@ export default function JogScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {pointRows}
+        {renderPointRows(setActionTarget, setMoveTarget)}
       </ScrollView>
     </Card>
   );
@@ -721,8 +858,60 @@ export default function JogScreen() {
         <View style={styles.pointsHeaderSpacer} />
         <InfoTip text="Saved robot positions. Pick one to line- or joint-move the robot there — you choose the move type and speed, and a STOP button stays on screen for the whole move. Make sure the path is clear first." />
       </Pressable>
-      {pointsOpen && <View style={styles.pointsCollapsedBody}>{pointRows}</View>}
+      {pointsOpen && <View style={styles.pointsCollapsedBody}>{renderPointRows(setActionTarget, setMoveTarget)}</View>}
     </Card>
+  );
+
+  /** Narrow: a compact trigger row (matches the config grid tiles) that opens
+   *  pointsModal below instead of expanding inline, so the points list never
+   *  crowds the pinned jog pad on phone widths. */
+  const pointsTrigger = (
+    <Card onPress={() => setPointsOpen(true)} style={styles.pointsTriggerTile}>
+      <Text style={styles.selectorLabel}>POINTS</Text>
+      <View style={styles.gridTileValueRow}>
+        <Text style={styles.gridTileValue} numberOfLines={1}>{points.length} saved</Text>
+        <ChevronRight size={14} color={colors.textFaint} />
+      </View>
+    </Card>
+  );
+
+  /** Narrow: full-screen-ish modal (opened by pointsTrigger) hosting the same
+   *  search/list/empty-state content as pointsPanel/pointsCollapsible. Picking
+   *  a point closes this modal first, then opens the move-confirm dialog —
+   *  mirroring how the rest of this screen never shows two Modals at once
+   *  (moveTarget → movingFromPage / alreadyHere are likewise sequential, never
+   *  stacked), rather than nesting the move dialogs inside this Modal. */
+  const pointsModal = (
+    <Modal
+      visible={pointsOpen}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setPointsOpen(false)}
+    >
+      <Pressable style={styles.pickerOverlay} onPress={() => setPointsOpen(false)}>
+        <Pressable style={styles.pointsDialog} onPress={() => {}}>
+          <View style={styles.dialogHeader}>
+            <View style={styles.dialogTitleRow}>
+              <Text style={styles.dialogTitle}>Points</Text>
+              <Text style={styles.pointsCount}>{points.length}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setPointsOpen(false)} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color={colors.textFaint} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.pointsModalScroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {renderPointRows(
+              (p) => { setPointsOpen(false); setActionTarget(p); },
+              (p) => { setPointsOpen(false); setMoveTarget(p); },
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 
   return (
@@ -765,7 +954,7 @@ export default function JogScreen() {
           )}
         </View>
       ) : (
-        // Narrow: config/DRO/points scroll; the jog pad is PINNED above the
+        // Narrow: config/points/DRO scroll; the jog pad is PINNED above the
         // STOP/Teach footer so the jog buttons are always on screen (the DRO
         // was pushing the pad below the fold when everything scrolled).
         <>
@@ -776,11 +965,12 @@ export default function JogScreen() {
             keyboardShouldPersistTaps="handled"
           >
             {configGrid}
-            {dro}
-            {pointsCollapsible}
+            {pointsTrigger}
+            {droInline}
           </ScrollView>
           <View style={styles.pinnedPad}>{jogPad}</View>
           {stopTeach(false)}
+          {pointsModal}
         </>
       )}
 
@@ -792,6 +982,189 @@ export default function JogScreen() {
         onRequestClose={() => setTeachOpen(false)}
       >
         <TeachModal key={teachOpen ? "open" : "closed"} onClose={() => setTeachOpen(false)} />
+      </Modal>
+
+      {/* ── Point actions (row tap) ── */}
+      {/* Each action closes this dialog as it opens the next stage, so the
+          move-confirm / edit / teach-confirm dialogs never stack on it. */}
+      <Modal
+        visible={!!actionTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setActionTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MapPin size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>{actionTarget?.name}</Text>
+              </View>
+              <Pressable onPress={() => setActionTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.moveCoordText}>
+              X {actionTarget?.x.toFixed(1)}{"  "}
+              Y {actionTarget?.y.toFixed(1)}{"  "}
+              Z {actionTarget?.z.toFixed(1)}{"  "}
+              RZ {actionTarget?.rz.toFixed(1)}
+            </Text>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => { const p = actionTarget; setActionTarget(null); setMoveTarget(p); }}
+            >
+              <Navigation size={18} color={colors.accent} />
+              <View style={styles.actionTextStack}>
+                <Text style={styles.actionText}>Move To</Text>
+                <Text style={styles.actionSubtext}>Line or joint move at a chosen speed</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => { if (actionTarget) openEditPoint(actionTarget); }}
+            >
+              <Pencil size={18} color={colors.accent} />
+              <View style={styles.actionTextStack}>
+                <Text style={styles.actionText}>Edit Position</Text>
+                <Text style={styles.actionSubtext}>Type new X / Y / Z / RZ coordinates</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => { const p = actionTarget; setActionTarget(null); setTeachTarget(p); }}
+            >
+              <MousePointerClick size={18} color={colors.accent} />
+              <View style={styles.actionTextStack}>
+                <Text style={styles.actionText}>Teach Here</Text>
+                <Text style={styles.actionSubtext}>Overwrite with the robot's current position</Text>
+              </View>
+            </Pressable>
+
+            <View style={styles.actionCancelRow}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setActionTarget(null)}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Edit point position (same client call as Space › Points) ── */}
+      <Modal
+        visible={!!editTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setEditTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <Pencil size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>Edit {editTarget?.name}</Text>
+              </View>
+              <Pressable onPress={() => setEditTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            {editFields.map((field) => (
+              <FormRow key={field} label={field.toUpperCase()} inline style={styles.editRow}>
+                <Input
+                  style={styles.editCoordInput}
+                  value={editDraft[field]}
+                  onChangeText={(v) => setEditDraft((d) => ({ ...d, [field]: v }))}
+                  keyboardType="numeric"
+                  selectTextOnFocus
+                  returnKeyType="done"
+                />
+              </FormRow>
+            ))}
+
+            <Divider style={styles.cardSeparator} />
+
+            <View style={styles.modalActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setEditTarget(null)}
+              />
+              <Button
+                label="Save"
+                variant="primary"
+                disabled={!editValid}
+                style={styles.modalCancelFlex}
+                onPress={saveEditPoint}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Teach-over confirm (destructive: replaces the stored coordinates) ── */}
+      <Modal
+        visible={!!teachTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTeachTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setTeachTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MousePointerClick size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>Teach Here?</Text>
+              </View>
+              <Pressable onPress={() => setTeachTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.teachConfirmBody}>
+              <Text style={styles.teachConfirmName}>{teachTarget?.name}</Text> will be overwritten with
+              the robot's current position — the point's stored coordinates are replaced and this
+              cannot be undone.
+            </Text>
+
+            <Text style={styles.moveCoordText}>
+              Stored{"  "}X {teachTarget?.x.toFixed(1)}{"  "}
+              Y {teachTarget?.y.toFixed(1)}{"  "}
+              Z {teachTarget?.z.toFixed(1)}{"  "}
+              RZ {teachTarget?.rz.toFixed(1)}
+            </Text>
+            <Text style={styles.moveCoordText}>
+              Current{"  "}X {fmt(s?.x)}{"  "}
+              Y {fmt(s?.y)}{"  "}
+              Z {fmt(s?.z)}{"  "}
+              RZ {fmt(s?.rz)}
+            </Text>
+
+            <View style={styles.modalActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setTeachTarget(null)}
+              />
+              <Button
+                label="Teach Here"
+                variant="primary"
+                icon={<MousePointerClick size={15} color={buttonTextColor("primary")} />}
+                style={styles.modalConfirmFlex}
+                onPress={teachOverPoint}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* ── Move-to-point confirm (same actions as Space › Points) ── */}
@@ -844,12 +1217,97 @@ export default function JogScreen() {
         </Pressable>
       </Modal>
 
+      {/* ── Type a target position (tap an axis in the DRO) ── */}
+      <Modal
+        visible={!!axisTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAxisTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setAxisTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <Navigation size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>Move {axisTarget?.key}</Text>
+              </View>
+              <Pressable onPress={() => setAxisTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.moveCoordText}>
+              Current {axisTarget?.key} {axisTarget?.current}{axisTarget?.unit ? ` ${axisTarget.unit}` : ""}
+            </Text>
+
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.selectorLabel}>TARGET {axisTarget?.key}</Text>
+              <InfoTip text="The robot line-moves to its current position with only this axis changed to the value you type. Make sure the path is clear first." />
+            </View>
+            <View style={styles.axisInputWrap}>
+              <Input
+                value={axisInput}
+                onChangeText={setAxisInput}
+                keyboardType="numeric"
+                selectTextOnFocus
+                autoFocus
+                placeholder={axisTarget?.current}
+                returnKeyType="done"
+                onSubmitEditing={moveAxisTo}
+                style={styles.axisInputText}
+              />
+            </View>
+
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.selectorLabel}>MOVE SPEED</Text>
+            </View>
+            <SegmentedControl
+              options={["Slow", "Normal", "Fast"] as const}
+              value={moveSpeed}
+              onChange={setMoveSpeed}
+              size="sm"
+            />
+
+            <Divider style={styles.cardSeparator} />
+
+            <View style={styles.modalActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setAxisTarget(null)}
+              />
+              <Button
+                label="Move"
+                variant="primary"
+                icon={<Navigation size={15} color={buttonTextColor("primary")} />}
+                disabled={!axisInputValid}
+                style={styles.modalConfirmFlex}
+                onPress={moveAxisTo}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Axis-target blocked notice (local frame active / Joint mode) ── */}
+      <Modal visible={!!axisNotice} transparent animationType="fade" onRequestClose={() => setAxisNotice(null)}>
+        <Pressable style={styles.overlay} onPress={() => setAxisNotice(null)}>
+          <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
+            <Navigation size={28} color={colors.accent} />
+            <Text style={styles.alreadyHereTitle}>Can't Type a Target</Text>
+            <Text style={styles.alreadyHereBody}>{axisNotice}</Text>
+            <Button label="OK" variant="primary" style={styles.alreadyHereButton} onPress={() => setAxisNotice(null)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* ── Move stop overlay ── */}
       <Modal visible={movingFromPage} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.moveStopCard}>
             <Navigation size={28} color={colors.accent} />
-            <Text style={styles.moveStopTitle}>Moving to point</Text>
+            <Text style={styles.moveStopTitle}>{movingIsAxis ? "Moving axis to" : "Moving to point"}</Text>
             {movingToName && <Text style={styles.moveStopName}>{movingToName}</Text>}
             <Button
               label="STOP"
@@ -859,6 +1317,7 @@ export default function JogScreen() {
                 robotClient.sendCommand("HardStop");
                 setMovingFromPage(false);
                 setMovingToName(null);
+                setMovingIsAxis(false);
               }}
               style={styles.moveStopButton}
               textStyle={styles.stopText}
@@ -1004,6 +1463,11 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
 
+  // Unset ("None") LOCAL/TOOL value — dimmed instead of full-strength.
+  selectorValueMuted: {
+    color: colors.textFaint,
+  },
+
   // ── Grid selector tile (narrow config grid) ───────────────────────────────
   configGrid: {
     flexDirection: "row",
@@ -1030,6 +1494,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: colors.text,
+  },
+
+  // Unset ("None") LOCAL/TOOL value — dimmed instead of full-strength.
+  gridTileValueMuted: {
+    color: colors.textFaint,
+  },
+
+  // Full-width trigger row under the config grid — opens pointsModal.
+  pointsTriggerTile: {
+    minHeight: 44,
+    gap: 4,
+    justifyContent: "center",
   },
 
   // ── Picker modal ──────────────────────────────────────────────────────────
@@ -1187,6 +1663,21 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
 
+  // ── Points modal (narrow) ─────────────────────────────────────────────────
+  pointsDialog: {
+    width: "100%",
+    maxWidth: 400,
+    maxHeight: "80%",
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
+  },
+
+  pointsModalScroll: {
+    flexGrow: 0,
+  },
+
   pointsSearchWrap: {
     padding: spacing.md,
   },
@@ -1342,6 +1833,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md + 2,
   },
 
+  // Typed axis target input (tap an axis in the DRO)
+  axisInputWrap: {
+    marginBottom: spacing.md,
+  },
+
+  axisInputText: {
+    ...type.mono,
+    fontSize: 18,
+  },
+
   actionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1355,6 +1856,44 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.accent,
     fontWeight: "500",
+  },
+
+  // ── Point actions dialog ──────────────────────────────────────────────────
+  actionTextStack: {
+    flex: 1,
+    gap: 2,
+  },
+
+  actionSubtext: {
+    ...type.caption,
+  },
+
+  actionCancelRow: {
+    flexDirection: "row",
+    marginTop: spacing.md + 2,
+  },
+
+  editRow: {
+    marginBottom: spacing.sm,
+  },
+
+  // Inline FormRow puts the label block on flex:1, so the field needs a width.
+  editCoordInput: {
+    ...type.mono,
+    width: 128,
+    textAlign: "right",
+  },
+
+  teachConfirmBody: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+    marginBottom: spacing.md,
+  },
+
+  teachConfirmName: {
+    fontWeight: "700",
+    color: colors.text,
   },
 
   moveStopCard: {

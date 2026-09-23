@@ -27,10 +27,11 @@ import {
   PolygonInspection,
   VisionResult,
   VisionZone,
+  VisionZoneGeometry,
   defaultBlobParams,
   defaultColorEntry,
 } from "@/src/models/robotModels";
-import { colors as kitColors, spacing, radii, shadows, accents, PageHeader } from "@/src/components/ui/kit";
+import { colors as kitColors, spacing, radii, shadows, accents, PageHeader, FormRow } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
@@ -40,6 +41,94 @@ import { ZonePickerModal } from "./ZonePickerModal";
 import { DictionaryPickerModal } from "./DictionaryPickerModal";
 import { ColorEditModal } from "./ColorEditModal";
 import { FormatPickerSheet } from "./InspectionTypePicker";
+
+// ── Tap-to-select zone hit-testing ──────────────────────────────────────────────
+//
+// VisionFeedViewer reports a tap as a normalized (0-1) point in image space — see its
+// onTapImagePoint prop. Hit-testing that point against the zones' stored geometry (also
+// normalized) mirrors the "inside" test ZoneDrawModal's canvas runs in screen-pixel space
+// (src/vision/visionHtml.ts, makeZoneDrawHtml: axes/rectFrame/inside) — that code is a
+// string embedded in a WebView document and cannot be imported, so the rotation-aware
+// rectangle math is replicated here rather than reused directly.
+//
+// Rotation and the circle's radius (defined relative to min(imageWidth, imageHeight), same
+// as drawZones in visionHtml.ts) only read correctly in a space where x and y share one
+// scale — which normalized image coordinates do not, since the image is rarely square. This
+// modal has no exact camera resolution to work with (only a feed URL), so FEED_ASPECT_GUESS
+// stands in for it, matching the 4:3 default VisionFeedViewer itself falls back to when no
+// aspect is given. An axis-aligned rectangle and a polygon test correctly regardless (ray
+// casting and an unrotated box compare each axis independently), so only a rotated rectangle
+// or a circle is affected by the guess being off.
+const FEED_ASPECT_GUESS = 4 / 3;
+
+function zoneAxes(rotationDeg: number) {
+  const a = (rotationDeg * Math.PI) / 180;
+  return { ux: Math.cos(a), uy: Math.sin(a), vx: -Math.sin(a), vy: Math.cos(a) };
+}
+
+// Point-in-shape tests below take (px, py) in a "pixel-space" stand-in — normalized
+// coordinates with x rescaled by the assumed aspect ratio (H=1, W=aspect) — so a rotated
+// rectangle's axes and a circle's radius mean the same thing they do on screen.
+function pointInRectPx(g: VisionZoneGeometry, aspect: number, px: number, py: number): boolean {
+  const cx = (g.x + g.width / 2) * aspect;
+  const cy = g.y + g.height / 2;
+  const hw = (g.width * aspect) / 2;
+  const hh = g.height / 2;
+  const ax = zoneAxes(g.rotation ?? 0);
+  const dx = px - cx, dy = py - cy;
+  return Math.abs(dx * ax.ux + dy * ax.uy) <= hw && Math.abs(dx * ax.vx + dy * ax.vy) <= hh;
+}
+
+function pointInCirclePx(g: VisionZoneGeometry, aspect: number, px: number, py: number): boolean {
+  const cx = g.cx * aspect, cy = g.cy;
+  const rad = g.radius * Math.min(aspect, 1);
+  const dx = px - cx, dy = py - cy;
+  return dx * dx + dy * dy <= rad * rad;
+}
+
+// Ray casting needs no aspect correction — it only compares each axis independently, so it
+// reads the same whether run in normalized or pixel space (same as ZoneDrawModal's `inside`).
+function pointInPolygonNorm(points: [number, number][], nx: number, ny: number): boolean {
+  let hit = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i], [xj, yj] = points[j];
+    if ((yi > ny) !== (yj > ny) && nx < ((xj - xi) * (ny - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+
+// Rough normalized-space area, used only to rank overlapping hits (smallest = most
+// specific) — not required to be exact, just consistently ordered across shapes.
+function zoneArea(g: VisionZoneGeometry): number {
+  if (g.shape === 'Rectangle') return g.width * g.height;
+  if (g.shape === 'Circle') return Math.PI * g.radius * g.radius;
+  if (g.shape === 'Polygon' && g.points.length >= 3) {
+    let sum = 0;
+    for (let i = 0, j = g.points.length - 1; i < g.points.length; j = i++) {
+      sum += g.points[j][0] * g.points[i][1] - g.points[i][0] * g.points[j][1];
+    }
+    return Math.abs(sum) / 2;
+  }
+  return Infinity;
+}
+
+/** Smallest zone whose geometry contains the tapped point, or null if none does. */
+function hitTestZones(zones: VisionZone[], nx: number, ny: number): VisionZone | null {
+  const px = nx * FEED_ASPECT_GUESS, py = ny;
+  let best: VisionZone | null = null;
+  let bestArea = Infinity;
+  for (const z of zones) {
+    const g = z.geometry;
+    let hit = false;
+    if (g.shape === 'Rectangle') hit = pointInRectPx(g, FEED_ASPECT_GUESS, px, py);
+    else if (g.shape === 'Circle') hit = pointInCirclePx(g, FEED_ASPECT_GUESS, px, py);
+    else if (g.shape === 'Polygon' && g.points.length >= 3) hit = pointInPolygonNorm(g.points, nx, ny);
+    if (!hit) continue;
+    const area = zoneArea(g);
+    if (area < bestArea) { bestArea = area; best = z; }
+  }
+  return best;
+}
 
 export function InspectionConfigModal({
   visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode, zones,
@@ -224,6 +313,16 @@ export function InspectionConfigModal({
     });
   }
 
+  // Tap-to-select: same state change the Zone dropdown makes (see ZonePickerModal's
+  // onSelect below), just driven by a hit-test on the tapped point instead of a picked
+  // row. A tap that lands on no zone does nothing.
+  function handleZoneTap(x: number, y: number) {
+    const hit = hitTestZones(zones, x, y);
+    if (!hit) return;
+    setZoneId(hit.id);
+    notifyLiveUpdate({ zoneId: hit.id });
+  }
+
   // Debounced live-update saves for non-polygon kinds
   useEffect(() => {
     if (!visible || kind !== 'blob') return;
@@ -381,6 +480,7 @@ export function InspectionConfigModal({
           zones={zones}
           isWide={isWide}
           placeholder="No camera feed"
+          onTapImagePoint={handleZoneTap}
         />
 
         {onToggleRunning && (
@@ -443,8 +543,6 @@ export function InspectionConfigModal({
         />
 
         <View style={isWide ? ws.wideRow : ws.stack}>
-        {/* Narrow: feed stacks on top. Wide: it moves to a fixed pane on the right (below). */}
-        {!isWide && feedSection}
 
         <ScrollView
           style={{ flex: 1 }}
@@ -452,7 +550,11 @@ export function InspectionConfigModal({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Name + Enabled grouped under one header */}
+          {/* Narrow: the debug feed scrolls WITH the settings (it used to be
+              pinned above this ScrollView). Wide: it stays in the right pane. */}
+          {!isWide && feedSection}
+
+          {/* Name + Enabled + Zone grouped under one header */}
           <View style={ves.groupCard}>
             <Text style={ves.groupTitle}>DETAILS</Text>
             <View style={ves.groupRow}>
@@ -465,24 +567,27 @@ export function InspectionConfigModal({
                 placeholderTextColor={kitColors.textFaint}
               />
             </View>
-            <View style={[ves.groupRow, ves.groupRowBorder]}>
-              <Text style={[ves.configFieldLabel, { flex: 1 }]}>Enabled</Text>
+            {/* Standard kit labeled-switch row (label left, control right) — see
+                robot/config.tsx / io/auxiliary.tsx for the same pattern elsewhere. It was
+                previously a bare Text+Switch styled with the Name row's narrow field-label,
+                which read as the switch stranded on its own at the card's right edge. */}
+            <FormRow label="Enabled" inline style={ves.groupRowBorder}>
               <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: accent }} />
-            </View>
+            </FormRow>
+            {/* Zone — was its own card below the DETAILS group; now a row of it, same
+                trigger opening the same ZonePickerModal. */}
+            <TouchableOpacity
+              style={[ves.groupRow, ves.groupRowBorder]}
+              onPress={() => setZonePickerOpen(true)}
+              activeOpacity={0.75}
+            >
+              <Text style={ves.configFieldLabel}>Zone</Text>
+              <Text style={{ flex: 1, fontSize: 14, color: kitColors.text }}>
+                {linkedZone?.name ?? 'Full image'}
+              </Text>
+              <ChevronDown size={15} color={kitColors.textFaint} />
+            </TouchableOpacity>
           </View>
-
-          {/* Zone */}
-          <TouchableOpacity
-            style={ves.configCard}
-            onPress={() => setZonePickerOpen(true)}
-            activeOpacity={0.75}
-          >
-            <Text style={ves.configFieldLabel}>Zone</Text>
-            <Text style={{ flex: 1, fontSize: 14, color: kitColors.text }}>
-              {linkedZone?.name ?? 'Full image'}
-            </Text>
-            <ChevronDown size={15} color={kitColors.textFaint} />
-          </TouchableOpacity>
 
           {/* Blob params */}
           {kind === 'blob' && (
@@ -843,7 +948,10 @@ const ws = StyleSheet.create({
   stack: { flex: 1 },
   // Padding around the frame + its controls. Matches the vision editor's feed pane
   // (paddingHorizontal 20 / paddingTop 18) so the frame sits identically in both editors.
-  feedPad: { paddingHorizontal: 20, paddingTop: 18, gap: 10 },
+  // No horizontal padding: on narrow the feed now lives inside the ScrollView,
+  // whose contentContainer already supplies the side gutter; the wide feed
+  // pane brings its own padding too.
+  feedPad: { gap: 10 },
   wideRow: {
     flex: 1, flexDirection: "row",
     width: "100%",
@@ -854,6 +962,8 @@ const ws = StyleSheet.create({
     width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
     borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: kitColors.border,
   },
-  leftPaneContent: { paddingBottom: spacing.xl },
+  // Horizontal/top padding lives here now that feedPad no longer carries it
+  // (the narrow layout's ScrollView gutter supplies it there instead).
+  leftPaneContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: spacing.xl },
   rightPaneContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 });

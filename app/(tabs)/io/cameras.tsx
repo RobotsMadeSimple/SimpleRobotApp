@@ -508,16 +508,45 @@ function NewCameraPage() {
   const add = async () => {
     setSaving(true);
     try {
+      const trimmedName  = name.trim();
+      const idx          = parseInt(deviceIndex) || 0;
+
+      // AddCamera's ack carries no payload (see CameraCommands.cs — it returns
+      // void), so the new camera's id can't be read off the response. Snapshot
+      // the ids we have *before* submitting, then diff against the refreshed
+      // list to find the one that just appeared.
+      let before: CameraState[] = [];
+      robotClient.onCameras(cams => { before = cams; })();
+
       await robotClient.addCamera({
-        name:        name.trim(),
-        deviceIndex: parseInt(deviceIndex) || 0,
+        name:        trimmedName,
+        deviceIndex: idx,
         enabled:     true,
         width:       parseInt(width)     || 640,
         height:      parseInt(height)    || 480,
         targetFps:   parseInt(targetFps) || 15,
       });
       await robotClient.getCameras().catch(() => {});
-      router.back();
+
+      let after: CameraState[] = [];
+      robotClient.onCameras(cams => { after = cams; })();
+
+      const beforeIds = new Set(before.map(c => c.id));
+      const added     = after.filter(c => !beforeIds.has(c.id));
+      const newCamera =
+        added.find(c => c.name === trimmedName && c.deviceIndex === idx) ??
+        added[0] ??
+        after.find(c => c.name === trimmedName && c.deviceIndex === idx);
+
+      if (newCamera) {
+        // Land in the editor, not the form — Back from there shouldn't return
+        // here.
+        router.replace({ pathname: "/(tabs)/io/cameras", params: { cameraId: newCamera.id } });
+      } else {
+        // Controller was slow to reflect the add (or it genuinely failed) —
+        // never strand the user on a spinner.
+        router.back();
+      }
     } finally {
       setSaving(false);
     }

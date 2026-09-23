@@ -1,4 +1,4 @@
-import { StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
+import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { Card } from "./Card";
 import { accents, colors, radii, spacing, type } from "./theme";
@@ -28,8 +28,19 @@ type Props = {
   axes: ReadoutAxis[];
   /** lg = jog/DRO prominence, md = dashboard rows. Default md. */
   size?: "md" | "lg";
+  /**
+   * One-line strip instead of the vertical list: all axes on a single row
+   * ("X 0.00 · Y 0.00 · …"), for tight layouts like the mobile jog screen.
+   * Targets are not shown inline. Overrides `size`.
+   */
+  inline?: boolean;
   /** Wrap in a Card surface. Default true; false for embedding in an existing Card. */
   card?: boolean;
+  /**
+   * Makes each axis row tappable (e.g. type-a-target-position flows). Applies
+   * to both the vertical list and the inline strip.
+   */
+  onAxisPress?: (axis: ReadoutAxis, index: number) => void;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -46,9 +57,35 @@ type Props = {
  *     { label: "RZ", value: status.rz, unit: "°"  },
  *   ]} />
  */
-export function PositionReadout({ axes, size = "md", card = true, style }: Props) {
+export function PositionReadout({ axes, size = "md", inline = false, card = true, onAxisPress, style }: Props) {
   const lg = size === "lg";
-  const hasTargets = axes.some((a) => a.target !== undefined);
+  const hasTargets = !inline && axes.some((a) => a.target !== undefined);
+
+  // Tappable rows when a press handler is given; plain Views otherwise.
+  const RowWrap = onAxisPress ? Pressable : View;
+  const rowProps = (axis: ReadoutAxis, i: number) =>
+    onAxisPress ? { onPress: () => onAxisPress(axis, i), hitSlop: 4 } : {};
+
+  if (inline) {
+    const strip = (
+      <View style={[styles.inlineRow, style]}>
+        {axes.map((axis, i) => (
+          <RowWrap key={axis.label} style={styles.inlineAxis} {...rowProps(axis, i)}>
+            <View style={[styles.axisTile, styles.axisTileInline, axis.active && styles.axisTileActive]}>
+              <Text style={[styles.axisLabel, axis.active && styles.axisLabelActive]}>{axis.label}</Text>
+            </View>
+            <Text
+              style={[styles.value, styles.valueInline, axis.active && styles.valueActive]}
+              numberOfLines={1}
+            >
+              {fmtValue(axis.value)}
+            </Text>
+          </RowWrap>
+        ))}
+      </View>
+    );
+    return card ? <Card padded={false}>{strip}</Card> : strip;
+  }
 
   const rows = (
     <View style={style}>
@@ -60,9 +97,10 @@ export function PositionReadout({ axes, size = "md", card = true, style }: Props
         </View>
       )}
       {axes.map((axis, i) => (
-        <View
+        <RowWrap
           key={axis.label}
           style={[styles.row, lg && styles.rowLg, (i > 0 || hasTargets) && styles.rowBorder]}
+          {...rowProps(axis, i)}
         >
           <View style={[styles.axisTile, lg && styles.axisTileLg, axis.active && styles.axisTileActive]}>
             <Text style={[styles.axisLabel, lg && styles.axisLabelLg, axis.active && styles.axisLabelActive]}>
@@ -84,7 +122,7 @@ export function PositionReadout({ axes, size = "md", card = true, style }: Props
             </Text>
           )}
           {!!axis.unit && <Text style={[styles.unit, lg && styles.unitLg]}>{axis.unit}</Text>}
-        </View>
+        </RowWrap>
       ))}
     </View>
   );
@@ -175,4 +213,25 @@ const styles = StyleSheet.create({
     color: colors.textFaint,
   },
   unitLg: { fontSize: 13, width: 30 },
+  // Inline one-line strip
+  inlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  inlineAxis: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    flexShrink: 1,
+  },
+  axisTileInline: { minWidth: 26, height: 22 },
+  valueInline: {
+    flex: 0,
+    fontSize: 14,
+    textAlign: "left",
+  },
 });

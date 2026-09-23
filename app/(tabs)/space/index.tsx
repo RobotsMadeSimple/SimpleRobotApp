@@ -1,8 +1,8 @@
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { accents, Card, colors, Divider, ListRow, PageHeader, PositionReadout, Screen, SectionHeader, spacing, StatTile } from "@/src/components/ui/kit";
-import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
+import { accents, Card, colors, Divider, ListRow, PageHeader, Screen, SectionHeader, spacing, StatTile } from "@/src/components/ui/kit";
+import { useGrids, usePoints, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { Crosshair, Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
+import { Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
 import { StyleSheet, View } from "react-native";
 
 const MENU_ITEMS = [
@@ -49,20 +49,10 @@ const MENU_ITEMS = [
 ];
 
 export default function SpacePage() {
-  const status = useRobotStatus();
   const points = usePoints();
   const grids  = useGrids();
   const stacks = useStacks();
   const tools  = useTools();
-
-  const fmt = (v?: number) => (v ?? 0).toFixed(1);
-
-  const positionAxes = [
-    { label: "X",  value: fmt(status.x),  unit: "mm" },
-    { label: "Y",  value: fmt(status.y),  unit: "mm" },
-    { label: "Z",  value: fmt(status.z),  unit: "mm" },
-    { label: "RZ", value: fmt(status.rz), unit: "°"  },
-  ];
 
   const summaryTiles = [
     { label: "Points", value: points.length, icon: MapPin,     tint: [colors.success, colors.successSoft] as [string, string] },
@@ -77,10 +67,6 @@ export default function SpacePage() {
       <PageHeader title="Space" subtitle="Points, tools, grids, and workspace setup" />
 
       <Screen>
-        {/* ── Current position ── */}
-        <SectionHeader title="Current position" icon={Crosshair} />
-        <PositionReadout axes={positionAxes} />
-
         {/* ── Workspace summary ── */}
         <SectionHeader title="Workspace" icon={LayoutGrid} style={styles.summaryHeader} />
         <View style={styles.tileRow}>

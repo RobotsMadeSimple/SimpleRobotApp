@@ -46,7 +46,8 @@ function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
   }
 
   const groupViews = groups.map(g => (
-    <View key={g.label} style={isWide && groups.length > 1 && styles.wideGroupCol}>
+    // groupCol's gap gives SectionHeader its spacing (it relies on parent flex gap).
+    <View key={g.label} style={[styles.groupCol, isWide && groups.length > 1 && styles.wideGroupCol]}>
       <SectionHeader title={g.label} icon={GROUP_ICONS[g.label as keyof typeof GROUP_ICONS]} />
       <Card padded={false}>
         {g.pins.map((pin, i) => (
@@ -139,5 +140,6 @@ const styles = StyleSheet.create({
   statRow:       { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   statTile:      { flex: 1, minWidth: 130 },
   wideGroupsRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
+  groupCol:      { gap: spacing.md },
   wideGroupCol:  { flex: 1, minWidth: 0 },
 });

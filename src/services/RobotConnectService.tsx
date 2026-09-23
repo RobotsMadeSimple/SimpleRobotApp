@@ -217,6 +217,15 @@ export class RobotConnectService {
     if (!pending)
       return;
 
+    // A failed command must reject its caller — the server reports handler
+    // errors as ok:false + error. Resolving these silently made failures
+    // (e.g. configuring pins on a disconnected Nano) look like successes.
+    if (data.ok === false) {
+      this.pendingAcks.delete(data.id);
+      pending.reject(data.error ?? `Command "${data.command}" failed`);
+      return;
+    }
+
     switch (data.command){
       case "GetStatus":
         if (typeof data.programs === "string") {
@@ -1475,7 +1484,10 @@ export class RobotConnectService {
       this.relayIO = { ...this.relayIO, names };
       this.emitRelayIO();
     }
-    return this.sendCommand("RenameRelay", { relay, name });
+    // Refresh from the controller's config afterwards — without this a save
+    // with the relay board disconnected looked like it did nothing.
+    return this.sendCommand("RenameRelay", { relay, name })
+      .then((v) => { this.getIO().catch(() => {}); return v; });
   }
 
   // ── DXF files ──────────────────────────────────────────────────────────────

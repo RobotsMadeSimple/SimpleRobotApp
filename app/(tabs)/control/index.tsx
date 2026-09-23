@@ -9,7 +9,6 @@ import {
   ListRow,
   radii,
   PageHeader,
-  PositionReadout,
   Screen,
   SectionHeader,
   shadows,
@@ -61,21 +60,12 @@ const HOMING_LABELS: Record<string, string> = {
 export default function Control() {
   const s = useRobotStatus();
   const isWide = useIsWide();
-  const fmt = (v?: number) => (v ?? 0).toFixed(1);
 
   const isHoming = !!s?.homingState && s.homingState !== "WaitingForStart";
   const homingLabel = s?.homingState ? (HOMING_LABELS[s.homingState] ?? s.homingState) : "";
 
   type PendingAction = { label: string; sub: string; icon: React.ReactNode; run: () => void } | null;
   const [confirm, setConfirm] = useState<PendingAction>(null);
-
-  // CNC-style DRO axis list — same readout in both layouts (see PositionReadout).
-  const coords = [
-    { label: "X",  value: fmt(s?.x),  unit: "mm" },
-    { label: "Y",  value: fmt(s?.y),  unit: "mm" },
-    { label: "Z",  value: fmt(s?.z),  unit: "mm" },
-    { label: "RZ", value: fmt(s?.rz), unit: "°"  },
-  ];
 
   const actions = [
     {
@@ -105,14 +95,10 @@ export default function Control() {
         title="Status"
         icon={Activity}
         right={
-          <InfoTip text="World-frame X/Y/Z/RZ position. Badges below show whether the robot is homed, moving, faulted, or has a driver connected — switch to Jog & Teach to move in the active Local or Tool frame instead." />
+          <InfoTip text="Shows whether the robot is homed, moving, faulted, or has a driver connected. The live position readout lives on the Jog & Teach screen." />
         }
       />
       <Card padded={false}>
-        <PositionReadout axes={coords} card={false} />
-
-        <Divider />
-
         <View style={styles.badgeRow}>
           <StatusPill
             label={s?.wasHomed ? "Homed" : "Not Homed"}
@@ -254,8 +240,6 @@ const styles = StyleSheet.create({
   wideRightCol: { flex: 1, gap: spacing.md },
 
   // ── Position card ────────────────────────────────────────────────────────
-  // The X/Y/Z/RZ readout is the kit's CNC-style PositionReadout (DRO list), so
-  // the card is unpadded and only the status pills carry their own padding.
   badgeRow: {
     flexDirection: "row",
     flexWrap: "wrap",

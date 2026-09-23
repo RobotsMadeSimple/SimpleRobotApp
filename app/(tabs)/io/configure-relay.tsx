@@ -1,3 +1,4 @@
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -62,8 +63,12 @@ export default function ConfigureRelayPage() {
         }
       }
       router.back();
-    } catch {
-      // Stay on page so user can retry
+    } catch (err) {
+      // Stay on page so the user can retry — and say why it failed.
+      appAlert(
+        "Save Failed",
+        typeof err === "string" ? err : "The relay names could not be saved. Check the controller connection.",
+      );
     } finally {
       setSaving(false);
     }

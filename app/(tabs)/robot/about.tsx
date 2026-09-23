@@ -374,27 +374,73 @@ export default function AboutRobot() {
   const electronIsUpToDate = electronLatestVersion !== null && electronLatestVersion === evCurrent;
   const electronHasUpdate  = electronLatestVersion !== null && electronLatestVersion !== evCurrent;
 
-  const identitySection = (
-    <>
-      <SectionHeader
-        title="Identity"
-        right={
-          <TouchableOpacity onPress={openEdit} style={styles.editButton}>
-            <Pencil size={14} color={colors.accent} />
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
-        }
-      />
-      <Card>
-        <Row icon={<Tag size={18} color={colors.accent} />} tileBg={colors.accentSoft} label="Name" value={robot.robotName || "—"} />
-        <Divider inset />
-        <Row icon={<Cpu size={18} color={accents.purple} />} tileBg={accents.purpleSoft} label="Type" value={robot.robotType || "—"} />
-        <Divider inset />
-        <Row icon={<Hash size={18} color={colors.textMuted} />} tileBg={colors.surfaceMuted} label="Serial Number" value={robot.serialNumber || "—"} />
-      </Card>
+  // Inline pencil-icon triggers for Name/Type — both re-open the same identity
+  // edit modal used before; no change to the edit/save logic itself.
+  const identityNameValue = (
+    <View style={styles.editableValue}>
+      <Text style={styles.identityValue} numberOfLines={1}>{robot.robotName || "—"}</Text>
+      <TouchableOpacity
+        onPress={openEdit}
+        style={styles.inlineEditBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityLabel="Edit robot name"
+      >
+        <Pencil size={13} color={colors.accent} />
+      </TouchableOpacity>
+    </View>
+  );
 
+  const identityTypeValue = (
+    <View style={styles.editableValue}>
+      <Text style={styles.identityValue} numberOfLines={1}>{robot.robotType || "—"}</Text>
+      <TouchableOpacity
+        onPress={openEdit}
+        style={styles.inlineEditBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityLabel="Edit robot type"
+      >
+        <Pencil size={13} color={colors.accent} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Identity rows, shared by the merged hero+identity card (wide + narrow).
+  const identityFields = (
+    <>
+      <Row icon={<Tag size={18} color={colors.accent} />} tileBg={colors.accentSoft} label="Name" value={identityNameValue} />
+      <Divider inset />
+      <Row icon={<Cpu size={18} color={accents.purple} />} tileBg={accents.purpleSoft} label="Type" value={identityTypeValue} />
+      <Divider inset />
+      <Row icon={<Hash size={18} color={colors.textMuted} />} tileBg={colors.surfaceMuted} label="Serial Number" value={robot.serialNumber || "—"} />
+    </>
+  );
+
+  // Hero: robot image + identity fields in one card — image beside the fields
+  // on wide, stacked above them on narrow.
+  const heroIdentityCard = (
+    <Card style={styles.heroCard}>
+      {isWide ? (
+        <View style={styles.heroRowWide}>
+          <View style={styles.heroImageWrapperWide}>
+            <Image source={imageSource} style={styles.heroImageWide} resizeMode="contain" />
+          </View>
+          <View style={styles.identityFieldsColWide}>{identityFields}</View>
+        </View>
+      ) : (
+        <View style={styles.heroColNarrow}>
+          <View style={styles.heroImageWrapperNarrow}>
+            <Image source={imageSource} style={styles.heroImageNarrow} resizeMode="contain" />
+          </View>
+          <View style={styles.identityFieldsColNarrow}>{identityFields}</View>
+        </View>
+      )}
+    </Card>
+  );
+
+  const networkSection = (
+    <>
       <SectionHeader title="Network" icon={Network} />
-      <Card>
+      <Card style={isWide ? styles.wideGridCard : undefined}>
         <Row icon={<Network size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="IP Address" value={robot.ipAddress || "—"} />
         <Divider inset />
         <Row icon={<Server size={18} color={accents.cyan} />} tileBg={accents.cyanSoft} label="Port" value={robot.port} />
@@ -412,7 +458,7 @@ export default function AboutRobot() {
           <InfoTip text="Homing State shows which step of the homing sequence the controller is on — 'Idle' means it isn't homing right now. Homed stays No until a homing cycle finishes, so the controller knows the robot's true position." />
         }
       />
-      <Card>
+      <Card style={isWide ? styles.wideGridCard : undefined}>
           <Row
             icon={status.connected ? <Wifi size={18} color={colors.success} /> : <WifiOff size={18} color={colors.danger} />}
             tileBg={status.connected ? colors.successSoft : colors.dangerSoft}
@@ -458,7 +504,7 @@ export default function AboutRobot() {
           title="Software"
           right={<InfoTip text="Controller and app versions update independently. Remote controller updates only work when the controller runs Linux — Windows controllers must be updated manually." />}
         />
-        <Card>
+        <Card style={isWide ? styles.wideGridCard : undefined}>
           <Row
             icon={<Download size={18} color={colors.accent} />}
             tileBg={colors.accentSoft}
@@ -503,118 +549,108 @@ export default function AboutRobot() {
             <Text style={styles.cardNote}>Remote update is only available on Linux controllers.</Text>
           )}
         </Card>
-
-        {/* App update — Android */}
-        {isAndroid && (
-          <>
-            <SectionHeader title="App" />
-            <Card>
-              <Row
-                icon={<Download size={18} color={colors.accent} />}
-                tileBg={colors.accentSoft}
-                label="App Version"
-                value={
-                  <View style={styles.versionRight}>
-                    {appIsUpToDate && (
-                      <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
-                    )}
-                    {appHasUpdate && <StatusPill label={`v${appLatestVersion} available`} tone="warning" />}
-                    <Text style={styles.rowValue} numberOfLines={1}>v{appVersion}</Text>
-                  </View>
-                }
-              />
-              <Divider inset />
-              <ActionRow
-                icon={checkingAppUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
-                label="Check for Updates"
-                onPress={checkAppForUpdates}
-                disabled={checkingAppUpdate}
-              />
-              <Divider />
-              <Button
-                variant="ghost"
-                label="Update App"
-                icon={<Download size={15} color={appHasUpdate ? colors.accent : colors.textFaint} />}
-                textStyle={!appHasUpdate && styles.cardActionTextDisabled}
-                onPress={handleAppUpdate}
-                disabled={!appAssetUrl || !appHasUpdate}
-                style={styles.cardActionBtn}
-              />
-            </Card>
-          </>
-        )}
-
-        {/* App update — Electron */}
-        {isElectron && (
-          <>
-            <SectionHeader title="App" />
-            <Card>
-              <Row
-                icon={<Download size={18} color={colors.accent} />}
-                tileBg={colors.accentSoft}
-                label="App Version"
-                value={
-                  <View style={styles.versionRight}>
-                    {electronIsUpToDate && (
-                      <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
-                    )}
-                    {electronHasUpdate && <StatusPill label={`v${electronLatestVersion} available`} tone="warning" />}
-                    <Text style={styles.rowValue} numberOfLines={1}>
-                      {electronVersion ? `v${electronVersion}` : "—"}
-                    </Text>
-                  </View>
-                }
-              />
-              <Divider inset />
-              <ActionRow
-                icon={checkingElectronUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
-                label="Check for Updates"
-                onPress={checkElectronForUpdates}
-                disabled={checkingElectronUpdate || downloadingElectron}
-              />
-              {downloadingElectron && <ProgressBar progress={electronDownloadProgress} />}
-              <Divider />
-              <Button
-                variant="ghost"
-                label={downloadingElectron ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%` : "Update App"}
-                icon={downloadingElectron
-                  ? <ActivityIndicator size="small" color={colors.accent} />
-                  : <Download size={15} color={electronHasUpdate ? colors.accent : colors.textFaint} />}
-                textStyle={!electronHasUpdate && styles.cardActionTextDisabled}
-                onPress={handleElectronUpdate}
-                disabled={!electronHasUpdate || downloadingElectron || checkingElectronUpdate}
-                style={styles.cardActionBtn}
-              />
-            </Card>
-          </>
-        )}
-
-        {/* Restart */}
-        <Button
-          variant="dangerSoft"
-          label="Restart Controller"
-          icon={<RefreshCw size={15} color={colors.danger} />}
-          onPress={() => setRestartVisible(true)}
-        />
     </>
+  );
+
+  // App update card — Android or Electron, mutually exclusive at runtime.
+  // Kept separate from softwareSection so wide mode can pair it alongside
+  // Software in the grid; null (nothing rendered) when neither applies.
+  const appSection = isAndroid ? (
+    <>
+      <SectionHeader title="App" />
+      <Card style={isWide ? styles.wideGridCard : undefined}>
+        <Row
+          icon={<Download size={18} color={colors.accent} />}
+          tileBg={colors.accentSoft}
+          label="App Version"
+          value={
+            <View style={styles.versionRight}>
+              {appIsUpToDate && (
+                <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
+              )}
+              {appHasUpdate && <StatusPill label={`v${appLatestVersion} available`} tone="warning" />}
+              <Text style={styles.rowValue} numberOfLines={1}>v{appVersion}</Text>
+            </View>
+          }
+        />
+        <Divider inset />
+        <ActionRow
+          icon={checkingAppUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
+          label="Check for Updates"
+          onPress={checkAppForUpdates}
+          disabled={checkingAppUpdate}
+        />
+        <Divider />
+        <Button
+          variant="ghost"
+          label="Update App"
+          icon={<Download size={15} color={appHasUpdate ? colors.accent : colors.textFaint} />}
+          textStyle={!appHasUpdate && styles.cardActionTextDisabled}
+          onPress={handleAppUpdate}
+          disabled={!appAssetUrl || !appHasUpdate}
+          style={styles.cardActionBtn}
+        />
+      </Card>
+    </>
+  ) : isElectron ? (
+    <>
+      <SectionHeader title="App" />
+      <Card style={isWide ? styles.wideGridCard : undefined}>
+        <Row
+          icon={<Download size={18} color={colors.accent} />}
+          tileBg={colors.accentSoft}
+          label="App Version"
+          value={
+            <View style={styles.versionRight}>
+              {electronIsUpToDate && (
+                <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
+              )}
+              {electronHasUpdate && <StatusPill label={`v${electronLatestVersion} available`} tone="warning" />}
+              <Text style={styles.rowValue} numberOfLines={1}>
+                {electronVersion ? `v${electronVersion}` : "—"}
+              </Text>
+            </View>
+          }
+        />
+        <Divider inset />
+        <ActionRow
+          icon={checkingElectronUpdate ? <ActivityIndicator size="small" color={colors.accent} /> : <RefreshCw size={18} color={colors.accent} />}
+          label="Check for Updates"
+          onPress={checkElectronForUpdates}
+          disabled={checkingElectronUpdate || downloadingElectron}
+        />
+        {downloadingElectron && <ProgressBar progress={electronDownloadProgress} />}
+        <Divider />
+        <Button
+          variant="ghost"
+          label={downloadingElectron ? `Downloading… ${Math.round(electronDownloadProgress * 100)}%` : "Update App"}
+          icon={downloadingElectron
+            ? <ActivityIndicator size="small" color={colors.accent} />
+            : <Download size={15} color={electronHasUpdate ? colors.accent : colors.textFaint} />}
+          textStyle={!electronHasUpdate && styles.cardActionTextDisabled}
+          onPress={handleElectronUpdate}
+          disabled={!electronHasUpdate || downloadingElectron || checkingElectronUpdate}
+          style={styles.cardActionBtn}
+        />
+      </Card>
+    </>
+  ) : null;
+
+  const restartButton = (
+    <Button
+      variant="dangerSoft"
+      label="Restart Controller"
+      icon={<RefreshCw size={15} color={colors.danger} />}
+      onPress={() => setRestartVisible(true)}
+    />
   );
 
   return (
     <View style={styles.root}>
       <PageHeader title="About" subtitle="Serial number, firmware and diagnostics" />
       <Screen>
-        {/* Hero card */}
-        <Card style={styles.heroCard}>
-          <View style={styles.heroImageWrapper}>
-            <Image source={imageSource} style={styles.heroImage} resizeMode="contain" />
-          </View>
-          <Text style={styles.heroName}>{robot.robotName || "Unknown Robot"}</Text>
-          {!!robot.robotType && (
-            <View style={styles.typeBadge}>
-              <Text style={styles.typeText}>{robot.robotType}</Text>
-            </View>
-          )}
-        </Card>
+        {/* Hero + Identity — image and editable name/type/serial in one card */}
+        {heroIdentityCard}
 
         <View style={styles.statRow}>
           <StatTile
@@ -647,18 +683,28 @@ export default function AboutRobot() {
         </View>
 
         {isWide ? (
-          <View style={styles.wideRow}>
-            <View style={styles.wideLeftCol}>{identitySection}</View>
-            <View style={styles.wideRightCol}>
-              {liveStatusSection}
-              {softwareSection}
+          <>
+            <View style={styles.wideGridRow}>
+              <View style={styles.wideGridCol}>{networkSection}</View>
+              <View style={styles.wideGridCol}>{liveStatusSection}</View>
             </View>
-          </View>
+            {appSection ? (
+              <View style={styles.wideGridRow}>
+                <View style={styles.wideGridCol}>{softwareSection}</View>
+                <View style={styles.wideGridCol}>{appSection}</View>
+              </View>
+            ) : (
+              softwareSection
+            )}
+            {restartButton}
+          </>
         ) : (
           <>
-            {identitySection}
+            {networkSection}
             {liveStatusSection}
             {softwareSection}
+            {appSection}
+            {restartButton}
           </>
         )}
       </Screen>
@@ -760,33 +806,40 @@ const styles = StyleSheet.create({
   center:     { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background },
   centerText: { fontSize: 15, color: colors.textMuted },
 
-  heroCard: {
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    gap: spacing.sm,
-  },
-  heroImageWrapper: { width: 110, height: 110, borderRadius: radii.xl, backgroundColor: colors.surface, justifyContent: "center", alignItems: "center", marginBottom: spacing.xs },
-  heroImage:        { width: 110, height: 110 },
-  heroName:         { ...type.pageTitle, fontSize: 22 },
-  typeBadge:        { backgroundColor: colors.accentSoft, borderRadius: radii.sm - 1, paddingHorizontal: spacing.md, paddingVertical: spacing.xs / 2 },
-  typeText:         { fontSize: 13, fontWeight: "600", color: colors.accent },
+  // ── Hero + Identity (merged card) ───────────────────────────────────────────
+  heroCard: {},
+  heroRowWide:   { flexDirection: "row", alignItems: "center", gap: spacing.lg },
+  heroColNarrow: { alignItems: "center", gap: spacing.md },
 
-  editButton:     { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  editButtonText: { fontSize: 12, fontWeight: "600", color: colors.accent },
+  heroImageWrapperWide:   { width: 168, height: 168, borderRadius: radii.xl, backgroundColor: colors.surfaceMuted, justifyContent: "center", alignItems: "center" },
+  heroImageWide:          { width: 148, height: 148 },
+  heroImageWrapperNarrow: { width: 128, height: 128, borderRadius: radii.xl, backgroundColor: colors.surfaceMuted, justifyContent: "center", alignItems: "center" },
+  heroImageNarrow:        { width: 112, height: 112 },
+
+  identityFieldsColWide:   { flex: 1 },
+  identityFieldsColNarrow: { width: "100%" },
+
+  // Inline pencil-icon edit triggers next to the Name/Type values.
+  editableValue:  { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexShrink: 1 },
+  // No percentage clamp here: inside the auto-sized editableValue wrapper a
+  // maxWidth percentage collapses the text — shrink only when space runs out.
+  identityValue:  { ...type.body, color: colors.textMuted, textAlign: "right", flexShrink: 1 },
+  inlineEditBtn:  { padding: spacing.xs, borderRadius: radii.pill, backgroundColor: colors.accentSoft },
 
   statRow:  { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   statTile: { flex: 1, minWidth: 130 },
 
-  // ── Wide two-column layout ──────────────────────────────────────────────────
-  // Identity/network (static info) in a fixed left column, live status +
-  // software/app updates in the wider right one.
-  wideRow: {
+  // ── Wide grid ────────────────────────────────────────────────────────────
+  // Network/Live Status and Software/App are paired row-by-row with
+  // alignItems: "stretch" so both cards in a row match the taller one's
+  // height; wideGridCard (flex: 1) lets each Card fill that stretched space.
+  wideGridRow: {
     flexDirection: "row",
     gap: spacing.lg,
-    alignItems: "flex-start",
+    alignItems: "stretch",
   },
-  wideLeftCol:  { width: 360, gap: spacing.md },
-  wideRightCol: { flex: 1, gap: spacing.md },
+  wideGridCol:  { flex: 1, gap: spacing.md },
+  wideGridCard: { flex: 1 },
 
   rowValue: { ...type.body, color: colors.textMuted, maxWidth: "45%", textAlign: "right" },
 

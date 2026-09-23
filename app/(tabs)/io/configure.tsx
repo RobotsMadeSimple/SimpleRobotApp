@@ -1,3 +1,4 @@
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoPinState, PinType } from "@/src/models/robotModels";
@@ -290,8 +291,15 @@ export default function ConfigurePage() {
       // Refresh IO state then go back
       await robotClient.getIO().catch(() => {});
       router.back();
-    } catch {
-      // stay on page — user can retry
+    } catch (err) {
+      // Stay on page so the user can retry — and SAY why it failed (a
+      // disconnected Nano used to fail here completely silently).
+      appAlert(
+        "Save Failed",
+        typeof err === "string"
+          ? err
+          : "The pin configuration could not be saved. Check that the Nano is connected.",
+      );
     } finally {
       setSaving(false);
     }

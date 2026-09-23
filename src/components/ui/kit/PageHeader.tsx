@@ -85,8 +85,10 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
   if (isWide) {
     return (
       <View>
-        {/* Breadcrumbs live in a real header bar spanning the content pane. */}
-        {trail.length > 1 && (
+        {/* Breadcrumbs live in a real header bar spanning the content pane.
+            Always rendered — a landing page shows its own name as the single
+            crumb, so the bar is a consistent landmark on every wide screen. */}
+        {(
           <View style={styles.crumbBar}>
             <View style={[styles.crumbRow, wideContent]}>
               {trail.map((crumb, i) => {
@@ -163,7 +165,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.md + 2,
   },
   wideWrap: {
     paddingTop: spacing.xxl,
@@ -172,8 +174,8 @@ const styles = StyleSheet.create({
   },
   crumbRow:  { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
   crumbItem: { flexDirection: "row", alignItems: "center" },
-  crumbSep:  { color: colors.textFaint, fontSize: 14, marginHorizontal: spacing.xs + 2 },
-  crumb:     { color: colors.textMuted, fontSize: 14, fontWeight: "600" },
+  crumbSep:  { color: colors.textFaint, fontSize: 16, marginHorizontal: spacing.sm },
+  crumb:     { color: colors.textMuted, fontSize: 16, fontWeight: "600" },
   crumbHover:   { color: colors.accent },
   crumbCurrent: { color: colors.text, fontWeight: "600" },
   wideTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.lg },

@@ -27,8 +27,16 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   placeholder?: string;
   pointerEvents?: "none" | "auto" | "box-none" | "box-only";
   onMessage?: (event: { nativeEvent: { data: string } }) => void;
+  /**
+   * Fires when the feed is tapped, with the tap in normalized (0-1) image coordinates —
+   * additive on top of the FEED_HTML document's own "feedTap" message (see visionHtml.ts),
+   * which already resolves the tap through the canvas's object-fit:contain letterboxing.
+   * Hit-testing that point against zone geometry is left to the caller (e.g.
+   * InspectionConfigModal), so this component stays presentation-only.
+   */
+  onTapImagePoint?: (x: number, y: number) => void;
 }>(function VisionFeedViewer(
-  { feedUrl, zones, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage },
+  { feedUrl, zones, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint },
   ref,
 ) {
   const webRef = useRef<VisionCanvasHandle>(null);
@@ -55,6 +63,21 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   // Fresh WebView: re-send both once the document is ready.
   const onLoad = useCallback(() => { injectFeed(); injectZones(); }, [injectFeed, injectZones]);
 
+  // Additive on top of the caller's own onMessage: a "feedTap" message (see FEED_HTML in
+  // visionHtml.ts) is consumed here and reported through onTapImagePoint; every message,
+  // including that one, is still forwarded to onMessage exactly as before.
+  const handleMessage = useCallback((e: { nativeEvent: { data: string } }) => {
+    if (onTapImagePoint) {
+      try {
+        const msg = JSON.parse(e.nativeEvent.data);
+        if (msg?.type === "feedTap" && typeof msg.x === "number" && typeof msg.y === "number") {
+          onTapImagePoint(msg.x, msg.y);
+        }
+      } catch {}
+    }
+    onMessage?.(e);
+  }, [onTapImagePoint, onMessage]);
+
   return (
     <View
       style={[styles.feedCard, isWide ? { width: "100%", aspectRatio: aspect, maxHeight: 560 } : { height: 220 }]}
@@ -66,7 +89,7 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
         style={{ flex: 1, backgroundColor: "#111" }}
         focusable={false}
         onLoad={onLoad}
-        onMessage={onMessage}
+        onMessage={handleMessage}
       />
       {!feedUrl && (
         <View style={styles.placeholder}>

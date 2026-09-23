@@ -3,6 +3,7 @@ import { Modal, PanResponder, Text, TextInput, TouchableOpacity, View } from "re
 import { ColorEntry } from "@/src/models/robotModels";
 import { colors, spacing, radii, shadows, accents } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { ColorPickModal } from "./ColorPickModal";
 
 // ── Draggable RGB / tolerance slider ─────────────────────────────────────────
@@ -92,6 +93,7 @@ export function ColorEditModal({ visible, entry, onSave, onClose, snapshotUri, o
   snapshotUri: string | null;
   onFetchSnapshot: () => Promise<void>;
 }) {
+  const isWide = useIsWide();
   const [r, setR] = useState(128);
   const [g, setG] = useState(128);
   const [b, setB] = useState(128);
@@ -128,6 +130,25 @@ export function ColorEditModal({ visible, entry, onSave, onClose, snapshotUri, o
     onFetchSnapshot();
   }
 
+  // ── Hex entry ──────────────────────────────────────────────────────────────
+  // Two-way: shows the RGB value as hex; typing a valid #RGB/#RRGGBB applies it
+  // to the channels live. `hexDraft` is non-null only while the field is being
+  // edited, so slider changes keep updating the display otherwise.
+  const toHex2 = (n: number) => n.toString(16).padStart(2, "0");
+  const hexOfRgb = `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`.toUpperCase();
+  const [hexDraft, setHexDraft] = useState<string | null>(null);
+
+  function applyHex(text: string) {
+    setHexDraft(text);
+    const raw  = text.trim().replace(/^#/, "");
+    const full = raw.length === 3 ? raw.split("").map(c => c + c).join("") : raw;
+    if (/^[0-9a-fA-F]{6}$/.test(full)) {
+      setR(parseInt(full.slice(0, 2), 16));
+      setG(parseInt(full.slice(2, 4), 16));
+      setB(parseInt(full.slice(4, 6), 16));
+    }
+  }
+
   const tolFrac = tol / 100;
   const TTHUMB  = 18;
   const TROW_H  = TTHUMB + 4;
@@ -135,14 +156,42 @@ export function ColorEditModal({ visible, entry, onSave, onClose, snapshotUri, o
   return (
     <>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-        <TouchableOpacity style={ves.backdrop} activeOpacity={1} onPress={onClose}>
-          <TouchableOpacity style={[ves.sheet, { paddingBottom: spacing.xl }]} activeOpacity={1} onPress={() => {}}>
+        <TouchableOpacity
+          style={[ves.backdrop, isWide && { justifyContent: 'center', alignItems: 'center', padding: spacing.xl }]}
+          activeOpacity={1}
+          onPress={onClose}
+        >
+          <TouchableOpacity
+            style={[
+              ves.sheet,
+              { paddingBottom: spacing.xl },
+              // Wide: a centered dialog, not an edge-to-edge bottom sheet.
+              isWide && { width: '100%', maxWidth: 420, borderRadius: radii.xl },
+            ]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
             <Text style={ves.sheetTitle}>Color Entry</Text>
 
-            {/* Preview swatch + pick button */}
+            {/* Preview swatch + hex entry + pick button */}
             <View style={{ alignSelf: 'center', marginBottom: spacing.lg, gap: spacing.sm, alignItems: 'center' }}>
               <View style={[{ width: 64, height: 64, borderRadius: radii.lg + 2, backgroundColor: `rgb(${r},${g},${b})`,
                 borderWidth: 1, borderColor: colors.border }, shadows.soft]} />
+              <TextInput
+                value={hexDraft ?? hexOfRgb}
+                onChangeText={applyHex}
+                onFocus={() => setHexDraft(hexOfRgb)}
+                onBlur={() => setHexDraft(null)}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={7}
+                placeholder="#FFFFFF"
+                placeholderTextColor={colors.textFaint}
+                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm,
+                  paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontSize: 13,
+                  color: colors.text, width: 96, textAlign: 'center',
+                  fontVariant: ['tabular-nums'] }}
+              />
               <TouchableOpacity onPress={openPick} activeOpacity={0.75}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
                   backgroundColor: accents.cyan, borderRadius: radii.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
