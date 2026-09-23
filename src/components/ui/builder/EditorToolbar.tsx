@@ -74,7 +74,7 @@ export function useUndoShortcuts({ enabled, onUndo, onRedo }: {
   enabled: boolean; onUndo: () => void; onRedo: () => void;
 }) {
   const handlers = useRef({ onUndo, onRedo });
-  handlers.current = { onUndo, onRedo };
+  useEffect(() => { handlers.current = { onUndo, onRedo }; });
 
   useEffect(() => {
     if (Platform.OS !== "web" || !enabled || typeof document === "undefined") return;

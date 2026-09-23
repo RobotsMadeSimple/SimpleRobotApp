@@ -41,10 +41,20 @@ export function RevisionsSheet({ visible, programName, hasUnsavedChanges, onClos
   const [detail, setDetail]     = useState<Load<BuiltProgram>>({ state: "loading" });
   const [restoring, setRestoring] = useState(false);
 
-  useEffect(() => {
-    if (!visible) return;
+  // Reset on close (not on open) so the effects below only fetch.
+  function close() {
     setSelected(null);
     setList({ state: "loading" });
+    onClose();
+  }
+
+  function select(rev: ProgramRevision) {
+    setDetail({ state: "loading" });
+    setSelected(rev);
+  }
+
+  useEffect(() => {
+    if (!visible) return;
     let live = true;
     robotClient.getBuiltProgramRevisions(programName)
       .then(value => { if (live) setList({ state: "ready", value }); })
@@ -54,7 +64,6 @@ export function RevisionsSheet({ visible, programName, hasUnsavedChanges, onClos
 
   useEffect(() => {
     if (!selected) return;
-    setDetail({ state: "loading" });
     let live = true;
     robotClient.getBuiltProgramRevision(programName, selected.id)
       .then(value => { if (live) setDetail({ state: "ready", value }); })
@@ -80,7 +89,7 @@ export function RevisionsSheet({ visible, programName, hasUnsavedChanges, onClos
     try {
       const program = await robotClient.restoreBuiltProgramRevision(programName, rev.id);
       onRestored(program);
-      onClose();
+      close();
     } catch (e) {
       appAlert("Restore Failed", e instanceof Error ? e.message : String(e));
     } finally {
@@ -89,7 +98,7 @@ export function RevisionsSheet({ visible, programName, hasUnsavedChanges, onClos
   }
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={selected ? "Revision" : "History"}>
+    <BottomSheet visible={visible} onClose={close} title={selected ? "Revision" : "History"}>
       {selected ? (
         <RevisionDetail
           revision={selected}
@@ -110,7 +119,7 @@ export function RevisionsSheet({ visible, programName, hasUnsavedChanges, onClos
         <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
           {list.value.map((r, i) => (
             <TouchableOpacity key={r.id} style={[styles.row, i < list.value.length - 1 && styles.rowBorder]}
-              onPress={() => setSelected(r)} activeOpacity={0.7}>
+              onPress={() => select(r)} activeOpacity={0.7}>
               <View style={styles.rowText}>
                 <Text style={styles.rowTitle}>{relativeTime(r.savedUnixMs)}</Text>
                 <Text style={styles.rowDesc}>

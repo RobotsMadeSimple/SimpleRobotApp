@@ -10,6 +10,8 @@ import { X } from "lucide-react-native";
 import { ProgramVariable, hasScalarElements, variableList } from "@/src/models/robotModels";
 import { VarPickerModal } from "./VarPicker";
 import { colors, accents } from "@/src/components/ui/kit";
+import { useExpressionEnv } from "./expressions/ExpressionEnv";
+import { ExpressionAssist, useFieldFocus } from "./expressions/ExpressionAssist";
 
 // ── Numeric inputs ────────────────────────────────────────────────────────────
 
@@ -194,8 +196,11 @@ export function ExpressionInput({
   const currentExpr = expressions?.[fieldKey];
   const [text, setText] = useState(currentExpr ?? (value != null ? String(value) : ""));
   const [varPickerOpen, setVarPickerOpen] = useState(false);
+  const [cursor, setCursor] = useState<number | undefined>(undefined);
   const inputRef   = useRef<any>(null);
   const isFocused  = useRef(false);
+  const field      = useFieldFocus();
+  const env        = useExpressionEnv();
 
   // Sync when draft changes externally (modal re-opens) — not while user is typing
   useEffect(() => {
@@ -255,6 +260,10 @@ export function ExpressionInput({
                 : hasScalarElements(list.elementType)     ? `$${v.name}[0]`
                 : list.elementType === "Point"            ? `$${v.name}[0].x`
                 : `$${v.name}[0].${Object.keys(list.items[0] ?? {})[0] ?? "field"}`;
+    insertToken(token);
+  }
+
+  function insertToken(token: string) {
     const ref = text.trim();
     const next = ref ? `${ref} ${token}` : token;
     setText(next);
@@ -280,6 +289,9 @@ export function ExpressionInput({
 
   const exprActive = isExpr(text);
   const hasVars    = variables && variables.length > 0;
+  // Properties and IO are pickable too when the builder has loaded them.
+  const hasSymbols = (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) > 0;
+  const canPick    = hasVars || hasSymbols;
 
   return (
     <View>
@@ -289,8 +301,9 @@ export function ExpressionInput({
           style={{ flex: 1, fontSize: 14, color: exprActive ? accents.purple : colors.text }}
           value={text}
           onChangeText={handleChange}
-          onFocus={() => { isFocused.current = true; }}
-          onBlur={() => { isFocused.current = false; commit(text); }}
+          onFocus={() => { isFocused.current = true; field.onFocus(); }}
+          onBlur={() => { isFocused.current = false; field.onBlur(); commit(text); }}
+          onSelectionChange={e => setCursor(e.nativeEvent.selection.end)}
           keyboardType="default"
           placeholder={placeholder ?? (allowUndefined ? "default" : "0")}
           placeholderTextColor={colors.textFaint}
@@ -303,7 +316,14 @@ export function ExpressionInput({
           </TouchableOpacity>
         )}
       </View>
-      {hasVars && (
+      <ExpressionAssist
+        text={text}
+        cursor={cursor}
+        focused={field.focused}
+        showValue={exprActive}
+        onChangeText={next => { handleChange(next); inputRef.current?.focus(); }}
+      />
+      {canPick && (
         <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
           {ops.map(([label, op]) => (
             <TouchableOpacity
@@ -324,14 +344,15 @@ export function ExpressionInput({
           </TouchableOpacity>
         </View>
       )}
-      {hasVars && (
+      {canPick && (
         <VarPickerModal
           visible={varPickerOpen}
           onClose={() => setVarPickerOpen(false)}
-          variables={variables!}
+          variables={variables ?? []}
           selected={undefined}
           title="Insert Variable"
           onSelect={v => { if (v) insertVar(v); }}
+          onPickSymbol={name => insertToken(`$${name}`)}
         />
       )}
     </View>

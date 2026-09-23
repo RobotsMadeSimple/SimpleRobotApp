@@ -24,32 +24,32 @@ export function useProgramValidation(program: BuiltProgram, enabled: boolean, de
   const firstRun = useRef(true);
   const seq      = useRef(0);
 
-  // Only content matters; lastUpdatedUnixMs changes on every render of the builder.
-  const key = useMemo(() => JSON.stringify({ ...program, lastUpdatedUnixMs: 0 }), [program]);
-  const latest = useRef(program);
-  latest.current = program;
-
+  // `program` is memoised by the caller, so a new object means new content.
   useEffect(() => {
-    if (!enabled || !supported) { setProblems([]); return; }
+    if (!enabled || !supported) return;
     const id = ++seq.current;
     const timer = setTimeout(() => {
-      robotClient.validateBuiltProgram(latest.current)
+      robotClient.validateBuiltProgram(program)
         .then(result => { if (id === seq.current) setProblems(result); })
         .catch(e => {
-          if (id !== seq.current) return;
-          if (isUnsupportedCommand(e)) { setSupported(false); setProblems([]); }
+          if (id === seq.current && isUnsupportedCommand(e)) setSupported(false);
         });
     }, firstRun.current ? 0 : delayMs);
     firstRun.current = false;
     return () => clearTimeout(timer);
-  }, [key, enabled, supported, delayMs]);
+  }, [program, enabled, supported, delayMs]);
 
-  return useMemo(() => ({
-    supported: supported && enabled,
-    problems,
-    errorCount:   problems.filter(p => p.severity === "error").length,
-    warningCount: problems.filter(p => p.severity === "warning").length,
-  }), [supported, enabled, problems]);
+  return useMemo(() => {
+    // Offline or unsupported: no result is current, so none is shown.
+    const active = supported && enabled;
+    const shown = active ? problems : [];
+    return {
+      supported: active,
+      problems: shown,
+      errorCount:   shown.filter(p => p.severity === "error").length,
+      warningCount: shown.filter(p => p.severity === "warning").length,
+    };
+  }, [supported, enabled, problems]);
 }
 
 /** Problems on a step itself, and on anything nested inside it (loop body, branches). */

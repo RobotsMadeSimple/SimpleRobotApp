@@ -51,6 +51,21 @@ export function docFromProgram(p: BuiltProgram, overrides?: Partial<EditorDoc>):
   };
 }
 
+/** The program to save (or validate) for a document. */
+export function programFromDoc(d: EditorDoc, id: string | undefined, lastUpdatedUnixMs: number): BuiltProgram {
+  return {
+    id,
+    name: d.name.trim(),
+    description: d.description.trim(),
+    steps: d.steps,
+    variables: d.variables.length > 0 ? d.variables : undefined,
+    lastUpdatedUnixMs,
+    isRoutine: d.isRoutine,
+    isBackground: d.isBackground || undefined,
+    killBackgroundOnStop: (!d.isRoutine && !d.isBackground) ? (d.killBackgroundOnStop || undefined) : undefined,
+  };
+}
+
 /**
  * Comparable form of a document for the unsaved-changes check. Name and description
  * are trimmed because that is how they are saved.

@@ -13,6 +13,7 @@ import { ChevronDown, X } from "lucide-react-native";
 import { ProgramVariable, variableList } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
 import { colors, radii } from "@/src/components/ui/kit";
+import { SymbolSections } from "./expressions/SymbolSections";
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ export function VarPickerModal({
   showNone = false,
   contextVariables,
   contextLabel,
+  onPickSymbol,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -95,6 +97,12 @@ export function VarPickerModal({
   showNone?: boolean;
   contextVariables?: ProgramVariable[];
   contextLabel?: string;
+  /**
+   * Set when the pick is inserted into an expression (not assigned to): adds the
+   * read-only Properties and the IO names below the variables. Receives the name
+   * without its `$`.
+   */
+  onPickSymbol?: (name: string) => void;
 }) {
   const [search,     setSearch]     = useState("");
   const [kindFilter, setKindFilter] = useState<VarKind | "all">("all");
@@ -254,6 +262,10 @@ export function VarPickerModal({
                   );
                 })}
               </>
+            )}
+
+            {onPickSymbol && kindFilter === "all" && (
+              <SymbolSections search={search} onPick={name => { onPickSymbol(name); onClose(); }} />
             )}
           </ScrollView>
         </Pressable>

@@ -57,12 +57,14 @@ import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
-import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
+import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, programFromDoc, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
 import { EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
 import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
 import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
 import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
+import { ExpressionEnvProvider } from "@/src/components/ui/builder/expressions/ExpressionEnv";
+import { PropertiesSection } from "@/src/components/ui/builder/expressions/PropertiesSection";
 import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
 /**
@@ -732,17 +734,7 @@ export default function BuilderScreen() {
   // ── Save / Run ────────────────────────────────────────────────────────────
 
   function buildProg(): BuiltProgram {
-    return {
-      id: programId,
-      name: programName.trim(),
-      description: description.trim(),
-      steps,
-      variables: variables.length > 0 ? variables : undefined,
-      lastUpdatedUnixMs: Date.now(),
-      isRoutine: isRoutineMode,
-      isBackground: isBackgroundMode || undefined,
-      killBackgroundOnStop: (!isRoutineMode && !isBackgroundMode) ? (killBackgroundOnStop || undefined) : undefined,
-    };
+    return programFromDoc(doc, programId, Date.now());
   }
 
   async function save(): Promise<boolean> {
@@ -953,14 +945,25 @@ export default function BuilderScreen() {
     if (depth < scopeStackRef.current.length) setScopeStack(prev => prev.slice(0, depth));
   }, [steps]);
 
+  // ── Expressions ───────────────────────────────────────────────────────────
+  // Symbols and live values are resolved against the saved robot program: a
+  // routine borrows its variable-context program, a local draft has none.
+  const expressionProgramName = isLocalMode ? undefined
+    : isRoutineMode ? contextProgramName
+    : (editName ?? (programName.trim() || undefined));
+  const expressionVariables = useMemo(
+    () => contextVariables.length > 0 ? [...variables, ...contextVariables] : variables,
+    [variables, contextVariables]);
+
   // ── Validation ────────────────────────────────────────────────────────────
   // The controller checks the unsaved document (debounced) so problems show up
   // while editing. A controller without ValidateBuiltProgram hides all of it.
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const validationProgram = useMemo(() => buildProg(), [doc, programId]);
+  // Timestamp 0: it is not saved, and a stable value keeps the memo meaningful.
+  const validationProgram = useMemo(() => programFromDoc(doc, programId, 0), [doc, programId]);
   const validation   = useProgramValidation(validationProgram, connected);
-  const problemIndex = useMemo(() => indexProblems(steps, validation.problems), [steps, validation.problems]);
+  const validationProblems = validation.problems;
+  const problemIndex = useMemo(() => indexProblems(steps, validationProblems), [steps, validationProblems]);
   const [problemsOpen, setProblemsOpen] = useState(false);
 
   // ── Revisions ─────────────────────────────────────────────────────────────
@@ -1288,6 +1291,7 @@ export default function BuilderScreen() {
           <Text style={styles.varAddText}>Add Variable</Text>
         </TouchableOpacity>
       </View>
+      <PropertiesSection />
     </>
   );
 
@@ -1438,6 +1442,7 @@ export default function BuilderScreen() {
     : headerCrumbs;
 
   return (
+    <ExpressionEnvProvider programName={expressionProgramName} variables={expressionVariables} enabled={connected}>
     <View style={styles.container}>
       {isWide ? (
         <PageHeader
@@ -1866,6 +1871,7 @@ export default function BuilderScreen() {
         </Pressable>
       </Modal>
     </View>
+    </ExpressionEnvProvider>
   );
 }
 
