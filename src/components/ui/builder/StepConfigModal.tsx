@@ -34,6 +34,7 @@ import {
   VisionStepOutput,
   auxStepsPerUnit,
   auxUnitLabel,
+  isAssignableVariable,
   isListVariable,
   isPointListVariable,
   isRecordListVariable,
@@ -1086,6 +1087,7 @@ export function StepConfigModal({
                       )}
                     </View>
                     <VarPickerModal
+                      filter={isAssignableVariable}
                       visible={waitTimeoutVarPicker}
                       onClose={() => setWaitTimeoutVarPicker(false)}
                       variables={scalarVars}
@@ -1152,6 +1154,7 @@ export function StepConfigModal({
                       )}
                     </View>
                     <VarPickerModal
+                      filter={isAssignableVariable}
                       visible={loopIndexVarPicker}
                       onClose={() => setLoopIndexVarPicker(false)}
                       variables={scalarVarsLoop}
@@ -1216,6 +1219,7 @@ export function StepConfigModal({
                       )}
                     </View>
                     <VarPickerModal
+                      filter={isAssignableVariable}
                       visible={forEachValuePicker}
                       onClose={() => setForEachValuePicker(false)}
                       variables={scalarVarsLoop}
@@ -1243,6 +1247,7 @@ export function StepConfigModal({
                       )}
                     </View>
                     <VarPickerModal
+                      filter={isAssignableVariable}
                       visible={loopIndexVarPicker}
                       onClose={() => setLoopIndexVarPicker(false)}
                       variables={scalarVarsLoop}
@@ -2690,6 +2695,7 @@ export function StepConfigModal({
 
             {/* Variable picker for inbound rows — numeric, list and image */}
             <VarPickerModal
+              filter={isAssignableVariable}
               visible={jsonInboundPicker !== null}
               title="Select Variable"
               variables={allVars}
@@ -2937,6 +2943,7 @@ export function StepConfigModal({
             </View>
 
             <VarPickerModal
+              filter={isAssignableVariable}
               visible={httpReceiveInboundPicker !== null}
               title="Select Variable"
               variables={numericVarsRcv}
@@ -3244,6 +3251,7 @@ export function StepConfigModal({
       onSelect={v => { set({ visionZoneVar: v?.name, visionZoneId: undefined }); }}
     />
     <VarPickerModal
+      filter={isAssignableVariable}
       visible={visionPicker !== null}
       onClose={() => setVisionPicker(null)}
       variables={pickerVars}
@@ -3263,6 +3271,7 @@ export function StepConfigModal({
       }}
     />
     <VarPickerModal
+      filter={isAssignableVariable}
       visible={colorPicker !== null}
       onClose={() => setColorPicker(null)}
       variables={colorPickerVars}
@@ -3281,6 +3290,7 @@ export function StepConfigModal({
       }}
     />
     <VarPickerModal
+      filter={isAssignableVariable}
       visible={polygonPicker !== null}
       onClose={() => setPolygonPicker(null)}
       variables={polygonPickerVars}
@@ -3300,6 +3310,7 @@ export function StepConfigModal({
       }}
     />
     <VarPickerModal
+      filter={isAssignableVariable}
       visible={arucoPicker !== null}
       onClose={() => setArucoPicker(null)}
       variables={arucoPickerVars}

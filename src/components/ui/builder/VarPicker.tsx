@@ -17,7 +17,7 @@ import { SymbolSections } from "./expressions/SymbolSections";
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
-export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "objects" | "string" | "image";
+export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "objects" | "string" | "image" | "computed";
 
 /**
  * The chip a variable wears. Lists are one type now, so the kind comes from the element
@@ -25,6 +25,9 @@ export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "obje
  * is the distinction worth showing.
  */
 export function varKind(v: ProgramVariable): VarKind {
+  // Checked first: a computed variable carries no stored-kind flags except isBoolean,
+  // and "this is a formula, not a slot" is the distinction that matters in a picker.
+  if (v.isComputed) return "computed";
   const list = variableList(v);
   if (list) {
     if (list.elementType === "Point")   return "points";
@@ -54,6 +57,7 @@ export const VAR_KIND_META: Record<
   objects: { label: "OBJ",  color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
   string:  { label: "STR",  color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
   image:   { label: "IMG",  color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
+  computed:{ label: "ƒ COMPUTED", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
 };
 
 /**
@@ -87,6 +91,7 @@ export function VarPickerModal({
   contextVariables,
   contextLabel,
   onPickSymbol,
+  filter,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -103,6 +108,12 @@ export function VarPickerModal({
    * without its `$`.
    */
   onPickSymbol?: (name: string) => void;
+  /**
+   * Narrows both `variables` and `contextVariables`. Assignment targets pass
+   * `isAssignableVariable` so computed variables — which cannot be written — are not
+   * offered.
+   */
+  filter?: (v: ProgramVariable) => boolean;
 }) {
   const [search,     setSearch]     = useState("");
   const [kindFilter, setKindFilter] = useState<VarKind | "all">("all");
@@ -111,25 +122,31 @@ export function VarPickerModal({
     if (visible) { setSearch(""); setKindFilter("all"); }
   }, [visible]);
 
+  const pickable = useMemo(
+    () => filter ? variables.filter(filter) : variables, [variables, filter]);
+  const pickableContext = useMemo(
+    () => filter ? (contextVariables ?? []).filter(filter) : (contextVariables ?? []),
+    [contextVariables, filter]);
+
   const kinds = useMemo(() => {
     const seen = new Set<VarKind>();
-    [...variables, ...(contextVariables ?? [])].forEach(v => seen.add(varKind(v)));
+    [...pickable, ...pickableContext].forEach(v => seen.add(varKind(v)));
     return [...seen];
-  }, [variables, contextVariables]);
+  }, [pickable, pickableContext]);
 
   const filtered = useMemo(() =>
-    variables.filter(v => {
+    pickable.filter(v => {
       if (kindFilter !== "all" && varKind(v) !== kindFilter) return false;
       const q = search.trim().toLowerCase();
       return !q || v.name.toLowerCase().includes(q);
-    }), [variables, kindFilter, search]);
+    }), [pickable, kindFilter, search]);
 
   const filteredContext = useMemo(() =>
-    (contextVariables ?? []).filter(v => {
+    pickableContext.filter(v => {
       if (kindFilter !== "all" && varKind(v) !== kindFilter) return false;
       const q = search.trim().toLowerCase();
       return !q || v.name.toLowerCase().includes(q);
-    }), [contextVariables, kindFilter, search]);
+    }), [pickableContext, kindFilter, search]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>

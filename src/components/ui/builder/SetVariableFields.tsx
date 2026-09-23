@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { Check, ChevronDown, Plus } from "lucide-react-native";
-import { isListVariable, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { isAssignableVariable, isListVariable, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { VarPickerModal } from "./VarPicker";
 import type { VarType } from "./VariableEditModal";
 import { ms, svs } from "./builderStyles";
@@ -93,8 +93,10 @@ export function SetVariableFields({
   set: (p: Partial<ProgramStep>) => void;
   onCreateVariable?: (defaultType?: VarType) => void;
 }) {
-  const varList = (variables ?? []).map(v => v.name);
-  const contextVarList = (contextVariables ?? []).map(v => v.name);
+  // Only assignable variables are targets: a computed variable is a formula and a
+  // write to it is refused (validation code computedVariable).
+  const varList = (variables ?? []).filter(isAssignableVariable).map(v => v.name);
+  const contextVarList = (contextVariables ?? []).filter(isAssignableVariable).map(v => v.name);
   const initial = useMemo(() => parseVarExpr(draft.variableName, draft.variableExpr), []);
   const [op, setOp]           = useState<SetVarOp>(initial.op);
   const [rawVal, setRawVal]   = useState(initial.val);
@@ -111,7 +113,7 @@ export function SetVariableFields({
     const current = variables?.length ?? 0;
     if (pendingCreate && current > prevVarCount.current) {
       const newest = variables![current - 1];
-      selectVar(newest.name);
+      if (isAssignableVariable(newest)) selectVar(newest.name);
       setPendingCreate(false);
     }
     prevVarCount.current = current;

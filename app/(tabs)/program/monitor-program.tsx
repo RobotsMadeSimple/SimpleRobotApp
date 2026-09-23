@@ -585,7 +585,9 @@ export default function MonitorProgramScreen() {
   // the early returns above without disturbing hook order.
   const declaredMonitorVars: ProgramVariableSnapshot[] = (builtProgram?.variables ?? [])
     .filter(v => v.displayOnMonitor && !isListVariable(v) && !v.isImage && !v.isString)
-    .map(v => ({ name: v.name, value: v.value ?? 0, isBoolean: v.isBoolean === true }));
+    // A computed variable has no initial value — its formula only runs on the robot — so
+    // it shows a placeholder until the controller reports one.
+    .map(v => ({ name: v.name, value: v.isComputed ? NaN : (v.value ?? 0), isBoolean: v.isBoolean === true }));
   // Live values once running; the declared initial values before then.
   const displayVars = varSnapshots.length > 0 ? varSnapshots : declaredMonitorVars;
 
@@ -832,13 +834,19 @@ export default function MonitorProgramScreen() {
               <Text style={styles.sectionLabel}>VARIABLES</Text>
               <View style={styles.varGrid}>
                 {displayVars.map(v => {
-                  const display = v.isBoolean
-                    ? (v.value !== 0 ? "True" : "False")
-                    : Number.isInteger(v.value) ? String(v.value) : v.value.toFixed(4).replace(/\.?0+$/, '');
+                  // A computed variable whose formula fails reports NaN, which JSON may
+                  // carry as null or a string — coerce, and show it rather than crash.
+                  const num   = typeof v.value === "number" ? v.value : Number(v.value ?? NaN);
+                  const valid = Number.isFinite(num);
+                  const display = !valid
+                    ? (varSnapshots.length > 0 ? "NaN" : "—")
+                    : v.isBoolean
+                    ? (num !== 0 ? "True" : "False")
+                    : Number.isInteger(num) ? String(num) : num.toFixed(4).replace(/\.?0+$/, '');
                   return (
                     <View key={v.name} style={styles.varCell}>
                       <Text style={styles.varCellName} numberOfLines={1}>${v.name}</Text>
-                      <Text style={[styles.varCellValue, v.isBoolean && { color: v.value !== 0 ? colors.success : colors.danger }]}
+                      <Text style={[styles.varCellValue, valid && v.isBoolean && { color: num !== 0 ? colors.success : colors.danger }]}
                         numberOfLines={1}>{display}</Text>
                     </View>
                   );

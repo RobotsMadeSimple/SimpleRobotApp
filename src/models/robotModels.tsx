@@ -684,7 +684,22 @@ export type ProgramVariable = {
    * which is often a PNG. Use `imageDataUri` rather than assuming a format.
    */
   isImage?: boolean;
+  /**
+   * When true, this is a computed variable (a user-defined property): `valueExpression`
+   * is a formula re-evaluated every time the variable is read, against the live
+   * variables, IO and properties. It has no stored value and cannot be assigned.
+   * Only `isBoolean`, `isGlobal` and `displayOnMonitor` combine with it; `value`,
+   * `items`, `isPersistent`, `isString`, `isImage` and `isStopwatch` do not.
+   * See docs/expressions-and-variables.md section 7 in the controller.
+   */
+  isComputed?: boolean;
 };
+
+/** True for a computed variable — readable in expressions, never a write target. */
+export const isComputedVariable = (v: ProgramVariable): boolean => v.isComputed === true;
+
+/** Can be a write target (Set Variable, loop index/value, vision/HTTP outputs). */
+export const isAssignableVariable = (v: ProgramVariable): boolean => !isComputedVariable(v);
 
 /**
  * A variable's list elements, folding in the legacy `values` / `points` / `objects` fields
@@ -1024,7 +1039,8 @@ export type KnownValidationCode =
   | "unknownPoint" | "unknownTool" | "unknownLocal" | "unknownRoutine" | "unknownVisionProgram"
   | "unknownGrid" | "unknownStack" | "unknownLabel" | "duplicateLabel" | "unknownVariable"
   | "unknownProperty" | "expressionSyntax" | "emptyLoop" | "emptyBranch" | "missingField"
-  | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable";
+  | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable"
+  | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict";
 
 /** One problem reported by `ValidateBuiltProgram`. */
 export type ValidationProblem = {
@@ -1039,12 +1055,14 @@ export type ValidationProblem = {
   message: string;
 };
 
-export type ExpressionVariableKind = "number" | "boolean" | "string" | "image" | "list";
+export type ExpressionVariableKind = "number" | "boolean" | "string" | "image" | "list" | "computed";
 
 export type ExpressionSymbolVariable = {
   name: string;
   kind: ExpressionVariableKind;
   elementType?: ListElementType;
+  /** The formula of a `kind: "computed"` variable. */
+  expression?: string;
   isGlobal: boolean;
   isPersistent: boolean;
   value?: number | string | boolean | null;

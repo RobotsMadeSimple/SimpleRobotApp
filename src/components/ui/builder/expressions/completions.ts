@@ -9,6 +9,8 @@ export type Completion = {
   /** Text that replaces the token being typed. */
   insert: string;
   detail?: string;
+  /** A computed variable (a named formula): readable like any other, tagged ƒ in the row. */
+  computed?: boolean;
 };
 
 /** Words the evaluator treats as operators or literals, never as function names. */
@@ -33,14 +35,17 @@ export function completionsAt(
     const prefix = (sigil[1] ?? "").toLowerCase();
     const seen = new Set<string>();
     const items: Completion[] = [];
-    const add = (kind: CompletionKind, name: string, detail?: string) => {
+    const add = (kind: CompletionKind, name: string, detail?: string, computed?: boolean) => {
       const key = name.toLowerCase();
       if (seen.has(key) || !key.startsWith(prefix) || key === prefix) return;
       seen.add(key);
-      items.push({ kind, label: `$${name}`, insert: `$${name}`, detail });
+      items.push({ kind, label: `$${name}`, insert: `$${name}`, detail, computed: computed || undefined });
     };
-    localVariables.forEach(v => add("variable", v.name, v.description));
-    symbols?.variables.forEach(v => add("variable", v.name, v.isGlobal ? "global" : undefined));
+    localVariables.forEach(v => add("variable", v.name,
+      v.description ?? (v.isComputed ? v.valueExpression : undefined), v.isComputed));
+    symbols?.variables.forEach(v => add("variable", v.name,
+      v.kind === "computed" ? (v.expression ?? "computed") : v.isGlobal ? "global" : undefined,
+      v.kind === "computed"));
     symbols?.properties.forEach(p => add("property", p.name, p.description));
     symbols?.io.forEach(i => add("io", i.name, i.description));
     // Before any letter is typed, the program's own variables are the likely pick;

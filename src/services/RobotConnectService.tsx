@@ -977,6 +977,7 @@ export class RobotConnectService {
         elementType:  ELEMENT_TYPES.find(k => k === v.elementType),
         isGlobal:     v.isGlobal === true,
         isPersistent: v.isPersistent === true,
+        expression:   typeof v.expression === "string" ? v.expression : undefined,
         value:        typeof v.value === "number" || typeof v.value === "string" || typeof v.value === "boolean" ? v.value : undefined,
       })),
       properties: wireArray(ack.properties).filter(isNamed).map(p => ({
@@ -1566,7 +1567,7 @@ function toCommandError(command: string, reason: unknown): Error {
   return new CommandFailedError(command, text || `${command} failed`);
 }
 
-const VARIABLE_KINDS = ["number", "boolean", "string", "image", "list"] as const;
+const VARIABLE_KINDS = ["number", "boolean", "string", "image", "list", "computed"] as const;
 const ELEMENT_TYPES  = ["Number", "Boolean", "Point", "Record"] as const;
 
 type WireRecord = Record<string, unknown>;

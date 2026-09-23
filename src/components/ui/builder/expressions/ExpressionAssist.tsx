@@ -82,7 +82,10 @@ export function ExpressionAssist({ text, cursor, focused, showValue, onChangeTex
               onPress={() => onChangeText(applyCompletion(text, completion.start, caret, item.insert))}
               activeOpacity={0.7}
             >
-              <Text style={[styles.suggestionText, { color: KIND_TINT[item.kind] }]}>{item.label}</Text>
+              <Text style={[styles.suggestionText, { color: KIND_TINT[item.kind] }]}>
+                {item.label}
+                {item.computed && <Text style={styles.computedTag}>  ƒ</Text>}
+              </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -123,6 +126,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 4,
   },
   suggestionText: { fontSize: 12, fontWeight: "600" },
+  computedTag:    { fontStyle: "italic", fontWeight: "700", color: colors.textMuted },
   statusRow:  { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: 4, minHeight: 18 },
   value:      { flex: 1, minWidth: 0 },
   valueText:  { fontSize: 12, fontWeight: "600", color: colors.textSecondary },

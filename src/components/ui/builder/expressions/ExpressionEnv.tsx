@@ -42,7 +42,7 @@ export function ExpressionEnvProvider({ programName, variables, enabled, childre
   // Refetch when the set of variables changes (names/kinds, not values), debounced
   // so typing a new variable's name does not fire a request per keystroke.
   const variablesKey = useMemo(
-    () => variables.map(v => `${v.name}:${v.isString ? "s" : v.isBoolean ? "b" : v.isImage ? "i" : "n"}`).join(","),
+    () => variables.map(v => `${v.name}:${v.isComputed ? "c" : v.isString ? "s" : v.isBoolean ? "b" : v.isImage ? "i" : "n"}`).join(","),
     [variables]);
   const firstFetch = useRef(true);
 

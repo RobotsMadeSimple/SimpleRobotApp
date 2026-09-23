@@ -108,6 +108,22 @@ function InitialValue({ v }: { v: ProgramVariable }) {
   );
 }
 
+/** Matches the Computed kind in VariableEditModal and the picker chip. */
+const COMPUTED_TINT = "#be185d";
+
+/**
+ * The formula line of a computed variable, shown where a stored variable shows its
+ * initial value. A computed variable has no initial value: the formula is what it is.
+ */
+function ComputedFormula({ v }: { v: ProgramVariable }) {
+  return (
+    <Text style={styles.varDesc} numberOfLines={2}>
+      {v.isBoolean ? "Boolean — " : ""}
+      <Text style={{ color: COMPUTED_TINT, fontWeight: "700" }}>{v.valueExpression?.trim() || "(no formula)"}</Text>
+    </Text>
+  );
+}
+
 export default function BuilderScreen() {
   const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
@@ -1203,7 +1219,7 @@ export default function BuilderScreen() {
             const vList = variableList(v);
             // Coerced to a real boolean: an empty-string expression would otherwise fall
             // through as "" and React Native throws on a bare string outside a <Text>.
-            const hasExpr = !!v.valueExpression?.trim();
+            const hasExpr = !v.isComputed && !!v.valueExpression?.trim();
             return (
             <React.Fragment key={v.id}>
               {i > 0 && <View style={styles.varSep} />}
@@ -1223,6 +1239,13 @@ export default function BuilderScreen() {
                     {v.isBoolean && (
                       <View style={{ backgroundColor: colors.successSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.successBorder }}>
                         <Text style={{ fontSize: 9, fontWeight: "700", color: colors.success, letterSpacing: 0.3 }}>BOOL</Text>
+                      </View>
+                    )}
+                    {/* A computed variable is a formula read live, not a stored value with a
+                        computed start — so it gets its own badge, not the fx one below. */}
+                    {v.isComputed && (
+                      <View style={{ backgroundColor: "#fdf2f8", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#fbcfe8" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: COMPUTED_TINT, letterSpacing: 0.3 }}>ƒ COMPUTED</Text>
                       </View>
                     )}
                     {/* Marks a computed starting value. It lives up here with the chips
@@ -1255,7 +1278,12 @@ export default function BuilderScreen() {
                       </View>
                     )}
                   </View>
-                  {v.description ? (
+                  {v.isComputed ? (
+                    <>
+                      <ComputedFormula v={v} />
+                      {v.description ? <Text style={styles.varDesc}>{v.description}</Text> : null}
+                    </>
+                  ) : v.description ? (
                     <Text style={styles.varDesc}>{v.description}</Text>
                   ) : vList ? (
                     <Text style={styles.varDesc}>{describeList(vList)}</Text>
