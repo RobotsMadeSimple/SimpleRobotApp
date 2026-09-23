@@ -269,10 +269,15 @@ export default function MonitorProgramScreen() {
 
   // Spinner while an action is being applied — cleared when the status changes
   // (the action took effect) or after a short fallback timeout.
+  // A short program can start AND finish between two status polls (a single move
+  // whose target is already reached completes in ~50 ms), so status reads
+  // "Complete" before and after and never changes; the controller's
+  // lastStartedUnixMs changes on every start and catches that case.
   const [pending, setPending] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const status = program?.status;
-  useEffect(() => { setPending(null); }, [status]);
+  const lastStarted = program?.lastStartedUnixMs;
+  useEffect(() => { setPending(null); }, [status, lastStarted]);
   useEffect(() => { setPending(null); }, [!!bgRunning]);
   useEffect(() => {
     if (!pending) return;

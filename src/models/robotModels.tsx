@@ -1028,6 +1028,14 @@ export type ProgramSummary = {
   maxStepCount: number;
   errorDescription: string;
   warningDescription: string;
+  /** Times the program has been started since the controller booted. */
+  runCount?: number;
+  /**
+   * Unix ms of the most recent start. Changes on every start, so a poller can
+   * notice a run that began and finished between two polls (status reads
+   * "Complete" both times — e.g. a single move whose target is already reached).
+   */
+  lastStartedUnixMs?: number;
   currentPointName: string;
   currentOffsetX?: number;  currentOffsetY?: number;  currentOffsetZ?: number;
   currentOffsetRX?: number; currentOffsetRY?: number; currentOffsetRZ?: number;
