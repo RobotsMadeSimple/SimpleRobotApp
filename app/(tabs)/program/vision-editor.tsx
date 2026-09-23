@@ -62,6 +62,7 @@ import { accents, colors, spacing, radii, shadows, InfoTip, PageHeader, StatusPi
 import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
+import { CameraCalibrationBadge } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { ZoneDrawModal } from "@/src/components/ui/vision-editor/ZoneDrawModal";
 import { InspectionTypePicker, InspItem } from "@/src/components/ui/vision-editor/InspectionTypePicker";
 import { InspectionConfigModal } from "@/src/components/ui/vision-editor/InspectionConfigModal";
@@ -519,6 +520,9 @@ export default function VisionEditorScreen() {
         <Text style={styles.cameraValue} numberOfLines={1}>
           {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
         </Text>
+        {!!program.cameraId && (
+          <CameraCalibrationBadge cameraId={program.cameraId} calibrated={selectedCam?.calibrated} />
+        )}
         <ChevronDown size={15} color={colors.textFaint} />
       </TouchableOpacity>
     </View>

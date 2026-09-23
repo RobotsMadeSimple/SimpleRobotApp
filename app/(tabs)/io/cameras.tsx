@@ -3,6 +3,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraState } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Camera,
@@ -425,11 +426,14 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
         title={camera.name}
         subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height}`}
         right={
-          <StatusPill
-            label={camera.connected ? "Connected" : "Offline"}
-            tone={camera.connected ? "success" : "danger"}
-            dot
-          />
+          <View style={styles.headerRight}>
+            <CameraCalibrationControls camera={camera} layout="inline" />
+            <StatusPill
+              label={camera.connected ? "Connected" : "Offline"}
+              tone={camera.connected ? "success" : "danger"}
+              dot
+            />
+          </View>
         }
       />
       {(() => {
@@ -608,6 +612,7 @@ export default function CamerasPage() {
 const styles = StyleSheet.create({
   scrollContent: { paddingTop: spacing.lg + 8, paddingBottom: spacing.xxl + 8, paddingHorizontal: spacing.lg, gap: spacing.xl },
   fieldGap: { marginTop: spacing.md + 2 },
+  headerRight: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: spacing.sm },
 
   dropdownRow: {
     flexDirection: "row",

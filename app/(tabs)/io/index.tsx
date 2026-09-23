@@ -33,9 +33,11 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
 import {
   Button,
+  Card,
   colors,
   Divider,
   InfoTip,
@@ -71,6 +73,7 @@ function DeviceNavCard({
   connected,
   onPress,
   onDelete,
+  footer,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -79,9 +82,13 @@ function DeviceNavCard({
   connected: boolean;
   onPress: () => void;
   onDelete?: () => void;
+  /** Extra strip under the row (camera calibration); turns the card into Card + flat row. */
+  footer?: React.ReactNode;
 }) {
-  return (
+  const row = (
     <ListRow
+      card={!footer}
+      style={footer ? styles.rowInCard : undefined}
       title={name}
       subtitle={subtitle}
       icon={icon}
@@ -100,6 +107,8 @@ function DeviceNavCard({
       }
     />
   );
+  if (!footer) return row;
+  return <Card padded={false}>{row}{footer}</Card>;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -341,6 +350,7 @@ export default function IoPage() {
             connected={cam.connected}
             onPress={() => router.push({ pathname: "/(tabs)/io/cameras", params: { cameraId: cam.id } })}
             onDelete={() => confirmRemove(cam.name, () => robotClient.removeCamera(cam.id).catch(() => {}))}
+            footer={<CameraCalibrationControls camera={cam} layout="footer" />}
           />
         ))}
 
@@ -413,6 +423,8 @@ const styles = StyleSheet.create({
   statTile: { flex: 1, minWidth: 130 },
 
   rowAccessories: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  // ListRow's own card padding, for the flat row inside a camera card with a footer.
+  rowInCard: { paddingHorizontal: spacing.lg - 2, paddingTop: spacing.lg - 2, paddingBottom: spacing.md },
   deleteBtn: { padding: spacing.xs + 2, marginLeft: 0 },
 
   // ── Add Device modal ───────────────────────────────────────────────────────
