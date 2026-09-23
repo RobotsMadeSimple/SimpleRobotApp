@@ -7,6 +7,7 @@ import { CalibrationProblem } from "./calibrationErrors";
 import { cs } from "./calibrationStyles";
 import { DotImage } from "./DotImage";
 import { Notice } from "./Notice";
+import { Requirement, StepFooter } from "./StepRequirements";
 
 type Props = {
   session: CalibrationSession | null;
@@ -89,10 +90,36 @@ export function DetectStep({
         </>
       )}
 
-      <View style={cs.buttons}>
-        <Button label="Back" variant="secondary" onPress={onBack} style={cs.grow} />
-        <Button label="Next: Teach" onPress={onNext} disabled={!session || session.dots.length === 0} style={cs.grow} />
-      </View>
+      <StepFooter
+        requirements={detectRequirements(session, detecting, problem)}
+        nextLabel="Next: Teach"
+        onNext={onNext}
+        onBack={onBack}
+        busy={detecting}
+      />
     </View>
   );
+}
+
+function detectRequirements(
+  session: CalibrationSession | null, detecting: boolean, problem: CalibrationProblem | null,
+): Requirement[] {
+  const found = !!session && session.dots.length >= 4;
+  return [
+    {
+      key: "dots",
+      label: found ? `Dot grid detected (${session!.gridRows} × ${session!.gridCols})` : "Detect the dot grid",
+      met: found,
+      hint: detecting ? "Detecting…"
+        : problem ? "Fix what the message above says, then press Re-detect."
+        : "Press Detect. The sheet must be flat, fully in view and evenly lit.",
+    },
+    {
+      key: "rms",
+      label: "Grid fit is sharp (RMS under 1.5 px)",
+      met: !!session && session.gridRmsPx <= 1.5,
+      optional: true,
+      hint: "A blurry or curled sheet raises this. Re-detect after flattening it or refocusing the camera.",
+    },
+  ];
 }

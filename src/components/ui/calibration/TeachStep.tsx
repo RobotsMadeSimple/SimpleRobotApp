@@ -12,8 +12,49 @@ import { cs } from "./calibrationStyles";
 import { dotLabel } from "./DetectStep";
 import { DotImage } from "./DotImage";
 import { Notice } from "./Notice";
+import { Attention, Requirement, StepFooter } from "./StepRequirements";
 import { TaughtList } from "./TaughtList";
 import { useJogSpeeds } from "./useJogSpeeds";
+
+/** True when every taught dot lies on one straight line of the grid (a 2-point fit at best). */
+function taughtCollinear(taught: CalibrationTaughtDot[]): boolean {
+  if (taught.length < 3) return true;
+  const [a, b] = taught;
+  return taught.slice(2).every(c => Math.abs((b.i - a.i) * (c.j - a.j) - (b.j - a.j) * (c.i - a.i)) < 1e-9);
+}
+
+function teachRequirements(taught: CalibrationTaughtDot[], tool: string): Requirement[] {
+  const n = taught.length;
+  return [
+    {
+      key: "two",
+      label: `Teach at least 2 dots (${Math.min(n, 2)} of 2)`,
+      met: n >= 2,
+      hint: "Tap a dot on the image, jog the tip exactly onto it, then press Teach.",
+    },
+    {
+      key: "three",
+      label: n >= 3 ? `${n} dots taught` : "Teach a third dot",
+      met: n >= 3,
+      optional: true,
+      hint: "Two dots cannot tell which way the sheet faces; a third dot lets the fit decide and checks the pitch.",
+    },
+    {
+      key: "spread",
+      label: "Taught dots are not all in one line",
+      met: n >= 3 && !taughtCollinear(taught),
+      optional: true,
+      hint: "Pick dots from different rows and columns, ideally far apart.",
+    },
+    {
+      key: "tool",
+      label: "A tool is active",
+      met: tool !== "None",
+      optional: true,
+      hint: "Without a tool the flange is taught, not the tip.",
+    },
+  ];
+}
 
 // Compact version of the jog page's speed chips: fine steps for landing on a dot,
 // Slow/Normal for getting there.
@@ -74,6 +115,7 @@ export function TeachStep({
         onSelect={onSelect}
         maxHeight={isWide ? 380 : 260}
       />
+      <Attention show={taught.length < 2} tag={selected ? "Jog onto the dot, then Teach" : "Tap a dot to start"}>
       <Card style={cs.cardGap}>
         <View style={cs.rowBetween}>
           <View style={cs.grow}>
@@ -110,6 +152,7 @@ export function TeachStep({
           )}
         </View>
       </Card>
+      </Attention>
       {isWide && taughtList}
     </View>
   );
@@ -153,10 +196,12 @@ export function TeachStep({
         {jogPane}
         {!isWide && taughtList}
       </View>
-      <View style={cs.buttons}>
-        <Button label="Back" variant="secondary" onPress={onBack} style={cs.grow} />
-        <Button label="Next: Solve" onPress={onNext} disabled={taught.length < 2} style={cs.grow} />
-      </View>
+      <StepFooter
+        requirements={teachRequirements(taught, tool)}
+        nextLabel="Next: Solve"
+        onNext={onNext}
+        onBack={onBack}
+      />
     </View>
   );
 }

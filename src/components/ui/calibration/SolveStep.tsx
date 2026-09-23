@@ -7,6 +7,7 @@ import { CalibrationProblem } from "./calibrationErrors";
 import { PITCH_SCALE_WARN_PERCENT, pitchScalePercent, taughtResiduals } from "./calibrationMath";
 import { cs } from "./calibrationStyles";
 import { Notice } from "./Notice";
+import { Attention, Requirement, StepFooter } from "./StepRequirements";
 
 type Props = {
   taught: CalibrationTaughtDot[];
@@ -43,6 +44,7 @@ export function SolveStep({ taught, result, saved, solving, problem, onSolve, on
       )}
 
       {!result && (
+        <Attention show tag="Solve to continue">
         <Card style={cs.cardGap}>
           <Text style={cs.body}>
             Fits the rotation and offset between the sheet and the robot from your {taught.length} taught
@@ -66,6 +68,7 @@ export function SolveStep({ taught, result, saved, solving, problem, onSolve, on
             />
           </View>
         </Card>
+        </Attention>
       )}
 
       {result && cal && (
@@ -144,10 +147,24 @@ export function SolveStep({ taught, result, saved, solving, problem, onSolve, on
         </>
       )}
 
-      <View style={cs.buttons}>
-        <Button label="Back" variant="secondary" onPress={onBack} style={cs.grow} />
-        <Button label="Next: Verify" onPress={onNext} disabled={!result} style={cs.grow} />
-      </View>
+      <StepFooter
+        requirements={solveRequirements(!!result, saved, scaleWarn)}
+        nextLabel="Next: Verify"
+        onNext={onNext}
+        onBack={onBack}
+        busy={solving}
+      />
     </View>
   );
+}
+
+function solveRequirements(solved: boolean, saved: boolean, scaleWarn: boolean): Requirement[] {
+  return [
+    { key: "solved", label: "Solve the calibration", met: solved,
+      hint: "Press Solve & save, or Solve (preview only) to check the numbers first." },
+    { key: "saved", label: "Calibration saved to the camera", met: saved, optional: true,
+      hint: "A preview can be verified, but programs only use a saved calibration." },
+    { key: "scale", label: "Pitch scale within 2 %", met: solved && !scaleWarn, optional: true,
+      hint: "Check the pitch you entered against the printed sheet, or re-teach a dot." },
+  ];
 }

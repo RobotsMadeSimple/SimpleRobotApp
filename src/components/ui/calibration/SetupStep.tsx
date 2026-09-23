@@ -1,11 +1,12 @@
 import { Text, View } from "react-native";
 import { ScanSearch } from "lucide-react-native";
 
-import { Button, buttonTextColor, Card, Chip, ChipGroup, FormRow, Input, SegmentedControl, StatusPill } from "@/src/components/ui/kit";
+import { buttonTextColor, Card, Chip, ChipGroup, FormRow, Input, SegmentedControl, StatusPill } from "@/src/components/ui/kit";
 import { relativeTime } from "@/src/components/ui/builder/RevisionsSheet";
 import { CameraCalibration, CameraState, Tool } from "@/src/models/robotModels";
 import { cs } from "./calibrationStyles";
 import { Notice } from "./Notice";
+import { Attention, Requirement, StepFooter } from "./StepRequirements";
 
 export type DotPolarity = "dark" | "light";
 
@@ -35,9 +36,21 @@ export function SetupStep({
 }: Props) {
   const pitchMm = parsePitch(pitch);
   const tool = activeTool || "None";
+  const cameraOk = !!camera?.connected;
+  const pitchOk  = pitchMm !== null;
+
+  const requirements: Requirement[] = [
+    { key: "camera", label: "Camera connected", met: cameraOk,
+      hint: camera ? "The camera is offline. Check it on the I/O page, then come back." : "Loading the camera…" },
+    { key: "pitch", label: "Enter the dot pitch in mm", met: pitchOk,
+      hint: "The center-to-center distance between neighbouring dots, printed in the sheet's footer." },
+    { key: "tool", label: "Select the tool that will touch the sheet", met: tool !== "None", optional: true,
+      hint: "Without a tool the robot flange is taught instead of the tip." },
+  ];
 
   return (
     <View style={cs.step}>
+      <Attention show={!cameraOk} tag="Camera offline">
       <Card style={cs.cardGap}>
         <View style={cs.rowBetween}>
           <View style={cs.grow}>
@@ -59,17 +72,20 @@ export function SetupStep({
           </Text>
         )}
       </Card>
+      </Attention>
 
       <Card style={cs.cardGap}>
-        <FormRow label="Dot pitch (mm)" hint="Center-to-center distance between neighbouring dots — the same in both directions. Measure the printed sheet; printers often scale.">
-          <Input
-            value={pitch}
-            onChangeText={onPitchChange}
-            placeholder="20"
-            keyboardType="decimal-pad"
-            returnKeyType="done"
-          />
-        </FormRow>
+        <Attention show={!pitchOk}>
+          <FormRow label="Dot pitch (mm)" hint="Center-to-center distance between neighbouring dots — the same in both directions. Measure the printed sheet; printers often scale.">
+            <Input
+              value={pitch}
+              onChangeText={onPitchChange}
+              placeholder="20"
+              keyboardType="decimal-pad"
+              returnKeyType="done"
+            />
+          </FormRow>
+        </Attention>
         <FormRow label="Dots">
           <SegmentedControl
             options={[{ label: "Dark on white", value: "dark" }, { label: "Light on dark", value: "light" }]}
@@ -79,6 +95,7 @@ export function SetupStep({
         </FormRow>
       </Card>
 
+      <Attention show={tool === "None"} tag="Recommended">
       <Card style={cs.cardGap}>
         <Text style={cs.label}>Active tool</Text>
         <Text style={cs.body}>
@@ -96,17 +113,18 @@ export function SetupStep({
           </Notice>
         )}
       </Card>
+      </Attention>
 
       <Notice tone="info">
         Lay the dot sheet flat on the work plane, fully inside the camera view, with even light.
       </Notice>
 
-      <Button
-        label={detecting ? "Detecting…" : "Detect dots"}
-        icon={<ScanSearch size={16} color={buttonTextColor("primary")} />}
-        loading={detecting}
-        disabled={!pitchMm || !camera}
-        onPress={onDetect}
+      <StepFooter
+        requirements={requirements}
+        nextLabel={detecting ? "Detecting…" : "Next: Detect dots"}
+        nextIcon={<ScanSearch size={16} color={buttonTextColor("primary")} />}
+        busy={detecting}
+        onNext={onDetect}
       />
     </View>
   );
