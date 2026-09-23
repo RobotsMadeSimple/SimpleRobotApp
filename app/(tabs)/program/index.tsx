@@ -2,6 +2,7 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
@@ -79,11 +80,7 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
           label: "Run Again",
           variant: "primary",
           bg: colors.success,
-          onPress: () => {
-            robotClient.resetProgram(name);
-            if (isBuilt) robotClient.executeBuiltProgram(name).catch(() => {});
-            else robotClient.startProgram(name);
-          },
+          onPress: () => { robotClient.runProgramAgain(name, isBuilt); },
         },
         { label: "Exit", variant: "primary", bg: colors.textSecondary, onPress: () => robotClient.abortProgram(name) },
       ];
@@ -108,15 +105,8 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
   const pct = p.maxStepCount > 0 ? Math.round((p.currentStepNumber / p.maxStepCount) * 100) : 0;
   const buttons = getButtons(p, isBuilt);
 
-  // Spinner while an action is being applied — cleared when the status changes
-  // (the action took effect) or after a short fallback timeout.
-  const [pending, setPending] = useState<string | null>(null);
-  useEffect(() => { setPending(null); }, [p.status]);
-  useEffect(() => {
-    if (!pending) return;
-    const t = setTimeout(() => setPending(null), 3000);
-    return () => clearTimeout(t);
-  }, [pending]);
+  // Spinner while an action is being applied — see useActionPending for when it clears.
+  const [pending, setPending] = useActionPending(p);
 
   const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => { progressAnim.setValue(pct); }, [pct]);

@@ -963,6 +963,18 @@ export class RobotConnectService {
     return this.sendCommand("ExecuteBuiltProgram", { name });
   }
 
+  /**
+   * "Run Again" for a Complete program: reset it, then start it. Built programs
+   * run in the controller's executor; external programs are flagged to start.
+   * One place for the sequence so every page behaves identically.
+   */
+  public runProgramAgain(name: string, isBuilt: boolean) {
+    this.resetProgram(name).catch(() => {});
+    return isBuilt
+      ? this.executeBuiltProgram(name).catch(() => {})
+      : this.startProgram(name).catch(() => {});
+  }
+
   public stopBuiltProgram(name: string) {
     return this.sendCommand("StopBuiltProgram", { name });
   }

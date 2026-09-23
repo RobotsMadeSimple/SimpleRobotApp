@@ -13,6 +13,7 @@ import { useBuiltPrograms,
   useProgramSummaries,
   useRobotStatus,
   useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router,
   Tabs,
@@ -102,14 +103,7 @@ function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
         {
           label: "Run Again",
           bg: colors.success,
-          onPress: () => {
-            robotClient.resetProgram(name);
-            if (isBuilt) {
-              robotClient.executeBuiltProgram(name).catch(() => {});
-            } else {
-              robotClient.startProgram(name);
-            }
-          },
+          onPress: () => { robotClient.runProgramAgain(name, isBuilt); },
         },
         { label: "Exit",     bg: colors.textSecondary, onPress: () => robotClient.abortProgram(name) },
       ];
@@ -267,23 +261,10 @@ export default function MonitorProgramScreen() {
   // need the room; below that the page stays a single scroll.
   const threeCol = usePaneLayout() === "desktop";
 
-  // Spinner while an action is being applied — cleared when the status changes
-  // (the action took effect) or after a short fallback timeout.
-  // A short program can start AND finish between two status polls (a single move
-  // whose target is already reached completes in ~50 ms), so status reads
-  // "Complete" before and after and never changes; the controller's
-  // lastStartedUnixMs changes on every start and catches that case.
-  const [pending, setPending] = useState<string | null>(null);
+  // Spinner while an action is being applied — see useActionPending for when it
+  // clears (status change, a new start, or the background-running flag flipping).
+  const [pending, setPending] = useActionPending(program, !!bgRunning);
   const [deleting, setDeleting] = useState(false);
-  const status = program?.status;
-  const lastStarted = program?.lastStartedUnixMs;
-  useEffect(() => { setPending(null); }, [status, lastStarted]);
-  useEffect(() => { setPending(null); }, [!!bgRunning]);
-  useEffect(() => {
-    if (!pending) return;
-    const t = setTimeout(() => setPending(null), 3000);
-    return () => clearTimeout(t);
-  }, [pending]);
 
   // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
