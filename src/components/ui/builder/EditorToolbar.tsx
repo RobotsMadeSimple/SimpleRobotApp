@@ -40,6 +40,13 @@ export function EditorToolbar({
     : <View style={styles.bar}><View style={styles.row}>{content}</View></View>;
 }
 
+/** Square icon button matching undo/redo, for tools the screen adds to the toolbar. */
+export function ToolbarButton({ label, onPress, children }: {
+  label: string; onPress: () => void; children: ReactNode;
+}) {
+  return <IconButton label={label} disabled={false} onPress={onPress}>{children}</IconButton>;
+}
+
 function IconButton({ label, disabled, onPress, children }: {
   label: string; disabled: boolean; onPress: () => void; children: ReactNode;
 }) {

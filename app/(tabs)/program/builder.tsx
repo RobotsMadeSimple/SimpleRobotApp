@@ -16,6 +16,7 @@ import {
   ClipboardPaste,
   Copy,
   Cpu,
+  History as HistoryIcon,
   Eye,
   EyeOff,
   ImagePlus,
@@ -57,7 +58,8 @@ import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
-import { EditorToolbar, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
+import { EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
+import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
 import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
 import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
 import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
@@ -961,9 +963,26 @@ export default function BuilderScreen() {
   const problemIndex = useMemo(() => indexProblems(steps, validation.problems), [steps, validation.problems]);
   const [problemsOpen, setProblemsOpen] = useState(false);
 
+  // ── Revisions ─────────────────────────────────────────────────────────────
+  // Only a program already on the robot has stored revisions, under the name
+  // it was opened with.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const canShowHistory = !isLocalMode && !!editName && connected;
+
+  // A restore is saved on the robot already, so it becomes the saved state, and
+  // it is committed like any edit so Undo brings back what was here before.
+  function applyRestoredRevision(program: BuiltProgram) {
+    const restored = docFromProgram(program, { isRoutine: program.isRoutine ?? isRoutineMode });
+    exitSelect();
+    setScopeStack([]);
+    commit(restored);
+    markSaved(restored);
+    if (program.id) setProgramId(program.id);
+  }
+
   // Keyboard shortcuts act on the program only while no dialog is on top of it.
   const dialogOpen = configOpen || varModalOpen || typePickerOpen || makeRoutineOpen
-    || contextPickerOpen || settingsModalOpen || problemsOpen;
+    || contextPickerOpen || settingsModalOpen || problemsOpen || historyOpen;
   useUndoShortcuts({ enabled: !dialogOpen && !localLoading, onUndo: undo, onRedo: redo });
 
   // Jump to the step a problem is on: enter its block and open its config.
@@ -993,6 +1012,11 @@ export default function BuilderScreen() {
           warningCount={validation.warningCount}
           onPress={() => setProblemsOpen(true)}
         />
+      )}
+      {canShowHistory && (
+        <ToolbarButton label="History" onPress={() => { exitSelect(); setHistoryOpen(true); }}>
+          <HistoryIcon size={16} color={colors.textSecondary} />
+        </ToolbarButton>
       )}
     </EditorToolbar>
   );
@@ -1660,6 +1684,15 @@ export default function BuilderScreen() {
           router.push({ pathname: "/(tabs)/program/builder", params: { isRoutine: "1" } });
         }}
       />
+      {canShowHistory && (
+        <RevisionsSheet
+          visible={historyOpen}
+          programName={editName!}
+          hasUnsavedChanges={isDirty}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={applyRestoredRevision}
+        />
+      )}
       <ValidationPanel
         visible={problemsOpen}
         problems={validation.problems}
