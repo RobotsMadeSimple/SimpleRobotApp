@@ -63,6 +63,8 @@ import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType, VariableEditModal } from "./VariableEditModal";
 import { StepMetaFields } from "./StepMetaFields";
+import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
+import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
 
@@ -1421,6 +1423,16 @@ export function StepConfigModal({
               )}
               <ChevronDown size={14} color={selectedVP ? accents.cyan : colors.textFaint} />
             </TouchableOpacity>
+
+            {selectedVP && (
+              <RunVisionOutputFrame
+                value={draft!.outputFrame}
+                onChange={v => set({ outputFrame: v })}
+                cameraId={selectedVP.cameraId || undefined}
+                camera={cameraDevices.find(c => c.id === selectedVP.cameraId)}
+                onOpenWizard={camId => { onSave(draft!); onClose(); openCalibrationWizard(camId); }}
+              />
+            )}
 
             {selectedVP && (
               <>
