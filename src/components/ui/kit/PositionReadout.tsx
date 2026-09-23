@@ -213,24 +213,32 @@ const styles = StyleSheet.create({
     color: colors.textFaint,
   },
   unitLg: { fontSize: 13, width: 30 },
-  // Inline one-line strip
+  // Inline strip: one line when it fits; wraps to a 2×2 grid when the numbers
+  // would otherwise clip (negative / 4-digit values need ~60px each). Values
+  // never shrink below their content width.
   inlineRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    gap: spacing.sm,
+    columnGap: spacing.sm,
+    rowGap: spacing.xs + 2,
   },
   inlineAxis: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs + 2,
-    flexShrink: 1,
+    flexGrow: 1,
+    flexBasis: 96,
+    minWidth: 96,
   },
   axisTileInline: { minWidth: 26, height: 22 },
+  // Left-aligned, right beside its axis tile — a right-aligned flex:1 value
+  // drifted to the cell edge and read as belonging to the NEXT axis. Leftover
+  // cell width now falls after the value, i.e. between axis groups.
   valueInline: {
-    flex: 0,
+    flexShrink: 1,
     fontSize: 14,
     textAlign: "left",
   },

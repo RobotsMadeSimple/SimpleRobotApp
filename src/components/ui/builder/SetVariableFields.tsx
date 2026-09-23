@@ -14,7 +14,7 @@ import { VarPickerModal } from "./VarPicker";
 import type { VarType } from "./VariableEditModal";
 import { ms, svs } from "./builderStyles";
 import { colors, accents } from "@/src/components/ui/kit";
-import { ExpressionAssist, useFieldFocus } from "./expressions/ExpressionAssist";
+import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── SetVariable helpers ───────────────────────────────────────────────────────
 
@@ -104,9 +104,6 @@ export function SetVariableFields({
   const [opDropOpen,  setOpDropOpen]  = useState(false);
   const [strVarPickerOpen, setStrVarPickerOpen] = useState(false);
   const [pendingCreate, setPendingCreate] = useState(false);
-  const valueFocus = useFieldFocus();
-  const [valueCursor, setValueCursor] = useState<number | undefined>(undefined);
-  const valueRef = useRef<TextInput | null>(null);
   const prevVarCount = useRef(variables?.length ?? 0);
 
   useEffect(() => {
@@ -220,25 +217,19 @@ export function SetVariableFields({
       ) : (
         <>
           <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (number or expression)</Text>
-          <TextInput
-            ref={valueRef}
-            style={[ms.input, { color: accents.purple }]}
+          {/* The same editor every other expression field opens — the value is never
+              typed under the keyboard, and the adders are the standard ones. */}
+          <ExpressionField
+            style={ms.input}
             value={rawVal}
-            onChangeText={changeVal}
-            onFocus={valueFocus.onFocus}
-            onBlur={valueFocus.onBlur}
-            onSelectionChange={e => setValueCursor(e.nativeEvent.selection.end)}
+            onChange={changeVal}
+            title={`Value for $${draft.variableName ?? "variable"}`}
+            hint={op === "=" ? undefined : `Applied as ${op} to the variable's current value.`}
             placeholder="e.g.  1  or  $speed * 2"
-            placeholderTextColor="#c4b5fd"
-            returnKeyType="done"
-            autoFocus={!!draft.variableName}
-          />
-          <ExpressionAssist
-            text={rawVal}
-            cursor={valueCursor}
-            focused={valueFocus.focused}
-            showValue={!/^\s*-?\d*\.?\d+\s*$/.test(rawVal)}
-            onChangeText={v => { changeVal(v); valueRef.current?.focus(); }}
+            variables={variables}
+            contextVariables={contextVariables}
+            contextLabel="Caller Variables"
+            comparisons={selectedVar?.isBoolean === true}
           />
         </>
       )}

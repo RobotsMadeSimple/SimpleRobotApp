@@ -1,24 +1,22 @@
-import React, { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { X } from "lucide-react-native";
+import React, { useMemo } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ExpressionFunction } from "@/src/models/robotModels";
-import { BottomSheet } from "@/src/components/ui/BottomSheet";
-import { accents, colors, radii, spacing, type } from "@/src/components/ui/kit";
+import { accents, colors, spacing, type } from "@/src/components/ui/kit";
 
 /**
- * Every function the controller's evaluator knows, with its signature and what it
- * does. Tapping one inserts `name(` into the field the sheet was opened from.
+ * Every function the controller's evaluator knows, with its signature and what it does.
+ * Tapping one inserts `name(` at the caret.
+ *
+ * Rendered inline inside ExpressionEditorModal rather than in a sheet of its own: the
+ * reference and the expression being written belong on the same screen, and a sheet over
+ * the editor would be the second layer of modal the editor exists to remove.
  */
-export function FunctionsHelpSheet({ visible, functions, onClose, onInsert }: {
-  visible: boolean;
+export function FunctionsList({ functions, search, onInsert }: {
   functions: ExpressionFunction[];
-  onClose: () => void;
+  /** Filter shared with the modal's other reference sections. */
+  search: string;
   onInsert: (name: string) => void;
 }) {
-  const [search, setSearch] = useState("");
-  // Cleared on the way out so the sheet always opens on the full list.
-  const close = () => { setSearch(""); onClose(); };
-
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return q
@@ -26,50 +24,29 @@ export function FunctionsHelpSheet({ visible, functions, onClose, onInsert }: {
       : functions;
   }, [functions, search]);
 
+  if (functions.length === 0) return null;
+
   return (
-    <BottomSheet visible={visible} onClose={close} title="Functions">
-      <View style={styles.search}>
-        <TextInput
-          style={styles.searchInput}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search functions…"
-          placeholderTextColor={colors.textFaint}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
-            <X size={13} color={colors.textFaint} />
-          </TouchableOpacity>
-        )}
-      </View>
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {shown.length === 0 && <Text style={styles.empty}>No functions match.</Text>}
-        {shown.map((f, i) => (
-          <TouchableOpacity
-            key={f.name}
-            style={[styles.row, i < shown.length - 1 && styles.rowBorder]}
-            onPress={() => { onInsert(f.name); close(); }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.signature}>{f.signature}</Text>
-            {!!f.description && <Text style={styles.description}>{f.description}</Text>}
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </BottomSheet>
+    <View>
+      {shown.length === 0 && <Text style={styles.empty}>No functions match.</Text>}
+      {shown.map((f, i) => (
+        <TouchableOpacity
+          key={f.name}
+          style={[styles.row, i < shown.length - 1 && styles.rowBorder]}
+          onPress={() => onInsert(f.name)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Insert ${f.name}`}
+        >
+          <Text style={styles.signature}>{f.signature}</Text>
+          {!!f.description && <Text style={styles.description}>{f.description}</Text>}
+        </TouchableOpacity>
+      ))}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  search: {
-    flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm,
-    paddingHorizontal: 10, backgroundColor: colors.surfaceMuted, marginBottom: spacing.sm,
-  },
-  searchInput: { flex: 1, fontSize: 14, color: colors.text, paddingVertical: 9 },
-  list:        { maxHeight: 440 },
   empty:       { fontSize: 13, color: colors.textFaint, textAlign: "center", paddingVertical: spacing.lg },
   row:         { paddingVertical: 10 },
   rowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },

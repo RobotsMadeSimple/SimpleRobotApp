@@ -7,11 +7,11 @@ import {
   View,
 } from "react-native";
 import { X } from "lucide-react-native";
-import { ProgramVariable, hasScalarElements, variableList } from "@/src/models/robotModels";
+import { ProgramVariable } from "@/src/models/robotModels";
 import { VarPickerModal } from "./VarPicker";
 import { colors, accents } from "@/src/components/ui/kit";
-import { useExpressionEnv } from "./expressions/ExpressionEnv";
-import { ExpressionAssist, useFieldFocus } from "./expressions/ExpressionAssist";
+import { ExpressionField } from "./expressions/ExpressionEditorModal";
+import { isExpressionText } from "./expressions/completions";
 
 // ── Numeric inputs ────────────────────────────────────────────────────────────
 
@@ -141,26 +141,24 @@ export function SignedNumberInput({
   );
 }
 
-/** Default chips for ExpressionInput — the four arithmetic operators. */
-export const ARITHMETIC_OPS: [string, string][] = [["×", "*"], ["+", "+"], ["-", "-"], ["÷", "/"]];
-
 /**
- * Chips for a field whose answer is a true/false. `and` and `or` are spelled as words
- * because that is how they read in the resulting expression, and `!=` is offered rather
- * than `==` alone because "is not" is the comparison people reach for and the hardest to
- * find on a phone keyboard.
+ * Turns a field key into a title for the expression editor — `jumpZStart` reads as
+ * "Jump Z Start". Call sites that have a nicer label (with units) pass `label`.
  */
-export const COMPARISON_OPS: [string, string][] =
-  [[">", ">"], ["<", "<"], ["==", "=="], ["!=", "!="], ["and", "and"], ["or", "or"]];
+function humanizeFieldKey(key: string): string {
+  const words = key.replace(/([a-z\d])([A-Z])/g, "$1 $2").replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 /**
  * Numeric field that also accepts math expressions referencing program variables.
  *
- * - Type a plain number as usual.
- * - Type or tap a variable chip to build an expression like "$speed * 0.8".
- * - Text turns purple when an expression is detected.
- * - Tap × to clear back to empty.
- * - Variable chips (when defined) are always shown below the field as one-tap shortcuts.
+ * The field is a read-only display: tapping it opens ExpressionEditorModal, where the
+ * input is pinned above the keyboard and every field gets the same operator, variable
+ * and function adders. Expressions read purple with an `fx` badge; × clears the field.
+ *
+ * What is stored is unchanged: a plain number goes through `onChangeValue` with the
+ * expression cleared, anything else through `onChangeExpr` with the number cleared.
  */
 export function ExpressionInput({
   fieldKey,
@@ -171,9 +169,13 @@ export function ExpressionInput({
   style,
   placeholder,
   allowUndefined,
-  autoFocus,
+  label,
+  hint,
   variables,
-  ops = ARITHMETIC_OPS,
+  contextVariables,
+  contextLabel,
+  comparisons,
+  ops,
 }: {
   fieldKey: string;
   value: number | undefined;
@@ -183,42 +185,29 @@ export function ExpressionInput({
   style?: any;
   placeholder?: string;
   allowUndefined?: boolean;
-  autoFocus?: boolean;
+  /** Title for the editor; defaults to the field key, humanized. */
+  label?: string;
+  /** One line under the editor's title — the field's own hint, when it has one. */
+  hint?: string;
   variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
+  contextLabel?: string;
   /**
-   * The one-tap operator chips, as [label, inserted text]. Defaults to arithmetic, which
-   * is what a field expecting a distance or a speed wants. A field whose answer is a
-   * true/false wants COMPARISON_OPS instead — typing `>` on a phone keyboard is a trip
-   * through the symbol layer.
+   * Adds the comparison and logic chips to the editor's symbol strip. Set it on a field
+   * whose answer is a true/false — typing `>=` on a phone keyboard is a trip through the
+   * symbol layer.
+   */
+  comparisons?: boolean;
+  /**
+   * Extra one-tap chips for this field, as `[label, inserted text]`. They are appended
+   * to the canonical strip (`+ − × ÷ ( )`), never a replacement for it.
    */
   ops?: [string, string][];
 }) {
   const currentExpr = expressions?.[fieldKey];
-  const [text, setText] = useState(currentExpr ?? (value != null ? String(value) : ""));
-  const [varPickerOpen, setVarPickerOpen] = useState(false);
-  const [cursor, setCursor] = useState<number | undefined>(undefined);
-  const inputRef   = useRef<any>(null);
-  const isFocused  = useRef(false);
-  const field      = useFieldFocus();
-  const env        = useExpressionEnv();
+  const text = currentExpr ?? (value != null ? String(value) : "");
 
-  // Sync when draft changes externally (modal re-opens) — not while user is typing
-  useEffect(() => {
-    if (isFocused.current) return;
-    setText(currentExpr ?? (value != null ? String(value) : ""));
-  }, [currentExpr, value]);
-
-  // Text contains variable references, braces or operators → treat as expression.
-  // Braces are optional here — the evaluator ignores them — but accepting them keeps
-  // "{$i + 1}" working in a numeric field for anyone used to the template syntax.
-  //
-  // Comparison and logic count too. Without them "1 > 0" would fail this test, and
-  // parseFloat would quietly accept the leading "1" and drop the rest.
-  const isExpr = (t: string) =>
-    /[${}+*\/\(\)<>=!&|]/.test(t) ||
-    /\b(?:and|or|not)\b/i.test(t) ||
-    (t.includes("-") && !/^-?\d*\.?\d*$/.test(t.trim()));
-
+  /** The editor's Done (and the field's ×) land here — the same split as before. */
   function commit(raw: string) {
     const t = raw.trim();
     if (!t) {
@@ -227,135 +216,30 @@ export function ExpressionInput({
       return;
     }
     const n = parseFloat(t);
-    if (!isNaN(n) && !isExpr(t)) {
+    if (!isNaN(n) && !isExpressionText(t)) {
       onChangeValue(n);
       onChangeExpr(fieldKey, undefined);
     } else {
-      onChangeExpr(fieldKey, t);
-    }
-  }
-
-  function handleChange(raw: string) {
-    setText(raw);
-    const t = raw.trim();
-    if (!t) {
+      // Clear the stale number so the expression is the only active value.
       onChangeValue(undefined);
-      onChangeExpr(fieldKey, undefined);
-    } else if (!isExpr(raw)) {
-      const n = parseFloat(t);
-      if (!isNaN(n)) { onChangeValue(n); onChangeExpr(fieldKey, undefined); }
-    } else {
-      onChangeValue(undefined); // clear stale numeric so expression is the only active value
       onChangeExpr(fieldKey, t);
     }
   }
-
-  function insertVar(v: ProgramVariable) {
-    // A list needs an index to reach a number, and what comes after the index depends on
-    // the element type — nothing for the scalar types, an axis for a point. For a record
-    // there is no fixed field set, so borrow the first field of the first element and
-    // leave a placeholder when the list is empty.
-    const list  = variableList(v);
-    const token = !list                                   ? `$${v.name}`
-                : hasScalarElements(list.elementType)     ? `$${v.name}[0]`
-                : list.elementType === "Point"            ? `$${v.name}[0].x`
-                : `$${v.name}[0].${Object.keys(list.items[0] ?? {})[0] ?? "field"}`;
-    insertToken(token);
-  }
-
-  function insertToken(token: string) {
-    const ref = text.trim();
-    const next = ref ? `${ref} ${token}` : token;
-    setText(next);
-    onChangeValue(undefined);
-    onChangeExpr(fieldKey, next);
-    inputRef.current?.focus();
-  }
-
-  function insertOp(op: string) {
-    const ref = text.trim();
-    const next = ref ? `${ref} ${op} ` : `${op} `;
-    setText(next);
-    onChangeValue(undefined);
-    onChangeExpr(fieldKey, next.trim());
-    inputRef.current?.focus();
-  }
-
-  function clear() {
-    setText("");
-    onChangeValue(undefined);
-    onChangeExpr(fieldKey, undefined);
-  }
-
-  const exprActive = isExpr(text);
-  const hasVars    = variables && variables.length > 0;
-  // Properties and IO are pickable too when the builder has loaded them.
-  const hasSymbols = (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) > 0;
-  const canPick    = hasVars || hasSymbols;
 
   return (
-    <View>
-      <View style={[style, { flexDirection: "row", alignItems: "center", paddingRight: 4 }]}>
-        <TextInput
-          ref={inputRef}
-          style={{ flex: 1, fontSize: 14, color: exprActive ? accents.purple : colors.text }}
-          value={text}
-          onChangeText={handleChange}
-          onFocus={() => { isFocused.current = true; field.onFocus(); }}
-          onBlur={() => { isFocused.current = false; field.onBlur(); commit(text); }}
-          onSelectionChange={e => setCursor(e.nativeEvent.selection.end)}
-          keyboardType="default"
-          placeholder={placeholder ?? (allowUndefined ? "default" : "0")}
-          placeholderTextColor={colors.textFaint}
-          autoFocus={autoFocus}
-          returnKeyType="done"
-        />
-        {text.trim().length > 0 && (
-          <TouchableOpacity onPress={clear} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
-            <X size={13} color={colors.textFaint} />
-          </TouchableOpacity>
-        )}
-      </View>
-      <ExpressionAssist
-        text={text}
-        cursor={cursor}
-        focused={field.focused}
-        showValue={exprActive}
-        onChangeText={next => { handleChange(next); inputRef.current?.focus(); }}
-      />
-      {canPick && (
-        <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
-          {ops.map(([label, op]) => (
-            <TouchableOpacity
-              key={op}
-              onPress={() => insertOp(op)}
-              activeOpacity={0.7}
-              style={exprStyles.opChip}
-            >
-              <Text style={exprStyles.opChipText}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity
-            onPress={() => setVarPickerOpen(true)}
-            activeOpacity={0.7}
-            style={[exprStyles.opChip, { backgroundColor: "#ede9fe", borderColor: "#c4b5fd" }]}
-          >
-            <Text style={[exprStyles.opChipText, { color: accents.purple, fontSize: 13 }]}>$var</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      {canPick && (
-        <VarPickerModal
-          visible={varPickerOpen}
-          onClose={() => setVarPickerOpen(false)}
-          variables={variables ?? []}
-          selected={undefined}
-          title="Insert Variable"
-          onSelect={v => { if (v) insertVar(v); }}
-          onPickSymbol={name => insertToken(`$${name}`)}
-        />
-      )}
-    </View>
+    <ExpressionField
+      value={text}
+      onChange={commit}
+      title={label ?? humanizeFieldKey(fieldKey)}
+      hint={hint}
+      placeholder={placeholder ?? (allowUndefined ? "default" : "0")}
+      variables={variables}
+      contextVariables={contextVariables}
+      contextLabel={contextLabel}
+      comparisons={comparisons}
+      extraOps={ops}
+      style={style}
+    />
   );
 }
 

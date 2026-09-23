@@ -280,6 +280,12 @@ export const sharedStyles = StyleSheet.create({
 
   // A disabled step (enabled: false) — dimmed, title struck through.
   stepCardDisabled: { opacity: 0.6 },
+  // Validation highlights: the whole card reads as broken, not just a dot.
+  stepCardError:   { backgroundColor: colors.dangerSoft,  borderWidth: 1, borderColor: colors.dangerBorder,  borderLeftWidth: 4 },
+  stepCardWarning: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warningBorder, borderLeftWidth: 4 },
+  // Floating caution badge, anchored over the card's top-right corner from the
+  // unclipped outer wrapper (stepCard itself clips overflow).
+  problemBadgeAnchor: { position: "absolute", top: -7, right: -5, zIndex: 20 },
   stepCardStruck:   { textDecorationLine: "line-through" },
 
   // Multi-select mode

@@ -1050,7 +1050,7 @@ export function StepConfigModal({
                 <ExpressionInput style={ms.input} fieldKey="waitMs"
                   value={draft!.waitMs} expressions={draft!.expressions}
                   onChangeValue={v => set({ waitMs: v !== undefined ? Math.round(v) : undefined })}
-                  onChangeExpr={setExpr} variables={variables} autoFocus />
+                  onChangeExpr={setExpr} variables={variables} />
               </>
             ) : (
               <>
@@ -1135,7 +1135,7 @@ export function StepConfigModal({
                 <ExpressionInput style={ms.input} fieldKey="loopCount"
                   value={draft!.loopCount ?? 1} expressions={draft!.expressions}
                   onChangeValue={v => set({ loopCount: v !== undefined ? Math.round(v) : 1 })}
-                  onChangeExpr={setExpr} variables={variables} autoFocus />
+                  onChangeExpr={setExpr} variables={variables} />
                 {scalarVarsLoop.length > 0 && (
                   <>
                     <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
@@ -1682,7 +1682,7 @@ export function StepConfigModal({
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (mm/s)</Text>
             <ExpressionInput style={ms.input} fieldKey="speed"
               value={draft!.speed} expressions={draft!.expressions}
-              onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables} autoFocus />
+              onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables} />
             <View style={ms.twoCol}>
               <View style={ms.twoColItem}>
                 <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
@@ -1711,7 +1711,7 @@ export function StepConfigModal({
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>BLEND RADIUS  (mm)</Text>
             <ExpressionInput style={ms.input} fieldKey="blendRadius"
               value={draft!.blendRadius} expressions={draft!.expressions}
-              onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} autoFocus />
+              onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
           </>
         );
 

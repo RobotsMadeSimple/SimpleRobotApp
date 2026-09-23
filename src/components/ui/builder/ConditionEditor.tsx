@@ -1,9 +1,9 @@
-import React, { useRef } from "react";
+import React from "react";
 import {
   Modal,
   Pressable,
+  StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -14,13 +14,10 @@ import {
   ConditionOp,
   ProgramVariable,
 } from "@/src/models/robotModels";
-import { VarPickerModal } from "./VarPicker";
-import { exprStyles } from "./NumericInputs";
 import { svs } from "./builderStyles";
 import { newId } from "./stepUtils";
 import { colors, spacing, radii, accents } from "@/src/components/ui/kit";
-import { useExpressionEnv } from "./expressions/ExpressionEnv";
-import { ExpressionAssist, useFieldFocus } from "./expressions/ExpressionAssist";
+import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── Condition editor ──────────────────────────────────────────────────────────
 
@@ -57,31 +54,6 @@ function ConditionItemEditor({
   onDelete: () => void;
 }) {
   const [opOpen, setOpOpen] = React.useState(false);
-  const [leftPickerOpen, setLeftPickerOpen] = React.useState(false);
-  const [rightPickerOpen, setRightPickerOpen] = React.useState(false);
-  const rightRef = useRef<any>(null);
-  const leftRef  = useRef<any>(null);
-  const env = useExpressionEnv();
-  // The var buttons also reach the read-only properties and IO names when loaded.
-  const hasVars = !!(variables && variables.length > 0)
-    || (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) > 0;
-  const leftFocus  = useFieldFocus();
-  const rightFocus = useFieldFocus();
-  const [leftCursor, setLeftCursor]   = React.useState<number | undefined>(undefined);
-  const [rightCursor, setRightCursor] = React.useState<number | undefined>(undefined);
-  // Both sides are expressions; evaluate them once they are more than a bare literal.
-  // String comparisons (contains/startsWith/endsWith) are not numeric, so they are skipped.
-  const stringOp = item.operator === "contains" || item.operator === "startsWith" || item.operator === "endsWith";
-  const worthEvaluating = (t: string) => !stringOp && (/[$()+\-*\/%^<>=!&|?]/.test(t) || /[A-Za-z]/.test(t));
-
-  function insertRightToken(token: string) {
-    const cur = (item.right ?? "").trimEnd();
-    const next = cur ? `${cur} ${token} ` : `${token} `;
-    onChange({ ...item, right: next });
-    rightRef.current?.focus();
-  }
-
-  const rightIsExpr = /[$+\-*\/()]/.test(item.right ?? "");
 
   return (
     <View style={{ marginBottom: 10, borderWidth: 1, borderColor: "#e0f2fe", borderRadius: radii.sm, padding: 10, backgroundColor: colors.surface }}>
@@ -90,42 +62,23 @@ function ConditionItemEditor({
         <X size={14} color={colors.textFaint} />
       </TouchableOpacity>
 
-      {/* Left */}
-      <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4, marginBottom: 4 }}>LEFT</Text>
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        <TextInput
-          ref={leftRef}
-          style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: accents.purple }}
-          value={item.left ?? ""}
-          onChangeText={v => onChange({ ...item, left: v })}
-          onFocus={leftFocus.onFocus}
-          onBlur={leftFocus.onBlur}
-          onSelectionChange={e => setLeftCursor(e.nativeEvent.selection.end)}
-          placeholder="$var or $stb.in1"
-          placeholderTextColor="#c4b5fd"
-          autoCapitalize="none"
-        />
-        {hasVars && (
-          <TouchableOpacity
-            onPress={() => setLeftPickerOpen(true)}
-            activeOpacity={0.7}
-            style={{ backgroundColor: "#ede9fe", borderWidth: 1, borderColor: "#c4b5fd", borderRadius: 8, paddingHorizontal: 10, justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "700", color: accents.purple }}>var</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      <ExpressionAssist
-        text={item.left ?? ""}
-        cursor={leftCursor}
-        focused={leftFocus.focused}
-        showValue={worthEvaluating(item.left ?? "")}
-        onChangeText={v => { onChange({ ...item, left: v }); leftRef.current?.focus(); }}
+      {/* Left — both sides are expressions, so both open the one expression editor. */}
+      <Text style={condStyles.sideLabel}>LEFT</Text>
+      <ExpressionField
+        style={condStyles.field}
+        value={item.left ?? ""}
+        onChange={v => onChange({ ...item, left: v })}
+        title="Left side"
+        hint="The value this condition tests."
+        placeholder="$var or $stb.in1"
+        variables={variables}
+        contextVariables={contextVariables}
+        contextLabel="Caller Variables"
       />
       <View style={{ height: spacing.md }} />
 
       {/* Operator — full-width select button */}
-      <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4, marginBottom: 4 }}>OPERATOR</Text>
+      <Text style={condStyles.sideLabel}>OPERATOR</Text>
       <TouchableOpacity
         style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#e0f2fe", borderWidth: 1.5, borderColor: "#bae6fd", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 12 }}
         onPress={() => setOpOpen(true)}
@@ -137,67 +90,19 @@ function ConditionItemEditor({
       </TouchableOpacity>
 
       {/* Right */}
-      <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4, marginBottom: 4 }}>RIGHT</Text>
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        <TextInput
-          ref={rightRef}
-          style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: rightIsExpr ? accents.purple : colors.text }}
-          value={item.right ?? ""}
-          onChangeText={v => onChange({ ...item, right: v })}
-          onFocus={rightFocus.onFocus}
-          onBlur={rightFocus.onBlur}
-          onSelectionChange={e => setRightCursor(e.nativeEvent.selection.end)}
-          placeholder="value or expression"
-          placeholderTextColor={colors.textFaint}
-          autoCapitalize="none"
-        />
-        {hasVars && (
-          <TouchableOpacity
-            onPress={() => setRightPickerOpen(true)}
-            activeOpacity={0.7}
-            style={{ backgroundColor: "#ede9fe", borderWidth: 1, borderColor: "#c4b5fd", borderRadius: 8, paddingHorizontal: 10, justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "700", color: accents.purple }}>var</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      <ExpressionAssist
-        text={item.right ?? ""}
-        cursor={rightCursor}
-        focused={rightFocus.focused}
-        showValue={worthEvaluating(item.right ?? "")}
-        onChangeText={v => { onChange({ ...item, right: v }); rightRef.current?.focus(); }}
+      <Text style={condStyles.sideLabel}>RIGHT</Text>
+      <ExpressionField
+        style={condStyles.field}
+        value={item.right ?? ""}
+        onChange={v => onChange({ ...item, right: v })}
+        title="Right side"
+        hint="What the left side is compared against."
+        placeholder="value or expression"
+        variables={variables}
+        contextVariables={contextVariables}
+        contextLabel="Caller Variables"
       />
-      <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
-        {([["×", "*"], ["+", "+"], ["−", "-"], ["÷", "/"]] as [string, string][]).map(([label, op]) => (
-          <TouchableOpacity key={op} onPress={() => insertRightToken(op)} activeOpacity={0.7} style={exprStyles.opChip}>
-            <Text style={exprStyles.opChipText}>{label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
 
-      <VarPickerModal
-        visible={leftPickerOpen}
-        onClose={() => setLeftPickerOpen(false)}
-        variables={variables ?? []}
-        contextVariables={contextVariables}
-        contextLabel="Caller Variables"
-        selected={(item.left ?? "").startsWith("$") ? item.left.slice(1) : undefined}
-        title="Left Variable"
-        onSelect={v => { if (v) onChange({ ...item, left: `$${v.name}` }); }}
-        onPickSymbol={name => onChange({ ...item, left: `$${name}` })}
-      />
-      <VarPickerModal
-        visible={rightPickerOpen}
-        onClose={() => setRightPickerOpen(false)}
-        variables={variables ?? []}
-        contextVariables={contextVariables}
-        contextLabel="Caller Variables"
-        selected={(item.right ?? "").startsWith("$") ? item.right.slice(1) : undefined}
-        title="Right Variable"
-        onSelect={v => { if (v) insertRightToken(`$${v.name}`); }}
-        onPickSymbol={name => insertRightToken(`$${name}`)}
-      />
       <Modal visible={opOpen} transparent animationType="fade" onRequestClose={() => setOpOpen(false)}>
         <Pressable style={svs.modalOverlay} onPress={() => setOpOpen(false)}>
           <Pressable style={svs.modalCard} onPress={() => {}}>
@@ -268,3 +173,11 @@ export function ConditionGroupEditor({
     </View>
   );
 }
+
+const condStyles = StyleSheet.create({
+  sideLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4, marginBottom: 4 },
+  field: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 9, minHeight: 38,
+  },
+});

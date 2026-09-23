@@ -773,13 +773,14 @@ export default function JogScreen() {
   );
 
   // ── Points panel ────────────────────────────────────────────────────────────
-  // Parameterized by onPick/onMove so each host (wide panel, twoColumn
+  // Parameterized by onPick so each host (wide panel, twoColumn
   // collapsible, narrow modal) controls what happens when a point is chosen —
   // the narrow modal closes itself first (see pointsModal) so it never stacks
   // on top of the dialog that follows.
   //   onPick — row tap: opens the point actions dialog.
-  //   onMove — the row's "Move To" button: shortcut straight to move-confirm.
-  const renderPointRows = (onPick: (p: Point) => void, onMove: (p: Point) => void) => (
+  // Row tap and the "Actions" button both open the point actions dialog
+  // (Move To / Edit Position / Teach Here).
+  const renderPointRows = (onPick: (p: Point) => void) => (
     <>
       <View style={styles.pointsSearchWrap}>
         <Input
@@ -814,11 +815,11 @@ export default function JogScreen() {
                 </Text>
               </View>
               <Button
-                label="Move To"
+                label="Actions"
                 variant="secondary"
                 size="sm"
-                icon={<Navigation size={14} color={buttonTextColor("secondary")} />}
-                onPress={() => onMove(p)}
+                icon={<ChevronRight size={14} color={buttonTextColor("secondary")} />}
+                onPress={() => onPick(p)}
               />
             </Pressable>
             {i < filteredPoints.length - 1 && <Divider />}
@@ -841,7 +842,7 @@ export default function JogScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {renderPointRows(setActionTarget, setMoveTarget)}
+        {renderPointRows(setActionTarget)}
       </ScrollView>
     </Card>
   );
@@ -858,7 +859,7 @@ export default function JogScreen() {
         <View style={styles.pointsHeaderSpacer} />
         <InfoTip text="Saved robot positions. Pick one to line- or joint-move the robot there — you choose the move type and speed, and a STOP button stays on screen for the whole move. Make sure the path is clear first." />
       </Pressable>
-      {pointsOpen && <View style={styles.pointsCollapsedBody}>{renderPointRows(setActionTarget, setMoveTarget)}</View>}
+      {pointsOpen && <View style={styles.pointsCollapsedBody}>{renderPointRows(setActionTarget)}</View>}
     </Card>
   );
 
@@ -906,7 +907,6 @@ export default function JogScreen() {
           >
             {renderPointRows(
               (p) => { setPointsOpen(false); setActionTarget(p); },
-              (p) => { setPointsOpen(false); setMoveTarget(p); },
             )}
           </ScrollView>
         </Pressable>

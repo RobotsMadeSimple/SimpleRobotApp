@@ -23,7 +23,7 @@ import {
   variableList,
 } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
-import { COMPARISON_OPS, ExpressionInput } from "./NumericInputs";
+import { ExpressionInput } from "./NumericInputs";
 import { newId } from "./stepUtils";
 
 export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "image" | "computed";
@@ -332,6 +332,7 @@ export function VariableEditModal({
                 onChangeValue={n => setValue(n === undefined ? "0" : String(n))}
                 onChangeExpr={(_k, e) => setValueExpr(e)}
                 style={ms.input}
+                label="Initial value"
                 variables={exprVars}
               />
               {usingExpr && <InitialValueExprHint />}
@@ -389,9 +390,11 @@ export function VariableEditModal({
                     // the buttons — leaving the field is what the fx segment is for.
                     onChangeExpr={(_k, e) => setValueExpr(e ?? "")}
                     style={ms.input}
+                    label="Initial value"
+                    hint="The variable starts true when this is true."
                     placeholder="e.g.  $count > 5"
                     variables={exprVars}
-                    ops={COMPARISON_OPS}
+                    comparisons
                   />
                   <InitialValueExprHint boolean />
                 </View>
@@ -548,9 +551,11 @@ export function VariableEditModal({
                 onChangeValue={n => setFormula(n === undefined ? "" : String(n))}
                 onChangeExpr={(_k, e) => { if (e !== undefined) setFormula(e); }}
                 style={ms.input}
+                label="Formula"
+                hint="Re-evaluated every time the variable is read."
                 placeholder={computedBool ? "e.g.  $partsDone >= $target" : "e.g.  $robot.z - $tableHeight"}
                 variables={exprVars}
-                ops={computedBool ? COMPARISON_OPS : undefined}
+                comparisons={computedBool}
               />
               <Text style={[ms.hintText, { marginTop: 6 }]}>
                 Evaluated every time <Text style={{ fontWeight: "700" }}>${name.trim() || "name"}</Text> is read, against the live variables, IO and properties, like <Text style={{ fontWeight: "700" }}>$robot.x</Text>. It may use other computed variables, but not itself.

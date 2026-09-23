@@ -83,3 +83,22 @@ export function insertAt(text: string, cursor: number, token: string): string {
 export function referencedNames(expression: string): string[] {
   return [...expression.matchAll(/\$([A-Za-z_][\w.]*)/g)].map(m => m[1].replace(/\.$/, ""));
 }
+
+/**
+ * Does this text read as an expression rather than a plain number?
+ *
+ * Variable references, braces and operators all count. Braces are optional here — the
+ * evaluator ignores them — but accepting them keeps "{$i + 1}" working in a numeric
+ * field for anyone used to the template syntax.
+ *
+ * Comparison and logic count too. Without them "1 > 0" would fail this test, and
+ * parseFloat would quietly accept the leading "1" and drop the rest.
+ *
+ * Shared by the field displays and the expression editor so "is this purple?" has one
+ * answer everywhere.
+ */
+export function isExpressionText(text: string): boolean {
+  return /[${}+*\/\(\)<>=!&|]/.test(text)
+    || /\b(?:and|or|not)\b/i.test(text)
+    || (text.includes("-") && !/^-?\d*\.?\d*$/.test(text.trim()));
+}

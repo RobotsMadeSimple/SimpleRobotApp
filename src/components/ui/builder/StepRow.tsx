@@ -1,10 +1,20 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   PanResponder,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
 import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
@@ -12,7 +22,7 @@ import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
-import { DisabledPill, ProblemDot, ProblemMessage, StepComment } from "./StepAnnotations";
+import { DisabledPill, ProblemBadge, StepComment, stepHasError } from "./StepAnnotations";
 import type { StepProblems } from "./useProgramValidation";
 
 // ── Insert divider ────────────────────────────────────────────────────────────
@@ -148,7 +158,26 @@ export function StepRow({
   /** Validation problems on this step or nested inside it. */
   problems?: StepProblems;
 }) {
-  const [showProblem, setShowProblem] = useState(false);
+  // Pulsing red wash over cards with validation ERRORS (warnings stay static).
+  // A translucent danger overlay breathes 4%→14% opacity under the content.
+  const isError = problems ? stepHasError(problems) : false;
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    if (isError) {
+      pulse.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 850, easing: Easing.inOut(Easing.quad) }),
+          withTiming(0, { duration: 850, easing: Easing.inOut(Easing.quad) }),
+        ),
+        -1,
+      );
+    } else {
+      cancelAnimation(pulse);
+      pulse.value = 0;
+    }
+    return () => cancelAnimation(pulse);
+  }, [isError, pulse]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: 0.04 + pulse.value * 0.1 }));
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
   const isSetSpeed    = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
@@ -175,7 +204,24 @@ export function StepRow({
         isDropBelow    && sharedStyles.dropTargetItemBottom,
       ]}
     >
-      <View style={[sharedStyles.stepCard, { borderLeftColor: category.color }, selected && sharedStyles.stepCardSelected, disabled && sharedStyles.stepCardDisabled]}>
+      {problems && (
+        <View style={sharedStyles.problemBadgeAnchor} pointerEvents="box-none">
+          <ProblemBadge problems={problems} />
+        </View>
+      )}
+      <View style={[
+        sharedStyles.stepCard,
+        { borderLeftColor: category.color },
+        problems && (stepHasError(problems) ? sharedStyles.stepCardError : sharedStyles.stepCardWarning),
+        selected && sharedStyles.stepCardSelected,
+        disabled && sharedStyles.stepCardDisabled,
+      ]}>
+        {isError && (
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger }, pulseStyle]}
+          />
+        )}
 
         {/* Card header row */}
         <TouchableOpacity
@@ -218,10 +264,7 @@ export function StepRow({
               <Text style={sharedStyles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
             )}
             {!!step.comment && <StepComment text={step.comment} />}
-            {problems && showProblem && <ProblemMessage problems={problems} />}
           </View>
-
-          {problems && <ProblemDot problems={problems} onPress={() => setShowProblem(v => !v)} />}
 
           {!selectMode && (
             <>
