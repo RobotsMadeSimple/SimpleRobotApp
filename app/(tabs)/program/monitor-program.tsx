@@ -53,7 +53,7 @@ import { Image as ExpoImage } from "expo-image";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
-import { accents, colors, spacing, radii, InfoTip, PageHeader, PositionReadout, StatusPill } from "@/src/components/ui/kit";
+import { colors, spacing, radii, InfoTip, PageHeader, PositionReadout, StatusPill } from "@/src/components/ui/kit";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
@@ -934,18 +934,16 @@ export default function MonitorProgramScreen() {
                 </View>
               )}
 
+              {/* One DRO with the live position and, beside each axis, the commanded target. */}
               <PositionReadout
                 card={false}
-                axes={(["X", "Y", "Z", "RZ"] as const).map((axis) => ({
-                  label: axis,
-                  value:  fmt(s?.[axis.toLowerCase() as "x" | "y" | "z" | "rz"]),
-                  unit:   axis === "RZ" ? "°" : "mm",
-                }))}
+                axes={[
+                  { label: "X",  value: fmt(s?.x),  target: fmt(s?.targetX),  unit: "mm" },
+                  { label: "Y",  value: fmt(s?.y),  target: fmt(s?.targetY),  unit: "mm" },
+                  { label: "Z",  value: fmt(s?.z),  target: fmt(s?.targetZ),  unit: "mm" },
+                  { label: "RZ", value: fmt(s?.rz), target: fmt(s?.targetRz), unit: "°"  },
+                ]}
               />
-
-              <Text style={styles.targetPositionLine} numberOfLines={1}>
-                Target  X {fmt(s?.targetX)}  Y {fmt(s?.targetY)}  Z {fmt(s?.targetZ)}  RZ {fmt(s?.targetRz)}
-              </Text>
 
               <View style={styles.posSubRow}>
                 <Text style={styles.posSubLabel}>POINT</Text>
@@ -1319,11 +1317,6 @@ const styles = StyleSheet.create({
   deleteBtnTextDisabled: { color: "#fca5a5" },
 
   // ── Position ───────────────────────────────────────────────────────────────
-  targetPositionLine: {
-    fontSize: 12, fontWeight: "600", color: accents.purple,
-    fontFamily: "monospace", marginTop: spacing.xs,
-  },
-
   posSubRow: {
     flexDirection: "row", alignItems: "center", flexWrap: "wrap",
     gap: spacing.xs, paddingTop: spacing.sm,

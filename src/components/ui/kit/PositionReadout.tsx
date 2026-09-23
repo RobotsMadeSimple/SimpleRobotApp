@@ -1,18 +1,28 @@
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { Card } from "./Card";
-import { colors, radii, spacing, type } from "./theme";
+import { accents, colors, radii, spacing, type } from "./theme";
 
 export type ReadoutAxis = {
   /** Axis letter(s): "X", "Y", "Z", "RZ", "J1"… */
   label: string;
   /** Already-formatted value ("123.45") or a number (formatted to 2 decimals). */
   value: number | string;
+  /**
+   * Optional commanded/target value, shown in a second column beside the live
+   * value ("current → target"). Dimmed once it matches the live value, so a
+   * glance tells you which axes still have somewhere to go.
+   */
+  target?: number | string;
   /** Unit shown faintly after the value ("mm", "°"). */
   unit?: string;
   /** Highlight this axis (e.g. the joint currently faulted or being jogged). */
   active?: boolean;
 };
+
+const fmtValue = (v: number | string) => (typeof v === "number" ? v.toFixed(2) : v);
+const reached  = (a: ReadoutAxis) =>
+  a.target !== undefined && Number(fmtValue(a.value)) === Number(fmtValue(a.target));
 
 type Props = {
   axes: ReadoutAxis[];
@@ -38,13 +48,21 @@ type Props = {
  */
 export function PositionReadout({ axes, size = "md", card = true, style }: Props) {
   const lg = size === "lg";
+  const hasTargets = axes.some((a) => a.target !== undefined);
 
   const rows = (
     <View style={style}>
+      {hasTargets && (
+        <View style={[styles.header, lg && styles.headerLg]}>
+          <Text style={styles.headerLabel}>CURRENT</Text>
+          <Text style={[styles.headerLabel, styles.headerTarget, lg && styles.headerTargetLg]}>TARGET</Text>
+          <View style={[styles.unit, lg && styles.unitLg]} />
+        </View>
+      )}
       {axes.map((axis, i) => (
         <View
           key={axis.label}
-          style={[styles.row, lg && styles.rowLg, i > 0 && styles.rowBorder]}
+          style={[styles.row, lg && styles.rowLg, (i > 0 || hasTargets) && styles.rowBorder]}
         >
           <View style={[styles.axisTile, lg && styles.axisTileLg, axis.active && styles.axisTileActive]}>
             <Text style={[styles.axisLabel, lg && styles.axisLabelLg, axis.active && styles.axisLabelActive]}>
@@ -55,8 +73,16 @@ export function PositionReadout({ axes, size = "md", card = true, style }: Props
             style={[styles.value, lg && styles.valueLg, axis.active && styles.valueActive]}
             numberOfLines={1}
           >
-            {typeof axis.value === "number" ? axis.value.toFixed(2) : axis.value}
+            {fmtValue(axis.value)}
           </Text>
+          {hasTargets && (
+            <Text
+              style={[styles.target, lg && styles.targetLg, reached(axis) && styles.targetReached]}
+              numberOfLines={1}
+            >
+              {axis.target === undefined ? "" : `→ ${fmtValue(axis.target)}`}
+            </Text>
+          )}
           {!!axis.unit && <Text style={[styles.unit, lg && styles.unitLg]}>{axis.unit}</Text>}
         </View>
       ))}
@@ -112,6 +138,37 @@ const styles = StyleSheet.create({
   },
   valueLg:     { fontSize: 24 },
   valueActive: { color: colors.accent },
+  // Target column: the commanded position the axis is heading to.
+  target: {
+    width: 92,
+    textAlign: "right",
+    fontFamily: type.mono.fontFamily,
+    fontVariant: ["tabular-nums"],
+    fontSize: 15,
+    fontWeight: "600",
+    color: accents.purple,
+  },
+  targetLg:      { width: 116, fontSize: 19 },
+  targetReached: { color: colors.textFaint },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    paddingHorizontal: spacing.md,
+    gap: spacing.md,
+  },
+  headerLg: { paddingHorizontal: spacing.lg },
+  headerLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.textFaint,
+    letterSpacing: 0.5,
+    textAlign: "right",
+  },
+  headerTarget:   { width: 92, color: accents.purple },
+  headerTargetLg: { width: 116 },
   unit: {
     width: 28,
     fontSize: 12,
