@@ -1,7 +1,7 @@
 import { useIsWide } from "@/src/components/ui/responsive";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
@@ -234,13 +234,17 @@ export default function ProgramScreen() {
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
   const [showVision,     setShowVision]     = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      robotClient.getRobotConfig()
-        .then(cfg => setShowVision(cfg.enableCameras ?? false))
-        .catch(() => {});
-    }, [])
-  );
+  // Re-run on (re)connect as well as on focus: if the controller starts while
+  // this tab is open, the focus-time request has already failed.
+  const connected = useConnected();
+  const loadVisionFlag = useCallback(() => {
+    if (!connected) return;
+    robotClient.getRobotConfig()
+      .then(cfg => setShowVision(cfg.enableCameras ?? false))
+      .catch(() => {});
+  }, [connected]);
+  useFocusEffect(loadVisionFlag);
+  useEffect(() => { loadVisionFlag(); }, [loadVisionFlag]);
 
   useFocusEffect(
     useCallback(() => {

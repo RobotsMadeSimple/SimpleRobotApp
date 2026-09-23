@@ -1,7 +1,8 @@
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useNanoIO,
+import { useConnected,
+  useNanoIO,
   useRelayIO,
   useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -124,26 +125,37 @@ export default function IoPage() {
   const [addModal,    setAddModal]    = useState(false);
   const [enabling,    setEnabling]    = useState<keyof IOConfig | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      robotClient.getRobotConfig()
-        .then(cfg => setIoConfig({
-          enableStbCard:   cfg.enableStbCard   ?? true,
-          enableNanoCards: cfg.enableNanoCards ?? false,
-          enableRelayCard: cfg.enableRelayCard ?? false,
-          enableAuxAxis:   cfg.enableAuxAxis   ?? false,
-          enableCameras:   cfg.enableCameras   ?? false,
-        }))
-        .catch(() => setIoConfig({
-          enableStbCard: true, enableNanoCards: false,
-          enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
-        }));
-      robotClient.getCameras().catch(() => {});
-      // Refresh Nano + relay state so the IO summary cards reflect outputs a
-      // running program changed, not the stale state from the last app action.
-      robotClient.getIO().catch(() => {});
-    }, [])
-  );
+  // Which cards to show comes from the robot config. Load it when the tab gains
+  // focus AND whenever the connection comes up: if the controller starts while
+  // this tab is already open, the focus-time request has failed and would
+  // otherwise leave the page on the offline defaults until the user navigated away.
+  const connected = useConnected();
+  const loadIoPage = useCallback(() => {
+    if (!connected) {
+      setIoConfig(cfg => cfg ?? {
+        enableStbCard: true, enableNanoCards: false,
+        enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
+      });
+      return;
+    }
+    robotClient.getRobotConfig()
+      .then(cfg => setIoConfig({
+        enableStbCard:   cfg.enableStbCard   ?? true,
+        enableNanoCards: cfg.enableNanoCards ?? false,
+        enableRelayCard: cfg.enableRelayCard ?? false,
+        enableAuxAxis:   cfg.enableAuxAxis   ?? false,
+        enableCameras:   cfg.enableCameras   ?? false,
+      }))
+      .catch(() => {});
+    robotClient.getCameras().catch(() => {});
+    robotClient.getAuxState().catch(() => {});
+    // Refresh Nano + relay state so the IO summary cards reflect outputs a
+    // running program changed, not the stale state from the last app action.
+    robotClient.getIO().catch(() => {});
+  }, [connected]);
+
+  useFocusEffect(loadIoPage);
+  useEffect(() => { loadIoPage(); }, [loadIoPage]);
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});

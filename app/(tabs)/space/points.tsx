@@ -1,7 +1,7 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { Point } from "@/src/models/robotModels";
-import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useConnected, usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { Button, colors, Divider, EmptyState, FormRow, InfoTip, Input, PageHeader, radii, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
@@ -334,13 +334,17 @@ export default function PointsPage() {
   const [moveSpeeds, setMoveSpeeds] = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
   const [selectedSpeed, setSelectedSpeed] = useState<"Slow" | "Normal" | "Fast">("Normal");
 
-  useFocusEffect(
-    useCallback(() => {
-      robotClient.getRobotConfig()
-        .then(cfg => setMoveSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
-        .catch(() => {});
-    }, [])
-  );
+  // Re-run on (re)connect as well as on focus: if the controller starts while
+  // this page is open, the focus-time request has already failed.
+  const connected = useConnected();
+  const loadMoveSpeeds = useCallback(() => {
+    if (!connected) return;
+    robotClient.getRobotConfig()
+      .then(cfg => setMoveSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
+      .catch(() => {});
+  }, [connected]);
+  useFocusEffect(loadMoveSpeeds);
+  useEffect(() => { loadMoveSpeeds(); }, [loadMoveSpeeds]);
 
   const AT_THRESHOLD = 0.5;
 
