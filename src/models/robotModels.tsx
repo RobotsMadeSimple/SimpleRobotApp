@@ -87,13 +87,35 @@ export type CameraState = {
   streamHeight?: number;
   /** Best-effort decode latency estimate, 0 when unknown. */
   latencyMs?: number;
+  // ── Sofia / DVRIP (XMeye) cameras (docs/network-cameras.md). `url`/`transport` unused. ──
+  /** Sofia only: camera IP / hostname. */
+  host?: string;
+  /** Sofia only. Default 34567. */
+  port?: number;
+  /** Sofia only. "Main" (primary, default) or "Extra1" (sub-stream). */
+  stream?: CameraStream;
+  /** Sofia only: what the camera streams; hints the decoder. Default "h264". */
+  codec?: CameraCodec;
+  /** Sofia only. "opencv": in-process via a loopback FFmpeg demux (default). "ffmpeg": external process. */
+  decoder?: CameraDecoder;
+  /** Sofia "ffmpeg" decoder only. Default "ffmpeg". */
+  ffmpegPath?: string;
+  /** Sofia "ffmpeg" decoder only: "", "auto", "d3d11va", … */
+  hwaccel?: string;
 };
 
-export type CameraSourceType = "usb" | "network";
+export type CameraSourceType = "usb" | "network" | "sofia";
 export type CameraTransport = "tcp" | "udp";
+export type CameraStream = "Main" | "Extra1";
+export type CameraCodec = "h264" | "hevc";
+export type CameraDecoder = "opencv" | "ffmpeg";
 
-/** Error codes from TestCameraSource (docs/network-cameras.md). */
+/** Error codes from TestCameraSource for network cameras (docs/network-cameras.md). */
 export type CameraSourceTestError = "invalidUrl" | "openFailed" | "noFrame" | "timeout";
+
+/** Error codes from TestCameraSource for Sofia cameras (docs/network-cameras.md). */
+export type SofiaSourceTestError =
+  "connectFailed" | "loginFailed" | "claimFailed" | "noFrame" | "timeout" | "decoderUnavailable";
 
 export type CameraSourceTestResult = {
   ok: boolean;
@@ -101,7 +123,13 @@ export type CameraSourceTestResult = {
   height: number;
   openMs: number;
   firstFrameMs: number;
-  /** A CameraSourceTestError code, or another controller message. */
+  /** Sofia only: DVRIP login time, ms. */
+  loginMs?: number;
+  /** Sofia only: codec identified from the decoded stream. */
+  detectedCodec?: "h264" | "hevc" | "unknown";
+  /** Sofia only: byte size of the first video frame. */
+  firstFrameBytes?: number;
+  /** A CameraSourceTestError / SofiaSourceTestError code, or another controller message. */
   error?: string;
 };
 

@@ -2,9 +2,11 @@ import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { CameraSourceType, CameraState } from "@/src/models/robotModels";
 import { NetworkSourceFields } from "@/src/components/ui/camera/NetworkSourceFields";
+import { SofiaSourceFields } from "@/src/components/ui/camera/SofiaSourceFields";
 import {
   cameraSourceParams, cameraSourceSummary, cameraSourceTag, cameraUrlProblem,
-  EMPTY_NETWORK_SOURCE, isNetworkCamera, NetworkSource, networkSourceOf, SOURCE_OPTIONS,
+  EMPTY_NETWORK_SOURCE, EMPTY_SOFIA_SOURCE, isNetworkCamera, isSofiaCamera, NetworkSource, networkSourceOf,
+  SofiaSource, sofiaSourceOf, sofiaSourceProblem, SOURCE_OPTIONS,
 } from "@/src/components/ui/camera/cameraSource";
 import { router, useLocalSearchParams } from "expo-router";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
@@ -154,6 +156,7 @@ function CameraConfigFields({
   savedResolutions,
   source, setSource,
   network, setNetwork,
+  sofia, setSofia,
 }: {
   name: string;        setName: (v: string) => void;
   deviceIndex: string; setDeviceIndex: (v: string) => void;
@@ -163,6 +166,7 @@ function CameraConfigFields({
   savedResolutions:    Resolution[];
   source:  CameraSourceType; setSource:  (v: CameraSourceType) => void;
   network: NetworkSource;    setNetwork: (v: NetworkSource) => void;
+  sofia:   SofiaSource;      setSofia:   (v: SofiaSource) => void;
 }) {
   const [sheetOpen,      setSheetOpen]      = useState(false);
   const [customSelected, setCustomSelected] = useState(false);
@@ -198,6 +202,8 @@ function CameraConfigFields({
 
         {source === "network" ? (
           <NetworkSourceFields value={network} onChange={setNetwork} rowStyle={styles.fieldGap} />
+        ) : source === "sofia" ? (
+          <SofiaSourceFields value={sofia} onChange={setSofia} rowStyle={styles.fieldGap} />
         ) : (
           <>
             <FormRow label="Device Index" style={styles.fieldGap}>
@@ -316,10 +322,16 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
   const [width,       setWidth]       = useState(String(camera.width));
   const [height,      setHeight]      = useState(String(camera.height));
   const [targetFps,   setTargetFps]   = useState(String(camera.targetFps));
-  const [source,      setSource]      = useState<CameraSourceType>(isNetworkCamera(camera) ? "network" : "usb");
+  const [source,      setSource]      = useState<CameraSourceType>(
+    isSofiaCamera(camera) ? "sofia" : isNetworkCamera(camera) ? "network" : "usb"
+  );
   const [network,     setNetwork]     = useState(() => networkSourceOf(camera));
+  const [sofia,       setSofia]       = useState(() => sofiaSourceOf(camera));
   const [saving,      setSaving]      = useState(false);
-  const urlProblem = source === "network" ? cameraUrlProblem(network.url) : null;
+  const sourceProblem =
+    source === "network" ? cameraUrlProblem(network.url) :
+    source === "sofia"   ? sofiaSourceProblem(sofia) :
+    null;
   const tag = cameraSourceTag(camera);
 
   const save = async () => {
@@ -332,7 +344,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       width:       parseInt(width)     || 640,
       height:      parseInt(height)    || 480,
       targetFps:   parseInt(targetFps) || 15,
-      ...cameraSourceParams(source, network),
+      ...cameraSourceParams(source, network, sofia),
     });
     await robotClient.getCameras().catch(() => {});
     setSaving(false);
@@ -383,11 +395,12 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
               savedResolutions={camera.supportedResolutions ?? []}
               source={source}           setSource={setSource}
               network={network}         setNetwork={setNetwork}
+              sofia={sofia}             setSofia={setSofia}
             />
             <Button
               label={saving ? "Saving…" : "Save"}
               loading={saving}
-              disabled={!!urlProblem}
+              disabled={!!sourceProblem}
               onPress={save}
             />
           </>
@@ -434,8 +447,12 @@ function NewCameraPage() {
   const [targetFps,   setTargetFps]   = useState("15");
   const [source,      setSource]      = useState<CameraSourceType>("usb");
   const [network,     setNetwork]     = useState<NetworkSource>(EMPTY_NETWORK_SOURCE);
+  const [sofia,       setSofia]       = useState<SofiaSource>(EMPTY_SOFIA_SOURCE);
   const [saving,      setSaving]      = useState(false);
-  const urlProblem = source === "network" ? cameraUrlProblem(network.url) : null;
+  const sourceProblem =
+    source === "network" ? cameraUrlProblem(network.url) :
+    source === "sofia"   ? sofiaSourceProblem(sofia) :
+    null;
 
   const add = async () => {
     setSaving(true);
@@ -457,7 +474,7 @@ function NewCameraPage() {
         width:       parseInt(width)     || 640,
         height:      parseInt(height)    || 480,
         targetFps:   parseInt(targetFps) || 15,
-        ...cameraSourceParams(source, network),
+        ...cameraSourceParams(source, network, sofia),
       });
       await robotClient.getCameras().catch(() => {});
 
@@ -487,7 +504,10 @@ function NewCameraPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <PageHeader title="New Camera" subtitle={source === "network" ? "Network camera" : "USB camera"} />
+      <PageHeader
+        title="New Camera"
+        subtitle={source === "network" ? "Network camera" : source === "sofia" ? "Sofia / XMeye camera" : "USB camera"}
+      />
       <Screen>
         <CameraConfigFields
           name={name}               setName={setName}
@@ -498,12 +518,13 @@ function NewCameraPage() {
           savedResolutions={[]}
           source={source}           setSource={setSource}
           network={network}         setNetwork={setNetwork}
+          sofia={sofia}             setSofia={setSofia}
         />
 
         <Button
           label={saving ? "Adding…" : "Add Camera"}
           loading={saving}
-          disabled={!!urlProblem}
+          disabled={!!sourceProblem}
           onPress={add}
         />
       </Screen>

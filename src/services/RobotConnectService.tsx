@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraSourceTestResult, CameraSourceType, CameraState, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -1446,37 +1446,73 @@ export class RobotConnectService {
     height: number;
     targetFps: number;
   } & CameraSourceParams) {
-    const { sourceType, url, username, password, transport, ...rest } = params;
-    return this.sendCommand("SetCameraConfig", { ...rest, ...cameraSourceParams({ sourceType, url, username, password, transport }) });
+    const {
+      sourceType, url, username, password, transport,
+      host, port, stream, codec, decoder, ffmpegPath, hwaccel,
+      ...rest
+    } = params;
+    return this.sendCommand("SetCameraConfig", {
+      ...rest,
+      ...cameraSourceParams({ sourceType, url, username, password, transport, host, port, stream, codec, decoder, ffmpegPath, hwaccel }),
+    });
   }
 
   /**
-   * Open a stream URL once on the controller and grab one frame
-   * (docs/network-cameras.md). A failed test (`ok: false`, error code) is a
-   * result, not an exception; an older controller throws UnsupportedCommandError.
+   * Open a stream URL, or log into a Sofia (DVRIP/XMeye) camera, once on the
+   * controller and grab one frame (docs/network-cameras.md). A failed test
+   * (`ok: false`, error code) is a result, not an exception; an older
+   * controller throws UnsupportedCommandError.
    */
   public async testCameraSource(params: {
+    sourceType?: "network";
     url: string;
     username?: string;
     password?: string;
     transport?: CameraTransport;
     timeoutMs?: number;
+  } | {
+    sourceType: "sofia";
+    host: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    stream?: CameraStream;
+    codec?: CameraCodec;
+    decoder?: CameraDecoder;
+    ffmpegPath?: string;
+    timeoutMs?: number;
   }): Promise<CameraSourceTestResult> {
     const timeoutMs = params.timeoutMs ?? 8000;
-    const wire: Record<string, unknown> = { url: params.url, timeoutMs };
-    if (params.username)  wire.username  = params.username;
-    if (params.password)  wire.password  = params.password;
-    if (params.transport) wire.transport = params.transport;
+    const wire: Record<string, unknown> = { timeoutMs };
+    if (params.sourceType === "sofia") {
+      wire.sourceType = "sofia";
+      wire.host       = params.host;
+      if (params.port != null) wire.port = params.port;
+      if (params.username)     wire.username   = params.username;
+      if (params.password)     wire.password   = params.password;
+      if (params.stream)       wire.stream     = params.stream;
+      if (params.codec)        wire.codec      = params.codec;
+      if (params.decoder)      wire.decoder    = params.decoder;
+      if (params.ffmpegPath)   wire.ffmpegPath = params.ffmpegPath;
+    } else {
+      wire.url = params.url;
+      if (params.username)  wire.username  = params.username;
+      if (params.password)  wire.password  = params.password;
+      if (params.transport) wire.transport = params.transport;
+    }
     const failed = (error: string): CameraSourceTestResult => ({ ok: false, width: 0, height: 0, openMs: 0, firstFrameMs: 0, error });
     try {
       // Give the controller its own open timeout plus headroom before the socket gives up.
       const ack = await this.request("TestCameraSource", wire, timeoutMs + 5000);
       return {
-        ok:           true,
-        width:        num(ack.width),
-        height:       num(ack.height),
-        openMs:       num(ack.openMs),
-        firstFrameMs: num(ack.firstFrameMs),
+        ok:              true,
+        width:           num(ack.width),
+        height:          num(ack.height),
+        openMs:          num(ack.openMs),
+        firstFrameMs:    num(ack.firstFrameMs),
+        loginMs:         ack.loginMs         !== undefined ? num(ack.loginMs) : undefined,
+        detectedCodec:   ack.detectedCodec   !== undefined ? (ack.detectedCodec as "h264" | "hevc" | "unknown") : undefined,
+        firstFrameBytes: ack.firstFrameBytes !== undefined ? num(ack.firstFrameBytes) : undefined,
       };
     } catch (e) {
       if (e instanceof CommandFailedError) return failed(e.message || "openFailed");
@@ -1847,15 +1883,30 @@ type CameraSourceParams = {
   username?: string;
   password?: string;
   transport?: CameraTransport;
+  // ── Sofia / DVRIP (XMeye) cameras ──
+  host?: string;
+  port?: number;
+  stream?: CameraStream;
+  codec?: CameraCodec;
+  decoder?: CameraDecoder;
+  ffmpegPath?: string;
+  hwaccel?: string;
 };
 
 /** Only the fields that were given, so a plain USB add/save stays exactly as before. */
 function cameraSourceParams(p: CameraSourceParams): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (p.sourceType !== undefined) out.sourceType = p.sourceType;
-  if (p.url        !== undefined) out.url        = p.url;
-  if (p.username   !== undefined) out.username   = p.username;
-  if (p.password   !== undefined) out.password   = p.password;
-  if (p.transport  !== undefined) out.transport  = p.transport;
+  if (p.sourceType  !== undefined) out.sourceType  = p.sourceType;
+  if (p.url         !== undefined) out.url         = p.url;
+  if (p.username    !== undefined) out.username    = p.username;
+  if (p.password    !== undefined) out.password    = p.password;
+  if (p.transport   !== undefined) out.transport   = p.transport;
+  if (p.host        !== undefined) out.host        = p.host;
+  if (p.port        !== undefined) out.port        = p.port;
+  if (p.stream      !== undefined) out.stream      = p.stream;
+  if (p.codec       !== undefined) out.codec       = p.codec;
+  if (p.decoder     !== undefined) out.decoder     = p.decoder;
+  if (p.ffmpegPath  !== undefined) out.ffmpegPath  = p.ffmpegPath;
+  if (p.hwaccel     !== undefined) out.hwaccel     = p.hwaccel;
   return out;
 }
