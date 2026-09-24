@@ -1,6 +1,11 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { CameraState } from "@/src/models/robotModels";
+import { CameraSourceType, CameraState } from "@/src/models/robotModels";
+import { NetworkSourceFields } from "@/src/components/ui/camera/NetworkSourceFields";
+import {
+  cameraSourceParams, cameraSourceSummary, cameraSourceTag, cameraUrlProblem,
+  EMPTY_NETWORK_SOURCE, isNetworkCamera, NetworkSource, networkSourceOf, SOURCE_OPTIONS,
+} from "@/src/components/ui/camera/cameraSource";
 import { router, useLocalSearchParams } from "expo-router";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import { CameraLiveFeed, makeCameraHtml } from "@/src/components/vision/CameraLiveFeed";
@@ -33,6 +38,7 @@ import {
   Input,
   PageHeader,
   radii,
+  SegmentedControl,
   Screen,
   SectionHeader,
   spacing,
@@ -146,6 +152,8 @@ function CameraConfigFields({
   height, setHeight,
   targetFps, setTargetFps,
   savedResolutions,
+  source, setSource,
+  network, setNetwork,
 }: {
   name: string;        setName: (v: string) => void;
   deviceIndex: string; setDeviceIndex: (v: string) => void;
@@ -153,6 +161,8 @@ function CameraConfigFields({
   height: string;      setHeight: (v: string) => void;
   targetFps: string;   setTargetFps: (v: string) => void;
   savedResolutions:    Resolution[];
+  source:  CameraSourceType; setSource:  (v: CameraSourceType) => void;
+  network: NetworkSource;    setNetwork: (v: NetworkSource) => void;
 }) {
   const [sheetOpen,      setSheetOpen]      = useState(false);
   const [customSelected, setCustomSelected] = useState(false);
@@ -169,7 +179,7 @@ function CameraConfigFields({
       <SectionHeader
         title="Configuration"
         right={
-          <InfoTip text="Device Index selects which USB camera the controller opens, in the same order the OS enumerates them (0, 1, 2…). Resolution and Target FPS should match a mode the camera actually supports — an unsupported combination can leave the feed blank." />
+          <InfoTip text="A USB camera is opened by Device Index; a network camera by its RTSP or HTTP stream URL. Device Index selects which USB camera the controller opens, in the same order the OS enumerates them (0, 1, 2…). Resolution and Target FPS should match a mode the camera actually supports — an unsupported combination can leave the feed blank." />
         }
       />
       <Card>
@@ -182,79 +192,89 @@ function CameraConfigFields({
           />
         </FormRow>
 
-        <FormRow label="Device Index" style={styles.fieldGap}>
-          <Input
-            value={deviceIndex}
-            onChangeText={setDeviceIndex}
-            placeholder="0"
-            keyboardType="numeric"
-            returnKeyType="done"
-          />
+        <FormRow label="Source" style={styles.fieldGap}>
+          <SegmentedControl options={SOURCE_OPTIONS} value={source} onChange={setSource} />
         </FormRow>
 
-        {/* Resolution row — tappable when options exist */}
-        <FormRow label="Resolution" style={styles.fieldGap}>
-          {hasOptions ? (
-            <TouchableOpacity
-              style={styles.dropdownRow}
-              onPress={() => setSheetOpen(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.dropdownValue}>
-                {isCustom ? "Custom" : `${matchedOption!.width} × ${matchedOption!.height}`}
-              </Text>
-              <ChevronDown size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.resolutionRow}>
+        {source === "network" ? (
+          <NetworkSourceFields value={network} onChange={setNetwork} rowStyle={styles.fieldGap} />
+        ) : (
+          <>
+            <FormRow label="Device Index" style={styles.fieldGap}>
               <Input
-                style={styles.resolutionInput}
-                value={width}
-                onChangeText={setWidth}
-                placeholder="640"
+                value={deviceIndex}
+                onChangeText={setDeviceIndex}
+                placeholder="0"
                 keyboardType="numeric"
                 returnKeyType="done"
-                textAlign="center"
               />
-              <Text style={styles.resolutionSep}>×</Text>
-              <Input
-                style={styles.resolutionInput}
-                value={height}
-                onChangeText={setHeight}
-                placeholder="480"
-                keyboardType="numeric"
-                returnKeyType="done"
-                textAlign="center"
-              />
-            </View>
-          )}
-        </FormRow>
+            </FormRow>
 
-        {/* Custom W×H inputs — sub-row visually attached to Resolution row above */}
-        {hasOptions && isCustom && (
-          <FormRow label="W × H" style={styles.fieldGap}>
-            <View style={styles.resolutionRow}>
-              <Input
-                style={styles.resolutionInput}
-                value={width}
-                onChangeText={setWidth}
-                placeholder="640"
-                keyboardType="numeric"
-                returnKeyType="done"
-                textAlign="center"
-              />
-              <Text style={styles.resolutionSep}>×</Text>
-              <Input
-                style={styles.resolutionInput}
-                value={height}
-                onChangeText={setHeight}
-                placeholder="480"
-                keyboardType="numeric"
-                returnKeyType="done"
-                textAlign="center"
-              />
-            </View>
-          </FormRow>
+            {/* Resolution row — tappable when options exist */}
+            <FormRow label="Resolution" style={styles.fieldGap}>
+              {hasOptions ? (
+                <TouchableOpacity
+                  style={styles.dropdownRow}
+                  onPress={() => setSheetOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.dropdownValue}>
+                    {isCustom ? "Custom" : `${matchedOption!.width} × ${matchedOption!.height}`}
+                  </Text>
+                  <ChevronDown size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.resolutionRow}>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={width}
+                    onChangeText={setWidth}
+                    placeholder="640"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                  <Text style={styles.resolutionSep}>×</Text>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={height}
+                    onChangeText={setHeight}
+                    placeholder="480"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                </View>
+              )}
+            </FormRow>
+
+            {/* Custom W×H inputs — sub-row visually attached to Resolution row above */}
+            {hasOptions && isCustom && (
+              <FormRow label="W × H" style={styles.fieldGap}>
+                <View style={styles.resolutionRow}>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={width}
+                    onChangeText={setWidth}
+                    placeholder="640"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                  <Text style={styles.resolutionSep}>×</Text>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={height}
+                    onChangeText={setHeight}
+                    placeholder="480"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                </View>
+              </FormRow>
+            )}
+          </>
         )}
 
         <FormRow label="Target FPS" style={styles.fieldGap}>
@@ -296,7 +316,11 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
   const [width,       setWidth]       = useState(String(camera.width));
   const [height,      setHeight]      = useState(String(camera.height));
   const [targetFps,   setTargetFps]   = useState(String(camera.targetFps));
+  const [source,      setSource]      = useState<CameraSourceType>(isNetworkCamera(camera) ? "network" : "usb");
+  const [network,     setNetwork]     = useState(() => networkSourceOf(camera));
   const [saving,      setSaving]      = useState(false);
+  const urlProblem = source === "network" ? cameraUrlProblem(network.url) : null;
+  const tag = cameraSourceTag(camera);
 
   const save = async () => {
     setSaving(true);
@@ -308,6 +332,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       width:       parseInt(width)     || 640,
       height:      parseInt(height)    || 480,
       targetFps:   parseInt(targetFps) || 15,
+      ...cameraSourceParams(source, network),
     });
     await robotClient.getCameras().catch(() => {});
     setSaving(false);
@@ -320,9 +345,10 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       )}
       <PageHeader
         title={camera.name}
-        subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height}`}
+        subtitle={cameraSourceSummary(camera)}
         right={
           <View style={styles.headerRight}>
+            {tag && <StatusPill label={tag} tone="accent" />}
             <CameraCalibrationControls camera={camera} layout="inline" />
             <StatusPill
               label={camera.connected ? "Connected" : "Offline"}
@@ -355,10 +381,13 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
               height={height}           setHeight={setHeight}
               targetFps={targetFps}     setTargetFps={setTargetFps}
               savedResolutions={camera.supportedResolutions ?? []}
+              source={source}           setSource={setSource}
+              network={network}         setNetwork={setNetwork}
             />
             <Button
               label={saving ? "Saving…" : "Save"}
               loading={saving}
+              disabled={!!urlProblem}
               onPress={save}
             />
           </>
@@ -403,7 +432,10 @@ function NewCameraPage() {
   const [width,       setWidth]       = useState("640");
   const [height,      setHeight]      = useState("480");
   const [targetFps,   setTargetFps]   = useState("15");
+  const [source,      setSource]      = useState<CameraSourceType>("usb");
+  const [network,     setNetwork]     = useState<NetworkSource>(EMPTY_NETWORK_SOURCE);
   const [saving,      setSaving]      = useState(false);
+  const urlProblem = source === "network" ? cameraUrlProblem(network.url) : null;
 
   const add = async () => {
     setSaving(true);
@@ -425,6 +457,7 @@ function NewCameraPage() {
         width:       parseInt(width)     || 640,
         height:      parseInt(height)    || 480,
         targetFps:   parseInt(targetFps) || 15,
+        ...cameraSourceParams(source, network),
       });
       await robotClient.getCameras().catch(() => {});
 
@@ -454,7 +487,7 @@ function NewCameraPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <PageHeader title="New Camera" subtitle="USB Camera" />
+      <PageHeader title="New Camera" subtitle={source === "network" ? "Network camera" : "USB camera"} />
       <Screen>
         <CameraConfigFields
           name={name}               setName={setName}
@@ -463,11 +496,14 @@ function NewCameraPage() {
           height={height}           setHeight={setHeight}
           targetFps={targetFps}     setTargetFps={setTargetFps}
           savedResolutions={[]}
+          source={source}           setSource={setSource}
+          network={network}         setNetwork={setNetwork}
         />
 
         <Button
           label={saving ? "Adding…" : "Add Camera"}
           loading={saving}
+          disabled={!!urlProblem}
           onPress={add}
         />
       </Screen>

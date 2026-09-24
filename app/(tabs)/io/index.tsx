@@ -35,6 +35,7 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
+import { cameraSourceSummary, cameraSourceTag } from "@/src/components/ui/camera/cameraSource";
 
 import {
   Button,
@@ -75,6 +76,7 @@ function DeviceNavCard({
   onPress,
   onDelete,
   footer,
+  tag,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -85,6 +87,8 @@ function DeviceNavCard({
   onDelete?: () => void;
   /** Extra strip under the row (camera calibration); turns the card into Card + flat row. */
   footer?: React.ReactNode;
+  /** Small source tag before the status pill ("RTSP" / "HTTP" network cameras). */
+  tag?: string | null;
 }) {
   const row = (
     <ListRow
@@ -98,6 +102,7 @@ function DeviceNavCard({
       chevron
       right={
         <View style={styles.rowAccessories}>
+          {!!tag && <StatusPill label={tag} tone="accent" />}
           <StatusPill
             label={connected ? "Connected" : "Offline"}
             tone={connected ? "success" : "danger"}
@@ -248,8 +253,8 @@ export default function IoPage() {
       field: "enableCameras",
       icon: <Camera size={20} color={colors.accent} />,
       iconBg: colors.accentSoft,
-      name: "USB Camera",
-      subtitle: "USB camera device",
+      name: "Camera",
+      subtitle: "USB or network (RTSP / HTTP) camera",
       onAdd: () => {
         setAddModal(false);
         if (!ioConfig?.enableCameras) {
@@ -358,7 +363,8 @@ export default function IoPage() {
             icon={<Camera size={20} color={colors.accent} />}
             iconBg={colors.accentSoft}
             name={cam.name}
-            subtitle={`Device ${cam.deviceIndex} · ${cam.width}×${cam.height} · ${cam.targetFps}fps`}
+            subtitle={`${cameraSourceSummary(cam)} · ${cam.targetFps}fps`}
+            tag={cameraSourceTag(cam)}
             connected={cam.connected}
             onPress={() => router.push({ pathname: "/(tabs)/io/cameras", params: { cameraId: cam.id } })}
             onDelete={() => confirmRemove(cam.name, () => robotClient.removeCamera(cam.id).catch(() => {}))}

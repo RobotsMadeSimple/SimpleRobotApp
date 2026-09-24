@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraState, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraSourceTestResult, CameraSourceType, CameraState, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -1421,7 +1421,7 @@ export class RobotConnectService {
     width?: number;
     height?: number;
     targetFps?: number;
-  }) {
+  } & CameraSourceParams) {
     return this.sendCommand("AddCamera", {
       name:        params.name,
       deviceIndex: params.deviceIndex,
@@ -1429,6 +1429,7 @@ export class RobotConnectService {
       width:       params.width       ?? 640,
       height:      params.height      ?? 480,
       targetFps:   params.targetFps   ?? 15,
+      ...cameraSourceParams(params),
     });
   }
 
@@ -1444,8 +1445,43 @@ export class RobotConnectService {
     width: number;
     height: number;
     targetFps: number;
-  }) {
-    return this.sendCommand("SetCameraConfig", params);
+  } & CameraSourceParams) {
+    const { sourceType, url, username, password, transport, ...rest } = params;
+    return this.sendCommand("SetCameraConfig", { ...rest, ...cameraSourceParams({ sourceType, url, username, password, transport }) });
+  }
+
+  /**
+   * Open a stream URL once on the controller and grab one frame
+   * (docs/network-cameras.md). A failed test (`ok: false`, error code) is a
+   * result, not an exception; an older controller throws UnsupportedCommandError.
+   */
+  public async testCameraSource(params: {
+    url: string;
+    username?: string;
+    password?: string;
+    transport?: CameraTransport;
+    timeoutMs?: number;
+  }): Promise<CameraSourceTestResult> {
+    const timeoutMs = params.timeoutMs ?? 8000;
+    const wire: Record<string, unknown> = { url: params.url, timeoutMs };
+    if (params.username)  wire.username  = params.username;
+    if (params.password)  wire.password  = params.password;
+    if (params.transport) wire.transport = params.transport;
+    const failed = (error: string): CameraSourceTestResult => ({ ok: false, width: 0, height: 0, openMs: 0, firstFrameMs: 0, error });
+    try {
+      // Give the controller its own open timeout plus headroom before the socket gives up.
+      const ack = await this.request("TestCameraSource", wire, timeoutMs + 5000);
+      return {
+        ok:           true,
+        width:        num(ack.width),
+        height:       num(ack.height),
+        openMs:       num(ack.openMs),
+        firstFrameMs: num(ack.firstFrameMs),
+      };
+    } catch (e) {
+      if (e instanceof CommandFailedError) return failed(e.message || "openFailed");
+      throw e;
+    }
   }
 
   public async getCameraResolutions(deviceIndex: number): Promise<{ width: number; height: number }[]> {
@@ -1803,3 +1839,23 @@ function wireCalibration(v: unknown): CameraCalibration | null {
 
 
 export const robotClient = new RobotConnectService()
+// ── Network camera source params (docs/network-cameras.md) ──────────────────
+
+type CameraSourceParams = {
+  sourceType?: CameraSourceType;
+  url?: string;
+  username?: string;
+  password?: string;
+  transport?: CameraTransport;
+};
+
+/** Only the fields that were given, so a plain USB add/save stays exactly as before. */
+function cameraSourceParams(p: CameraSourceParams): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (p.sourceType !== undefined) out.sourceType = p.sourceType;
+  if (p.url        !== undefined) out.url        = p.url;
+  if (p.username   !== undefined) out.username   = p.username;
+  if (p.password   !== undefined) out.password   = p.password;
+  if (p.transport  !== undefined) out.transport  = p.transport;
+  return out;
+}

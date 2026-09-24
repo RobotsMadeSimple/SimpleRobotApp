@@ -7,6 +7,7 @@ import { CameraCalibration, CameraState, Tool } from "@/src/models/robotModels";
 import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { cs } from "./calibrationStyles";
 import { Notice } from "./Notice";
+import { cameraSourceSummary } from "@/src/components/ui/camera/cameraSource";
 import { Attention, Requirement, StepFooter } from "./StepRequirements";
 
 export type DotPolarity = "dark" | "light";
@@ -57,7 +58,7 @@ export function SetupStep({
           <View style={cs.grow}>
             <Text style={cs.strong}>{camera?.name ?? "Camera"}</Text>
             <Text style={cs.caption}>
-              {camera ? `Device ${camera.deviceIndex} · ${camera.width}×${camera.height}` : "Loading…"}
+              {camera ? cameraSourceSummary(camera) : "Loading…"}
             </Text>
           </View>
           <StatusPill

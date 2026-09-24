@@ -72,6 +72,37 @@ export type CameraState = {
   supportedResolutions: { width: number; height: number }[];
   /** Has a saved camera-to-robot calibration (docs/camera-calibration.md). Absent on older controllers. */
   calibrated?: boolean;
+  // ── Network cameras (docs/network-cameras.md). All absent on older controllers. ──
+  /** Absent = "usb". */
+  sourceType?: CameraSourceType;
+  /** Stream URL without credentials (network cameras). */
+  url?: string;
+  username?: string;
+  /** Returned so the app can edit it; never render it. */
+  password?: string;
+  /** RTSP only. Default "tcp". */
+  transport?: CameraTransport;
+  /** Size the stream actually delivers (0 until connected). */
+  streamWidth?: number;
+  streamHeight?: number;
+  /** Best-effort decode latency estimate, 0 when unknown. */
+  latencyMs?: number;
+};
+
+export type CameraSourceType = "usb" | "network";
+export type CameraTransport = "tcp" | "udp";
+
+/** Error codes from TestCameraSource (docs/network-cameras.md). */
+export type CameraSourceTestError = "invalidUrl" | "openFailed" | "noFrame" | "timeout";
+
+export type CameraSourceTestResult = {
+  ok: boolean;
+  width: number;
+  height: number;
+  openMs: number;
+  firstFrameMs: number;
+  /** A CameraSourceTestError code, or another controller message. */
+  error?: string;
 };
 
 // ── Camera-to-robot calibration (docs/camera-calibration.md) ─────────────────
