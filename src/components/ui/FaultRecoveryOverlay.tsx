@@ -1,5 +1,6 @@
 import { colors } from "@/src/components/ui/kit";
 import { JogButton } from "@/src/components/ui/JogButton";
+import { JOG_HEARTBEAT_MS } from "@/src/components/ui/JogPad";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react-native";
@@ -69,11 +70,11 @@ export function FaultRecoveryOverlay() {
   const startJog = useCallback((index: number, dir: 1 | -1) => {
     if (intervalRef.current) return;
     const vec = jogVec(index, dir);
-    // Fire immediately, then repeat while held.
+    // Fire immediately, then heartbeat while held (see JOG_HEARTBEAT_MS).
     robotClient.jogJ({ ...vec, speed: 20, accel: 200, decel: 1000 });
     intervalRef.current = setInterval(() => {
       robotClient.jogJ({ ...vec, speed: 20, accel: 200, decel: 1000 });
-    }, 20);
+    }, JOG_HEARTBEAT_MS);
   }, []);
 
   function toneFor(index: number, dir: 1 | -1): Tone {

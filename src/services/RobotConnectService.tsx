@@ -673,6 +673,19 @@ export class RobotConnectService {
     });
   }
 
+  /**
+   * Fire-and-forget command: sends immediately without registering an ack, a
+   * promise, or a timeout. For the high-rate jog heartbeat (and StopJog), where a
+   * tracked reply per tick is pure overhead — omitting the id means the ack the
+   * controller still sends comes back id-less and is ignored by onmessage. No-op
+   * when the socket isn't open, so a dropped connection never throws mid-jog.
+   */
+  private sendCommandNoAck(command: string, params: Record<string, any> = {}) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "Command", command, params }));
+  }
+
   onMessage<T = any>(handler: MessageHandler<T>) {
     this.messageHandlers.push(handler);
     return () => {
@@ -717,8 +730,12 @@ export class RobotConnectService {
     return this.sendCommand("GetPoints");
   }
 
+  // StopJog and the jog heartbeat go out fire-and-forget: no caller awaits them,
+  // and skipping the ack/promise/timeout churn keeps release snappy and the
+  // socket clear (the controller's velocity profiler runs continuously with a
+  // ~1s watchdog, so these are keep-alives, not per-tick moves).
   public stopJog() {
-    return this.sendCommand("StopJog");
+    this.sendCommandNoAck("StopJog");
   }
 
   public hardStop() {
@@ -726,15 +743,15 @@ export class RobotConnectService {
   }
 
   public jogL({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
-    return this.sendCommand("JogL", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+    this.sendCommandNoAck("JogL", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public jogJ({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
-    return this.sendCommand("JogJ", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+    this.sendCommandNoAck("JogJ", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public jogTool({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
-    return this.sendCommand("JogTool", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+    this.sendCommandNoAck("JogTool", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public offsetL({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
