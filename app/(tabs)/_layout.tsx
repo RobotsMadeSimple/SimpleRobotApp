@@ -74,11 +74,15 @@ export function TabLayout() {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarPosition: isWide ? "left" : "bottom",
-        tabBarVariant: isWide ? "material" : "uikit",
-        tabBarStyle: isWide
-          ? { paddingTop: insets.top }
-          : { height: 60 + insets.bottom, paddingBottom: insets.bottom },
-        tabBarLabelStyle: { fontSize: 12 },
+        // Wide renders the custom NavRail as the tab bar (above): it styles itself and
+        // owns its own safe-area insets, so the built-in-bar options below don't apply.
+        // Setting tabBarVariant:"material" here routed Android through the Material bar's
+        // layout path and rendered the rail unstyled — so these stay narrow-only.
+        ...(isWide ? {} : {
+          tabBarVariant: "uikit" as const,
+          tabBarStyle: { height: 60 + insets.bottom, paddingBottom: insets.bottom },
+          tabBarLabelStyle: { fontSize: 12 },
+        }),
         tabBarIcon: ({ color, size }) => {
           const icons: Record<string, any> = {
             robot: Router,
