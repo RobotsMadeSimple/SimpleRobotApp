@@ -1,4 +1,4 @@
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors, radii, spacing } from "@/src/components/ui/kit";
@@ -68,12 +68,17 @@ export function NavRail({ state, descriptors, navigation }: TabBarProps) {
             <Pressable
               key={route.key}
               onPress={onPress}
-              // Plain array style (not a function): matches the brand/status Views that
-              // style correctly on Android — the function form's returned styles weren't
-              // landing on Android, leaving the item buttons unstyled. Web hover is handled
-              // by web-only styles below; press feedback uses the native ripple.
+              // Native uses a plain array style (matches the brand/status Views that
+              // render correctly on Android — the Pressable style *function* form's
+              // returned styles weren't landing there, leaving the buttons unstyled).
+              // Web keeps the function form so it can add a hover highlight; press
+              // feedback on Android uses the native ripple.
               android_ripple={{ color: colors.surfaceHover, borderless: false }}
-              style={[styles.item, focused && styles.itemActive]}
+              style={
+                Platform.OS === "web"
+                  ? ({ hovered }: any) => [styles.item, focused && styles.itemActive, !focused && hovered && styles.itemHover]
+                  : [styles.item, focused && styles.itemActive]
+              }
             >
               {options.tabBarIcon?.({ focused, color: tint, size: 20 })}
               <Text style={[styles.itemLabel, { color: focused ? colors.accent : colors.textSecondary }, focused && styles.itemLabelActive]}>
