@@ -1,5 +1,7 @@
 
-import { colors } from "@/src/components/ui/kit";
+// Import the token directly (not via the kit barrel): PageHeader — re-exported by
+// the barrel — imports this file, so going through the barrel forms a require cycle.
+import { colors } from "@/src/components/ui/kit/theme";
 import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { Text, View } from "react-native";
 

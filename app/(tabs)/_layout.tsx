@@ -1,3 +1,6 @@
+// First import: registers a LogBox filter for nativewind's SafeAreaView deprecation
+// before nativewind/global.css loads and fires it. See the file for details.
+import "@/src/setup/silenceDeprecations";
 import { Tabs, router } from "expo-router";
 import {
   ArrowLeftRight,
