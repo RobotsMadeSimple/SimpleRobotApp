@@ -1,6 +1,7 @@
 import {
   accents,
   Button,
+  buttonTextColor,
   Card,
   Chip,
   ChipGroup,
@@ -19,6 +20,7 @@ import {
   type,
 } from "@/src/components/ui/kit";
 import { useIsWide } from "@/src/components/ui/responsive";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Gauge,
@@ -59,6 +61,19 @@ type RobotConfig = {
   jogSlowSpeed:   number;
   jogNormalSpeed: number;
   jogFastSpeed:   number;
+  // ASTRO motor config (steps/rev + gear ratio per motor)
+  astroStepsPerRevM1: number;
+  astroStepsPerRevM2: number;
+  astroStepsPerRevM3: number;
+  astroStepsPerRevM4: number;
+  astroGearRatioM1: number;
+  astroGearRatioM2: number;
+  astroGearRatioM3: number;
+  astroGearRatioM4: number;
+  // ASTRO joint gearing (drivetrain reduction used by the kinematics)
+  astroJoint1GearRatio: number;
+  astroJoint4GearRatio: number;
+  astroCoreXyPulleyPcdMm: number;
   // CNC4Axis motor config
   cncStepsPerRevX:  number;
   cncStepsPerRevY:  number;
@@ -90,11 +105,13 @@ type RobotConfig = {
 
 type EditingField = {
   label: string;
-  type: "number" | "direction" | "homing" | "cncAxis" | "jointLimit";
+  type: "number" | "direction" | "homing" | "cncAxis" | "astroMotor" | "jointLimit";
   numKey?: keyof RobotConfig;
   numText: string;
   unit?: string;
   placeholder?: string;
+  /** Overrides the default "OFFSET (unit)/VALUE" caption in the number editor. */
+  editLabel?: string;
   dirKey?: keyof RobotConfig;
   dirValue: number;
   // cncAxis only
@@ -103,6 +120,13 @@ type EditingField = {
   cncMeasureKey?: keyof RobotConfig;
   cncMeasureText?: string;
   cncIsRotary?: boolean;
+  // astroMotor only (steps/rev + gear ratio)
+  astroStepsKey?: keyof RobotConfig;
+  astroStepsText?: string;
+  astroGearKey?: keyof RobotConfig;
+  astroGearText?: string;
+  defaultSteps?: number;
+  defaultGear?: number;
   // jointLimit only
   minKey?: keyof RobotConfig;
   minText?: string;
@@ -173,10 +197,29 @@ export default function ConfigureRobot() {
   const [config, setConfig] = useState<RobotConfig | null>(null);
   const [editing, setEditing] = useState<EditingField | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmReset, setConfirmReset] = useState<null | "motorSetup" | "all">(null);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
   }, []);
+
+  // Reset to defaults on the controller, then re-pull the resulting config so the
+  // page reflects exactly what was applied. "all" is refused while moving/homing.
+  async function resetConfig(section: "motorSetup" | "all") {
+    setResetting(true);
+    try {
+      await robotClient.resetRobotConfig(section);
+      const fresh = await robotClient.getRobotConfig();
+      setConfig(fresh);
+      setConfirmReset(null);
+    } catch (e) {
+      setConfirmReset(null);
+      appAlert("Couldn't reset", String(e ?? "Reset failed"), [{ text: "OK" }]);
+    } finally {
+      setResetting(false);
+    }
+  }
 
   const isCNC = config?.robotType === "CNC4Axis";
 
@@ -199,6 +242,11 @@ export default function ConfigureRobot() {
       if (editing.type === "cncAxis") {
         if (editing.cncStepsKey)   patch[editing.cncStepsKey]   = parseInt(editing.cncStepsText  ?? "1600") || 1600;
         if (editing.cncMeasureKey) patch[editing.cncMeasureKey] = parseFloat(editing.cncMeasureText ?? "5") || 5;
+      }
+      if (editing.type === "astroMotor") {
+        if (editing.astroStepsKey) patch[editing.astroStepsKey] = parseInt(editing.astroStepsText ?? "") || (editing.defaultSteps ?? 1600);
+        // Gear ratio must be > 0 (0/blank falls back to the default; the controller also guards this).
+        if (editing.astroGearKey)  patch[editing.astroGearKey]  = parseFloat(editing.astroGearText ?? "") || (editing.defaultGear ?? 1);
       }
       if (editing.type === "jointLimit") {
         // Blank (or unparseable) clears the bound — send null so it becomes unset.
@@ -236,6 +284,15 @@ export default function ConfigureRobot() {
         { key: "m3Direction", label: "M3 — CoreXY B" },
         { key: "m4Direction", label: "M4 — J4 Rotation" },
       ];
+
+  // ASTRO per-motor step resolution + gear ratio. Defaults mirror the controller
+  // (M1–M3 = 1600 spr, M4 = 400 spr, all gear 1:1).
+  const astroMotorRows: { label: string; stepsKey: keyof RobotConfig; gearKey: keyof RobotConfig; defSteps: number; defGear: number }[] = [
+    { label: "M1 — J1 Rotation", stepsKey: "astroStepsPerRevM1", gearKey: "astroGearRatioM1", defSteps: 1600, defGear: 1 },
+    { label: "M2 — CoreXY A",    stepsKey: "astroStepsPerRevM2", gearKey: "astroGearRatioM2", defSteps: 1600, defGear: 1 },
+    { label: "M3 — CoreXY B",    stepsKey: "astroStepsPerRevM3", gearKey: "astroGearRatioM3", defSteps: 1600, defGear: 1 },
+    { label: "M4 — J4 Rotation", stepsKey: "astroStepsPerRevM4", gearKey: "astroGearRatioM4", defSteps: 400,  defGear: 1 },
+  ];
 
   const isWide = useIsWide();
 
@@ -336,6 +393,81 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
             </Card>
+
+            {/* ── Motor Setup (ASTRO) ── */}
+            <SectionHeader
+              title="Motor Setup"
+              icon={Gauge}
+              right={<InfoTip text="Microstep resolution (steps per motor revolution) and gear ratio (motor turns per output turn) for each motor — used to convert motion into step pulses. Match them to your driver's microstepping and any joint gearing. Defaults: M1–M3 1600 spr, M4 400 spr, all 1:1." />}
+            />
+            <Card padded={false}>
+              {astroMotorRows.map(({ label, stepsKey, gearKey, defSteps, defGear }) => (
+                <ConfigRow
+                  key={stepsKey}
+                  icon={<Gauge size={16} color={accents.purple} />}
+                  tileBg={accents.purpleSoft}
+                  label={label}
+                  value={config ? `${config[stepsKey] ?? defSteps} spr · ${config[gearKey] ?? defGear}:1` : "—"}
+                  onPress={config ? () => setEditing({
+                    label, type: "astroMotor", numText: "", dirValue: 1,
+                    astroStepsKey: stepsKey, astroStepsText: String(config[stepsKey] ?? defSteps),
+                    astroGearKey: gearKey,   astroGearText:  String(config[gearKey] ?? defGear),
+                    defaultSteps: defSteps,  defaultGear:    defGear,
+                  }) : undefined}
+                />
+              ))}
+              <ConfigRow
+                icon={<RotateCcw size={16} color={colors.textMuted} />}
+                tileBg={colors.background}
+                label="Reset Motor Setup"
+                value="Defaults"
+                last
+                onPress={config && !resetting ? () => setConfirmReset("motorSetup") : undefined}
+              />
+            </Card>
+
+            {/* ── Joint Gearing (ASTRO) ── */}
+            <SectionHeader
+              title="Joint Gearing"
+              icon={RotateCcw}
+              right={<InfoTip text="Drivetrain reduction the kinematics uses to turn joint motion into motor motion — separate from the per-motor gear above. J1/J4 are gear ratios (motor turns per joint turn); CoreXY is the belt pulley pitch diameter (linear travel per motor rev = π · PCD). Defaults: J1 4:1, J4 10:1, CoreXY 19.099 mm." />}
+            />
+            <Card padded={false}>
+              <ConfigRow
+                icon={<RotateCcw size={16} color={accents.cyan} />}
+                tileBg={accents.cyanSoft}
+                label="J1 — Base Rotation"
+                value={config ? `${config.astroJoint1GearRatio}:1` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "J1 Gear Ratio", type: "number",
+                  numKey: "astroJoint1GearRatio", numText: String(config.astroJoint1GearRatio),
+                  editLabel: "GEAR RATIO (motor : joint)", placeholder: "4", dirValue: 1,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<RotateCcw size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
+                label="J4 — EOAT Rotation"
+                value={config ? `${config.astroJoint4GearRatio}:1` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "J4 Gear Ratio", type: "number",
+                  numKey: "astroJoint4GearRatio", numText: String(config.astroJoint4GearRatio),
+                  editLabel: "GEAR RATIO (motor : joint)", placeholder: "10", dirValue: 1,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<Ruler size={16} color={colors.success} />}
+                tileBg={colors.successSoft}
+                label="CoreXY Pulley PCD"
+                value={config ? `${config.astroCoreXyPulleyPcdMm} mm` : "—"}
+                last
+                onPress={config ? () => setEditing({
+                  label: "CoreXY Pulley PCD", type: "number",
+                  numKey: "astroCoreXyPulleyPcdMm", numText: String(config.astroCoreXyPulleyPcdMm),
+                  unit: "mm", editLabel: "PULLEY PITCH DIAMETER (mm)", placeholder: "19.099", dirValue: 1,
+                }) : undefined}
+              />
+            </Card>
           </>
         )}
 
@@ -428,7 +560,6 @@ export default function ConfigureRobot() {
                   tileBg={accents.purpleSoft}
                   label={label}
                   value={config ? `${config[stepsKey]} spr · ${config[measureKey]} ${isRotary ? "°/rev" : "mm/rev"}` : "—"}
-                  last={idx === arr.length - 1}
                   onPress={config ? () => setEditing({
                     label, type: "cncAxis",
                     numText: "", dirValue: 1,
@@ -440,6 +571,14 @@ export default function ConfigureRobot() {
                   }) : undefined}
                 />
               ))}
+              <ConfigRow
+                icon={<RotateCcw size={16} color={colors.textMuted} />}
+                tileBg={colors.background}
+                label="Reset Motor Setup"
+                value="Defaults"
+                last
+                onPress={config && !resetting ? () => setConfirmReset("motorSetup") : undefined}
+              />
             </Card>
           </>
         )}
@@ -550,6 +689,57 @@ export default function ConfigureRobot() {
           </>
         )}
 
+        {/* ── Reset all to defaults ── */}
+        <View style={styles.resetAllWrap}>
+          <Button
+            label={resetting ? "Resetting…" : "Reset All Settings to Defaults"}
+            variant="destructive"
+            icon={<RotateCcw size={16} color={buttonTextColor("destructive")} />}
+            onPress={() => setConfirmReset("all")}
+            disabled={!config || resetting}
+          />
+          <Text style={styles.resetAllHint}>
+            Restores homing, motor setup, jog speeds and joint limits to defaults. Robot type and device toggles are kept.
+          </Text>
+        </View>
+
+        {/* ── Reset confirmation ── */}
+        <Modal
+          visible={confirmReset !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setConfirmReset(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>
+                {confirmReset === "all" ? "Reset all settings?" : "Reset motor setup?"}
+              </Text>
+              <Text style={styles.confirmBody}>
+                {confirmReset === "all"
+                  ? "Homing offsets, motor setup, jog speeds and joint limits will be restored to defaults. Robot type and device toggles are kept. This can't be undone."
+                  : "Steps per revolution and gear ratios will be restored to their default values. This can't be undone."}
+              </Text>
+              <View style={styles.modalButtons}>
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={() => setConfirmReset(null)}
+                  disabled={resetting}
+                  style={styles.modalBtn}
+                />
+                <Button
+                  label={resetting ? "Resetting…" : "Reset"}
+                  variant="destructive"
+                  onPress={() => confirmReset && resetConfig(confirmReset)}
+                  disabled={resetting}
+                  style={styles.modalBtn}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* ── Edit modal ── */}
         <Modal
           visible={editing !== null}
@@ -564,7 +754,7 @@ export default function ConfigureRobot() {
               {(editing?.type === "number" || editing?.type === "homing") && (
                 <>
                   <Text style={styles.editLabel}>
-                    {editing.unit ? `OFFSET (${editing.unit})` : "VALUE"}
+                    {editing.editLabel ?? (editing.unit ? `OFFSET (${editing.unit})` : "VALUE")}
                   </Text>
                   <Input
                     style={styles.editInput}
@@ -650,6 +840,47 @@ export default function ConfigureRobot() {
                 </>
               )}
 
+              {editing?.type === "astroMotor" && (
+                <>
+                  <Text style={styles.editLabel}>STEPS PER REVOLUTION</Text>
+                  <ChipGroup style={styles.presetRow}>
+                    {([
+                      { label: "Full",  steps: 200  },
+                      { label: "1/2",   steps: 400  },
+                      { label: "1/4",   steps: 800  },
+                      { label: "1/8",   steps: 1600 },
+                      { label: "1/16",  steps: 3200 },
+                    ] as const).map(({ label, steps }) => (
+                      <Chip
+                        key={steps}
+                        label={`${label} · ${steps}`}
+                        selected={editing.astroStepsText === String(steps)}
+                        onPress={() => setEditing(e => e ? { ...e, astroStepsText: String(steps) } : e)}
+                        tint={[accents.purple, accents.purpleSoft]}
+                      />
+                    ))}
+                  </ChipGroup>
+                  <Input
+                    style={styles.editInput}
+                    value={editing.astroStepsText ?? ""}
+                    onChangeText={v => setEditing(e => e ? { ...e, astroStepsText: v } : e)}
+                    keyboardType="numeric"
+                    placeholder={String(editing.defaultSteps ?? 1600)}
+                  />
+                  <Text style={[styles.editLabel, { marginTop: spacing.sm }]}>GEAR RATIO (motor : output)</Text>
+                  <Input
+                    style={styles.editInput}
+                    value={editing.astroGearText ?? ""}
+                    onChangeText={v => setEditing(e => e ? { ...e, astroGearText: v } : e)}
+                    keyboardType="decimal-pad"
+                    placeholder={String(editing.defaultGear ?? 1)}
+                  />
+                  <Text style={styles.limitHint}>
+                    Default: {editing.defaultSteps} steps/rev · {editing.defaultGear}:1
+                  </Text>
+                </>
+              )}
+
               <View style={styles.modalButtons}>
                 <Button
                   label="Cancel"
@@ -693,7 +924,22 @@ const styles = StyleSheet.create({
   },
   wideCol: { flex: 1, gap: spacing.md },
 
+  // ── Reset-all footer ─────────────────────────────────────────────────────────
+  resetAllWrap: {
+    marginTop: spacing.lg,
+    gap: spacing.xs,
+  },
+  resetAllHint: {
+    ...type.caption,
+    textAlign: "center",
+  },
+
   // ── Modal ──────────────────────────────────────────────────────────────────
+  confirmBody: {
+    ...type.body,
+    color: colors.textMuted,
+    marginBottom: spacing.lg,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: colors.overlay,

@@ -1289,6 +1289,17 @@ export class RobotConnectService {
     jogSlowSpeed: number;
     jogNormalSpeed: number;
     jogFastSpeed: number;
+    astroStepsPerRevM1: number;
+    astroStepsPerRevM2: number;
+    astroStepsPerRevM3: number;
+    astroStepsPerRevM4: number;
+    astroGearRatioM1: number;
+    astroGearRatioM2: number;
+    astroGearRatioM3: number;
+    astroGearRatioM4: number;
+    astroJoint1GearRatio: number;
+    astroJoint4GearRatio: number;
+    astroCoreXyPulleyPcdMm: number;
     cncStepsPerRevX: number;
     cncStepsPerRevY: number;
     cncStepsPerRevZ: number;
@@ -1335,6 +1346,17 @@ export class RobotConnectService {
     jogSlowSpeed?: number;
     jogNormalSpeed?: number;
     jogFastSpeed?: number;
+    astroStepsPerRevM1?: number;
+    astroStepsPerRevM2?: number;
+    astroStepsPerRevM3?: number;
+    astroStepsPerRevM4?: number;
+    astroGearRatioM1?: number;
+    astroGearRatioM2?: number;
+    astroGearRatioM3?: number;
+    astroGearRatioM4?: number;
+    astroJoint1GearRatio?: number;
+    astroJoint4GearRatio?: number;
+    astroCoreXyPulleyPcdMm?: number;
     cncStepsPerRevX?: number;
     cncStepsPerRevY?: number;
     cncStepsPerRevZ?: number;
@@ -1361,6 +1383,15 @@ export class RobotConnectService {
     joint4Max?: number | null;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
+  }
+
+  /**
+   * Reset configuration to defaults. `"motorSetup"` resets only steps/rev + gear ratios;
+   * `"all"` resets every motion/tuning setting (robot type and device toggles are kept).
+   * Resolves the controller's resulting config so the caller can refresh without re-fetching.
+   */
+  public resetRobotConfig(section: "motorSetup" | "all" = "all") {
+    return this.sendCommand("ResetRobotConfig", { section });
   }
 
   // ── Joint-limit fault recovery ─────────────────────────────────────────────
