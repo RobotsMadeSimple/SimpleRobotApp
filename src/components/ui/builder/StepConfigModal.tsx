@@ -63,6 +63,7 @@ import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType, VariableEditModal } from "./VariableEditModal";
 import { StepMetaFields } from "./StepMetaFields";
+import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
 import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
@@ -2996,6 +2997,18 @@ export function StepConfigModal({
         );
       }
 
+      case "Plugin":
+        return (
+          <PluginStepFields
+            key={draft!.id}
+            draft={draft!}
+            set={set}
+            variables={variables}
+            contextVariables={contextVariables}
+            onSaveVariable={onSaveVariable}
+          />
+        );
+
       case "Unknown":
         return (
           <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: radii.sm, marginTop: 8 }}>
@@ -3101,6 +3114,9 @@ export function StepConfigModal({
                 renderSubPage()
               ) : (
                 <>
+                  {/* Plugin steps open with what they are: plugin · step and its description. */}
+                  {draft!.type === "Plugin" && <PluginStepHeader step={draft!} />}
+
                   {/* Step name — all step types except SetSpeed */}
                   {!isSetSpeed && (
                     <>
