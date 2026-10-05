@@ -34,6 +34,7 @@ import {
   Grid2X2,
   MapPin,
   MousePointerClick,
+  Move3d,
   Navigation,
   OctagonX,
   Pencil,
@@ -447,9 +448,9 @@ export default function JogScreen() {
   const speedOptions = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
 
   const jogModes = [
-    { label: "XYZ",   value: "XYZ" },
-    { label: "Tool",  value: "Tool" },
-    { label: "Joint", value: "Joint" },
+    { label: "XYZ",   value: "XYZ",   icon: (c: string, s: number) => <Move3d size={s} color={c} /> },
+    { label: "Tool",  value: "Tool",  icon: (c: string, s: number) => <Wrench size={s} color={c} /> },
+    { label: "Joint", value: "Joint", icon: (c: string, s: number) => <RotateCw size={s} color={c} /> },
   ];
 
   // Reload jog speeds whenever this screen comes into focus (picks up config changes immediately)
@@ -648,13 +649,16 @@ export default function JogScreen() {
         <Text style={styles.selectorLabel}>SPEED</Text>
         <InfoTip text="Slow/Normal/Fast jog continuously while held, at the speeds set on Robot › Configure. The 0.1/1/10 mm chips take one precise step per tap in XYZ and Joint mode — in Tool mode they instead jog continuously at a very slow speed." />
       </View>
-      <ChipGroup>
+      {/* Config card only renders on wide layouts, so keep all six speeds on one row
+          (equal-width, no wrap) rather than letting them spill onto a second line. */}
+      <ChipGroup style={styles.speedGroup}>
         {speedOptions.map((spd) => (
           <Chip
             key={spd}
             label={spd}
             selected={selectedSpeed === spd}
             onPress={() => setSelectedSpeed(spd)}
+            style={styles.speedChip}
           />
         ))}
       </ChipGroup>
@@ -814,13 +818,7 @@ export default function JogScreen() {
                   X {p.x.toFixed(1)}  Y {p.y.toFixed(1)}  Z {p.z.toFixed(1)}  RZ {p.rz.toFixed(1)}
                 </Text>
               </View>
-              <Button
-                label="Actions"
-                variant="secondary"
-                size="sm"
-                icon={<ChevronRight size={14} color={buttonTextColor("secondary")} />}
-                onPress={() => onPick(p)}
-              />
+              <ChevronRight size={20} color={colors.textFaint} />
             </Pressable>
             {i < filteredPoints.length - 1 && <Divider />}
           </View>
@@ -1455,6 +1453,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+  },
+
+  // Speed chips: one no-wrap row of equal-width chips (wide config card only).
+  speedGroup: {
+    flexWrap: "nowrap",
+    gap: spacing.xs,
+  },
+  speedChip: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: spacing.xs,
   },
 
   selectorValue: {

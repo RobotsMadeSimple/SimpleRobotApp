@@ -1,8 +1,14 @@
+import { ReactNode } from "react";
 import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { colors, radii, shadows, spacing } from "./theme";
 
-type Option<T extends string> = { label: string; value: T };
+type Option<T extends string> = {
+  label: string;
+  value: T;
+  /** Optional icon stacked above the label; receives the segment's current tint + size. */
+  icon?: (color: string, size: number) => ReactNode;
+};
 
 type Props<T extends string> = {
   /** Segments, in order. Plain strings use the string as both label and value. */
@@ -24,8 +30,9 @@ export function SegmentedControl<T extends string>({
   return (
     <View style={[styles.track, style]}>
       {options.map((opt) => {
-        const o = typeof opt === "string" ? { label: opt, value: opt } : opt;
+        const o: Option<T> = typeof opt === "string" ? { label: opt, value: opt } : opt;
         const selected = o.value === value;
+        const tint = selected ? colors.accent : colors.textMuted;
         return (
           <Pressable
             key={o.value}
@@ -34,6 +41,7 @@ export function SegmentedControl<T extends string>({
             accessibilityRole="button"
             accessibilityState={{ selected }}
           >
+            {o.icon?.(tint, size === "sm" ? 14 : 16)}
             <Text
               style={[styles.label, size === "sm" && styles.labelSm, selected && styles.labelSelected]}
               numberOfLines={1}
@@ -60,6 +68,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    gap: 2,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
     borderRadius: radii.sm,
