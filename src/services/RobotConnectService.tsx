@@ -222,7 +222,11 @@ export class RobotConnectService {
     // (e.g. configuring pins on a disconnected Nano) look like successes.
     if (data.ok === false) {
       this.pendingAcks.delete(data.id);
-      pending.reject(data.error ?? `Command "${data.command}" failed`);
+      // badConfig-style failures name the offending field; keep it in the text so
+      // callers can highlight it (see toPluginConfigError).
+      pending.reject(typeof data.field === "string" && data.field
+        ? `${data.error ?? "failed"}${data.message ? `: ${data.message}` : ""} (field ${data.field})`
+        : data.error ?? `Command "${data.command}" failed`);
       return;
     }
 

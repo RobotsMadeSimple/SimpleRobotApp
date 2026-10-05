@@ -13,6 +13,7 @@ import {
   CircuitBoard,
   Cpu,
   Gauge,
+  Plug,
   Plus,
   Radio,
   Wifi,
@@ -35,6 +36,7 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
+import { pluginNeedsAttention } from "@/src/components/ui/plugins/pluginUi";
 import { cameraSourceSummary, cameraSourceTag } from "@/src/components/ui/camera/cameraSource";
 
 import {
@@ -77,6 +79,7 @@ function DeviceNavCard({
   onDelete,
   footer,
   tag,
+  statusPill,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -89,6 +92,8 @@ function DeviceNavCard({
   footer?: React.ReactNode;
   /** Small source tag before the status pill ("RTSP" / "HTTP" network cameras). */
   tag?: string | null;
+  /** Replaces the Connected/Offline pill (e.g. the Plugins summary). */
+  statusPill?: React.ReactNode;
 }) {
   const row = (
     <ListRow
@@ -103,11 +108,13 @@ function DeviceNavCard({
       right={
         <View style={styles.rowAccessories}>
           {!!tag && <StatusPill label={tag} tone="accent" />}
-          <StatusPill
-            label={connected ? "Connected" : "Offline"}
-            tone={connected ? "success" : "danger"}
-            dot
-          />
+          {statusPill ?? (
+            <StatusPill
+              label={connected ? "Connected" : "Offline"}
+              tone={connected ? "success" : "danger"}
+              dot
+            />
+          )}
           {onDelete && <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />}
         </View>
       }
@@ -284,6 +291,11 @@ export default function IoPage() {
   const onlineDevices  = connectionFlags.filter(Boolean).length;
   const offlineDevices = totalDevices - onlineDevices;
 
+  // Plugins summary from the status poll (GetStatus.plugins, additive).
+  const pluginList     = status.plugins ?? [];
+  const pluginsRunning = pluginList.filter(p => p.state === "running" || p.state === "degraded").length;
+  const pluginsWarn    = pluginList.some(pluginNeedsAttention);
+
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
@@ -371,6 +383,23 @@ export default function IoPage() {
             footer={<CameraCalibrationControls camera={cam} layout="footer" />}
           />
         ))}
+
+        {/* Plugins — external extensions; summary comes from GetStatus.plugins */}
+        <DeviceNavCard
+          icon={<Plug size={20} color={pluginsWarn ? colors.warning : colors.accent} />}
+          iconBg={pluginsWarn ? colors.warningSoft : colors.accentSoft}
+          name="Plugins"
+          subtitle={pluginList.length === 0 ? "No plugins installed" : "External steps, functions, and services"}
+          connected={connected}
+          statusPill={
+            <StatusPill
+              label={`${pluginsRunning} running / ${pluginList.length} installed`}
+              tone={pluginsWarn ? "warning" : pluginsRunning > 0 ? "success" : "neutral"}
+              dot
+            />
+          }
+          onPress={() => router.push("/(tabs)/io/plugins")}
+        />
 
         {/* Add Device button */}
         <Button

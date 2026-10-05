@@ -12,6 +12,8 @@ export default function IOLayout() {
       <Stack.Screen name="camera-calibrate" />
       <Stack.Screen name="configure" />
       <Stack.Screen name="configure-relay" />
+      <Stack.Screen name="plugins" />
+      <Stack.Screen name="plugin-detail" />
     </Stack>
   );
 }
