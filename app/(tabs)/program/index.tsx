@@ -1,70 +1,91 @@
-import { wide } from "@/src/components/ui/responsive";
-﻿import { ActionButton } from "@/src/components/ui/ActionButton";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
-import { AlertTriangle, ChevronRight, Cpu, Gauge, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  Button,
+  ButtonVariant,
+  EmptyState,
+  InfoTip,
+  ListRow,
+  PageHeader,
+  Screen,
+  SectionHeader,
+  StatTile,
+  accents,
+  colors,
+  radii,
+  shadows,
+  spacing,
+} from "@/src/components/ui/kit";
+
+// Feature-tint colors, mapped onto the kit's secondary accent families. They
+// differentiate the four program-list categories from each other (kit only
+// defines a single "accent" blue).
+const ROUTINE_TINT = { color: accents.purple, bg: accents.purpleSoft };
+const LOCAL_TINT    = { color: accents.orange, bg: accents.orangeSoft };
+const VISION_TINT   = { color: accents.cyan,   bg: accents.cyanSoft };
 
 // ── Status theming ─────────────────────────────────────────────────────────────
+// Collapsed onto the same handful of tones StatusPill uses (success/accent/
+// warning/danger/neutral) instead of the eight bespoke shades the old screen had.
 
 type StatusTheme = { bg: string; text: string; bar: string; dot: string };
 
 const STATUS_THEME: Record<ProgramStatus, StatusTheme> = {
-  Ready:     { bg: "#f3f4f6", text: "#6b7280", bar: "#9ca3af", dot: "#9ca3af" },
-  Starting:  { bg: "#eff6ff", text: "#2563eb", bar: "#3b82f6", dot: "#3b82f6" },
-  Running:   { bg: "#f0fdf4", text: "#16a34a", bar: "#22c55e", dot: "#22c55e" },
-  Finishing: { bg: "#f0fdf4", text: "#16a34a", bar: "#22c55e", dot: "#22c55e" },
-  Stopping:  { bg: "#fff7ed", text: "#ea580c", bar: "#f97316", dot: "#f97316" },
-  Stopped:   { bg: "#f3f4f6", text: "#6b7280", bar: "#9ca3af", dot: "#9ca3af" },
-  Complete:  { bg: "#dcfce7", text: "#15803d", bar: "#22c55e", dot: "#22c55e" },
-  Error:     { bg: "#fef2f2", text: "#dc2626", bar: "#ef4444", dot: "#ef4444" },
+  Ready:     { bg: colors.background,  text: colors.textMuted, bar: colors.textFaint, dot: colors.textFaint },
+  Starting:  { bg: colors.accentSoft,  text: colors.accent,    bar: colors.accentBright, dot: colors.accentBright },
+  Running:   { bg: colors.successSoft, text: colors.success,   bar: colors.success,   dot: colors.success },
+  Finishing: { bg: colors.successSoft, text: colors.success,   bar: colors.success,   dot: colors.success },
+  Stopping:  { bg: colors.warningSoft, text: colors.warning,   bar: colors.warning,   dot: colors.warning },
+  Stopped:   { bg: colors.background,  text: colors.textMuted, bar: colors.textFaint, dot: colors.textFaint },
+  Complete:  { bg: colors.successSoft, text: colors.success,   bar: colors.success,   dot: colors.success },
+  Error:     { bg: colors.dangerSoft,  text: colors.danger,    bar: colors.danger,    dot: colors.danger },
 };
 
 // ── Action buttons ─────────────────────────────────────────────────────────────
 
-type ActionBtn = { label: string; bg: string; onPress: () => void };
+type ActionBtn = { label: string; variant: ButtonVariant; bg?: string; onPress: () => void };
 
 function getButtons(p: ProgramSummary, isBuilt: boolean): ActionBtn[] {
   const { name, status } = p;
   switch (status) {
     case "Ready":
-      return [{ label: "Start", bg: "#16a34a", onPress: () => robotClient.startProgram(name) }];
+      return [{ label: "Start", variant: "primary", bg: colors.success, onPress: () => robotClient.startProgram(name) }];
     case "Starting":
     case "Running":
     case "Finishing":
-      return [{ label: "Stop", bg: "#dc2626", onPress: () => robotClient.stopProgram(name) }];
+      return [{ label: "Stop", variant: "destructive", onPress: () => robotClient.stopProgram(name) }];
     case "Stopped":
       return [
-        { label: "Continue", bg: "#2563eb", onPress: () => robotClient.startProgram(name) },
-        { label: "Exit",     bg: "#374151", onPress: () => robotClient.abortProgram(name) },
+        { label: "Continue", variant: "primary", onPress: () => robotClient.startProgram(name) },
+        { label: "Exit",     variant: "primary", bg: colors.textSecondary, onPress: () => robotClient.abortProgram(name) },
       ];
     case "Complete":
       return [
         {
           label: "Run Again",
-          bg: "#16a34a",
-          onPress: () => {
-            robotClient.resetProgram(name);
-            if (isBuilt) robotClient.executeBuiltProgram(name).catch(() => {});
-            else robotClient.startProgram(name);
-          },
+          variant: "primary",
+          bg: colors.success,
+          onPress: () => { robotClient.runProgramAgain(name, isBuilt); },
         },
-        { label: "Exit", bg: "#374151", onPress: () => robotClient.abortProgram(name) },
+        { label: "Exit", variant: "primary", bg: colors.textSecondary, onPress: () => robotClient.abortProgram(name) },
       ];
     case "Error":
-      return [{ label: "Exit", bg: "#dc2626", onPress: () => robotClient.abortProgram(name) }];
+      return [{ label: "Exit", variant: "destructive", onPress: () => robotClient.abortProgram(name) }];
     case "Stopping":
     default:
       return [];
@@ -84,23 +105,16 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
   const pct = p.maxStepCount > 0 ? Math.round((p.currentStepNumber / p.maxStepCount) * 100) : 0;
   const buttons = getButtons(p, isBuilt);
 
-  // Spinner while an action is being applied — cleared when the status changes
-  // (the action took effect) or after a short fallback timeout.
-  const [pending, setPending] = useState<string | null>(null);
-  useEffect(() => { setPending(null); }, [p.status]);
-  useEffect(() => {
-    if (!pending) return;
-    const t = setTimeout(() => setPending(null), 3000);
-    return () => clearTimeout(t);
-  }, [pending]);
+  // Spinner while an action is being applied — see useActionPending for when it clears.
+  const [pending, setPending] = useActionPending(p);
 
   const progressAnim = useRef(new Animated.Value(pct)).current;
   useEffect(() => { progressAnim.setValue(pct); }, [pct]);
 
   const hasAlert = !!(p.errorDescription || p.warningDescription);
   const isError  = !!p.errorDescription;
-  const alertColor        = isError ? '#dc2626' : '#d97706';
-  const alertText         = p.errorDescription || p.warningDescription || '';
+  const alertColor = isError ? colors.danger : colors.warning;
+  const alertText  = p.errorDescription || p.warningDescription || '';
 
   return (
     <View style={styles.runningCardWrapper}>
@@ -111,14 +125,14 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
       >
         {/* Status bar — shows run state only */}
         <View style={[styles.statusBar, { backgroundColor: hasAlert ? alertColor : theme.bg }]}>
-          <View style={[styles.statusDot, { backgroundColor: hasAlert ? '#fff' : theme.dot }]} />
-          <Text style={[styles.statusText, { color: hasAlert ? '#fff' : theme.text }]} numberOfLines={1}>
+          <View style={[styles.statusDot, { backgroundColor: hasAlert ? colors.onAccent : theme.dot }]} />
+          <Text style={[styles.statusText, { color: hasAlert ? colors.onAccent : theme.text }]} numberOfLines={1}>
             {p.status}
           </Text>
           {isBuilt && (
             <View style={[styles.builtBadge, hasAlert && styles.builtBadgeAlert]}>
-              <Cpu size={10} color={hasAlert ? '#fff' : '#2563eb'} />
-              <Text style={[styles.builtBadgeText, hasAlert && { color: '#fff' }]}>BUILT</Text>
+              <Cpu size={10} color={hasAlert ? colors.onAccent : colors.accent} />
+              <Text style={[styles.builtBadgeText, hasAlert && { color: colors.onAccent }]}>BUILT</Text>
             </View>
           )}
         </View>
@@ -127,8 +141,8 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
         {hasAlert && (
           <View style={[styles.alertStripe, { backgroundColor: alertColor }]}>
             {isError
-              ? <XCircle size={13} color="#fff" />
-              : <AlertTriangle size={13} color="#fff" />
+              ? <XCircle size={13} color={colors.onAccent} />
+              : <AlertTriangle size={13} color={colors.onAccent} />
             }
             <Text style={styles.alertStripeText} numberOfLines={2}>{alertText}</Text>
           </View>
@@ -142,9 +156,9 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
               onPress={e => { e.stopPropagation?.(); onSpeedPress(); }}
               activeOpacity={0.7}
             >
-              <Gauge size={11} color={speedOverridePercent !== 100 ? (speedOverridePercent > 100 ? "#dc2626" : "#d97706") : "#6b7280"} />
+              <Gauge size={11} color={speedOverridePercent !== 100 ? (speedOverridePercent > 100 ? colors.danger : colors.warning) : colors.textMuted} />
               <Text style={[styles.speedPillText, speedOverridePercent !== 100 && {
-                color: speedOverridePercent > 100 ? "#dc2626" : "#d97706",
+                color: speedOverridePercent > 100 ? colors.danger : colors.warning,
               }]}>{Math.round(speedOverridePercent)}%</Text>
             </TouchableOpacity>
           </View>
@@ -177,13 +191,17 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
                 const isStartAction = btn.label === "Start" || btn.label === "Continue" || btn.label === "Run Again";
                 const blocked = !!(isBuilt && anotherBuiltRunning && isStartAction);
                 return (
-                  <ActionButton
+                  <Button
                     key={btn.label}
                     label={blocked ? "Another Program Running" : btn.label}
+                    variant={btn.variant}
+                    size="sm"
                     loading={pending === btn.label}
                     disabled={blocked || (pending !== null && pending !== btn.label)}
-                    style={[styles.actionBtn, { backgroundColor: blocked ? "#9ca3af" : btn.bg }]}
-                    textStyle={styles.actionBtnText}
+                    style={[
+                      styles.actionBtn,
+                      blocked ? { backgroundColor: colors.textFaint } : btn.bg ? { backgroundColor: btn.bg } : undefined,
+                    ]}
                     onPress={(e) => { e.stopPropagation?.(); setPending(btn.label); btn.onPress(); }}
                   />
                 );
@@ -204,57 +222,29 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
   );
 }
 
-// ── Nav Tile ───────────────────────────────────────────────────────────────────
-
-function NavTile({
-  icon,
-  label,
-  count,
-  countLabel,
-  color,
-  bg,
-  onPress,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  count: number;
-  countLabel: string;
-  color: string;
-  bg: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity style={styles.navTile} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.navTileIcon, { backgroundColor: bg }]}>
-        {icon}
-      </View>
-      <View style={styles.navTileBody}>
-        <Text style={styles.navTileLabel}>{label}</Text>
-        <Text style={styles.navTileCount}>{count} {countLabel}</Text>
-      </View>
-      <ChevronRight size={18} color="#9ca3af" />
-    </TouchableOpacity>
-  );
-}
-
 // ── Screen ─────────────────────────────────────────────────────────────────────
 
 export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
   const robotStatus      = useRobotStatus();
+  const isWide           = useIsWide();
   const [visionCount,    setVisionCount]    = useState(0);
   const [localCount,     setLocalCount]     = useState(0);
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
   const [showVision,     setShowVision]     = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      robotClient.getRobotConfig()
-        .then(cfg => setShowVision(cfg.enableCameras ?? false))
-        .catch(() => {});
-    }, [])
-  );
+  // Re-run on (re)connect as well as on focus: if the controller starts while
+  // this tab is open, the focus-time request has already failed.
+  const connected = useConnected();
+  const loadVisionFlag = useCallback(() => {
+    if (!connected) return;
+    robotClient.getRobotConfig()
+      .then(cfg => setShowVision(cfg.enableCameras ?? false))
+      .catch(() => {});
+  }, [connected]);
+  useFocusEffect(loadVisionFlag);
+  useEffect(() => { loadVisionFlag(); }, [loadVisionFlag]);
 
   useFocusEffect(
     useCallback(() => {
@@ -303,17 +293,34 @@ export default function ProgramScreen() {
     programSummaries.filter(p => !builtNames.has(p.name)).length;
   const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
 
-  return (
-    <View style={{ flex: 1 }}>
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[styles.content, wide.content]}
-      showsVerticalScrollIndicator={false}
-    >
+  const activeCount = programSummaries.filter(
+    p => p.status === "Running" || p.status === "Starting" || p.status === "Finishing"
+  ).length;
+
+  const statRow = (
+    <View style={styles.statRow}>
+      <StatTile
+        label="Running"
+        value={activeCount}
+        icon={PlayCircle}
+        tint={activeCount > 0 ? [colors.success, colors.successSoft] : undefined}
+        style={styles.statTile}
+      />
+      <StatTile label="Programs" value={robotProgramCount} icon={Cpu} style={styles.statTile} />
+      <StatTile
+        label="Routines"
+        value={routineCount}
+        icon={Repeat2}
+        tint={[ROUTINE_TINT.color, ROUTINE_TINT.bg]}
+        style={styles.statTile}
+      />
+    </View>
+  );
+
+  const runningSection = (
+    <>
       {/* Now Running / Last Ran */}
-      <Text style={styles.sectionLabel}>
-        {displayedProgram && displayedProgram.status === "Ready" ? "LAST RAN" : "NOW RUNNING"}
-      </Text>
+      <SectionHeader title={displayedProgram && displayedProgram.status === "Ready" ? "Last Ran" : "Now Running"} />
       {displayedProgram ? (
         <RunningCard
           key={displayedProgram.name}
@@ -324,64 +331,88 @@ export default function ProgramScreen() {
           onSpeedPress={() => setSpeedModalOpen(true)}
         />
       ) : (
-        <View style={styles.nothingRunning}>
-          <Text style={styles.nothingRunningText}>No program has been run yet</Text>
-        </View>
+        <EmptyState
+          icon={<PlayCircle size={32} color={colors.textFaint} />}
+          title="No program has been run yet"
+          subtitle="Pick a program below and start it — its live step, progress and alerts appear here."
+        />
       )}
+    </>
+  );
 
+  const navSection = (
+    <>
       {/* Nav tiles */}
-      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>PROGRAMS</Text>
+      <SectionHeader
+        title="Programs"
+        icon={Box}
+        right={
+          <InfoTip text="A program is a full sequence the robot runs on its own. A routine is a reusable block of steps that programs call with a Call Routine step. Local Programs are drafts kept only on this device, not on the robot." />
+        }
+      />
 
-      <NavTile
-        icon={<Cpu size={20} color="#2563eb" />}
-        label="Programs"
-        count={robotProgramCount}
-        countLabel={robotProgramCount === 1 ? "program" : "programs"}
-        color="#2563eb"
-        bg="#eff6ff"
+      <ListRow
+        title="Programs"
+        subtitle={`${robotProgramCount} ${robotProgramCount === 1 ? "program" : "programs"}`}
+        icon={<Cpu size={20} color={colors.accent} />}
+        iconColor={colors.accentSoft}
         onPress={() => router.navigate("/(tabs)/program/robot-programs")}
       />
 
-      <NavTile
-        icon={<Repeat2 size={20} color="#7c3aed" />}
-        label="Routines"
-        count={routineCount}
-        countLabel={routineCount === 1 ? "routine" : "routines"}
-        color="#7c3aed"
-        bg="#f5f3ff"
+      <ListRow
+        title="Routines"
+        subtitle={`${routineCount} ${routineCount === 1 ? "routine" : "routines"}`}
+        icon={<Repeat2 size={20} color={ROUTINE_TINT.color} />}
+        iconColor={ROUTINE_TINT.bg}
         onPress={() => router.navigate("/program/routines")}
       />
 
       {localCount > 0 && (
-        <NavTile
-          icon={<Smartphone size={20} color="#ea580c" />}
-          label="Local Drafts"
-          count={localCount}
-          countLabel={localCount === 1 ? "draft" : "drafts"}
-          color="#ea580c"
-          bg="#fff7ed"
+        <ListRow
+          title="Local Programs"
+          subtitle={`${localCount} ${localCount === 1 ? "draft on this device" : "drafts on this device"}`}
+          icon={<Smartphone size={20} color={LOCAL_TINT.color} />}
+          iconColor={LOCAL_TINT.bg}
           onPress={() => router.navigate("/(tabs)/program/phone-programs")}
         />
       )}
 
       {showVision && (
-        <NavTile
-          icon={<ScanSearch size={20} color="#0891b2" />}
-          label="Vision Programs"
-          count={visionCount}
-          countLabel={visionCount === 1 ? "program" : "programs"}
-          color="#0891b2"
-          bg="#ecfeff"
+        <ListRow
+          title="Vision Programs"
+          subtitle={`${visionCount} ${visionCount === 1 ? "program" : "programs"}`}
+          icon={<ScanSearch size={20} color={VISION_TINT.color} />}
+          iconColor={VISION_TINT.bg}
           onPress={() => router.navigate("/(tabs)/program/vision")}
         />
       )}
-    </ScrollView>
+    </>
+  );
 
-    <SpeedOverrideModal
-      visible={speedModalOpen}
-      overridePercent={robotStatus?.speedOverridePercent ?? 100}
-      onClose={() => setSpeedModalOpen(false)}
-    />
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader title="Program" subtitle="Build, run, and monitor robot programs" />
+      <Screen>
+        {statRow}
+        {isWide ? (
+          // Wide: the running program on the left, the page selectors on the right.
+          <View style={styles.wideRow}>
+            <View style={styles.wideLeftCol}>{runningSection}</View>
+            <View style={styles.wideRightCol}>{navSection}</View>
+          </View>
+        ) : (
+          <>
+            {runningSection}
+            {navSection}
+          </>
+        )}
+      </Screen>
+
+      <SpeedOverrideModal
+        visible={speedModalOpen}
+        overridePercent={robotStatus?.speedOverridePercent ?? 100}
+        onClose={() => setSpeedModalOpen(false)}
+      />
     </View>
   );
 }
@@ -389,55 +420,36 @@ export default function ProgramScreen() {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  scroll:   { flex: 1, backgroundColor: "#f3f4f6" },
-  content:  { padding: 16, paddingBottom: 32, gap: 10 },
+  statRow:  { flexDirection: "row", gap: spacing.md },
+  statTile: { flex: 1, minWidth: 0 },
 
-  nothingRunning: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  nothingRunningText: { fontSize: 13, color: "#9ca3af" },
-
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 2,
-  },
+  // Wide: running program on a narrow left column, page selectors on the wider right.
+  wideRow:      { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
+  wideLeftCol:  { width: 360, gap: spacing.md },
+  wideRightCol: { flex: 1, gap: spacing.md },
 
   // Running program card
   runningCardWrapper: {
-    borderRadius: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    borderRadius: radii.lg,
+    ...shadows.soft,
   },
   runningCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
     overflow: "hidden",
   },
   runningCardAlertBorder: {
     borderWidth: 2.5,
-    borderRadius: 16,
+    borderRadius: radii.lg,
   },
   statusBar: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    gap: 8,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.sm + 1,
+    gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
   },
   statusDot:  { width: 7, height: 7, borderRadius: 4 },
   statusText: { flex: 1, fontSize: 12, fontWeight: "600", letterSpacing: 0.4 },
@@ -445,65 +457,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#eff6ff",
-    borderRadius: 20,
-    paddingHorizontal: 8,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
   builtBadgeAlert: { backgroundColor: "rgba(255,255,255,0.2)" },
-  builtBadgeText: { fontSize: 10, fontWeight: "700", color: "#2563eb", letterSpacing: 0.4 },
+  builtBadgeText: { fontSize: 10, fontWeight: "700", color: colors.accent, letterSpacing: 0.4 },
   alertStripe: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 7, gap: 7,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm - 1, gap: 7,
   },
-  alertStripeText: { flex: 1, fontSize: 12, fontWeight: "600", color: "#fff", lineHeight: 17 },
+  alertStripeText: { flex: 1, fontSize: 12, fontWeight: "600", color: colors.onAccent, lineHeight: 17 },
 
-  runningCardBody: { padding: 14, gap: 10 },
-  runningNameRow:  { flexDirection: "row", alignItems: "center", gap: 8 },
-  runningName:     { flex: 1, fontSize: 17, fontWeight: "700", color: "#111827" },
+  runningCardBody: { padding: spacing.md + 2, gap: spacing.md },
+  runningNameRow:  { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  runningName:     { flex: 1, fontSize: 17, fontWeight: "700", color: colors.text },
   speedPill: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "#f3f4f6", borderRadius: 20,
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderWidth: 1, borderColor: "#e5e7eb",
+    backgroundColor: colors.background, borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderWidth: 1, borderColor: colors.border,
   },
-  speedPillText: { fontSize: 11, fontWeight: "700", color: "#6b7280" },
+  speedPillText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
 
-  stepRow:   { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  stepLabel: { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.6, paddingTop: 2 },
-  stepText:  { flex: 1, fontSize: 13, color: "#374151", lineHeight: 18 },
+  stepRow:   { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  stepLabel: { fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.6, paddingTop: 2 },
+  stepText:  { flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
 
-  progressRow:   { flexDirection: "row", alignItems: "center", gap: 10 },
-  progressTrack: { flex: 1, height: 6, backgroundColor: "#e5e7eb", borderRadius: 3, overflow: "hidden" },
+  progressRow:   { flexDirection: "row", alignItems: "center", gap: spacing.sm + 2 },
+  progressTrack: { flex: 1, height: 6, backgroundColor: colors.border, borderRadius: 3, overflow: "hidden" },
   progressFill:  { height: 6, borderRadius: 3 },
-  percentText:   { width: 38, textAlign: "right", fontSize: 12, fontWeight: "600", color: "#6b7280" },
+  percentText:   { width: 38, textAlign: "right", fontSize: 12, fontWeight: "600", color: colors.textMuted },
 
-  buttonsRow: { flexDirection: "row", gap: 8 },
-  actionBtn:  { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-
-  // Nav tiles
-  navTile: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    gap: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  navTileIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  navTileBody:  { flex: 1 },
-  navTileLabel: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  navTileCount: { fontSize: 12, color: "#6b7280", marginTop: 1 },
+  buttonsRow: { flexDirection: "row", gap: spacing.sm },
+  actionBtn:  { flex: 1 },
 });

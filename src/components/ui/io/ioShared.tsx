@@ -3,8 +3,6 @@ import {
   Settings,
   ToggleLeft,
   ToggleRight,
-  Wifi,
-  WifiOff,
 } from "lucide-react-native";
 import React from "react";
 import {
@@ -14,13 +12,19 @@ import {
   View,
 } from "react-native";
 
+import { accents, colors, radii, shadows, spacing, StatusPill, type } from "@/src/components/ui/kit";
+
 // ── Type helpers ──────────────────────────────────────────────────────────────
+//
+// Input/Neopixel map onto kit tokens exactly. Output keeps its purple —
+// a device-type tint (matches the Aux Stepper Axis tint elsewhere in this
+// section), now via the kit's purple accent family.
 
 export function typeColor(type: PinType) {
-  if (type === "Input")    return { fg: "#2563eb", bg: "#eff6ff" };
-  if (type === "Output")   return { fg: "#7c3aed", bg: "#f5f3ff" };
-  if (type === "Neopixel") return { fg: "#d97706", bg: "#fffbeb" };
-  return { fg: "#6b7280", bg: "#f3f4f6" };
+  if (type === "Input")    return { fg: colors.accent,     bg: colors.accentSoft };
+  if (type === "Output")   return { fg: accents.purple,    bg: accents.purpleSoft }; // device-type tint
+  if (type === "Neopixel") return { fg: colors.warning,    bg: colors.warningSoft };
+  return { fg: colors.textMuted, bg: colors.background };
 }
 
 export function typeLabel(type: PinType) {
@@ -37,14 +41,12 @@ export function IORow({
   sublabel,
   type,
   value,
-  last,
   onToggle,
 }: {
   label: string;
   sublabel: string;
   type: PinType;
   value: boolean;
-  last?: boolean;
   onToggle?: () => void;
 }) {
   const { fg, bg } = typeColor(type);
@@ -52,7 +54,7 @@ export function IORow({
   const isNeopixel = type === "Neopixel";
 
   return (
-    <View style={[ios.row, !last && ios.rowBorder]}>
+    <View style={ios.row}>
       <View style={[ios.typeBadge, { backgroundColor: bg }]}>
         <Text style={[ios.typeBadgeText, { color: fg }]}>{typeLabel(type)}</Text>
       </View>
@@ -63,21 +65,14 @@ export function IORow({
       </View>
 
       {!isOutput && !isNeopixel && (
-        <>
-          <View style={[ios.dot, value ? ios.dotOn : ios.dotOff]} />
-          <View style={[ios.badge, value ? ios.badgeOn : ios.badgeOff]}>
-            <Text style={[ios.badgeText, value ? ios.badgeTextOn : ios.badgeTextOff]}>
-              {value ? "ON" : "OFF"}
-            </Text>
-          </View>
-        </>
+        <StatusPill label={value ? "ON" : "OFF"} tone={value ? "success" : "neutral"} dot />
       )}
 
       {isOutput && (
         <Pressable onPress={onToggle} hitSlop={8}>
           {value
-            ? <ToggleRight size={28} color="#7c3aed" />
-            : <ToggleLeft  size={28} color="#d1d5db" />
+            ? <ToggleRight size={28} color={accents.purple} />
+            : <ToggleLeft  size={28} color={colors.borderStrong} />
           }
         </Pressable>
       )}
@@ -119,19 +114,11 @@ export function CardHeader({
         <Text style={ios.cardName}>{name}</Text>
         <Text style={ios.cardSub}>{subtitle}</Text>
       </View>
-      <View style={[ios.connBadge, connected ? ios.connOn : ios.connOff]}>
-        {connected
-          ? <Wifi    size={11} color="#16a34a" />
-          : <WifiOff size={11} color="#dc2626" />
-        }
-        <Text style={[ios.connText, connected ? ios.connTextOn : ios.connTextOff]}>
-          {connected ? "Connected" : "Offline"}
-        </Text>
-      </View>
+      <StatusPill label={connected ? "Connected" : "Offline"} tone={connected ? "success" : "danger"} dot />
       {actions}
       {onConfigure && (
         <Pressable style={ios.configBtn} onPress={onConfigure} hitSlop={6}>
-          <Settings size={15} color="#6b7280" />
+          <Settings size={15} color={colors.textMuted} />
         </Pressable>
       )}
     </View>
@@ -163,62 +150,48 @@ export function PinGroup({
 }
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
+//
+// Kept as a single `ios` StyleSheet (rather than folded fully into per-screen
+// styles) because auxiliary.tsx reuses `ios.row` / `rowInfo` / `rowLabel` /
+// `rowSub` / `emptyCard` directly for its motor-driver row.
 
 export const ios = StyleSheet.create({
   card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    ...shadows.soft,
   },
 
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    padding: 14,
+    gap: spacing.sm + 2,
+    padding: spacing.md + 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
   },
   cardIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: radii.sm + 1,
     justifyContent: "center",
     alignItems: "center",
   },
-  cardName: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  cardSub:  { fontSize: 11, color: "#9ca3af", marginTop: 1 },
-
-  connBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  connOn:      { backgroundColor: "#f0fdf4" },
-  connOff:     { backgroundColor: "#fef2f2" },
-  connText:    { fontSize: 11, fontWeight: "600" },
-  connTextOn:  { color: "#16a34a" },
-  connTextOff: { color: "#dc2626" },
+  cardName: type.title,
+  cardSub:  { ...type.caption, marginTop: 1 },
 
   configBtn: {
-    marginLeft: 6,
-    padding: 4,
+    marginLeft: spacing.xs + 2,
+    padding: spacing.xs,
   },
 
-  group: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 },
+  group: { paddingHorizontal: spacing.md + 2, paddingTop: spacing.md, paddingBottom: spacing.xs + 2 },
   groupHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginBottom: 6,
+    gap: spacing.xs + 2,
+    marginBottom: spacing.xs + 2,
   },
   groupDot: {
     width: 8, height: 8,
@@ -227,51 +200,38 @@ export const ios = StyleSheet.create({
   },
   groupLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 0.8 },
   groupCard: {
-    backgroundColor: "#f9fafb",
-    borderRadius: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.sm + 1,
     overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
+    borderColor: colors.border,
   },
 
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    gap: 10,
-    backgroundColor: "#fff",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 3,
+    gap: spacing.sm + 2,
+    backgroundColor: colors.surface,
   },
   rowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
   },
   typeBadge: {
     width: 36, height: 22,
-    borderRadius: 5,
+    borderRadius: radii.sm - 4,
     justifyContent: "center",
     alignItems: "center",
   },
   typeBadgeText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   rowInfo: { flex: 1 },
-  rowLabel: { fontSize: 14, fontWeight: "500", color: "#111827" },
-  rowSub:   { fontSize: 11, color: "#9ca3af", marginTop: 1 },
-
-  dot: { width: 9, height: 9, borderRadius: 5 },
-  dotOn:  { backgroundColor: "#22c55e", shadowColor: "#22c55e", shadowOpacity: 0.6, shadowRadius: 4, elevation: 2 },
-  dotOff: { backgroundColor: "#d1d5db" },
-  badge: {
-    paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 7, minWidth: 42, alignItems: "center",
-  },
-  badgeOn:       { backgroundColor: "#f0fdf4" },
-  badgeOff:      { backgroundColor: "#f3f4f6" },
-  badgeText:     { fontSize: 11, fontWeight: "700", letterSpacing: 0.4 },
-  badgeTextOn:   { color: "#16a34a" },
-  badgeTextOff:  { color: "#9ca3af" },
+  rowLabel: { ...type.body, fontSize: 14, fontWeight: "500", color: colors.text },
+  rowSub:   { ...type.caption, marginTop: 1 },
 
   neoDots: { flexDirection: "row", gap: 3 },
   neoDot:  { width: 7, height: 7, borderRadius: 4, backgroundColor: "#fbbf24", opacity: 0.5 },
 
-  emptyCard: { fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 16 },
+  emptyCard: { fontSize: 13, color: colors.textFaint, textAlign: "center", padding: spacing.lg },
 });

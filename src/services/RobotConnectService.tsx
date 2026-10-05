@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CameraState, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -216,6 +216,15 @@ export class RobotConnectService {
 
     if (!pending)
       return;
+
+    // A failed command must reject its caller — the server reports handler
+    // errors as ok:false + error. Resolving these silently made failures
+    // (e.g. configuring pins on a disconnected Nano) look like successes.
+    if (data.ok === false) {
+      this.pendingAcks.delete(data.id);
+      pending.reject(data.error ?? `Command "${data.command}" failed`);
+      return;
+    }
 
     switch (data.command){
       case "GetStatus":
@@ -664,6 +673,19 @@ export class RobotConnectService {
     });
   }
 
+  /**
+   * Fire-and-forget command: sends immediately without registering an ack, a
+   * promise, or a timeout. For the high-rate jog heartbeat (and StopJog), where a
+   * tracked reply per tick is pure overhead — omitting the id means the ack the
+   * controller still sends comes back id-less and is ignored by onmessage. No-op
+   * when the socket isn't open, so a dropped connection never throws mid-jog.
+   */
+  private sendCommandNoAck(command: string, params: Record<string, any> = {}) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "Command", command, params }));
+  }
+
   onMessage<T = any>(handler: MessageHandler<T>) {
     this.messageHandlers.push(handler);
     return () => {
@@ -708,8 +730,12 @@ export class RobotConnectService {
     return this.sendCommand("GetPoints");
   }
 
+  // StopJog and the jog heartbeat go out fire-and-forget: no caller awaits them,
+  // and skipping the ack/promise/timeout churn keeps release snappy and the
+  // socket clear (the controller's velocity profiler runs continuously with a
+  // ~1s watchdog, so these are keep-alives, not per-tick moves).
   public stopJog() {
-    return this.sendCommand("StopJog");
+    this.sendCommandNoAck("StopJog");
   }
 
   public hardStop() {
@@ -717,15 +743,15 @@ export class RobotConnectService {
   }
 
   public jogL({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
-    return this.sendCommand("JogL", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+    this.sendCommandNoAck("JogL", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public jogJ({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
-    return this.sendCommand("JogJ", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+    this.sendCommandNoAck("JogJ", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public jogTool({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
-    return this.sendCommand("JogTool", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
+    this.sendCommandNoAck("JogTool", { X: x, Y: y, Z: z, RZ: rz, Speed: speed, Accel: accel, Decel: decel });
   }
 
   public offsetL({ x = 0, y = 0, z = 0, rz = 0, speed = 100, accel = 100, decel = 100 }: MoveParams) {
@@ -890,8 +916,9 @@ export class RobotConnectService {
     return this.sendCommand("GetBuiltPrograms");
   }
 
-  public saveBuiltProgram(program: BuiltProgram) {
-    return this.sendCommand("SaveBuiltProgram", {
+  /** The wire shape of a program, shared by SaveBuiltProgram and ValidateBuiltProgram. */
+  private builtProgramParams(program: BuiltProgram) {
+    return {
       id:                  program.id ?? '',
       name:                program.name,
       description:         program.description,
@@ -900,11 +927,196 @@ export class RobotConnectService {
       isRoutine:           program.isRoutine           ?? false,
       isBackground:        program.isBackground        ?? false,
       killBackgroundOnStop: program.killBackgroundOnStop ?? true,
-    });
+    };
+  }
+
+  public saveBuiltProgram(program: BuiltProgram) {
+    return this.sendCommand("SaveBuiltProgram", this.builtProgramParams(program));
   }
 
   public deleteBuiltProgram(name: string) {
     return this.sendCommand("DeleteBuiltProgram", { name });
+  }
+
+  // ── Program-editor services (docs/expressions-and-variables.md) ───────────
+  //
+  // Newer controller commands. An older controller answers them with
+  // ok:false / "unknownCommand", which surfaces here as UnsupportedCommandError
+  // so a caller can hide the feature instead of reporting a failure.
+
+  /**
+   * Send a command and return its ACK, turning `ok: false` into a thrown error.
+   * Works whether sendCommand resolves failed ACKs or rejects them.
+   */
+  private async request(command: string, params: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>> {
+    let data: unknown;
+    try {
+      data = await this.sendCommand(command, params, timeoutMs);
+    } catch (e) {
+      throw toCommandError(command, e);
+    }
+    const ack = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+    if (ack.ok === false) throw toCommandError(command, ack.error);
+    return ack;
+  }
+
+  /** Check a (possibly unsaved) program. Resolves the problem list; empty = clean. */
+  public async validateBuiltProgram(program: BuiltProgram): Promise<ValidationProblem[]> {
+    const ack = await this.request("ValidateBuiltProgram", { program: this.builtProgramParams(program) });
+    return wireArray(ack.problems).map(normalizeProblem).filter((p): p is ValidationProblem => p !== null);
+  }
+
+  /**
+   * Evaluate an expression against the named running program (or globals + IO +
+   * properties when none). An evaluation error is a normal result (`ok: false`);
+   * only an unsupported command or a transport failure throws.
+   */
+  public async evaluateExpression(expression: string, programName?: string): Promise<ExpressionEvaluation> {
+    try {
+      const ack = await this.request("EvaluateExpression", programName ? { expression, programName } : { expression });
+      const value = typeof ack.value === "number" ? ack.value : Number(ack.value);
+      return Number.isFinite(value) && ack.value !== null && ack.value !== undefined
+        ? { ok: true, value, isBoolean: ack.isBoolean === true }
+        : { ok: false, error: typeof ack.error === "string" && ack.error ? ack.error : "No value" };
+    } catch (e) {
+      if (e instanceof CommandFailedError) return { ok: false, error: e.message };
+      throw e;
+    }
+  }
+
+  /** Variables, read-only properties, functions and IO names an expression may use. */
+  public async getExpressionSymbols(programName?: string): Promise<ExpressionSymbols> {
+    const ack = await this.request("GetExpressionSymbols", programName ? { programName } : {});
+    return {
+      variables: wireArray(ack.variables).filter(isNamed).map(v => ({
+        name:         stripSigil(v.name),
+        kind:         VARIABLE_KINDS.find(k => k === v.kind) ?? "number",
+        elementType:  ELEMENT_TYPES.find(k => k === v.elementType),
+        isGlobal:     v.isGlobal === true,
+        isPersistent: v.isPersistent === true,
+        expression:   typeof v.expression === "string" ? v.expression : undefined,
+        value:        typeof v.value === "number" || typeof v.value === "string" || typeof v.value === "boolean" ? v.value : undefined,
+      })),
+      properties: wireArray(ack.properties).filter(isNamed).map(p => ({
+        name: stripSigil(p.name), description: str(p.description), type: str(p.type),
+      })),
+      functions: wireArray(ack.functions).filter(isNamed).map(f => ({
+        name: f.name, signature: str(f.signature) || `${f.name}()`, description: str(f.description),
+      })),
+      io: wireArray(ack.io).filter(isNamed).map(i => ({
+        name: stripSigil(i.name), description: str(i.description),
+      })),
+    };
+  }
+
+  /** Stored revisions of a program, newest first. */
+  public async getBuiltProgramRevisions(name: string): Promise<ProgramRevision[]> {
+    const ack = await this.request("GetBuiltProgramRevisions", { name });
+    return wireArray(ack.revisions)
+      .filter(r => r.id !== undefined && r.id !== null && r.id !== "")
+      .map(r => ({
+        id:            String(r.id),
+        savedUnixMs:   Number(r.savedUnixMs ?? r.id) || 0,
+        stepCount:     Number(r.stepCount) || 0,
+        variableCount: Number(r.variableCount) || 0,
+        note:          typeof r.note === "string" && r.note ? r.note : undefined,
+      }))
+      .sort((a, b) => b.savedUnixMs - a.savedUnixMs);
+  }
+
+  /** The full content of one stored revision. */
+  public async getBuiltProgramRevision(name: string, id: string): Promise<BuiltProgram> {
+    const ack = await this.request("GetBuiltProgramRevision", { name, id });
+    return wireProgram(ack.program, name);
+  }
+
+  /**
+   * Make a stored revision the current program (the controller records the
+   * replaced content as a new revision first). Refreshes the program list and
+   * resolves the restored program.
+   */
+  public async restoreBuiltProgramRevision(name: string, id: string): Promise<BuiltProgram> {
+    const ack = await this.request("RestoreBuiltProgramRevision", { name, id });
+    this.getBuiltPrograms().catch(() => {});
+    return wireProgram(ack.program, name);
+  }
+
+  // ── Camera-to-robot calibration (docs/camera-calibration.md) ──────────────
+  //
+  // All additive: an older controller answers "unknownCommand", which surfaces as
+  // UnsupportedCommandError so the UI can hide Calibrate instead of failing.
+  // Other failures are CommandFailedError whose message is the contract's error
+  // code (noDotsFound, gridNotFound, notEnoughTaught, …).
+
+  /** The saved calibration for a camera, or null when it has none. */
+  public async getCameraCalibration(cameraId: string): Promise<CameraCalibration | null> {
+    const ack = await this.request("GetCameraCalibration", { cameraId });
+    return wireCalibration(ack.calibration);
+  }
+
+  public async deleteCameraCalibration(cameraId: string): Promise<void> {
+    await this.request("DeleteCameraCalibration", { cameraId });
+  }
+
+  /** Grab a frame, detect the dot grid and open a session. */
+  public async calibrationStart(cameraId: string, dotPitchMm: number, options: CalibrationDetectOptions = {}): Promise<CalibrationSession> {
+    const ack = await this.request("CalibrationStart", { cameraId, dotPitchMm, ...detectParams(options) }, 30000);
+    return wireSession(ack);
+  }
+
+  /** New frame, same session; taught dots whose index still matches are kept. */
+  public async calibrationRedetect(sessionId: string, options: CalibrationDetectOptions = {}): Promise<CalibrationSession> {
+    const ack = await this.request("CalibrationRedetect", { sessionId, ...detectParams(options) }, 30000);
+    return wireSession(ack, sessionId);
+  }
+
+  /** Record the current TCP position for a dot. Resolves the full taught list. */
+  public async calibrationTeachDot(sessionId: string, dotIndex: number): Promise<CalibrationTaughtDot[]> {
+    const ack = await this.request("CalibrationTeachDot", { sessionId, dotIndex });
+    return wireTaught(ack.taught);
+  }
+
+  public async calibrationUnteachDot(sessionId: string, dotIndex: number): Promise<CalibrationTaughtDot[]> {
+    const ack = await this.request("CalibrationUnteachDot", { sessionId, dotIndex });
+    return wireTaught(ack.taught);
+  }
+
+  /** Fit sheet → robot from the taught dots; saves it as the camera's calibration unless `save` is false. */
+  public async calibrationSolve(sessionId: string, save = true): Promise<CalibrationSolveResult> {
+    const ack = await this.request("CalibrationSolve", { sessionId, save });
+    const calibration = wireCalibration(ack.calibration);
+    if (!calibration) throw new Error("The controller returned no calibration");
+    return {
+      calibration,
+      taughtRmsMm:        num(ack.taughtRmsMm, calibration.taughtRmsMm),
+      taughtMaxMm:        num(ack.taughtMaxMm, calibration.taughtMaxMm),
+      pitchScaleEstimate: num(ack.pitchScaleEstimate, calibration.pitchScaleEstimate),
+      warnings:           strArray(ack.warnings),
+    };
+  }
+
+  /** Map a normalized image point to robot X/Y/Z via a saved calibration (cameraId) or a solved session. */
+  public async calibrationPredict(source: { cameraId: string } | { sessionId: string }, u: number, v: number): Promise<CalibrationRobotPoint> {
+    const ack = await this.request("CalibrationPredict", { ...source, u, v });
+    const robot = wirePoint(parseMaybeJson(ack.robot));
+    if (!robot) throw new Error("The controller returned no prediction");
+    return robot;
+  }
+
+  public async calibrationDiscard(sessionId: string): Promise<void> {
+    await this.request("CalibrationDiscard", { sessionId });
+  }
+
+  /** Absolute URL for a server-relative path such as a session's `imageUrl`. */
+  public calibrationImageUrl(imageUrl: string): string | null {
+    if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+    const base = this.httpBaseUrl();
+    return base ? `${base}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}` : null;
+  }
+
+  /** Straight-line move to a Cartesian target (same wire shape the jog page's type-a-position move sends). */
+  public moveL(target: { x: number; y: number; z: number; rz: number }, speed?: number) {
+    return this.sendCommand("MoveL", { X: target.x, Y: target.y, Z: target.z, RZ: target.rz, Speed: speed });
   }
 
   // ── Grid repository ───────────────────────────────────────────────────────
@@ -961,6 +1173,18 @@ export class RobotConnectService {
 
   public executeBuiltProgram(name: string) {
     return this.sendCommand("ExecuteBuiltProgram", { name });
+  }
+
+  /**
+   * "Run Again" for a Complete program: reset it, then start it. Built programs
+   * run in the controller's executor; external programs are flagged to start.
+   * One place for the sequence so every page behaves identically.
+   */
+  public runProgramAgain(name: string, isBuilt: boolean) {
+    this.resetProgram(name).catch(() => {});
+    return isBuilt
+      ? this.executeBuiltProgram(name).catch(() => {})
+      : this.startProgram(name).catch(() => {});
   }
 
   public stopBuiltProgram(name: string) {
@@ -1065,6 +1289,17 @@ export class RobotConnectService {
     jogSlowSpeed: number;
     jogNormalSpeed: number;
     jogFastSpeed: number;
+    astroStepsPerRevM1: number;
+    astroStepsPerRevM2: number;
+    astroStepsPerRevM3: number;
+    astroStepsPerRevM4: number;
+    astroGearRatioM1: number;
+    astroGearRatioM2: number;
+    astroGearRatioM3: number;
+    astroGearRatioM4: number;
+    astroJoint1GearRatio: number;
+    astroJoint4GearRatio: number;
+    astroCoreXyPulleyPcdMm: number;
     cncStepsPerRevX: number;
     cncStepsPerRevY: number;
     cncStepsPerRevZ: number;
@@ -1111,6 +1346,17 @@ export class RobotConnectService {
     jogSlowSpeed?: number;
     jogNormalSpeed?: number;
     jogFastSpeed?: number;
+    astroStepsPerRevM1?: number;
+    astroStepsPerRevM2?: number;
+    astroStepsPerRevM3?: number;
+    astroStepsPerRevM4?: number;
+    astroGearRatioM1?: number;
+    astroGearRatioM2?: number;
+    astroGearRatioM3?: number;
+    astroGearRatioM4?: number;
+    astroJoint1GearRatio?: number;
+    astroJoint4GearRatio?: number;
+    astroCoreXyPulleyPcdMm?: number;
     cncStepsPerRevX?: number;
     cncStepsPerRevY?: number;
     cncStepsPerRevZ?: number;
@@ -1137,6 +1383,15 @@ export class RobotConnectService {
     joint4Max?: number | null;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
+  }
+
+  /**
+   * Reset configuration to defaults. `"motorSetup"` resets only steps/rev + gear ratios;
+   * `"all"` resets every motion/tuning setting (robot type and device toggles are kept).
+   * Resolves the controller's resulting config so the caller can refresh without re-fetching.
+   */
+  public resetRobotConfig(section: "motorSetup" | "all" = "all") {
+    return this.sendCommand("ResetRobotConfig", { section });
   }
 
   // ── Joint-limit fault recovery ─────────────────────────────────────────────
@@ -1214,7 +1469,7 @@ export class RobotConnectService {
     width?: number;
     height?: number;
     targetFps?: number;
-  }) {
+  } & CameraSourceParams) {
     return this.sendCommand("AddCamera", {
       name:        params.name,
       deviceIndex: params.deviceIndex,
@@ -1222,6 +1477,7 @@ export class RobotConnectService {
       width:       params.width       ?? 640,
       height:      params.height      ?? 480,
       targetFps:   params.targetFps   ?? 15,
+      ...cameraSourceParams(params),
     });
   }
 
@@ -1237,8 +1493,79 @@ export class RobotConnectService {
     width: number;
     height: number;
     targetFps: number;
-  }) {
-    return this.sendCommand("SetCameraConfig", params);
+  } & CameraSourceParams) {
+    const {
+      sourceType, url, username, password, transport,
+      host, port, stream, codec, decoder, ffmpegPath, hwaccel,
+      ...rest
+    } = params;
+    return this.sendCommand("SetCameraConfig", {
+      ...rest,
+      ...cameraSourceParams({ sourceType, url, username, password, transport, host, port, stream, codec, decoder, ffmpegPath, hwaccel }),
+    });
+  }
+
+  /**
+   * Open a stream URL, or log into a Sofia (DVRIP/XMeye) camera, once on the
+   * controller and grab one frame (docs/network-cameras.md). A failed test
+   * (`ok: false`, error code) is a result, not an exception; an older
+   * controller throws UnsupportedCommandError.
+   */
+  public async testCameraSource(params: {
+    sourceType?: "network";
+    url: string;
+    username?: string;
+    password?: string;
+    transport?: CameraTransport;
+    timeoutMs?: number;
+  } | {
+    sourceType: "sofia";
+    host: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    stream?: CameraStream;
+    codec?: CameraCodec;
+    decoder?: CameraDecoder;
+    ffmpegPath?: string;
+    timeoutMs?: number;
+  }): Promise<CameraSourceTestResult> {
+    const timeoutMs = params.timeoutMs ?? 8000;
+    const wire: Record<string, unknown> = { timeoutMs };
+    if (params.sourceType === "sofia") {
+      wire.sourceType = "sofia";
+      wire.host       = params.host;
+      if (params.port != null) wire.port = params.port;
+      if (params.username)     wire.username   = params.username;
+      if (params.password)     wire.password   = params.password;
+      if (params.stream)       wire.stream     = params.stream;
+      if (params.codec)        wire.codec      = params.codec;
+      if (params.decoder)      wire.decoder    = params.decoder;
+      if (params.ffmpegPath)   wire.ffmpegPath = params.ffmpegPath;
+    } else {
+      wire.url = params.url;
+      if (params.username)  wire.username  = params.username;
+      if (params.password)  wire.password  = params.password;
+      if (params.transport) wire.transport = params.transport;
+    }
+    const failed = (error: string): CameraSourceTestResult => ({ ok: false, width: 0, height: 0, openMs: 0, firstFrameMs: 0, error });
+    try {
+      // Give the controller its own open timeout plus headroom before the socket gives up.
+      const ack = await this.request("TestCameraSource", wire, timeoutMs + 5000);
+      return {
+        ok:              true,
+        width:           num(ack.width),
+        height:          num(ack.height),
+        openMs:          num(ack.openMs),
+        firstFrameMs:    num(ack.firstFrameMs),
+        loginMs:         ack.loginMs         !== undefined ? num(ack.loginMs) : undefined,
+        detectedCodec:   ack.detectedCodec   !== undefined ? (ack.detectedCodec as "h264" | "hevc" | "unknown") : undefined,
+        firstFrameBytes: ack.firstFrameBytes !== undefined ? num(ack.firstFrameBytes) : undefined,
+      };
+    } catch (e) {
+      if (e instanceof CommandFailedError) return failed(e.message || "openFailed");
+      throw e;
+    }
   }
 
   public async getCameraResolutions(deviceIndex: number): Promise<{ width: number; height: number }[]> {
@@ -1356,7 +1683,10 @@ export class RobotConnectService {
       this.relayIO = { ...this.relayIO, names };
       this.emitRelayIO();
     }
-    return this.sendCommand("RenameRelay", { relay, name });
+    // Refresh from the controller's config afterwards — without this a save
+    // with the relay board disconnected looked like it did nothing.
+    return this.sendCommand("RenameRelay", { relay, name })
+      .then((v) => { this.getIO().catch(() => {}); return v; });
   }
 
   // ── DXF files ──────────────────────────────────────────────────────────────
@@ -1401,5 +1731,230 @@ export class RobotConnectService {
   }
 }
 
+// ── Wire helpers for the program-editor commands ─────────────────────────────
+
+/** The controller does not know the command (an older build). Hide the feature. */
+export class UnsupportedCommandError extends Error {
+  constructor(public readonly command: string) {
+    super(`${command} is not supported by this controller`);
+    this.name = "UnsupportedCommandError";
+  }
+}
+
+/** The controller ran the command and reported `ok: false` with this message. */
+export class CommandFailedError extends Error {
+  constructor(public readonly command: string, message: string) {
+    super(message);
+    this.name = "CommandFailedError";
+  }
+}
+
+export function isUnsupportedCommand(e: unknown): e is UnsupportedCommandError {
+  return e instanceof UnsupportedCommandError;
+}
+
+// sendCommand's own rejections. Those say nothing about whether the command
+// exists, so they stay plain errors rather than CommandFailedError.
+const TRANSPORT_FAILURE = /^(Not connected|Command ".*" timed out)$/;
+
+function toCommandError(command: string, reason: unknown): Error {
+  if (reason instanceof Error) return reason;
+  const text = typeof reason === "string" ? reason : reason == null ? "" : String(reason);
+  if (/unknown\s*command/i.test(text)) return new UnsupportedCommandError(command);
+  if (TRANSPORT_FAILURE.test(text)) return new Error(text);
+  return new CommandFailedError(command, text || `${command} failed`);
+}
+
+const VARIABLE_KINDS = ["number", "boolean", "string", "image", "list", "computed"] as const;
+const ELEMENT_TYPES  = ["Number", "Boolean", "Point", "Record"] as const;
+
+type WireRecord = Record<string, unknown>;
+
+/** Arrays may arrive as JSON strings, the way GetBuiltPrograms sends its list. */
+function wireArray(v: unknown): WireRecord[] {
+  let parsed = v;
+  if (typeof v === "string") {
+    try { parsed = JSON.parse(v); } catch { return []; }
+  }
+  return Array.isArray(parsed)
+    ? parsed.filter((x): x is WireRecord => !!x && typeof x === "object")
+    : [];
+}
+
+function isNamed(r: WireRecord): r is WireRecord & { name: string } {
+  return typeof r.name === "string" && r.name.length > 0;
+}
+
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/** Symbols are stored without their `$` whichever way the controller spells them. */
+const stripSigil = (name: string): string => name.replace(/^\$/, "");
+
+function normalizeProblem(r: WireRecord): ValidationProblem | null {
+  const message = str(r.message);
+  if (!message) return null;
+  // The contract does not pin stepPath's shape; accept a string or an array of segments.
+  const path = Array.isArray(r.stepPath) ? r.stepPath.map(String).join(" › ") : str(r.stepPath);
+  return {
+    stepId:   r.stepId == null ? "" : String(r.stepId),
+    stepPath: path,
+    field:    str(r.field) || undefined,
+    severity: r.severity === "warning" ? "warning" : "error",
+    code:     str(r.code),
+    message,
+  };
+}
+
+function wireProgram(v: unknown, fallbackName: string): BuiltProgram {
+  let parsed = v;
+  if (typeof v === "string") {
+    try { parsed = JSON.parse(v); } catch { parsed = null; }
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("The controller returned no program");
+  const p = parsed as Partial<BuiltProgram>;
+  return {
+    ...p,
+    name:              p.name ?? fallbackName,
+    description:       p.description ?? "",
+    steps:             Array.isArray(p.steps) ? p.steps : [],
+    lastUpdatedUnixMs: p.lastUpdatedUnixMs ?? Date.now(),
+  };
+}
+
+// ── Wire helpers for the calibration commands ────────────────────────────────
+
+const num = (v: unknown, fallback = 0): number => {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const strArray = (v: unknown): string[] => {
+  const parsed = parseMaybeJson(v);
+  return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+};
+
+/** Objects may arrive as JSON strings, the way GetCameras sends its list. */
+function parseMaybeJson(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+function wirePoint(v: unknown): CalibrationRobotPoint | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as WireRecord;
+  return { x: num(r.x), y: num(r.y), z: num(r.z) };
+}
+
+function wireMatrix(v: unknown): Matrix3 {
+  const rows = Array.isArray(v) ? v : [];
+  const row = (k: number): [number, number, number] => {
+    const r = Array.isArray(rows[k]) ? (rows[k] as unknown[]) : [];
+    return [num(r[0], k === 0 ? 1 : 0), num(r[1], k === 1 ? 1 : 0), num(r[2], k === 2 ? 1 : 0)];
+  };
+  return [row(0), row(1), row(2)];
+}
+
+function wireTaught(v: unknown): CalibrationTaughtDot[] {
+  return wireArray(v).map(t => ({
+    dotIndex: num(t.dotIndex, -1),
+    i:        num(t.i),
+    j:        num(t.j),
+    robot:    wirePoint(t.robot) ?? { x: 0, y: 0, z: 0 },
+  })).filter(t => t.dotIndex >= 0);
+}
+
+function detectParams(o: CalibrationDetectOptions): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  if (o.minDotAreaPx !== undefined) p.minDotAreaPx = o.minDotAreaPx;
+  if (o.maxDotAreaPx !== undefined) p.maxDotAreaPx = o.maxDotAreaPx;
+  if (o.darkDots !== undefined) p.darkDots = o.darkDots;
+  return p;
+}
+
+function wireSession(ack: WireRecord, fallbackSessionId = ""): CalibrationSession {
+  const sessionId = str(ack.sessionId) || fallbackSessionId;
+  return {
+    sessionId,
+    imageWidth:  num(ack.imageWidth),
+    imageHeight: num(ack.imageHeight),
+    dots: wireArray(ack.dots).map(d => ({
+      index: num(d.index), i: num(d.i), j: num(d.j), u: num(d.u), v: num(d.v), areaPx: num(d.areaPx),
+    })),
+    gridRows:  num(ack.gridRows),
+    gridCols:  num(ack.gridCols),
+    gridRmsPx: num(ack.gridRmsPx),
+    warnings:  strArray(ack.warnings),
+    imageUrl:  str(ack.imageUrl) || `/calibration/${sessionId}/image`,
+    taught:    ack.taught === undefined ? undefined : wireTaught(ack.taught),
+  };
+}
+
+function wireCalibration(v: unknown): CameraCalibration | null {
+  const parsed = parseMaybeJson(v);
+  if (!parsed || typeof parsed !== "object") return null;
+  const c = parsed as WireRecord;
+  const s2r = (c.sheetToRobot && typeof c.sheetToRobot === "object" ? c.sheetToRobot : {}) as WireRecord;
+  return {
+    cameraId:     str(c.cameraId),
+    imageWidth:   num(c.imageWidth),
+    imageHeight:  num(c.imageHeight),
+    dotPitchMm:   num(c.dotPitchMm),
+    pixelToSheet: wireMatrix(c.pixelToSheet),
+    sheetToRobot: { cos: num(s2r.cos, 1), sin: num(s2r.sin), tx: num(s2r.tx), ty: num(s2r.ty) },
+    pixelToRobot: wireMatrix(c.pixelToRobot),
+    planeZ:       num(c.planeZ),
+    taughtDots: wireArray(c.taughtDots).map(t => ({
+      i: num(t.i), j: num(t.j), u: num(t.u), v: num(t.v),
+      robot: wirePoint(t.robot) ?? { x: 0, y: 0, z: 0 },
+      residualMm: t.residualMm === undefined ? undefined : num(t.residualMm),
+    })),
+    gridRows:           num(c.gridRows),
+    gridCols:           num(c.gridCols),
+    dotCount:           num(c.dotCount),
+    gridRmsPx:          num(c.gridRmsPx),
+    taughtRmsMm:        num(c.taughtRmsMm),
+    taughtMaxMm:        num(c.taughtMaxMm),
+    pitchScaleEstimate: num(c.pitchScaleEstimate, 1),
+    mirrored:           c.mirrored === true,
+    activeTool:         str(c.activeTool),
+    calibratedUnixMs:   num(c.calibratedUnixMs),
+  };
+}
+
 
 export const robotClient = new RobotConnectService()
+// ── Network camera source params (docs/network-cameras.md) ──────────────────
+
+type CameraSourceParams = {
+  sourceType?: CameraSourceType;
+  url?: string;
+  username?: string;
+  password?: string;
+  transport?: CameraTransport;
+  // ── Sofia / DVRIP (XMeye) cameras ──
+  host?: string;
+  port?: number;
+  stream?: CameraStream;
+  codec?: CameraCodec;
+  decoder?: CameraDecoder;
+  ffmpegPath?: string;
+  hwaccel?: string;
+};
+
+/** Only the fields that were given, so a plain USB add/save stays exactly as before. */
+function cameraSourceParams(p: CameraSourceParams): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (p.sourceType  !== undefined) out.sourceType  = p.sourceType;
+  if (p.url         !== undefined) out.url         = p.url;
+  if (p.username    !== undefined) out.username    = p.username;
+  if (p.password    !== undefined) out.password    = p.password;
+  if (p.transport   !== undefined) out.transport   = p.transport;
+  if (p.host        !== undefined) out.host        = p.host;
+  if (p.port        !== undefined) out.port        = p.port;
+  if (p.stream      !== undefined) out.stream      = p.stream;
+  if (p.codec       !== undefined) out.codec       = p.codec;
+  if (p.decoder     !== undefined) out.decoder     = p.decoder;
+  if (p.ffmpegPath  !== undefined) out.ffmpegPath  = p.ffmpegPath;
+  if (p.hwaccel     !== undefined) out.hwaccel     = p.hwaccel;
+  return out;
+}

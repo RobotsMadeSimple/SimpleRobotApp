@@ -3,6 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Check } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { CameraState } from "@/src/models/robotModels";
+import { accents, colors } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 
 export function CameraPickerModal({ visible, cameras, selected, onSelect, onClose }: {
@@ -24,12 +25,12 @@ export function CameraPickerModal({ visible, cameras, selected, onSelect, onClos
             style={[ves.sheetRow, cam.id === selected && ves.sheetRowActive]}
             onPress={() => { onSelect(cam.id); onClose(); }}
           >
-            <View style={[ves.dot, { backgroundColor: cam.connected ? "#22c55e" : "#d1d5db" }]} />
+            <View style={[ves.dot, { backgroundColor: cam.connected ? colors.success : colors.borderStrong }]} />
             <View style={{ flex: 1 }}>
               <Text style={ves.sheetRowName}>{cam.name || cam.id}</Text>
               {cam.name && <Text style={ves.sheetRowSub}>{cam.id}</Text>}
             </View>
-            {cam.id === selected && <Check size={16} color="#0891b2" />}
+            {cam.id === selected && <Check size={16} color={accents.cyan} />}
           </TouchableOpacity>
         ))}
       </ScrollView>

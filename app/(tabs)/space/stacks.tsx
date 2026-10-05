@@ -1,28 +1,20 @@
-import { wide } from "@/src/components/ui/responsive";
-import {
-  NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
+import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { accents, Button, colors, EmptyState, InfoTip, ListRow, PageHeader, SectionHeader, spacing } from "@/src/components/ui/kit";
 import { RobotStack } from "@/src/models/robotModels";
 import { useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ChevronRight,
-  Layers,
-  Plus,
-  Trash2 } from "lucide-react-native";
-import {
-  Alert,
-  FlatList,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Layers, Plus } from "lucide-react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 
 export default function StacksPage() {
   const stacks = useStacks();
+  const wideContent = useWideContent();
+  // Desktop-tier only: two columns of stack cards, one on tablets/phones.
+  const twoCol = usePaneLayout() === "desktop";
 
   function handleDelete(item: RobotStack) {
     appAlert(
@@ -40,56 +32,59 @@ export default function StacksPage() {
   }
 
   const renderItem = ({ item }: { item: RobotStack }) => (
-    <TouchableOpacity
-      style={gs.row}
+    <ListRow
+      title={item.name}
+      subtitle={
+        `Base: ${item.basePointName || "—"}\n` +
+        `Offset (${item.offsetX}, ${item.offsetY}, ${item.offsetZ})` +
+        (item.maxCount != null ? `  ·  max ${item.maxCount}` : "")
+      }
+      subtitleLines={2}
+      icon={<Layers size={20} color={accents.purple} />}
+      iconColor={accents.purpleSoft}
       onPress={() => router.push(`/space/stack-edit?id=${encodeURIComponent(item.id)}`)}
-      activeOpacity={0.7}
-    >
-      <View style={gs.iconTile}>
-        <Layers size={20} color="#7c3aed" />
-      </View>
-      <View style={gs.rowText}>
-        <Text style={gs.rowName}>{item.name}</Text>
-        <Text style={gs.rowDesc} numberOfLines={2}>
-          Base: {item.basePointName || "—"}
-          {"\n"}
-          Offset ({item.offsetX}, {item.offsetY}, {item.offsetZ})
-          {item.maxCount != null ? `  ·  max ${item.maxCount}` : ""}
-        </Text>
-      </View>
-      <DeleteIconButton size={15} style={gs.deleteBtn} onPress={() => handleDelete(item)} />
-      <ChevronRight size={16} color="#d1d5db" />
-    </TouchableOpacity>
+      chevron
+      right={<DeleteIconButton size={15} style={gs.deleteBtn} onPress={() => handleDelete(item)} />}
+      style={twoCol && gs.stackCard}
+    />
   );
 
   return (
     <View style={gs.page}>
       <NotConnectedOverlay />
-      <SubPageHeader title="Stacks" />
+      <PageHeader title="Stacks" subtitle="1D position arrays with optional round-robin indexing" />
 
       <FlatList
+        key={twoCol ? "2col" : "1col"}
         data={stacks}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={[gs.listContent, wide.content]}
+        numColumns={twoCol ? 2 : 1}
+        columnWrapperStyle={twoCol ? gs.columnWrapper : undefined}
+        contentContainerStyle={[gs.listContent, wideContent]}
+        ListHeaderComponent={
+          <SectionHeader
+            title="Stacks"
+            style={gs.hint}
+            right={<InfoTip text="A stack steps from a base point along one offset: each index multiplies the step offset. Set a max count to make the index wrap around (round-robin) instead of growing without bound." />}
+          />
+        }
         ListEmptyComponent={
-          <View style={gs.emptyContainer}>
-            <Layers size={40} color="#d1d5db" />
-            <Text style={gs.emptyTitle}>No Stacks</Text>
-            <Text style={gs.emptyBody}>
-              Tap below to define a 1D position array.
-            </Text>
-          </View>
+          <EmptyState
+            icon={<Layers size={40} color={colors.textFaint} />}
+            title="No Stacks"
+            subtitle="Tap below to define a 1D position array."
+          />
         }
         ListFooterComponent={
-          <TouchableOpacity
+          <Button
+            variant="dashed"
+            label="New Stack"
+            icon={<Plus size={16} color={accents.purple} />}
             style={gs.addCard}
+            textStyle={gs.addCardText}
             onPress={() => router.push("/space/stack-edit")}
-            activeOpacity={0.7}
-          >
-            <Plus size={16} color="#7c3aed" />
-            <Text style={gs.addCardText}>New Stack</Text>
-          </TouchableOpacity>
+          />
         }
       />
     </View>
@@ -99,55 +94,16 @@ export default function StacksPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const gs = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#f3f4f6" },
+  page: { flex: 1, backgroundColor: colors.background },
 
-  listContent: { padding: 16, paddingBottom: 32, gap: 10 },
+  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm + 2 },
+  hint: { marginBottom: spacing.sm },
 
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  iconTile: {
-    width: 42, height: 42, borderRadius: 11,
-    backgroundColor: "#f3e8ff",
-    justifyContent: "center", alignItems: "center",
-  },
-  rowText:  { flex: 1, gap: 4 },
-  rowName:  { fontSize: 15, fontWeight: "600", color: "#111827" },
-  rowDesc:  { fontSize: 12, color: "#9ca3af", lineHeight: 17 },
-  deleteBtn: { padding: 4 },
+  columnWrapper: { gap: spacing.sm + 2 },
+  stackCard: { flex: 1 },
 
-  addCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1.5,
-    borderColor: "#7c3aed",
-    borderRadius: 14,
-    paddingVertical: 14,
-    backgroundColor: "transparent",
-    marginTop: 2,
-  },
-  addCardText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#7c3aed",
-  },
+  deleteBtn: { padding: spacing.xs },
 
-  emptyContainer: { alignItems: "center", marginTop: 60, marginBottom: 24, gap: 10 },
-  emptyTitle:     { fontSize: 16, fontWeight: "700", color: "#374151" },
-  emptyBody: {
-    fontSize: 13, color: "#9ca3af",
-    textAlign: "center", paddingHorizontal: 24,
-  },
+  addCard: { marginTop: 2, borderColor: accents.purple },
+  addCardText: { color: accents.purple },
 });

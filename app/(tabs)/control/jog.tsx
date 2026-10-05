@@ -1,87 +1,143 @@
-import { wide } from "@/src/components/ui/responsive";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import JogPad from "@/src/components/ui/JogPad";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  Button,
+  buttonTextColor,
+  Card,
+  Chip,
+  ChipGroup,
+  colors,
+  Divider,
+  EmptyState,
+  FormRow,
+  InfoTip,
+  Input,
+  PageHeader,
+  PositionReadout,
+  RadioRow,
+  type ReadoutAxis,
+  radii,
+  SegmentedControl,
+  shadows,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { Point } from "@/src/models/robotModels";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, Tabs, useFocusEffect } from "expo-router";
 import {
   ArrowRight,
   ChevronDown,
+  ChevronRight,
   Grid2X2,
+  MapPin,
   MousePointerClick,
-  Move,
+  Move3d,
+  Navigation,
   OctagonX,
+  Pencil,
   Plus,
-  Rotate3d,
+  RotateCw,
   Search,
   Wrench,
   X,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import React, { useCallback, useEffect, useState } from "react";
 import {
+  LayoutChangeEvent,
   Modal,
-  PanResponder,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 
+// ── Layout breakpoints (measured on the content area, not the window) ─────────
+// The jog pad sizes itself to ~405px, so the column that hosts it is fixed at
+// PAD_COL_WIDTH and the config / points columns take the remaining width. The
+// thresholds below are the narrowest widths at which each arrangement still has
+// real gutters rather than a squeeze.
+const PAD_COL_WIDTH = 440;
+const THREE_COL_MIN = 1140; // config | pad + STOP/Teach | points
+const TWO_COL_MIN    = 810; // config (+ points) | pad + STOP/Teach
+/** Rough NavRail width, used only to seed the layout before onLayout measures. */
+const RAIL_ESTIMATE = 216;
+
 // ── Picker modal ──────────────────────────────────────────────────────────────
+// Generalized beyond a flat string list so mode/speed pickers can carry a
+// one-line description per row and an InfoTip beside the modal title (the
+// narrow grid tiles relocate their InfoTips here — see JOG_MODE_INFO/SPEED_INFO).
+type PickerOption = { value: string; label?: string; description?: string };
+
+function normalizePickerOption(opt: string | PickerOption): PickerOption {
+  return typeof opt === "string" ? { value: opt } : opt;
+}
+
 function PickerModal({
   visible,
   title,
+  titleInfo,
   options,
   value,
   onSelect,
   onClose,
+  footnote,
   viewLabel,
   viewRoute,
 }: {
   visible: boolean;
   title: string;
-  options: string[];
+  /** Shown as an InfoTip (ⓘ) beside the title — relocated field-level InfoTips land here. */
+  titleInfo?: string;
+  options: (string | PickerOption)[];
   value: string;
   onSelect: (v: string) => void;
   onClose: () => void;
+  /** Small note below the option list (e.g. a mode-dependent caveat). */
+  footnote?: string;
   viewLabel?: string;
   viewRoute?: string;
 }) {
+  const normalized = options.map(normalizePickerOption);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={styles.pickerOverlay} onPress={onClose} activeOpacity={1}>
         <TouchableOpacity style={styles.pickerCard} onPress={() => {}} activeOpacity={1}>
           <View style={styles.dialogHeader}>
-            <Text style={styles.dialogTitle}>{title}</Text>
+            <View style={styles.dialogTitleRow}>
+              <Text style={styles.dialogTitle}>{title}</Text>
+              {titleInfo && <InfoTip text={titleInfo} />}
+            </View>
             <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color="#9ca3af" />
+              <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {options.map((opt, i) => {
-              const active = opt === value;
-              const isLast = i === options.length - 1;
+            {normalized.map((opt, i) => {
+              const active = opt.value === value;
+              const isLast = i === normalized.length - 1;
               return (
-                <TouchableOpacity
-                  key={opt}
-                  style={[styles.pickerRow, !isLast && styles.pickerRowBorder, active && styles.pickerRowActive]}
-                  onPress={() => { onSelect(opt); onClose(); }}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.radioRing, active && styles.radioRingActive]}>
-                    {active && <View style={styles.radioDot} />}
-                  </View>
-                  <Text style={[styles.pickerRowText, active && styles.pickerRowTextActive]}>
-                    {opt}
-                  </Text>
-                </TouchableOpacity>
+                <View key={opt.value}>
+                  <RadioRow
+                    title={opt.label ?? opt.value}
+                    subtitle={opt.description}
+                    selected={active}
+                    onPress={() => { onSelect(opt.value); onClose(); }}
+                  />
+                  {!isLast && <Divider />}
+                </View>
               );
             })}
           </ScrollView>
+
+          {footnote && <Text style={styles.pickerFootnote}>{footnote}</Text>}
 
           {viewLabel && viewRoute && (
             <TouchableOpacity
@@ -90,7 +146,7 @@ function PickerModal({
               activeOpacity={0.7}
             >
               <Text style={styles.pickerViewLinkText}>{viewLabel}</Text>
-              <ArrowRight size={14} color="#2563eb" />
+              <ArrowRight size={14} color={colors.accent} />
             </TouchableOpacity>
           )}
         </TouchableOpacity>
@@ -108,6 +164,7 @@ function Selector({
   icon,
   viewLabel,
   viewRoute,
+  mutedValue,
 }: {
   label: string;
   value: string;
@@ -116,6 +173,8 @@ function Selector({
   icon?: React.ReactNode;
   viewLabel?: string;
   viewRoute?: string;
+  /** Dim the value text — set by call sites for an unset "None" value. */
+  mutedValue?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -126,8 +185,8 @@ function Selector({
         <View style={styles.selectorTextStack}>
           <Text style={styles.selectorLabel}>{label}</Text>
           <View style={styles.selectorValueRow}>
-            <Text style={styles.selectorValue}>{value}</Text>
-            <ChevronDown size={13} color="#9ca3af" />
+            <Text style={[styles.selectorValue, mutedValue && styles.selectorValueMuted]}>{value}</Text>
+            <ChevronDown size={13} color={colors.textFaint} />
           </View>
         </View>
       </AnimatedPressable>
@@ -143,6 +202,60 @@ function Selector({
         viewRoute={viewRoute}
       />
     </View>
+  );
+}
+
+// ── Grid selector tile (narrow layout) ─────────────────────────────────────────
+// Compact 2×2 replacement for the config card's SegmentedControl/ChipGroup/
+// Selector row on narrow screens: caption + current value + chevron, tap opens
+// the same PickerModal machinery as the LOCAL/TOOL Selector above.
+function GridSelectorTile({
+  label,
+  value,
+  options,
+  onSelect,
+  titleInfo,
+  footnote,
+  viewLabel,
+  viewRoute,
+  mutedValue,
+}: {
+  label: string;
+  value: string;
+  options: (string | PickerOption)[];
+  onSelect: (v: string) => void;
+  titleInfo?: string;
+  footnote?: string;
+  viewLabel?: string;
+  viewRoute?: string;
+  /** Dim the value text — set by call sites for an unset "None" value. */
+  mutedValue?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Card onPress={() => setOpen(true)} style={styles.gridTile}>
+        <Text style={styles.selectorLabel}>{label}</Text>
+        <View style={styles.gridTileValueRow}>
+          <Text style={[styles.gridTileValue, mutedValue && styles.gridTileValueMuted]} numberOfLines={1}>{value}</Text>
+          <ChevronDown size={14} color={colors.textFaint} />
+        </View>
+      </Card>
+
+      <PickerModal
+        visible={open}
+        title={label}
+        titleInfo={titleInfo}
+        options={options}
+        value={value}
+        onSelect={onSelect}
+        onClose={() => setOpen(false)}
+        footnote={footnote}
+        viewLabel={viewLabel}
+        viewRoute={viewRoute}
+      />
+    </>
   );
 }
 
@@ -173,24 +286,29 @@ function TeachModal({ onClose }: { onClose: () => void }) {
     <TouchableOpacity style={styles.overlay} onPress={onClose} activeOpacity={1}>
       <TouchableOpacity style={styles.dialog} onPress={() => {}} activeOpacity={1}>
         <View style={styles.dialogHeader}>
-          <Text style={styles.dialogTitle}>
-            {mode === "list" ? "Teach Point" : "New Point"}
-          </Text>
+          <View style={styles.dialogTitleRow}>
+            <Text style={styles.dialogTitle}>
+              {mode === "list" ? "Teach Point" : "New Point"}
+            </Text>
+            {mode === "list" && (
+              <InfoTip text="Tap a saved point to overwrite it with the robot's current position — the point's stored coordinates are replaced and this cannot be undone. Use New Point to save the current position under a new name instead." />
+            )}
+          </View>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.7}>
-            <X size={18} color="#9ca3af" />
+            <X size={18} color={colors.textFaint} />
           </TouchableOpacity>
         </View>
 
         {mode === "list" ? (
           <>
             <View style={styles.searchRow}>
-              <Search size={15} color="#9ca3af" />
+              <Search size={15} color={colors.textFaint} />
               <TextInput
                 style={styles.searchInput}
                 value={search}
                 onChangeText={setSearch}
                 placeholder="Search points…"
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={colors.textFaint}
                 returnKeyType="search"
                 clearButtonMode="while-editing"
               />
@@ -202,47 +320,46 @@ function TeachModal({ onClose }: { onClose: () => void }) {
                   {points.length === 0 ? "No points saved yet" : "No matches"}
                 </Text>
               )}
-              {filtered.map((p) => (
-                <TouchableOpacity key={p.name} style={styles.pointRow} onPress={() => teachPoint(p.name)} activeOpacity={0.7}>
-                  <Text style={styles.pointName}>{p.name}</Text>
-                  <Text style={styles.pointCoords}>
-                    {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
-                  </Text>
-                </TouchableOpacity>
+              {filtered.map((p, i) => (
+                <View key={p.name}>
+                  <TouchableOpacity style={styles.pointRow} onPress={() => teachPoint(p.name)} activeOpacity={0.7}>
+                    <Text style={styles.pointName}>{p.name}</Text>
+                    <Text style={styles.pointCoords}>
+                      {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
+                    </Text>
+                  </TouchableOpacity>
+                  {i < filtered.length - 1 && <Divider />}
+                </View>
               ))}
             </ScrollView>
 
             <TouchableOpacity style={styles.newPointButton} onPress={() => setMode("new")} activeOpacity={0.7}>
-              <Plus size={16} color="#2563eb" />
+              <Plus size={16} color={colors.accent} />
               <Text style={styles.newPointText}>New Point</Text>
             </TouchableOpacity>
           </>
         ) : (
           <>
-            <Text style={styles.inputLabel}>Point name</Text>
-            <TextInput
-              style={styles.textInput}
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="e.g. PickUp1"
-              placeholderTextColor="#9ca3af"
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={teachNew}
-            />
+            <FormRow label="Point name" style={styles.newPointForm}>
+              <Input
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="e.g. PickUp1"
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={teachNew}
+              />
+            </FormRow>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setMode("list")} activeOpacity={0.7}>
-                <Text style={styles.modalCancelText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirm, !newName.trim() && styles.disabled]}
-                onPress={teachNew}
+              <Button label="Back" variant="secondary" style={styles.modalCancelFlex} onPress={() => setMode("list")} />
+              <Button
+                label="Teach Here"
+                variant="primary"
+                icon={<MousePointerClick size={15} color={buttonTextColor("primary")} />}
                 disabled={!newName.trim()}
-                activeOpacity={0.7}
-              >
-                <MousePointerClick size={15} color="white" />
-                <Text style={styles.modalConfirmText}>Teach Here</Text>
-              </TouchableOpacity>
+                style={styles.modalConfirmFlex}
+                onPress={teachNew}
+              />
             </View>
           </>
         )}
@@ -250,6 +367,37 @@ function TeachModal({ onClose }: { onClose: () => void }) {
     </TouchableOpacity>
   );
 }
+
+// ── Jog mode / speed copy (narrow grid tiles) ──────────────────────────────────
+// Same wording as the InfoTips that sit above the SegmentedControl/ChipGroup in
+// the wide config card — relocated verbatim into the modal title's InfoTip so
+// none of the explanatory text is lost, plus a distilled one-line description
+// per row and a footnote for the Tool-mode step caveat.
+const JOG_MODE_INFO =
+  "XYZ jogs along the room/local axes. Tool jogs along the tool tip's own axes " +
+  "(e.g. it always plunges straight into the tip). Joint moves a single robot " +
+  "joint at a time.";
+const SPEED_INFO =
+  "Slow/Normal/Fast jog continuously while held, at the speeds set on Robot › " +
+  "Configure. The 0.1/1/10 mm chips take one precise step per tap in XYZ and " +
+  "Joint mode — in Tool mode they instead jog continuously at a very slow speed.";
+const SPEED_FOOTNOTE =
+  "In Tool mode, the 0.1/1/10 mm steps jog continuously at a very slow speed instead of stepping.";
+
+const jogModeTileOptions: PickerOption[] = [
+  { value: "XYZ",   description: "Room/local axes" },
+  { value: "Tool",  description: "Tool-tip's own axes" },
+  { value: "Joint", description: "Single joint at a time" },
+];
+
+const speedTileOptions: PickerOption[] = [
+  { value: "0.1mm",  description: "One precise step per tap" },
+  { value: "1mm",    description: "One precise step per tap" },
+  { value: "10mm",   description: "One precise step per tap" },
+  { value: "Slow",   description: "Jogs continuously while held" },
+  { value: "Normal", description: "Jogs continuously while held" },
+  { value: "Fast",   description: "Jogs continuously while held" },
+];
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function JogScreen() {
@@ -260,8 +408,25 @@ export default function JogScreen() {
 
   const tools      = useTools();
   const locals     = useLocals();
+  const points     = usePoints();
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
+  const wideContent = useWideContent();
+  const { width: windowWidth } = useWindowDimensions();
+  const isWide = useIsWide();
+
+  // Lay out against the real content width (the NavRail eats ~216px of the
+  // window on wide screens), seeded from the window so the first frame is right.
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+  const paneWidth = measuredWidth || (isWide ? windowWidth - RAIL_ESTIMATE : windowWidth);
+  const threeColumn = paneWidth >= THREE_COL_MIN;
+  const twoColumn   = !threeColumn && paneWidth >= TWO_COL_MIN;
+  const wideLayout  = threeColumn || twoColumn;
+
+  const onContentLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setMeasuredWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  }, []);
 
   const [tool, setToolLocal] = useState(activeTool || "None");
 
@@ -283,9 +448,9 @@ export default function JogScreen() {
   const speedOptions = ["0.1mm", "1mm", "10mm", "Slow", "Normal", "Fast"];
 
   const jogModes = [
-    { key: "XYZ",   icon: (active: boolean) => <Move    size={17} color={active ? "#fff" : "#6b7280"} /> },
-    { key: "Tool",  icon: (active: boolean) => <Move    size={17} color={active ? "#fff" : "#6b7280"} /> },
-    { key: "Joint", icon: (active: boolean) => <Rotate3d size={17} color={active ? "#fff" : "#6b7280"} /> },
+    { label: "XYZ",   value: "XYZ",   icon: (c: string, s: number) => <Move3d size={s} color={c} /> },
+    { label: "Tool",  value: "Tool",  icon: (c: string, s: number) => <Wrench size={s} color={c} /> },
+    { label: "Joint", value: "Joint", icon: (c: string, s: number) => <RotateCw size={s} color={c} /> },
   ];
 
   // Reload jog speeds whenever this screen comes into focus (picks up config changes immediately)
@@ -302,127 +467,510 @@ export default function JogScreen() {
 
   const coords = mode === "Joint"
     ? [
-        { label: "J1", value: s?.joint1Angle, unit: "°" },
-        { label: "J2", value: s?.joint2X,     unit: "mm" },
-        { label: "J3", value: s?.joint2Z,     unit: "mm" },
-        { label: "J4", value: s?.joint4Angle, unit: "°" },
+        { label: "J1", value: fmt(s?.joint1Angle), unit: "°"  },
+        { label: "J2", value: fmt(s?.joint2X),     unit: "mm" },
+        { label: "J3", value: fmt(s?.joint2Z),     unit: "mm" },
+        { label: "J4", value: fmt(s?.joint4Angle), unit: "°"  },
       ]
     : [
         // Local-frame position — tracks the selected local (equals world when none)
-        { label: "X",  value: s?.localX,  unit: "mm" },
-        { label: "Y",  value: s?.localY,  unit: "mm" },
-        { label: "Z",  value: s?.localZ,  unit: "mm" },
-        { label: "RZ", value: s?.localRZ, unit: "°"  },
+        { label: "X",  value: fmt(s?.localX),  unit: "mm" },
+        { label: "Y",  value: fmt(s?.localY),  unit: "mm" },
+        { label: "Z",  value: fmt(s?.localZ),  unit: "mm" },
+        { label: "RZ", value: fmt(s?.localRZ), unit: "°"  },
       ];
 
-  return (
-    <View style={styles.container}>
-      <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-      <SubPageHeader title="Jog & Teach" />
+  // ── Move-to-point (mechanics mirrored from Space › Points) ──────────────────
+  const [pointSearch, setPointSearch]     = useState("");
+  const [pointsOpen, setPointsOpen]       = useState(false);
+  const [moveTarget, setMoveTarget]       = useState<Point | null>(null);
+  const [moveSpeed, setMoveSpeed]         = useState<"Slow" | "Normal" | "Fast">("Normal");
+  const [movingFromPage, setMovingFromPage] = useState(false);
+  const [movingToName, setMovingToName]   = useState<string | null>(null);
+  const [alreadyHere, setAlreadyHere]     = useState<string | null>(null);
+  /** Move overlay wording: axis moves aren't "to a point". */
+  const [movingIsAxis, setMovingIsAxis]   = useState(false);
 
-      {/* ── Scrollable area: position + controls + jogpad ── */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, wide.content]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Combined position + controls card */}
-        <View style={styles.card}>
+  const AT_THRESHOLD = 0.5;
 
-          {/* Position strip */}
-          <View style={styles.coordRow}>
-            {coords.map(({ label, value, unit }) => (
-              <View key={label} style={styles.coordCell}>
-                <Text style={styles.coordLabel}>{label}</Text>
-                <Text style={styles.coordValue}>{fmt(value)}</Text>
-                <Text style={styles.coordUnit}>{unit}</Text>
-              </View>
-            ))}
-          </View>
+  function isAtPoint(p: Point) {
+    return (
+      Math.abs((s?.x ?? 0) - p.x) < AT_THRESHOLD &&
+      Math.abs((s?.y ?? 0) - p.y) < AT_THRESHOLD &&
+      Math.abs((s?.z ?? 0) - p.z) < AT_THRESHOLD
+    );
+  }
 
-          <View style={styles.cardSeparator} />
+  // Clear the "moving" overlay as soon as the robot reports it stopped.
+  useEffect(() => {
+    if (movingFromPage && !status.moving) {
+      setMovingFromPage(false);
+      setMovingToName(null);
+      setMovingIsAxis(false);
+    }
+  }, [status.moving]);
 
-          {/* Local / Tool row */}
-          <View style={styles.selectorsRow}>
-            <Selector
-              label="LOCAL"
-              value={local}
-              options={localOptions}
-              onSelect={setLocal}
-              icon={<Grid2X2 size={15} color="#6b7280" />}
-              viewLabel="View Locals"
-              viewRoute="/space/locals"
-            />
-            <View style={styles.cardDivider} />
-            <Selector
-              label="TOOL"
-              value={tool || "None"}
-              options={["None", ...tools.map(t => t.name)]}
-              onSelect={setTool}
-              icon={<Wrench size={15} color="#6b7280" />}
-              viewLabel="View Tools"
-              viewRoute="/space/tools"
-            />
-          </View>
+  /** Same commands Space › Points sends: MoveL / MoveJ by point name + speed. */
+  function moveToPoint(command: "MoveL" | "MoveJ") {
+    const p = moveTarget;
+    if (!p) return;
+    if (isAtPoint(p)) { setMoveTarget(null); setAlreadyHere(p.name); return; }
+    setMovingToName(p.name);
+    robotClient.sendCommand(command, { name: p.name, speed: jogSpeeds?.[moveSpeed] });
+    setMoveTarget(null);
+    setMovingFromPage(true);
+  }
 
-          <View style={styles.cardSeparator} />
+  const filteredPoints = points.filter((p) =>
+    p.name.toLowerCase().includes(pointSearch.trim().toLowerCase())
+  );
 
-          {/* Jog mode */}
-          <View style={styles.segmentRow}>
-            {jogModes.map(({ key, icon }) => {
-              const active = mode === key;
-              return (
-                <AnimatedPressable
-                  key={key}
-                  style={[styles.segment, active && styles.segmentActive]}
-                  onPress={() => setMode(key)}
-                >
-                  {icon(active)}
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{key}</Text>
-                </AnimatedPressable>
-              );
-            })}
-          </View>
+  // ── Point actions (tap a point row) ─────────────────────────────────────────
+  // A tap opens an actions dialog — Move To / Edit Position / Teach Here —
+  // instead of going straight to the move confirm. Each action closes this
+  // dialog before opening its own stage, so two Modals are never on screen at
+  // once (same sequencing the rest of the screen uses).
+  const [actionTarget, setActionTarget] = useState<Point | null>(null);
+  const [editTarget, setEditTarget]     = useState<Point | null>(null);
+  const [editDraft, setEditDraft]       = useState({ x: "", y: "", z: "", rz: "" });
+  const [teachTarget, setTeachTarget]   = useState<Point | null>(null);
 
-          <View style={styles.cardSeparator} />
+  const editFields = ["x", "y", "z", "rz"] as const;
+  const editValid  = editFields.every((f) => {
+    const raw = editDraft[f].trim();
+    return raw !== "" && Number.isFinite(Number(raw));
+  });
 
-          {/* Speed */}
-          <View style={styles.chipRow}>
-            {speedOptions.map((spd) => {
-              const active = selectedSpeed === spd;
-              return (
-                <AnimatedPressable
-                  key={spd}
-                  style={[styles.chip, active && styles.chipActive]}
-                  onPress={() => setSelectedSpeed(spd)}
-                >
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{spd}</Text>
-                </AnimatedPressable>
-              );
-            })}
-          </View>
+  function openEditPoint(p: Point) {
+    setEditDraft({
+      x:  p.x.toString(),
+      y:  p.y.toString(),
+      z:  p.z.toString(),
+      rz: p.rz.toString(),
+    });
+    setActionTarget(null);
+    setEditTarget(p);
+  }
 
-        </View>
+  /** Same client call Space › Points uses; the points list refreshes itself off
+   *  the status stream's lastPointUpdate, so there's nothing to reload here. */
+  function saveEditPoint() {
+    const p = editTarget;
+    if (!p || !editValid) return;
+    robotClient.editPoint(p.name, {
+      x:  Number(editDraft.x),
+      y:  Number(editDraft.y),
+      z:  Number(editDraft.z),
+      rz: Number(editDraft.rz),
+    });
+    setEditTarget(null);
+  }
 
-        {/* JogPad */}
-        <View style={styles.jogWrapper}>
-          <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} />
-        </View>
-      </ScrollView>
+  /** Same command the Teach modal sends — overwrites the point in place. */
+  function teachOverPoint() {
+    const p = teachTarget;
+    if (!p) return;
+    robotClient.sendCommand("TeachPoint", { name: p.name });
+    setTeachTarget(null);
+  }
 
-      {/* ── Fixed bottom row: STOP + Teach ── */}
-      <View style={styles.bottomRow}>
-        <AnimatedPressable style={styles.stopButton} onPress={() => robotClient.sendCommand("HardStop")}>
-          <OctagonX size={22} color="white" />
-          <Text style={styles.stopText}>STOP</Text>
-        </AnimatedPressable>
+  // ── Type a target position (tap an axis in the DRO) ─────────────────────────
+  // Sends an absolute cartesian MoveL built from the robot's CURRENT base-frame
+  // vector with only the tapped axis replaced by the typed value.
+  //
+  // Frame safety: a raw-vector MoveL is interpreted in the BASE frame by the
+  // controller (only named-point moves get local-frame transforms), while this
+  // DRO shows the LOCAL-frame position (status.localX/…). Those agree only when
+  // no local is active, so the feature is gated on local === "None" rather than
+  // doing frame math in the app. Joint mode is gated too: the controller has no
+  // absolute single-joint move command (MoveL/MoveJ/OffsetL/Jog* only).
+  type AxisKey = "X" | "Y" | "Z" | "RZ";
+  const AXIS_KEYS: AxisKey[] = ["X", "Y", "Z", "RZ"];
 
-        <AnimatedPressable style={styles.teachButton} onPress={() => setTeachOpen(true)}>
-          <MousePointerClick size={18} color="#2563eb" />
-          <Text style={styles.teachButtonText}>Teach</Text>
-        </AnimatedPressable>
+  const [axisTarget, setAxisTarget] = useState<{ key: AxisKey; unit?: string; current: string } | null>(null);
+  const [axisInput, setAxisInput]   = useState("");
+  const [axisNotice, setAxisNotice] = useState<string | null>(null);
+
+  const axisInputValid = Number.isFinite(Number(axisInput.trim())) && axisInput.trim() !== "";
+
+  function openAxisTarget(axis: ReadoutAxis) {
+    if (mode === "Joint") {
+      setAxisNotice("Joint targets aren't supported — use the jog buttons to move a single joint.");
+      return;
+    }
+    if (local !== "None") {
+      setAxisNotice("Deactivate the Local frame to type target positions.");
+      return;
+    }
+    const key = AXIS_KEYS.find((k) => k === axis.label);
+    if (!key) return;
+    const current = String(axis.value);
+    setAxisInput(current);
+    setAxisTarget({ key, unit: axis.unit, current });
+  }
+
+  /** Absolute line move to the current vector with one axis overridden. */
+  function moveAxisTo() {
+    const t = axisTarget;
+    if (!t) return;
+    const v = Number(axisInput.trim());
+    if (!Number.isFinite(v) || axisInput.trim() === "") return;
+
+    const vector: Record<AxisKey, number> = {
+      X:  s?.x  ?? 0,
+      Y:  s?.y  ?? 0,
+      Z:  s?.z  ?? 0,
+      RZ: s?.rz ?? 0,
+    };
+    vector[t.key] = v;
+
+    setMovingToName(`${t.key} ${v.toFixed(1)}${t.unit ? ` ${t.unit}` : ""}`);
+    setMovingIsAxis(true);
+    robotClient.sendCommand("MoveL", { ...vector, Speed: jogSpeeds?.[moveSpeed] });
+    setAxisTarget(null);
+    setMovingFromPage(true);
+  }
+
+  // The pieces the layout arranges. Defined once so every layout places the same
+  // controls without duplicating them.
+  const configCard = (
+    <Card>
+      {/* Jog mode */}
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.selectorLabel}>JOG MODE</Text>
+        <InfoTip text="XYZ jogs along the room/local axes. Tool jogs along the tool tip's own axes (e.g. it always plunges straight into the tip). Joint moves a single robot joint at a time." />
       </View>
+      <SegmentedControl options={jogModes} value={mode} onChange={setMode} />
+
+      <Divider style={styles.cardSeparator} />
+
+      {/* Speed */}
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.selectorLabel}>SPEED</Text>
+        <InfoTip text="Slow/Normal/Fast jog continuously while held, at the speeds set on Robot › Configure. The 0.1/1/10 mm chips take one precise step per tap in XYZ and Joint mode — in Tool mode they instead jog continuously at a very slow speed." />
+      </View>
+      {/* Config card only renders on wide layouts, so keep all six speeds on one row
+          (equal-width, no wrap) rather than letting them spill onto a second line. */}
+      <ChipGroup style={styles.speedGroup}>
+        {speedOptions.map((spd) => (
+          <Chip
+            key={spd}
+            label={spd}
+            selected={selectedSpeed === spd}
+            onPress={() => setSelectedSpeed(spd)}
+            style={styles.speedChip}
+          />
+        ))}
+      </ChipGroup>
+
+      <Divider style={styles.cardSeparator} />
+
+      {/* Local / Tool row */}
+      <View style={styles.selectorsRow}>
+        <Selector
+          label="LOCAL"
+          value={local}
+          options={localOptions}
+          onSelect={setLocal}
+          icon={<Grid2X2 size={15} color={colors.textMuted} />}
+          viewLabel="View Locals"
+          viewRoute="/space/locals"
+          mutedValue={local === "None"}
+        />
+        <Divider vertical style={styles.cardDivider} />
+        <Selector
+          label="TOOL"
+          value={tool || "None"}
+          options={["None", ...tools.map(t => t.name)]}
+          onSelect={setTool}
+          icon={<Wrench size={15} color={colors.textMuted} />}
+          viewLabel="View Tools"
+          viewRoute="/space/tools"
+          mutedValue={(tool || "None") === "None"}
+        />
+      </View>
+    </Card>
+  );
+
+  // Narrow-only replacement for configCard: a compact 2×2 grid of selector
+  // tiles, each opening the same PickerModal a tap on a Selector would. State,
+  // handlers and option sets are shared with the wide config card above.
+  const configGrid = (
+    <View style={styles.configGrid}>
+      <GridSelectorTile
+        label="JOG MODE"
+        value={mode}
+        options={jogModeTileOptions}
+        onSelect={setMode}
+        titleInfo={JOG_MODE_INFO}
+      />
+      <GridSelectorTile
+        label="SPEED"
+        value={selectedSpeed}
+        options={speedTileOptions}
+        onSelect={setSelectedSpeed}
+        titleInfo={SPEED_INFO}
+        footnote={SPEED_FOOTNOTE}
+      />
+      <GridSelectorTile
+        label="LOCAL"
+        value={local}
+        options={localOptions}
+        onSelect={setLocal}
+        viewLabel="View Locals"
+        viewRoute="/space/locals"
+        mutedValue={local === "None"}
+      />
+      <GridSelectorTile
+        label="TOOL"
+        value={tool || "None"}
+        options={["None", ...tools.map(t => t.name)]}
+        onSelect={setTool}
+        viewLabel="View Tools"
+        viewRoute="/space/tools"
+        mutedValue={(tool || "None") === "None"}
+      />
+    </View>
+  );
+
+  // CNC-style DRO — the axis list replaces the old 4-across coordinate strip.
+  // Wide layout only; kept at its established "lg" size.
+  // Rows are tappable: a tap opens the type-a-target dialog (or a notice when
+  // the frame/mode guards block it — see openAxisTarget).
+  const dro = (
+    <PositionReadout axes={coords} size="lg" onAxisPress={openAxisTarget} />
+  );
+
+  // Narrow-only replacement for dro: a single-row inline strip (axis tile +
+  // value per axis, no targets) so the DRO doesn't push the pinned jog pad
+  // below the fold on phone widths.
+  const droInline = (
+    <PositionReadout axes={coords} inline onAxisPress={openAxisTarget} />
+  );
+
+  const jogPad = (
+    <View style={styles.jogWrapper}>
+      <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} />
+    </View>
+  );
+
+  const stopTeach = (inline: boolean) => (
+    <View style={[styles.bottomRow, inline && styles.bottomRowInline]}>
+      <Button
+        label="STOP"
+        variant="destructive"
+        icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
+        style={[styles.stopButton, inline && styles.stopButtonWide]}
+        textStyle={styles.stopText}
+        onPress={() => robotClient.sendCommand("HardStop")}
+      />
+
+      <Button
+        label="Teach"
+        variant="ghost"
+        icon={<MousePointerClick size={18} color={colors.accent} />}
+        style={[styles.teachButton, inline && styles.teachButtonWide]}
+        textStyle={styles.teachButtonText}
+        onPress={() => setTeachOpen(true)}
+      />
+    </View>
+  );
+
+  // ── Points panel ────────────────────────────────────────────────────────────
+  // Parameterized by onPick so each host (wide panel, twoColumn
+  // collapsible, narrow modal) controls what happens when a point is chosen —
+  // the narrow modal closes itself first (see pointsModal) so it never stacks
+  // on top of the dialog that follows.
+  //   onPick — row tap: opens the point actions dialog.
+  // Row tap and the "Actions" button both open the point actions dialog
+  // (Move To / Edit Position / Teach Here).
+  const renderPointRows = (onPick: (p: Point) => void) => (
+    <>
+      <View style={styles.pointsSearchWrap}>
+        <Input
+          value={pointSearch}
+          onChangeText={setPointSearch}
+          placeholder="Search points…"
+          icon={<Search size={16} color={colors.textFaint} />}
+          clearable
+          returnKeyType="search"
+        />
+      </View>
+
+      {filteredPoints.length === 0 ? (
+        <EmptyState
+          icon={<MapPin size={28} color={colors.textFaint} />}
+          title={points.length === 0 ? "No points saved yet" : "No matches"}
+          subtitle={
+            points.length === 0
+              ? "Jog the robot to a position, then press Teach to save it here."
+              : undefined
+          }
+          style={styles.pointsEmpty}
+        />
+      ) : (
+        filteredPoints.map((p, i) => (
+          <View key={p.name}>
+            <Pressable style={styles.pointListRow} onPress={() => onPick(p)}>
+              <View style={styles.pointListText}>
+                <Text style={styles.pointName} numberOfLines={1}>{p.name}</Text>
+                <Text style={styles.pointCoords} numberOfLines={1}>
+                  X {p.x.toFixed(1)}  Y {p.y.toFixed(1)}  Z {p.z.toFixed(1)}  RZ {p.rz.toFixed(1)}
+                </Text>
+              </View>
+              <ChevronRight size={20} color={colors.textFaint} />
+            </Pressable>
+            {i < filteredPoints.length - 1 && <Divider />}
+          </View>
+        ))
+      )}
+    </>
+  );
+
+  /** Wide: a full-height panel whose list scrolls on its own. */
+  const pointsPanel = (
+    <Card padded={false} style={styles.pointsCard}>
+      <View style={styles.pointsHeader}>
+        <Text style={styles.pointsTitle}>Points</Text>
+        <InfoTip text="Saved robot positions. Pick one to line- or joint-move the robot there — you choose the move type and speed, and a STOP button stays on screen for the whole move. Make sure the path is clear first." />
+      </View>
+      <ScrollView
+        style={styles.pointsScroll}
+        contentContainerStyle={styles.pointsScrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {renderPointRows(setActionTarget)}
+      </ScrollView>
+    </Card>
+  );
+
+  /** Narrow: the same list as a collapsible section so it never crowds the pad. */
+  const pointsCollapsible = (
+    <Card padded={false}>
+      <Pressable style={styles.pointsHeader} onPress={() => setPointsOpen(o => !o)}>
+        {pointsOpen
+          ? <ChevronDown size={16} color={colors.textMuted} />
+          : <ChevronRight size={16} color={colors.textMuted} />}
+        <Text style={styles.pointsTitle}>Points</Text>
+        <Text style={styles.pointsCount}>{points.length}</Text>
+        <View style={styles.pointsHeaderSpacer} />
+        <InfoTip text="Saved robot positions. Pick one to line- or joint-move the robot there — you choose the move type and speed, and a STOP button stays on screen for the whole move. Make sure the path is clear first." />
+      </Pressable>
+      {pointsOpen && <View style={styles.pointsCollapsedBody}>{renderPointRows(setActionTarget)}</View>}
+    </Card>
+  );
+
+  /** Narrow: a compact trigger row (matches the config grid tiles) that opens
+   *  pointsModal below instead of expanding inline, so the points list never
+   *  crowds the pinned jog pad on phone widths. */
+  const pointsTrigger = (
+    <Card onPress={() => setPointsOpen(true)} style={styles.pointsTriggerTile}>
+      <Text style={styles.selectorLabel}>POINTS</Text>
+      <View style={styles.gridTileValueRow}>
+        <Text style={styles.gridTileValue} numberOfLines={1}>{points.length} saved</Text>
+        <ChevronRight size={14} color={colors.textFaint} />
+      </View>
+    </Card>
+  );
+
+  /** Narrow: full-screen-ish modal (opened by pointsTrigger) hosting the same
+   *  search/list/empty-state content as pointsPanel/pointsCollapsible. Picking
+   *  a point closes this modal first, then opens the move-confirm dialog —
+   *  mirroring how the rest of this screen never shows two Modals at once
+   *  (moveTarget → movingFromPage / alreadyHere are likewise sequential, never
+   *  stacked), rather than nesting the move dialogs inside this Modal. */
+  const pointsModal = (
+    <Modal
+      visible={pointsOpen}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setPointsOpen(false)}
+    >
+      <Pressable style={styles.pickerOverlay} onPress={() => setPointsOpen(false)}>
+        <Pressable style={styles.pointsDialog} onPress={() => {}}>
+          <View style={styles.dialogHeader}>
+            <View style={styles.dialogTitleRow}>
+              <Text style={styles.dialogTitle}>Points</Text>
+              <Text style={styles.pointsCount}>{points.length}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setPointsOpen(false)} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color={colors.textFaint} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.pointsModalScroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {renderPointRows(
+              (p) => { setPointsOpen(false); setActionTarget(p); },
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+
+  return (
+    <View style={styles.container} onLayout={onContentLayout}>
+      <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
+      <PageHeader
+        title="Jog & Teach"
+        subtitle="Manually move the robot, then save a point at its current position"
+        backTo="/control"
+      />
+
+      {wideLayout ? (
+        // Wide: jog config + DRO on the left, the pad with STOP/Teach directly
+        // underneath in the middle, saved points on the right (desktop widths).
+        <View style={styles.wideRow}>
+          <View style={[styles.sideCol, threeColumn && styles.sideColThree]}>
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.sideColContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {configCard}
+              {dro}
+              {/* Two-column widths have no room for a third pane — the points
+                  list rides along under the config column instead. */}
+              {twoColumn && pointsCollapsible}
+            </ScrollView>
+          </View>
+
+          <View style={styles.padCol}>
+            {jogPad}
+            {stopTeach(true)}
+          </View>
+
+          {threeColumn && (
+            <View style={[styles.sideCol, styles.sideColThree, styles.pointsCol]}>
+              {pointsPanel}
+            </View>
+          )}
+        </View>
+      ) : (
+        // Narrow: config/points/DRO scroll; the jog pad is PINNED above the
+        // STOP/Teach footer so the jog buttons are always on screen (the DRO
+        // was pushing the pad below the fold when everything scrolled).
+        <>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, wideContent]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {configGrid}
+            {pointsTrigger}
+            {droInline}
+          </ScrollView>
+          <View style={styles.pinnedPad}>{jogPad}</View>
+          {stopTeach(false)}
+          {pointsModal}
+        </>
+      )}
 
       {/* ── Teach modal ── */}
       <Modal
@@ -433,6 +981,363 @@ export default function JogScreen() {
       >
         <TeachModal key={teachOpen ? "open" : "closed"} onClose={() => setTeachOpen(false)} />
       </Modal>
+
+      {/* ── Point actions (row tap) ── */}
+      {/* Each action closes this dialog as it opens the next stage, so the
+          move-confirm / edit / teach-confirm dialogs never stack on it. */}
+      <Modal
+        visible={!!actionTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setActionTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MapPin size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>{actionTarget?.name}</Text>
+              </View>
+              <Pressable onPress={() => setActionTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.moveCoordText}>
+              X {actionTarget?.x.toFixed(1)}{"  "}
+              Y {actionTarget?.y.toFixed(1)}{"  "}
+              Z {actionTarget?.z.toFixed(1)}{"  "}
+              RZ {actionTarget?.rz.toFixed(1)}
+            </Text>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => { const p = actionTarget; setActionTarget(null); setMoveTarget(p); }}
+            >
+              <Navigation size={18} color={colors.accent} />
+              <View style={styles.actionTextStack}>
+                <Text style={styles.actionText}>Move To</Text>
+                <Text style={styles.actionSubtext}>Line or joint move at a chosen speed</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => { if (actionTarget) openEditPoint(actionTarget); }}
+            >
+              <Pencil size={18} color={colors.accent} />
+              <View style={styles.actionTextStack}>
+                <Text style={styles.actionText}>Edit Position</Text>
+                <Text style={styles.actionSubtext}>Type new X / Y / Z / RZ coordinates</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.actionRow}
+              onPress={() => { const p = actionTarget; setActionTarget(null); setTeachTarget(p); }}
+            >
+              <MousePointerClick size={18} color={colors.accent} />
+              <View style={styles.actionTextStack}>
+                <Text style={styles.actionText}>Teach Here</Text>
+                <Text style={styles.actionSubtext}>Overwrite with the robot's current position</Text>
+              </View>
+            </Pressable>
+
+            <View style={styles.actionCancelRow}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setActionTarget(null)}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Edit point position (same client call as Space › Points) ── */}
+      <Modal
+        visible={!!editTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setEditTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <Pencil size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>Edit {editTarget?.name}</Text>
+              </View>
+              <Pressable onPress={() => setEditTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            {editFields.map((field) => (
+              <FormRow key={field} label={field.toUpperCase()} inline style={styles.editRow}>
+                <Input
+                  style={styles.editCoordInput}
+                  value={editDraft[field]}
+                  onChangeText={(v) => setEditDraft((d) => ({ ...d, [field]: v }))}
+                  keyboardType="numeric"
+                  selectTextOnFocus
+                  returnKeyType="done"
+                />
+              </FormRow>
+            ))}
+
+            <Divider style={styles.cardSeparator} />
+
+            <View style={styles.modalActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setEditTarget(null)}
+              />
+              <Button
+                label="Save"
+                variant="primary"
+                disabled={!editValid}
+                style={styles.modalCancelFlex}
+                onPress={saveEditPoint}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Teach-over confirm (destructive: replaces the stored coordinates) ── */}
+      <Modal
+        visible={!!teachTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTeachTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setTeachTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MousePointerClick size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>Teach Here?</Text>
+              </View>
+              <Pressable onPress={() => setTeachTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.teachConfirmBody}>
+              <Text style={styles.teachConfirmName}>{teachTarget?.name}</Text> will be overwritten with
+              the robot's current position — the point's stored coordinates are replaced and this
+              cannot be undone.
+            </Text>
+
+            <Text style={styles.moveCoordText}>
+              Stored{"  "}X {teachTarget?.x.toFixed(1)}{"  "}
+              Y {teachTarget?.y.toFixed(1)}{"  "}
+              Z {teachTarget?.z.toFixed(1)}{"  "}
+              RZ {teachTarget?.rz.toFixed(1)}
+            </Text>
+            <Text style={styles.moveCoordText}>
+              Current{"  "}X {fmt(s?.x)}{"  "}
+              Y {fmt(s?.y)}{"  "}
+              Z {fmt(s?.z)}{"  "}
+              RZ {fmt(s?.rz)}
+            </Text>
+
+            <View style={styles.modalActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setTeachTarget(null)}
+              />
+              <Button
+                label="Teach Here"
+                variant="primary"
+                icon={<MousePointerClick size={15} color={buttonTextColor("primary")} />}
+                style={styles.modalConfirmFlex}
+                onPress={teachOverPoint}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Move-to-point confirm (same actions as Space › Points) ── */}
+      <Modal
+        visible={!!moveTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMoveTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setMoveTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <MapPin size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>{moveTarget?.name}</Text>
+              </View>
+              <Pressable onPress={() => setMoveTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.moveCoordText}>
+              X {moveTarget?.x.toFixed(1)}{"  "}
+              Y {moveTarget?.y.toFixed(1)}{"  "}
+              Z {moveTarget?.z.toFixed(1)}{"  "}
+              RZ {moveTarget?.rz.toFixed(1)}
+            </Text>
+
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.selectorLabel}>MOVE SPEED</Text>
+            </View>
+            <SegmentedControl
+              options={["Slow", "Normal", "Fast"] as const}
+              value={moveSpeed}
+              onChange={setMoveSpeed}
+              size="sm"
+            />
+
+            <Divider style={styles.cardSeparator} />
+
+            <Pressable style={styles.actionRow} onPress={() => moveToPoint("MoveL")}>
+              <Navigation size={18} color={colors.accent} />
+              <Text style={styles.actionText}>Line Move</Text>
+            </Pressable>
+            <Pressable style={styles.actionRow} onPress={() => moveToPoint("MoveJ")}>
+              <RotateCw size={18} color={colors.accent} />
+              <Text style={styles.actionText}>Joint Move</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Type a target position (tap an axis in the DRO) ── */}
+      <Modal
+        visible={!!axisTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAxisTarget(null)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setAxisTarget(null)}>
+          <Pressable style={styles.moveDialog} onPress={() => {}}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogTitleRow}>
+                <Navigation size={16} color={colors.textMuted} />
+                <Text style={styles.dialogTitle}>Move {axisTarget?.key}</Text>
+              </View>
+              <Pressable onPress={() => setAxisTarget(null)} hitSlop={10}>
+                <X size={18} color={colors.textFaint} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.moveCoordText}>
+              Current {axisTarget?.key} {axisTarget?.current}{axisTarget?.unit ? ` ${axisTarget.unit}` : ""}
+            </Text>
+
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.selectorLabel}>TARGET {axisTarget?.key}</Text>
+              <InfoTip text="The robot line-moves to its current position with only this axis changed to the value you type. Make sure the path is clear first." />
+            </View>
+            <View style={styles.axisInputWrap}>
+              <Input
+                value={axisInput}
+                onChangeText={setAxisInput}
+                keyboardType="numeric"
+                selectTextOnFocus
+                autoFocus
+                placeholder={axisTarget?.current}
+                returnKeyType="done"
+                onSubmitEditing={moveAxisTo}
+                style={styles.axisInputText}
+              />
+            </View>
+
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.selectorLabel}>MOVE SPEED</Text>
+            </View>
+            <SegmentedControl
+              options={["Slow", "Normal", "Fast"] as const}
+              value={moveSpeed}
+              onChange={setMoveSpeed}
+              size="sm"
+            />
+
+            <Divider style={styles.cardSeparator} />
+
+            <View style={styles.modalActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                style={styles.modalCancelFlex}
+                onPress={() => setAxisTarget(null)}
+              />
+              <Button
+                label="Move"
+                variant="primary"
+                icon={<Navigation size={15} color={buttonTextColor("primary")} />}
+                disabled={!axisInputValid}
+                style={styles.modalConfirmFlex}
+                onPress={moveAxisTo}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Axis-target blocked notice (local frame active / Joint mode) ── */}
+      <Modal visible={!!axisNotice} transparent animationType="fade" onRequestClose={() => setAxisNotice(null)}>
+        <Pressable style={styles.overlay} onPress={() => setAxisNotice(null)}>
+          <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
+            <Navigation size={28} color={colors.accent} />
+            <Text style={styles.alreadyHereTitle}>Can't Type a Target</Text>
+            <Text style={styles.alreadyHereBody}>{axisNotice}</Text>
+            <Button label="OK" variant="primary" style={styles.alreadyHereButton} onPress={() => setAxisNotice(null)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Move stop overlay ── */}
+      <Modal visible={movingFromPage} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.moveStopCard}>
+            <Navigation size={28} color={colors.accent} />
+            <Text style={styles.moveStopTitle}>{movingIsAxis ? "Moving axis to" : "Moving to point"}</Text>
+            {movingToName && <Text style={styles.moveStopName}>{movingToName}</Text>}
+            <Button
+              label="STOP"
+              variant="destructive"
+              icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
+              onPress={() => {
+                robotClient.sendCommand("HardStop");
+                setMovingFromPage(false);
+                setMovingToName(null);
+                setMovingIsAxis(false);
+              }}
+              style={styles.moveStopButton}
+              textStyle={styles.stopText}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Already at position popup ── */}
+      <Modal visible={!!alreadyHere} transparent animationType="fade" onRequestClose={() => setAlreadyHere(null)}>
+        <Pressable style={styles.overlay} onPress={() => setAlreadyHere(null)}>
+          <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
+            <MapPin size={28} color={colors.accent} />
+            <Text style={styles.alreadyHereTitle}>Already Here</Text>
+            <Text style={styles.alreadyHereBody}>
+              The robot is already at{"\n"}
+              <Text style={styles.alreadyHereName}>{alreadyHere}</Text>
+            </Text>
+            <Button label="OK" variant="primary" style={styles.alreadyHereButton} onPress={() => setAlreadyHere(null)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -441,7 +1346,7 @@ export default function JogScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.background,
   },
 
   scroll: {
@@ -449,20 +1354,51 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
-    padding: 10,
-    gap: 8,
-    paddingBottom: 12,
+    padding: spacing.sm + 2,
+    gap: spacing.md,
+    paddingBottom: spacing.md,
+  },
+
+  // ── Wide layout ─────────────────────────────────────────────────────────────
+  // Three panes on desktop (config+DRO · pad+STOP/Teach · points), two when the
+  // window can't hold a third pane with real gutters. The pad column is fixed
+  // because the pad sizes itself; the side columns take the rest of the width.
+  wideRow: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    gap: spacing.xl,
+  },
+  sideCol: {
+    flex: 1,
+    minWidth: 290,
+  },
+  sideColThree: {
+    maxWidth: 460,
+  },
+  sideColContent: {
+    gap: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  pointsCol: {
+    // The points panel manages its own scrolling, so the column just fills height.
+    justifyContent: "flex-start",
+  },
+  // Centre column: the jog pad with STOP/Teach directly beneath it, both kept
+  // on screen (this column never scrolls) so STOP is always one tap away.
+  padCol: {
+    width: PAD_COL_WIDTH,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xl,
   },
 
   // ── Card ──────────────────────────────────────────────────────────────────
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 11,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+  cardSeparator: {
+    marginVertical: spacing.sm,
   },
 
   selectorsRow: {
@@ -471,58 +1407,7 @@ const styles = StyleSheet.create({
   },
 
   cardDivider: {
-    width: StyleSheet.hairlineWidth,
-    alignSelf: "stretch",
-    backgroundColor: "#e5e7eb",
-    marginHorizontal: 4,
-  },
-
-  cardSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#e5e7eb",
-    marginVertical: 8,
-  },
-
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#9ca3af",
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-
-  // ── Position ──────────────────────────────────────────────────────────────
-  coordRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
-  coordCell: {
-    alignItems: "center",
-    flex: 1,
-  },
-
-  coordLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-
-  coordValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111",
-    fontFamily: "monospace",
-  },
-
-  coordUnit: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.3,
-    marginTop: 1,
+    marginHorizontal: spacing.xs,
   },
 
   // ── Selector ──────────────────────────────────────────────────────────────
@@ -535,9 +1420,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + 2,
   },
 
   selectorIcon: {
@@ -552,8 +1437,16 @@ const styles = StyleSheet.create({
   selectorLabel: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#9ca3af",
+    color: colors.textFaint,
     letterSpacing: 0.8,
+  },
+
+  // Label + InfoTip row above the jog-mode segmented control and speed chips.
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs + 2,
   },
 
   selectorValueRow: {
@@ -562,219 +1455,264 @@ const styles = StyleSheet.create({
     gap: 4,
   },
 
+  // Speed chips: one no-wrap row of equal-width chips (wide config card only).
+  speedGroup: {
+    flexWrap: "nowrap",
+    gap: spacing.xs,
+  },
+  speedChip: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: spacing.xs,
+  },
+
   selectorValue: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
+  },
+
+  // Unset ("None") LOCAL/TOOL value — dimmed instead of full-strength.
+  selectorValueMuted: {
+    color: colors.textFaint,
+  },
+
+  // ── Grid selector tile (narrow config grid) ───────────────────────────────
+  configGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+
+  gridTile: {
+    flexBasis: "48%",
+    flexGrow: 1,
+    minHeight: 44,
+    gap: 4,
+    justifyContent: "center",
+  },
+
+  gridTileValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  gridTileValue: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.text,
+  },
+
+  // Unset ("None") LOCAL/TOOL value — dimmed instead of full-strength.
+  gridTileValueMuted: {
+    color: colors.textFaint,
+  },
+
+  // Full-width trigger row under the config grid — opens pointsModal.
+  pointsTriggerTile: {
+    minHeight: 44,
+    gap: 4,
+    justifyContent: "center",
   },
 
   // ── Picker modal ──────────────────────────────────────────────────────────
   pickerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 32,
+    padding: spacing.xxl,
   },
 
   pickerCard: {
     width: "100%",
     maxWidth: 340,
     maxHeight: "70%",
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
 
   pickerViewLink: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
+    gap: spacing.xs + 2,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: colors.border,
   },
 
   pickerViewLinkText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#2563eb",
+    color: colors.accent,
   },
 
-  pickerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 13,
-  },
-
-  pickerRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-
-  pickerRowActive: {
-    // no background tint needed — radio dot communicates state
-  },
-
-  pickerRowText: {
-    fontSize: 15,
-    fontWeight: "500",
-    color: "#374151",
-  },
-
-  pickerRowTextActive: {
-    fontWeight: "700",
-    color: "#2563eb",
-  },
-
-  radioRing: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#d1d5db",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  radioRingActive: {
-    borderColor: "#2563eb",
-  },
-
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#2563eb",
-  },
-
-  // ── Segmented control ─────────────────────────────────────────────────────
-  segmentRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 2,
-  },
-
-  segment: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 7,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-  },
-
-  segmentActive: {
-    backgroundColor: "#2563eb",
-  },
-
-  segmentText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-
-  segmentTextActive: {
-    color: "#fff",
-  },
-
-  // ── Speed chips ───────────────────────────────────────────────────────────
-  chipRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-
-  chip: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: "#f3f4f6",
-  },
-
-  chipActive: {
-    backgroundColor: "#2563eb",
-  },
-
-  chipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-
-  chipTextActive: {
-    color: "#fff",
+  pickerFootnote: {
+    ...type.caption,
+    marginTop: spacing.sm + 2,
+    lineHeight: 16,
   },
 
   // ── JogPad ────────────────────────────────────────────────────────────────
   jogWrapper: {
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
+    marginTop: spacing.xs + 2,
+  },
+  // Narrow: keeps the pad on screen above the STOP/Teach footer while the
+  // config/DRO/points scroll behind it.
+  pinnedPad: {
+    backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
   },
 
-  // ── Bottom row (fixed) ────────────────────────────────────────────────────
+  // ── STOP / Teach row ──────────────────────────────────────────────────────
+  // Narrow: pinned footer directly beneath the pad. Wide: inline under the pad
+  // in the centre column (no top border, no pinned chrome).
   bottomRow: {
     flexDirection: "row",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 14,
-    backgroundColor: "#f3f4f6",
+    gap: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm + 2,
+    paddingBottom: spacing.md + 2,
+    backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: colors.border,
   },
 
+  bottomRowInline: {
+    alignSelf: "stretch",
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    borderTopWidth: 0,
+    gap: spacing.md,
+  },
+
+  // STOP keeps its exact hit area (paddingVertical) — only color/radius come from the kit.
   stopButton: {
     flex: 3,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#dc2626",
-    borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
+  },
+
+  // Wide has the room, so STOP grows (it never shrinks).
+  stopButtonWide: {
+    paddingVertical: spacing.lg + 2,
   },
 
   stopText: {
-    color: "white",
     fontSize: 18,
-    fontWeight: "bold",
     letterSpacing: 2,
   },
 
   teachButton: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
+    backgroundColor: colors.accentSoft,
     borderWidth: 1.5,
-    borderColor: "#2563eb",
-    borderRadius: 12,
-    paddingVertical: 12,
-    backgroundColor: "#eff6ff",
+    borderColor: colors.accent,
+    paddingVertical: spacing.md,
+  },
+
+  teachButtonWide: {
+    paddingVertical: spacing.lg + 2,
   },
 
   teachButtonText: {
-    color: "#2563eb",
     fontSize: 15,
-    fontWeight: "600",
+  },
+
+  // ── Points panel ──────────────────────────────────────────────────────────
+  pointsCard: {
+    flex: 1,
+    overflow: "hidden",
+  },
+
+  pointsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg - 2,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+
+  pointsTitle: {
+    ...type.sectionLabel,
+  },
+
+  pointsCount: {
+    ...type.mono,
+    fontSize: 12,
+    color: colors.textFaint,
+  },
+
+  pointsHeaderSpacer: {
+    flex: 1,
+  },
+
+  pointsScroll: {
+    flex: 1,
+  },
+
+  pointsScrollContent: {
+    paddingBottom: spacing.sm,
+  },
+
+  pointsCollapsedBody: {
+    paddingBottom: spacing.sm,
+  },
+
+  // ── Points modal (narrow) ─────────────────────────────────────────────────
+  pointsDialog: {
+    width: "100%",
+    maxWidth: 400,
+    maxHeight: "80%",
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
+  },
+
+  pointsModalScroll: {
+    flexGrow: 0,
+  },
+
+  pointsSearchWrap: {
+    padding: spacing.md,
+  },
+
+  pointsEmpty: {
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+
+  pointListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg - 2,
+    paddingVertical: spacing.sm + 2,
+  },
+
+  pointListText: {
+    flex: 1,
+    gap: 2,
   },
 
   // ── Teach modal ───────────────────────────────────────────────────────────
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -782,45 +1720,48 @@ const styles = StyleSheet.create({
   dialog: {
     width: 300,
     maxHeight: 600,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
 
   dialogHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: spacing.md + 2,
+  },
+
+  dialogTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
 
   dialogTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
   },
 
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
     borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    marginBottom: 8,
-    backgroundColor: "#f9fafb",
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm - 1,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
   },
 
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: "#111",
+    color: colors.text,
     padding: 0,
   },
 
@@ -829,105 +1770,205 @@ const styles = StyleSheet.create({
   },
 
   pointRow: {
-    paddingVertical: 11,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
+    paddingVertical: spacing.sm + 3,
   },
 
   pointName: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#111",
+    color: colors.text,
   },
 
   pointCoords: {
+    ...type.mono,
     fontSize: 12,
-    color: "#9ca3af",
-    fontFamily: "monospace",
+    color: colors.textFaint,
     marginTop: 2,
   },
 
   emptyText: {
-    color: "#9ca3af",
+    color: colors.textFaint,
     textAlign: "center",
-    paddingVertical: 20,
+    paddingVertical: spacing.lg + 4,
     fontSize: 14,
   },
 
   newPointButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 13,
+    gap: spacing.sm,
+    paddingVertical: spacing.md + 1,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e7eb",
-    marginTop: 4,
+    borderTopColor: colors.border,
+    marginTop: spacing.xs,
   },
 
   newPointText: {
     fontSize: 14,
-    color: "#2563eb",
+    color: colors.accent,
     fontWeight: "600",
   },
 
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.5,
-    marginBottom: 6,
-  },
-
-  textInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#111",
-    backgroundColor: "#f9fafb",
-    marginBottom: 14,
+  newPointForm: {
+    marginBottom: spacing.md + 2,
   },
 
   modalActions: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.sm + 2,
   },
 
-  modalCancel: {
+  modalCancelFlex: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingVertical: 11,
-    alignItems: "center",
   },
 
-  modalCancelText: {
-    color: "#6b7280",
-    fontSize: 14,
+  modalConfirmFlex: {
+    flex: 2,
+  },
+
+  // ── Move-to-point dialogs (mirrors Space › Points) ────────────────────────
+  moveDialog: {
+    width: 300,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
+  },
+
+  moveCoordText: {
+    ...type.mono,
+    fontSize: 11,
+    color: colors.textFaint,
+    marginBottom: spacing.md + 2,
+  },
+
+  // Typed axis target input (tap an axis in the DRO)
+  axisInputWrap: {
+    marginBottom: spacing.md,
+  },
+
+  axisInputText: {
+    ...type.mono,
+    fontSize: 18,
+  },
+
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.md + 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.background,
+  },
+
+  actionText: {
+    fontSize: 15,
+    color: colors.accent,
     fontWeight: "500",
   },
 
-  modalConfirm: {
-    flex: 2,
+  // ── Point actions dialog ──────────────────────────────────────────────────
+  actionTextStack: {
+    flex: 1,
+    gap: 2,
+  },
+
+  actionSubtext: {
+    ...type.caption,
+  },
+
+  actionCancelRow: {
     flexDirection: "row",
+    marginTop: spacing.md + 2,
+  },
+
+  editRow: {
+    marginBottom: spacing.sm,
+  },
+
+  // Inline FormRow puts the label block on flex:1, so the field needs a width.
+  editCoordInput: {
+    ...type.mono,
+    width: 128,
+    textAlign: "right",
+  },
+
+  teachConfirmBody: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+    marginBottom: spacing.md,
+  },
+
+  teachConfirmName: {
+    fontWeight: "700",
+    color: colors.text,
+  },
+
+  moveStopCard: {
+    width: 240,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xl + 4,
+    paddingHorizontal: spacing.xl,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
-    paddingVertical: 11,
+    gap: spacing.sm,
+    ...shadows.raised,
   },
 
-  modalConfirmText: {
-    color: "white",
-    fontSize: 14,
+  moveStopTitle: {
+    fontSize: 15,
+    color: colors.textSecondary,
     fontWeight: "600",
+    marginTop: spacing.xs,
   },
 
-  disabled: {
-    opacity: 0.4,
+  moveStopName: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+
+  moveStopButton: {
+    borderRadius: radii.md,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.xl - 4,
+    marginTop: spacing.sm,
+  },
+
+  alreadyHereCard: {
+    width: 220,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xl + 4,
+    paddingHorizontal: spacing.xl,
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    ...shadows.raised,
+  },
+
+  alreadyHereTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.text,
+    marginTop: spacing.xs,
+  },
+
+  alreadyHereBody: {
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+
+  alreadyHereName: {
+    fontWeight: "700",
+  },
+
+  alreadyHereButton: {
+    paddingHorizontal: spacing.xl - 4,
+    marginTop: spacing.xs,
   },
 });

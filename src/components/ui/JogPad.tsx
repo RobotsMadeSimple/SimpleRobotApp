@@ -10,6 +10,13 @@ import { JointJogPanel, JointAxis } from "@/src/components/ui/jog/JointJogPanel"
 
 const DEFAULT_SPEEDS = { Slow: 10, Normal: 100, Fast: 300 };
 
+// Jog keep-alive cadence. The controller runs a continuous velocity profile with
+// a ~1s watchdog (JoggingMotionProfiler.resetTime), so each jog command is just a
+// heartbeat that refreshes it — not a discrete move. 150ms keeps a ~6x safety
+// margin while cutting jog traffic ~85% vs the old 20ms firehose, which used to
+// leave StopJog stuck behind a congested socket over WiFi (laggy start/stop).
+export const JOG_HEARTBEAT_MS = 150;
+
 function buildSpeedMap(overrides?: { Slow: number; Normal: number; Fast: number }): Record<string, number> {
   const s = overrides ?? DEFAULT_SPEEDS;
   return {
@@ -75,9 +82,9 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides }: JogPa
     };
 
     if (jogMode === "Tool") {
-      intervalRef.current = setInterval(() => {
-        robotClient.jogTool({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
-      }, 20);
+      const tick = () => robotClient.jogTool({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
+      tick(); // fire immediately so the move starts on press, not after one interval
+      intervalRef.current = setInterval(tick, JOG_HEARTBEAT_MS);
       return;
     }
 
@@ -90,9 +97,9 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides }: JogPa
         speed: 100, accel: 200, decel: 1000,
       });
     } else {
-      intervalRef.current = setInterval(() => {
-        robotClient.jogL({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
-      }, 20);
+      const tick = () => robotClient.jogL({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
+      tick(); // fire immediately so the move starts on press, not after one interval
+      intervalRef.current = setInterval(tick, JOG_HEARTBEAT_MS);
     }
   };
 
@@ -117,9 +124,9 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides }: JogPa
         speed: 20, accel: 100, decel: 200,
       });
     } else {
-      intervalRef.current = setInterval(() => {
-        robotClient.jogJ({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
-      }, 20);
+      const tick = () => robotClient.jogJ({ ...vec, speed: activeSpeed, accel: 200, decel: 1000 });
+      tick(); // fire immediately so the move starts on press, not after one interval
+      intervalRef.current = setInterval(tick, JOG_HEARTBEAT_MS);
     }
   };
 

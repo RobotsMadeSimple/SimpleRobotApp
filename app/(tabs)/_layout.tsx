@@ -1,3 +1,6 @@
+// First import: registers a LogBox filter for nativewind's SafeAreaView deprecation
+// before nativewind/global.css loads and fires it. See the file for details.
+import "@/src/setup/silenceDeprecations";
 import { Tabs, router } from "expo-router";
 import {
   ArrowLeftRight,
@@ -13,7 +16,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import "@/global.css";
-import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
+import { useIsWide } from "@/src/components/ui/responsive";
+import { colors } from "@/src/components/ui/kit";
+import { NavRail } from "@/src/components/ui/NavRail";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
 import { RobotProvider } from "@/src/providers/RobotProvider";
@@ -56,22 +61,31 @@ function usePreventBackExit() {
 
 export function TabLayout() {
   const insets = useSafeAreaInsets();
+  const isWide = useIsWide();
   usePreventBackExit();
 
   return (
     <Tabs
+      // Wide screens (tablet/desktop/web): custom branded navigation rail down
+      // the left edge (see NavRail). Narrow screens keep the stock bottom bar.
+      {...(isWide ? { tabBar: (props: any) => <NavRail {...props} /> } : {})}
       screenOptions={({ route }) => ({
-        headerShown: true,
-        headerTitleAlign: "left",
-        headerTitleStyle: { fontWeight: "bold", fontSize: 25 },
-        headerRight: () => <ConnectionStatus />,
-        tabBarActiveTintColor: "#2563eb",
-        tabBarInactiveTintColor: "#64748b",
-        tabBarStyle: {
-          height: 60 + insets.bottom,
-          paddingBottom: insets.bottom,
-        },
-        tabBarLabelStyle: { fontSize: 12 },
+        // Navigation chrome is owned by each page's <PageHeader> (breadcrumbs on
+        // wide, named back affordance + connection status on narrow) — the stock
+        // navigator header is disabled app-wide.
+        headerShown: false,
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarPosition: isWide ? "left" : "bottom",
+        // Wide renders the custom NavRail as the tab bar (above): it styles itself and
+        // owns its own safe-area insets, so the built-in-bar options below don't apply.
+        // Setting tabBarVariant:"material" here routed Android through the Material bar's
+        // layout path and rendered the rail unstyled — so these stay narrow-only.
+        ...(isWide ? {} : {
+          tabBarVariant: "uikit" as const,
+          tabBarStyle: { height: 60 + insets.bottom, paddingBottom: insets.bottom },
+          tabBarLabelStyle: { fontSize: 12 },
+        }),
         tabBarIcon: ({ color, size }) => {
           const icons: Record<string, any> = {
             robot: Router,

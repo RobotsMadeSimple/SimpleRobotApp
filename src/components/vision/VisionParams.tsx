@@ -1,6 +1,7 @@
 import { BlobDetectionParams } from "@/src/models/robotModels";
 import { useEffect, useRef, useState } from "react";
 import { PanResponder, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { accents, colors, spacing, radii, shadows } from "@/src/components/ui/kit";
 
 export function ParamRow({ label, value, min, max, onChange, desc }: {
   label: string; value: number; min: number; max: number; onChange: (v: number) => void; desc?: string;
@@ -36,7 +37,7 @@ export function ToggleRow({ label, value, onChange, desc }: {
     <View>
       <View style={styles.paramRow}>
         <Text style={styles.paramLabel}>{label}</Text>
-        <Switch value={value} onValueChange={onChange} trackColor={{ true: "#0891b2" }} />
+        <Switch value={value} onValueChange={onChange} trackColor={{ true: accents.cyan }} />
       </View>
       {!!desc && <Text style={styles.paramDesc}>{desc}</Text>}
     </View>
@@ -96,9 +97,9 @@ export function SliderParamRow({ label, value, min, max, onChange, desc }: {
         <View style={{
           position: 'absolute', left: 0, right: 0,
           top: (ROW_H - 4) / 2, height: 4, borderRadius: 2,
-          backgroundColor: '#e5e7eb', overflow: 'hidden',
+          backgroundColor: colors.border, overflow: 'hidden',
         }}>
-          <View style={{ width: `${frac * 100}%`, height: '100%', borderRadius: 2, backgroundColor: '#d97706' }} />
+          <View style={{ width: `${frac * 100}%`, height: '100%', borderRadius: 2, backgroundColor: colors.warning }} />
         </View>
 
         <View
@@ -112,11 +113,10 @@ export function SliderParamRow({ label, value, min, max, onChange, desc }: {
             justifyContent: 'center', alignItems: 'center',
           }}
         >
-          <View style={{
+          <View style={[{
             width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
-            backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#d97706',
-            shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, elevation: 3,
-          }} />
+            backgroundColor: colors.surface, borderWidth: 2.5, borderColor: colors.warning,
+          }, shadows.soft]} />
         </View>
       </View>
 
@@ -201,12 +201,11 @@ export function GrayscaleSliderRow({ label, value, onChange, desc }: {
             justifyContent: 'center', alignItems: 'center',
           }}
         >
-          <View style={{
+          <View style={[{
             width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
             backgroundColor: `rgb(${brightness},${brightness},${brightness})`,
-            borderWidth: 2.5, borderColor: '#374151',
-            shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 3, elevation: 3,
-          }} />
+            borderWidth: 2.5, borderColor: colors.textSecondary,
+          }, shadows.soft]} />
         </View>
       </View>
 
@@ -270,15 +269,15 @@ export function ThresholdRangeRow({
 
   const thumbStyle = {
     width: THUMB_D, height: THUMB_D, borderRadius: THUMB_D / 2,
-    backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#374151',
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 3, elevation: 4,
+    backgroundColor: colors.surface, borderWidth: 2.5, borderColor: colors.textSecondary,
+    ...shadows.soft,
   };
 
   return (
     <View>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}>
         <Text style={styles.paramLabel}>Threshold</Text>
-        <Text style={{ fontSize: 13, color: '#374151', fontWeight: '600' }}>{minVal}–{maxVal}</Text>
+        <Text style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '600' }}>{minVal}–{maxVal}</Text>
       </View>
 
       <View
@@ -390,19 +389,19 @@ export function BlobParamsPanel({ params, onUpdate }: { params: BlobDetectionPar
 }
 
 const styles = StyleSheet.create({
-  paramRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  paramLabel: { flex: 1, fontSize: 13, color: '#374151' },
-  paramDesc:  { fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 15 },
+  paramRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  paramLabel: { flex: 1, fontSize: 13, color: colors.textSecondary },
+  paramDesc:  { fontSize: 11, color: colors.textFaint, marginTop: 2, lineHeight: 15 },
   paramInput: {
-    width: 80, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8,
-    paddingHorizontal: 8, paddingVertical: 4, textAlign: 'right',
-    fontSize: 13, color: '#111827',
+    width: 80, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, textAlign: 'right',
+    fontSize: 13, color: colors.text,
   },
   blobPanel: {
-    padding: 14, gap: 10,
-    backgroundColor: '#f9fafb',
-    borderRadius: 12,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    padding: spacing.md, gap: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.md,
+    ...shadows.soft,
   },
-  blobPanelTitle: { fontSize: 12, fontWeight: '700', color: '#374151', marginBottom: 2 },
+  blobPanelTitle: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 2 },
 });

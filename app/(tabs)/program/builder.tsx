@@ -1,4 +1,3 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { appAlert } from "@/src/components/ui/AppAlert";
@@ -6,7 +5,7 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, imageDataUri, variableList } from "@/src/models/robotModels";
+import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
@@ -17,6 +16,9 @@ import {
   ClipboardPaste,
   Copy,
   Cpu,
+  History as HistoryIcon,
+  Eye,
+  EyeOff,
   ImagePlus,
   Plus,
   Repeat,
@@ -30,7 +32,7 @@ import {
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
   Dimensions,
@@ -54,15 +56,25 @@ import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, Drag
 import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
+import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
+import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, programFromDoc, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
+import { EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
+import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
+import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
+import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
+import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
+import { ExpressionEnvProvider } from "@/src/components/ui/builder/expressions/ExpressionEnv";
+import { PropertiesSection } from "@/src/components/ui/builder/expressions/PropertiesSection";
+import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
 /**
  * Lists are one variable type now, so the chip on a variable row names the element type
  * instead — which is the part that actually changes how the variable is used.
  */
 const LIST_CHIP: Record<ListElementType, { label: string; color: string; bg: string; border: string }> = {
-  Number:  { label: "LIST",    color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
-  Boolean: { label: "FLAGS",   color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
-  Point:   { label: "POINTS",  color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
+  Number:  { label: "LIST",    color: accents.purple, bg: accents.purpleSoft, border: accents.purpleBorder },
+  Boolean: { label: "FLAGS",   color: colors.success, bg: colors.successSoft, border: colors.successBorder },
+  Point:   { label: "POINTS",  color: accents.cyan, bg: accents.cyanSoft, border: accents.cyanBorder },
   Record:  { label: "OBJECTS", color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
 };
 
@@ -90,8 +102,24 @@ function InitialValue({ v }: { v: ProgramVariable }) {
     <Text style={styles.varDesc}>
       {v.isBoolean ? "Boolean — initial: " : "Initial: "}
       {expr
-        ? <Text style={{ color: "#7c3aed", fontWeight: "700" }}>{expr}</Text>
+        ? <Text style={{ color: accents.purple, fontWeight: "700" }}>{expr}</Text>
         : v.isBoolean ? (v.value !== 0 ? "True" : "False") : String(v.value)}
+    </Text>
+  );
+}
+
+/** Matches the Computed kind in VariableEditModal and the picker chip. */
+const COMPUTED_TINT = "#be185d";
+
+/**
+ * The formula line of a computed variable, shown where a stored variable shows its
+ * initial value. A computed variable has no initial value: the formula is what it is.
+ */
+function ComputedFormula({ v }: { v: ProgramVariable }) {
+  return (
+    <Text style={styles.varDesc} numberOfLines={2}>
+      {v.isBoolean ? "Boolean — " : ""}
+      <Text style={{ color: COMPUTED_TINT, fontWeight: "700" }}>{v.valueExpression?.trim() || "(no formula)"}</Text>
     </Text>
   );
 }
@@ -109,36 +137,44 @@ export default function BuilderScreen() {
     ? builtPrograms.find(p => p.name === editName) ?? null
     : null;
 
-  const [isRoutineMode, setIsRoutineMode] = useState(
-    () => isRoutineParam === "1" || (!isLocalMode && builtPrograms.find(p => p.name === editName)?.isRoutine === true)
-  );
-  const [isBackgroundMode,   setIsBackgroundMode]   = useState(
-    () => !isLocalMode && builtPrograms.find(p => p.name === editName)?.isBackground === true
-  );
-  const [killBackgroundOnStop, setKillBackgroundOnStop] = useState(
-    () => !isLocalMode ? (builtPrograms.find(p => p.name === editName)?.killBackgroundOnStop ?? true) : true
-  );
+  // ── Editable document + undo history ────────────────────────────────────
+  // Everything the user can edit lives in one EditorDoc so undo/redo and the
+  // unsaved-changes check see the same value. The setters below are the only
+  // way to change it, and every one routes through history.commit.
+  const history = useDocumentHistory<EditorDoc>(() => {
+    const isRoutine = isRoutineParam === "1" || existing?.isRoutine === true;
+    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine };
+  }, { limit: 100 });
+  const { doc, commit } = history;
+  const {
+    name: programName, description, steps, variables,
+    isRoutine: isRoutineMode, isBackground: isBackgroundMode, killBackgroundOnStop,
+  } = doc;
+
+  const setSteps = useCallback((u: SetStateAction<ProgramStep[]>) =>
+    commit(d => ({ ...d, steps: typeof u === "function" ? u(d.steps) : u })), [commit]);
+  const setVariables = useCallback((u: SetStateAction<ProgramVariable[]>) =>
+    commit(d => ({ ...d, variables: typeof u === "function" ? u(d.variables) : u })), [commit]);
+  // Typing coalesces, so one undo reverts a burst of keystrokes rather than one letter.
+  const setProgramName = (name: string) => commit(d => ({ ...d, name }), { coalesceKey: "name" });
+  const setDescription = (description: string) => commit(d => ({ ...d, description }), { coalesceKey: "description" });
+  const setIsRoutineMode        = (isRoutine: boolean)            => commit(d => ({ ...d, isRoutine }));
+  const setIsBackgroundMode     = (isBackground: boolean)         => commit(d => ({ ...d, isBackground }));
+  const setKillBackgroundOnStop = (killBackgroundOnStop: boolean) => commit(d => ({ ...d, killBackgroundOnStop }));
 
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [contextProgramName, setContextProgramName] = useState<string | undefined>(callerNameParam ?? undefined);
   const [contextPickerOpen,  setContextPickerOpen]  = useState(false);
 
-  const [programName, setProgramName] = useState(existing?.name ?? "");
   const [programId, setProgramId]     = useState<string | undefined>(existing?.id);
-  const [description, setDescription] = useState(existing?.description ?? "");
-  const [steps, setSteps]             = useState<ProgramStep[]>(existing?.steps ?? []);
-  const [variables, setVariables]     = useState<ProgramVariable[]>(existing?.variables ?? []);
   const [coverImage, setCoverImage]   = useState<string | null>(null);
   const [localLoading, setLocalLoading] = useState(isLocalMode && !!editName);
 
-  // Snapshot of the last-saved state used to detect unsaved changes.
-  const [savedSnapshot, setSavedSnapshot] = useState(() =>
-    JSON.stringify({ name: existing?.name ?? "", description: existing?.description ?? "", steps: existing?.steps ?? [], variables: existing?.variables ?? [] })
-  );
-  const isDirty = useMemo(
-    () => JSON.stringify({ name: programName.trim(), description, steps, variables }) !== savedSnapshot,
-    [programName, description, steps, variables, savedSnapshot]
-  );
+  // Snapshot of the last-saved document used to detect unsaved changes. Undoing
+  // back to it reads as clean again.
+  const [savedSnapshot, setSavedSnapshot] = useState(() => docSnapshot(history.doc));
+  const markSaved = (d: EditorDoc) => setSavedSnapshot(docSnapshot(d));
+  const isDirty = useMemo(() => docSnapshot(doc) !== savedSnapshot, [doc, savedSnapshot]);
 
   const contextVariables = useMemo(() => {
     if (!isRoutineMode || !contextProgramName) return [];
@@ -154,17 +190,10 @@ export default function BuilderScreen() {
     ]).then(([programs, img]) => {
       const prog = programs.find(p => p.name === editName);
       if (prog) {
-        const hydratedSteps = rehydrateIds(prog.steps);
-        const loadedVars    = prog.variables ?? [];
-        setProgramName(prog.name);
-        setDescription(prog.description);
-        setSteps(hydratedSteps);
-        setVariables(loadedVars);
-        setIsRoutineMode(prog.isRoutine ?? false);
-        setIsBackgroundMode(prog.isBackground ?? false);
-        setKillBackgroundOnStop(prog.killBackgroundOnStop ?? true);
+        const loaded = docFromProgram(prog);
+        history.reset(loaded);
+        markSaved(loaded);
         if (prog.id) setProgramId(prog.id);
-        setSavedSnapshot(JSON.stringify({ name: prog.name, description: prog.description, steps: hydratedSteps, variables: loadedVars }));
       }
       if (img) setCoverImage(img);
       setLocalLoading(false);
@@ -179,27 +208,15 @@ export default function BuilderScreen() {
       .catch(() => {});
   }, [editName]);
 
-  // Assign fresh IDs to any steps that lost theirs during server round-trip
-  function rehydrateIds(src: ProgramStep[]): ProgramStep[] {
-    return src.map(s => ({
-      ...s,
-      id: s.id || newId(),
-      loopSteps:      s.loopSteps      ? rehydrateIds(s.loopSteps)      : s.loopSteps,
-      ifSteps:        s.ifSteps        ? rehydrateIds(s.ifSteps)        : s.ifSteps,
-      elseSteps:      s.elseSteps      ? rehydrateIds(s.elseSteps)      : s.elseSteps,
-      elseIfBranches: s.elseIfBranches ? s.elseIfBranches.map(b => ({ ...b, id: b.id || newId(), steps: rehydrateIds(b.steps) })) : s.elseIfBranches,
-    }));
-  }
-
+  // (Re)load the robot program when it becomes available. Loading is not an
+  // edit: it replaces the history and becomes the saved state.
   useEffect(() => {
     if (existing) {
-      setProgramName(existing.name);
-      setDescription(existing.description);
-      setSteps(rehydrateIds(existing.steps));
-      setVariables(existing.variables ?? []);
-      setIsBackgroundMode(existing.isBackground ?? false);
-      setKillBackgroundOnStop(existing.killBackgroundOnStop ?? true);
+      const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true });
+      history.reset(loaded);
+      markSaved(loaded);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing?.name]);
 
   // ── Cover image helpers ────────────────────────────────────────────────────
@@ -369,6 +386,23 @@ export default function BuilderScreen() {
       });
       if (firstIdx < 0) rebuilt.push(loop);
       return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
+    });
+    exitSelect();
+  }
+
+  // Every selected step is already off → the action switches them back on;
+  // otherwise it switches them all off.
+  function selectionAllDisabled(): boolean {
+    const sel = selectedInOrder();
+    return sel.length > 0 && sel.every(s => !isStepEnabled(s));
+  }
+
+  function setSelectedEnabled(enabled: boolean) {
+    if (selectedIds.length === 0) return;
+    setSteps(prev => {
+      const scoped = getStepsAtScope(prev, scopeStackRef.current)
+        .map(s => selectedIds.includes(s.id) ? withStepEnabled(s, enabled) : s);
+      return setStepsAtScope(prev, scopeStackRef.current, scoped);
     });
     exitSelect();
   }
@@ -716,20 +750,13 @@ export default function BuilderScreen() {
   // ── Save / Run ────────────────────────────────────────────────────────────
 
   function buildProg(): BuiltProgram {
-    return {
-      id: programId,
-      name: programName.trim(),
-      description: description.trim(),
-      steps,
-      variables: variables.length > 0 ? variables : undefined,
-      lastUpdatedUnixMs: Date.now(),
-      isRoutine: isRoutineMode,
-      isBackground: isBackgroundMode || undefined,
-      killBackgroundOnStop: (!isRoutineMode && !isBackgroundMode) ? (killBackgroundOnStop || undefined) : undefined,
-    };
+    return programFromDoc(doc, programId, Date.now());
   }
 
   async function save(): Promise<boolean> {
+    // The document as it is being saved: edits made while the save is in
+    // flight must still read as unsaved afterwards.
+    const savedDoc = doc;
     const name = programName.trim();
     if (!name) {
       appAlert("Name required", "Please give the program a name.");
@@ -768,7 +795,7 @@ export default function BuilderScreen() {
       }
       if (coverImage) await robotClient.saveProgramImage(name, coverImage).catch(() => {});
     }
-    setSavedSnapshot(JSON.stringify({ name, description: description.trim(), steps, variables }));
+    markSaved(savedDoc);
     return true;
   }
 
@@ -838,6 +865,23 @@ export default function BuilderScreen() {
     exitBuilder();
   }
 
+  // Guarded crumb navigation for the wide header — ancestor crumbs (Program,
+  // Programs/Local Programs/Routines) must go through the same unsaved-changes
+  // prompt as the Exit button rather than navigating straight away.
+  function guardedNavigate(href: string) {
+    if (selectMode) exitSelect();
+    if (!isDirty) { router.navigate(href as never); return; }
+    appAlert(
+      "Unsaved Changes",
+      "You have unsaved changes. Leave without saving?",
+      [
+        { text: "Save & Leave", onPress: async () => { if (await save()) router.navigate(href as never); } },
+        { text: "Discard",      style: "destructive", onPress: () => router.navigate(href as never) },
+        { text: "Cancel",       style: "cancel" },
+      ]
+    );
+  }
+
   // Keep a stable ref so the BackHandler effect can always call the latest version.
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
@@ -851,6 +895,9 @@ export default function BuilderScreen() {
   }, []));
 
   async function handleRun() {
+    // Errors would stop the run on the controller anyway; show them instead.
+    // Saving stays allowed with errors (see handleSave).
+    if (validation.errorCount > 0) { setProblemsOpen(true); return; }
     if (!(await save())) return;
     const name = programName.trim();
     await robotClient.executeBuiltProgram(name).catch(() => {});
@@ -894,21 +941,117 @@ export default function BuilderScreen() {
     if (!savedStep) return;
     const next = applyCncFieldsById(steps, stepId, savedStep);
     if (JSON.stringify(next) === JSON.stringify(steps)) return;
-    setSteps(next);
+    const nextDoc = { ...doc, steps: next };
+    commit(nextDoc);
     // The robot copy was saved just before the handoff, so after pulling the
     // toolpath back the local state matches the robot again.
-    setSavedSnapshot(JSON.stringify({ name: programName.trim(), description, steps: next, variables }));
+    markSaved(nextDoc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builtPrograms, steps, programName, description, variables, isLocalMode]));
+  }, [builtPrograms, doc, isLocalMode]));
+
+  // ── Undo / redo ───────────────────────────────────────────────────────────
+
+  function undo() { exitSelect(); history.undo(); }
+  function redo() { exitSelect(); history.redo(); }
+
+  // An undo can remove the block the user is inside; step back out to the
+  // deepest scope that still exists.
+  useEffect(() => {
+    const depth = validScopeDepth(steps, scopeStackRef.current);
+    if (depth < scopeStackRef.current.length) setScopeStack(prev => prev.slice(0, depth));
+  }, [steps]);
+
+  // ── Expressions ───────────────────────────────────────────────────────────
+  // Symbols and live values are resolved against the saved robot program: a
+  // routine borrows its variable-context program, a local draft has none.
+  const expressionProgramName = isLocalMode ? undefined
+    : isRoutineMode ? contextProgramName
+    : (editName ?? (programName.trim() || undefined));
+  const expressionVariables = useMemo(
+    () => contextVariables.length > 0 ? [...variables, ...contextVariables] : variables,
+    [variables, contextVariables]);
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  // The controller checks the unsaved document (debounced) so problems show up
+  // while editing. A controller without ValidateBuiltProgram hides all of it.
+
+  // Timestamp 0: it is not saved, and a stable value keeps the memo meaningful.
+  const validationProgram = useMemo(() => programFromDoc(doc, programId, 0), [doc, programId]);
+  const validation   = useProgramValidation(validationProgram, connected);
+  const validationProblems = validation.problems;
+  const problemIndex = useMemo(() => indexProblems(steps, validationProblems), [steps, validationProblems]);
+  const [problemsOpen, setProblemsOpen] = useState(false);
+
+  // ── Revisions ─────────────────────────────────────────────────────────────
+  // Only a program already on the robot has stored revisions, under the name
+  // it was opened with.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const canShowHistory = !isLocalMode && !!editName && connected;
+
+  // A restore is saved on the robot already, so it becomes the saved state, and
+  // it is committed like any edit so Undo brings back what was here before.
+  function applyRestoredRevision(program: BuiltProgram) {
+    const restored = docFromProgram(program, { isRoutine: program.isRoutine ?? isRoutineMode });
+    exitSelect();
+    setScopeStack([]);
+    commit(restored);
+    markSaved(restored);
+    if (program.id) setProgramId(program.id);
+  }
+
+  // Keyboard shortcuts act on the program only while no dialog is on top of it.
+  const dialogOpen = configOpen || varModalOpen || typePickerOpen || makeRoutineOpen
+    || contextPickerOpen || settingsModalOpen || problemsOpen || historyOpen;
+  useUndoShortcuts({ enabled: !dialogOpen && !localLoading, onUndo: undo, onRedo: redo });
+
+  // Jump to the step a problem is on: enter its block and open its config.
+  function openProblem(p: ValidationProblem) {
+    setProblemsOpen(false);
+    const loc = findStepLocation(steps, p.stepId);
+    if (!loc) return;
+    exitSelect();
+    scrollYRef.current = 0;
+    setScopeStack(loc.scope);
+    // Let the sheet finish closing first: iOS will not present a modal while
+    // another one is still dismissing.
+    setTimeout(() => { setEditingStep(loc.step); setConfigOpen(true); }, 350);
+  }
+
+  const editorTools = (variant: "header" | "bar") => (
+    <EditorToolbar
+      variant={variant}
+      canUndo={history.canUndo}
+      canRedo={history.canRedo}
+      onUndo={undo}
+      onRedo={redo}
+    >
+      {validation.supported && (
+        <ProblemsPill
+          errorCount={validation.errorCount}
+          warningCount={validation.warningCount}
+          onPress={() => setProblemsOpen(true)}
+        />
+      )}
+      {canShowHistory && (
+        <ToolbarButton label="History" onPress={() => { exitSelect(); setHistoryOpen(true); }}>
+          <HistoryIcon size={16} color={colors.textSecondary} />
+        </ToolbarButton>
+      )}
+    </EditorToolbar>
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (localLoading) {
     return (
       <View style={styles.container}>
-        <SubPageHeader title="Loading…" onBack={handleBack} />
+        <PageHeader
+          title="Loading…"
+          subtitle="Reading the local program from this device"
+          crumbs={[{ label: "Program", href: "/program" }, { label: "Local Programs", href: "/(tabs)/program/phone-programs" }, { label: "Loading…" }]}
+        />
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ fontSize: 14, color: "#9ca3af" }}>Loading local program…</Text>
+          <Text style={{ fontSize: 14, color: colors.textFaint }}>Loading local program…</Text>
         </View>
       </View>
     );
@@ -931,13 +1074,13 @@ export default function BuilderScreen() {
       </TouchableOpacity>
       {scopeStack.slice(0, -1).map((frame, fi) => (
         <React.Fragment key={fi}>
-          <ChevronRight size={12} color="#9ca3af" />
+          <ChevronRight size={12} color={colors.textFaint} />
           <TouchableOpacity onPress={() => { exitSelect(); setScopeStack(prev => prev.slice(0, fi + 1)); }} hitSlop={8} activeOpacity={0.7}>
             <Text style={styles.scopeBreadcrumbItem}>{frame.label}</Text>
           </TouchableOpacity>
         </React.Fragment>
       ))}
-      <ChevronRight size={12} color="#9ca3af" />
+      <ChevronRight size={12} color={colors.textFaint} />
       <Text style={styles.scopeBreadcrumbCurrent}>{scopeStack[scopeStack.length - 1].label}</Text>
     </>
   ) : null;
@@ -953,7 +1096,7 @@ export default function BuilderScreen() {
         value={programName}
         onChangeText={setProgramName}
         placeholder={isRoutineMode ? "Routine name…" : isBackgroundMode ? "Background program name…" : "Program name…"}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={colors.textFaint}
         returnKeyType="next"
       />
       <View style={styles.metaSep} />
@@ -962,7 +1105,7 @@ export default function BuilderScreen() {
         value={description}
         onChangeText={setDescription}
         placeholder="Description (optional)"
-        placeholderTextColor="#c4c4c4"
+        placeholderTextColor={colors.textFaint}
         returnKeyType="done"
       />
       <View style={styles.metaSep} />
@@ -979,17 +1122,17 @@ export default function BuilderScreen() {
                 />
               ) : (
                 <View style={styles.imagePreviewPlaceholder}>
-                  <ImagePlus size={22} color="#d1d5db" />
+                  <ImagePlus size={22} color={colors.borderStrong} />
                 </View>
               )}
             </View>
             <View style={styles.imageActions}>
               <TouchableOpacity style={styles.imageBtn} onPress={pickFromCamera} activeOpacity={0.75}>
-                <Camera size={15} color="#2563eb" />
+                <Camera size={15} color={colors.accent} />
                 <Text style={styles.imageBtnText}>Camera</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.imageBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
-                <ImagePlus size={15} color="#2563eb" />
+                <ImagePlus size={15} color={colors.accent} />
                 <Text style={styles.imageBtnText}>Photo Library</Text>
               </TouchableOpacity>
             </View>
@@ -998,18 +1141,18 @@ export default function BuilderScreen() {
             <>
               <View style={styles.metaSep} />
               <TouchableOpacity
-                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+                style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}
                 onPress={() => setSettingsModalOpen(true)}
                 activeOpacity={0.7}
               >
-                <SlidersHorizontal size={16} color="#6b7280" />
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
+                <SlidersHorizontal size={16} color={colors.textMuted} />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary, flex: 1 }}>Program Settings</Text>
                 {isBackgroundMode && (
-                  <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                    <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
+                  <View style={{ backgroundColor: colors.successSoft, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "700", color: colors.success }}>BACKGROUND</Text>
                   </View>
                 )}
-                <ChevronRight size={15} color="#9ca3af" />
+                <ChevronRight size={15} color={colors.textFaint} />
               </TouchableOpacity>
             </>
           )}
@@ -1021,18 +1164,18 @@ export default function BuilderScreen() {
         <>
           <View style={styles.metaSep} />
           <TouchableOpacity
-            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}
             onPress={() => setSettingsModalOpen(true)}
             activeOpacity={0.7}
           >
-            <SlidersHorizontal size={16} color="#6b7280" />
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Program Settings</Text>
+            <SlidersHorizontal size={16} color={colors.textMuted} />
+            <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary, flex: 1 }}>Program Settings</Text>
             {isBackgroundMode && (
-              <View style={{ backgroundColor: "#dcfce7", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                <Text style={{ fontSize: 10, fontWeight: "700", color: "#16a34a" }}>BACKGROUND</Text>
+              <View style={{ backgroundColor: colors.successSoft, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                <Text style={{ fontSize: 10, fontWeight: "700", color: colors.success }}>BACKGROUND</Text>
               </View>
             )}
-            <ChevronRight size={15} color="#9ca3af" />
+            <ChevronRight size={15} color={colors.textFaint} />
           </TouchableOpacity>
         </>
       )}
@@ -1042,16 +1185,16 @@ export default function BuilderScreen() {
         <>
           <View style={styles.metaSep} />
           <TouchableOpacity
-            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}
             onPress={() => setContextPickerOpen(true)}
             activeOpacity={0.7}
           >
-            <ChevronsRight size={16} color="#6b7280" />
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151", flex: 1 }}>Variable Context</Text>
-            <Text style={{ fontSize: 12, color: contextProgramName ? "#2563eb" : "#9ca3af", maxWidth: 160 }} numberOfLines={1}>
+            <ChevronsRight size={16} color={colors.textMuted} />
+            <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary, flex: 1 }}>Variable Context</Text>
+            <Text style={{ fontSize: 12, color: contextProgramName ? colors.accent : colors.textFaint, maxWidth: 160 }} numberOfLines={1}>
               {contextProgramName ?? "None"}
             </Text>
-            <ChevronRight size={15} color="#9ca3af" />
+            <ChevronRight size={15} color={colors.textFaint} />
           </TouchableOpacity>
         </>
       )}
@@ -1060,7 +1203,12 @@ export default function BuilderScreen() {
 
   const variablesSection = (
     <>
-      <Text style={styles.sectionLabel}>VARIABLES</Text>
+      <View style={styles.sectionLabelRow}>
+        <Text style={styles.sectionLabel}>VARIABLES</Text>
+        {variables.length > 0 && <Text style={styles.sectionCount}>{variables.length}</Text>}
+        <View style={{ flex: 1 }} />
+        <InfoTip text="Variables hold values the program can read and change while it runs. Reference one from any numeric field, and tick 'show on monitor' to watch it live." />
+      </View>
       <View style={styles.variablesCard}>
         {variables.length === 0 ? (
           <Text style={styles.varEmptyText}>
@@ -1071,7 +1219,7 @@ export default function BuilderScreen() {
             const vList = variableList(v);
             // Coerced to a real boolean: an empty-string expression would otherwise fall
             // through as "" and React Native throws on a bare string outside a <Text>.
-            const hasExpr = !!v.valueExpression?.trim();
+            const hasExpr = !v.isComputed && !!v.valueExpression?.trim();
             return (
             <React.Fragment key={v.id}>
               {i > 0 && <View style={styles.varSep} />}
@@ -1089,8 +1237,15 @@ export default function BuilderScreen() {
                       </View>
                     )}
                     {v.isBoolean && (
-                      <View style={{ backgroundColor: "#f0fdf4", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bbf7d0" }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#16a34a", letterSpacing: 0.3 }}>BOOL</Text>
+                      <View style={{ backgroundColor: colors.successSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.successBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: colors.success, letterSpacing: 0.3 }}>BOOL</Text>
+                      </View>
+                    )}
+                    {/* A computed variable is a formula read live, not a stored value with a
+                        computed start — so it gets its own badge, not the fx one below. */}
+                    {v.isComputed && (
+                      <View style={{ backgroundColor: "#fdf2f8", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#fbcfe8" }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: COMPUTED_TINT, letterSpacing: 0.3 }}>ƒ COMPUTED</Text>
                       </View>
                     )}
                     {/* Marks a computed starting value. It lives up here with the chips
@@ -1098,32 +1253,37 @@ export default function BuilderScreen() {
                         description shows that instead of its initial value — and "this
                         one is computed" is worth knowing either way. */}
                     {hasExpr && (
-                      <View style={{ backgroundColor: "#f5f3ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#ddd6fe" }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", fontStyle: "italic", color: "#7c3aed", letterSpacing: 0.3 }}>fx</Text>
+                      <View style={{ backgroundColor: accents.purpleSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: accents.purpleBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", fontStyle: "italic", color: accents.purple, letterSpacing: 0.3 }}>fx</Text>
                       </View>
                     )}
                     {v.isGlobal && (
-                      <View style={{ backgroundColor: "#fffbeb", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#fde68a" }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#b45309", letterSpacing: 0.3 }}>GLOBAL</Text>
+                      <View style={{ backgroundColor: colors.warningSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.warningBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: colors.warning, letterSpacing: 0.3 }}>GLOBAL</Text>
                       </View>
                     )}
                     {v.displayOnMonitor && (
-                      <View style={{ backgroundColor: "#eff6ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#bfdbfe" }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#2563eb", letterSpacing: 0.3 }}>MONITOR</Text>
+                      <View style={{ backgroundColor: colors.accentSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.accentBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: colors.accent, letterSpacing: 0.3 }}>MONITOR</Text>
                       </View>
                     )}
                     {v.isStopwatch && (
                       <View style={{ backgroundColor: "#e0f2fe", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#7dd3fc" }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#0891b2", letterSpacing: 0.3 }}>STOPWATCH</Text>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: accents.cyan, letterSpacing: 0.3 }}>STOPWATCH</Text>
                       </View>
                     )}
                     {v.isPersistent && (
-                      <View style={{ backgroundColor: "#f5f3ff", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "#ddd6fe" }}>
-                        <Text style={{ fontSize: 9, fontWeight: "700", color: "#7c3aed", letterSpacing: 0.3 }}>PERSIST</Text>
+                      <View style={{ backgroundColor: accents.purpleSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: accents.purpleBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: accents.purple, letterSpacing: 0.3 }}>PERSIST</Text>
                       </View>
                     )}
                   </View>
-                  {v.description ? (
+                  {v.isComputed ? (
+                    <>
+                      <ComputedFormula v={v} />
+                      {v.description ? <Text style={styles.varDesc}>{v.description}</Text> : null}
+                    </>
+                  ) : v.description ? (
                     <Text style={styles.varDesc}>{v.description}</Text>
                   ) : vList ? (
                     <Text style={styles.varDesc}>{describeList(vList)}</Text>
@@ -1155,10 +1315,11 @@ export default function BuilderScreen() {
           style={[styles.varAddBtn, variables.length > 0 && styles.varAddBtnBorder]}
           onPress={() => openNewVar()} activeOpacity={0.7}
         >
-          <Plus size={13} color="#7c3aed" />
+          <Plus size={13} color={accents.purple} />
           <Text style={styles.varAddText}>Add Variable</Text>
         </TouchableOpacity>
       </View>
+      <PropertiesSection />
     </>
   );
 
@@ -1166,8 +1327,13 @@ export default function BuilderScreen() {
     <>
       {currentSteps.length === 0 ? (
         <View style={styles.emptySteps}>
-          <Cpu size={32} color="#d1d5db" />
-          <Text style={styles.emptyStepsText}>{inScope ? "No steps in this scope" : "No steps yet"}</Text>
+          <Cpu size={32} color={colors.borderStrong} />
+          <Text style={styles.emptyStepsText}>{inScope ? "No steps in this block" : "No steps yet"}</Text>
+          <Text style={styles.emptyStepsHint}>
+            {inScope
+              ? "Add the steps that should run inside this block."
+              : "Add your first block — moves, logic, I/O and vision are all in the picker."}
+          </Text>
         </View>
       ) : (
         <View style={styles.stepsList}>
@@ -1210,6 +1376,7 @@ export default function BuilderScreen() {
                 router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
               } : undefined}
               onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
+              problems={problemIndex.get(step.id)}
             />
           ))}
         </View>
@@ -1220,7 +1387,7 @@ export default function BuilderScreen() {
           style={styles.addCard}
           onPress={() => openTypePicker({ mode: "append" })}
         >
-          <Plus size={16} color="#2563eb" />
+          <Plus size={16} color={colors.accent} />
           <Text style={styles.addCardText}>Add Step</Text>
         </AnimatedPressable>
         {clipboard.length > 0 && (
@@ -1228,7 +1395,7 @@ export default function BuilderScreen() {
             style={styles.pasteCard}
             onPress={() => pasteStep({ mode: "append" })}
           >
-            <ClipboardPaste size={16} color="#7c3aed" />
+            <ClipboardPaste size={16} color={accents.purple} />
             <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
           </AnimatedPressable>
         )}
@@ -1238,40 +1405,96 @@ export default function BuilderScreen() {
 
   // On wide screens the save actions live in the header instead of a bottom
   // bar — the bar's floating buttons can clip off-screen at some widths.
+  // Exit is here too: the wide header has no back arrow, and leaving the
+  // builder must still go through the unsaved-changes prompt.
   const headerActions = isWide ? (
-    <View style={{ flexDirection: "row", gap: 8 }}>
+    <View style={{ flexDirection: "row", gap: spacing.sm }}>
+      {editorTools("header")}
+      <ActionButton
+        label={inScope ? "Leave Block" : "Exit"}
+        icon={<ArrowLeft size={14} color={colors.textSecondary} />}
+        style={styles.headerExitBtn}
+        textStyle={styles.headerExitText}
+        onPress={inScope ? popScope : exitBuilder}
+      />
       {isLocalMode && connected && (
         <ActionButton
           label="Save to Robot"
-          icon={<Upload size={14} color="#16a34a" />}
+          icon={<Upload size={14} color={colors.success} />}
           loading={savingToRobot}
           style={styles.headerUploadBtn}
           textStyle={styles.headerUploadText}
-          spinnerColor="#16a34a"
+          spinnerColor={colors.success}
           onPress={saveToRobot}
         />
       )}
       <ActionButton
         label="Save"
-        icon={<Wrench size={14} color="#fff" />}
+        icon={<Wrench size={14} color={colors.onAccent} />}
         loading={saving}
         style={styles.headerSaveBtn}
         textStyle={styles.headerSaveText}
-        spinnerColor="#fff"
+        spinnerColor={colors.onAccent}
         onPress={handleSave}
       />
     </View>
   ) : undefined;
 
+  // ── Header ────────────────────────────────────────────────────────────────
+  // PageHeader owns chrome both wide and narrow. Narrow's back press runs
+  // `handleBack` (pop a scope, or prompt on unsaved changes) via onBack; wide's
+  // ancestor crumbs run `guardedNavigate` via onNavigate — both routes through
+  // the same unsaved-changes prompt as the header's Exit button.
+
+  const rootStepCount = steps.length;
+  const headerSubtitle = inScope
+    ? `${currentSteps.length} step${currentSteps.length !== 1 ? "s" : ""} in this block`
+    : `${programName.trim() ? programName.trim() : "Untitled"} · ${rootStepCount} step${rootStepCount !== 1 ? "s" : ""}` +
+      `${variables.length > 0 ? ` · ${variables.length} variable${variables.length !== 1 ? "s" : ""}` : ""}` +
+      `${isDirty ? " · unsaved changes" : ""}`;
+
+  const headerCrumbs = [
+    { label: "Program", href: "/program" },
+    ...(isRoutineMode
+      ? [{ label: "Routines", href: "/program/routines" }]
+      : isLocalMode
+        ? [{ label: "Local Programs", href: "/(tabs)/program/phone-programs" }]
+        : [{ label: "Programs", href: "/(tabs)/program/robot-programs" }]),
+    { label: builderTitle },
+  ];
+
+  // Narrow's back affordance should read "Back" (a single scope pop) rather
+  // than jump straight to the parent list name when inside a nested block.
+  const narrowCrumbs = inScope
+    ? [{ label: "Back" }, { label: builderTitle }]
+    : headerCrumbs;
+
   return (
+    <ExpressionEnvProvider programName={expressionProgramName} variables={expressionVariables} enabled={connected}>
     <View style={styles.container}>
-      <SubPageHeader title={builderTitle} onBack={isWide ? exitBuilder : handleBack} right={headerActions} />
+      {isWide ? (
+        <PageHeader
+          title={builderTitle}
+          subtitle={headerSubtitle}
+          crumbs={headerCrumbs}
+          right={headerActions}
+          onNavigate={guardedNavigate}
+        />
+      ) : (
+        <PageHeader
+          title={builderTitle}
+          subtitle={headerSubtitle}
+          crumbs={narrowCrumbs}
+          onBack={handleBack}
+        />
+      )}
+      {!isWide && editorTools("bar")}
 
       {/* Multi-select toolbar */}
       {selectMode && (
         <View style={styles.selectBar}>
           <TouchableOpacity onPress={exitSelect} hitSlop={10} activeOpacity={0.7}>
-            <X size={20} color="#374151" />
+            <X size={20} color={colors.textSecondary} />
           </TouchableOpacity>
           <Text style={styles.selectCount}>{selectedIds.length} selected</Text>
           <ScrollView
@@ -1287,7 +1510,7 @@ export default function BuilderScreen() {
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
           >
-            <Copy size={16} color="#2563eb" />
+            <Copy size={16} color={colors.accent} />
             <Text style={styles.selectActionText}>Copy</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1296,7 +1519,7 @@ export default function BuilderScreen() {
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
           >
-            <Scissors size={16} color="#2563eb" />
+            <Scissors size={16} color={colors.accent} />
             <Text style={styles.selectActionText}>Cut</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1305,8 +1528,8 @@ export default function BuilderScreen() {
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
           >
-            <Repeat size={16} color="#0891b2" />
-            <Text style={[styles.selectActionText, { color: "#0891b2" }]}>Loop</Text>
+            <Repeat size={16} color={accents.cyan} />
+            <Text style={[styles.selectActionText, { color: accents.cyan }]}>Loop</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
@@ -1314,8 +1537,21 @@ export default function BuilderScreen() {
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
           >
-            <Repeat2 size={16} color="#7c3aed" />
-            <Text style={[styles.selectActionText, { color: "#7c3aed" }]}>Routine</Text>
+            <Repeat2 size={16} color={accents.purple} />
+            <Text style={[styles.selectActionText, { color: accents.purple }]}>Routine</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={() => setSelectedEnabled(selectionAllDisabled())}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            {selectionAllDisabled()
+              ? <Eye size={16} color={colors.textSecondary} />
+              : <EyeOff size={16} color={colors.textSecondary} />}
+            <Text style={[styles.selectActionText, { color: colors.textSecondary }]}>
+              {selectionAllDisabled() ? "Enable" : "Disable"}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
@@ -1323,7 +1559,7 @@ export default function BuilderScreen() {
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
           >
-            <Trash2 size={16} color="#dc2626" />
+            <Trash2 size={16} color={colors.danger} />
           </TouchableOpacity>
           </ScrollView>
         </View>
@@ -1347,7 +1583,7 @@ export default function BuilderScreen() {
               {inScope && (
                 <View style={[styles.scopeBreadcrumb, styles.scopeHeaderWide]}>
                   <TouchableOpacity style={styles.scopeBackBtn} onPress={popScope} hitSlop={8} activeOpacity={0.7}>
-                    <ArrowLeft size={16} color="#111827" />
+                    <ArrowLeft size={16} color={colors.text} />
                   </TouchableOpacity>
                   <View style={styles.scopeTrailWrap}>{breadcrumbTrail}</View>
                 </View>
@@ -1361,7 +1597,14 @@ export default function BuilderScreen() {
                 onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
                 scrollEventThrottle={16}
               >
-                {!inScope && <Text style={styles.sectionLabel}>STEPS</Text>}
+                {!inScope && (
+                  <View style={styles.sectionLabelRow}>
+                    <Text style={styles.sectionLabel}>STEPS</Text>
+                    <Text style={styles.sectionCount}>{currentSteps.length}</Text>
+                    <View style={{ flex: 1 }} />
+                    <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, disable, wrap them in a loop, or save them as a routine." />
+                  </View>
+                )}
                 {stepsSection}
               </ScrollView>
             </View>
@@ -1386,11 +1629,11 @@ export default function BuilderScreen() {
             <View style={styles.bottomBar}>
               <ActionButton
                 label="Save to Robot"
-                icon={<Upload size={15} color="#16a34a" />}
+                icon={<Upload size={15} color={colors.success} />}
                 loading={savingToRobot}
                 style={styles.uploadBtn}
                 textStyle={styles.uploadBtnText}
-                spinnerColor="#16a34a"
+                spinnerColor={colors.success}
                 onPress={saveToRobot}
               />
             </View>
@@ -1411,7 +1654,12 @@ export default function BuilderScreen() {
         {variablesSection}
 
         {/* Steps (root level) */}
-        <Text style={styles.sectionLabel}>STEPS</Text>
+        <View style={styles.sectionLabelRow}>
+          <Text style={styles.sectionLabel}>STEPS</Text>
+          <Text style={styles.sectionCount}>{currentSteps.length}</Text>
+          <View style={{ flex: 1 }} />
+          <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, disable, wrap them in a loop, or save them as a routine." />
+        </View>
         {stepsSection}
       </ScrollView>
 
@@ -1420,21 +1668,21 @@ export default function BuilderScreen() {
         {isLocalMode && connected && (
           <ActionButton
             label="Save to Robot"
-            icon={<Upload size={15} color="#16a34a" />}
+            icon={<Upload size={15} color={colors.success} />}
             loading={savingToRobot}
             style={styles.uploadBtn}
             textStyle={styles.uploadBtnText}
-            spinnerColor="#16a34a"
+            spinnerColor={colors.success}
             onPress={saveToRobot}
           />
         )}
         <ActionButton
           label="Save"
-          icon={<Wrench size={16} color="#2563eb" />}
+          icon={<Wrench size={16} color={colors.accent} />}
           loading={saving}
           style={styles.saveBtn}
           textStyle={styles.saveBtnText}
-          spinnerColor="#2563eb"
+          spinnerColor={colors.accent}
           onPress={handleSave}
         />
       </View>
@@ -1469,6 +1717,21 @@ export default function BuilderScreen() {
           router.push({ pathname: "/(tabs)/program/builder", params: { isRoutine: "1" } });
         }}
       />
+      {canShowHistory && (
+        <RevisionsSheet
+          visible={historyOpen}
+          programName={editName!}
+          hasUnsavedChanges={isDirty}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={applyRestoredRevision}
+        />
+      )}
+      <ValidationPanel
+        visible={problemsOpen}
+        problems={validation.problems}
+        onClose={() => setProblemsOpen(false)}
+        onSelect={openProblem}
+      />
       <VariableEditModal
         visible={varModalOpen}
         variable={editingVar}
@@ -1486,20 +1749,20 @@ export default function BuilderScreen() {
               <View style={{ width: 18 }} />
               <Text style={ms.title}>New Routine</Text>
               <TouchableOpacity onPress={() => setMakeRoutineOpen(false)} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
+                <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
-            <Text style={{ fontSize: 13, color: "#6b7280", paddingHorizontal: 16, paddingBottom: 10, lineHeight: 18 }}>
+            <Text style={{ fontSize: 13, color: colors.textMuted, paddingHorizontal: spacing.lg, paddingBottom: 10, lineHeight: 18 }}>
               Save the {selectedIds.length} selected step{selectedIds.length !== 1 ? "s" : ""} as a reusable routine.
             </Text>
-            <View style={{ paddingHorizontal: 16 }}>
+            <View style={{ paddingHorizontal: spacing.lg }}>
               <Text style={ms.fieldLabel}>NAME</Text>
               <TextInput
                 style={ms.input}
                 value={routineNameInput}
                 onChangeText={setRoutineNameInput}
                 placeholder="e.g. PickAndPlace"
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={colors.textFaint}
                 autoFocus
                 autoCapitalize="none"
                 returnKeyType="done"
@@ -1519,7 +1782,7 @@ export default function BuilderScreen() {
                 disabled={!routineNameValid || makingRoutine}
                 activeOpacity={0.7}
               >
-                <Repeat2 size={15} color="white" />
+                <Repeat2 size={15} color={colors.onAccent} />
                 <Text style={ms.saveText}>Create Routine</Text>
               </TouchableOpacity>
             </View>
@@ -1536,10 +1799,10 @@ export default function BuilderScreen() {
               <View style={{ width: 18 }} />
               <Text style={ms.title}>Variable Context</Text>
               <TouchableOpacity onPress={() => setContextPickerOpen(false)} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
+                <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
-            <Text style={{ fontSize: 12, color: '#6b7280', paddingHorizontal: 16, paddingBottom: 8 }}>
+            <Text style={{ fontSize: 12, color: colors.textMuted, paddingHorizontal: spacing.lg, paddingBottom: 8 }}>
               Pick a program whose variables will be available in this routine's expressions and conditions.
             </Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -1588,39 +1851,39 @@ export default function BuilderScreen() {
               <View style={{ width: 18 }} />
               <Text style={ms.title}>Program Settings</Text>
               <TouchableOpacity onPress={() => setSettingsModalOpen(false)} hitSlop={12} activeOpacity={0.7}>
-                <X size={18} color="#9ca3af" />
+                <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {/* Background program */}
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#f3f4f6" }}>
-                <View style={{ flex: 1, marginRight: 16 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Background Program</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.background }}>
+                <View style={{ flex: 1, marginRight: spacing.lg }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Background Program</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                     Runs in parallel — cannot move the robot or change tools/speed
                   </Text>
                 </View>
                 <Switch
                   value={isBackgroundMode}
                   onValueChange={v => { setIsBackgroundMode(v); if (v) setIsRoutineMode(false); }}
-                  trackColor={{ false: "#e5e7eb", true: "#16a34a" }}
+                  trackColor={{ false: colors.border, true: colors.success }}
                 />
               </View>
 
               {/* Stop backgrounds on finish — only for non-background, non-routine programs */}
               {!isRoutineMode && !isBackgroundMode && (
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14 }}>
-                  <View style={{ flex: 1, marginRight: 16 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Stop Backgrounds on Finish</Text>
-                    <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                  <View style={{ flex: 1, marginRight: spacing.lg }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Stop Backgrounds on Finish</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                       Kill all running background programs when this program ends
                     </Text>
                   </View>
                   <Switch
                     value={killBackgroundOnStop}
                     onValueChange={setKillBackgroundOnStop}
-                    trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                    trackColor={{ false: colors.border, true: colors.accent }}
                   />
                 </View>
               )}
@@ -1628,7 +1891,7 @@ export default function BuilderScreen() {
 
             <View style={[ms.actions, { marginTop: 8 }]}>
               <TouchableOpacity style={ms.saveBtn} onPress={() => setSettingsModalOpen(false)} activeOpacity={0.7}>
-                <Check size={15} color="white" />
+                <Check size={15} color={colors.onAccent} />
                 <Text style={ms.saveText}>Done</Text>
               </TouchableOpacity>
             </View>
@@ -1636,6 +1899,7 @@ export default function BuilderScreen() {
         </Pressable>
       </Modal>
     </View>
+    </ExpressionEnvProvider>
   );
 }
 
@@ -1680,8 +1944,8 @@ function applyCncFieldsById(steps: ProgramStep[], id: string, src: ProgramStep):
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
-  content:   { padding: 16, paddingBottom: 32, gap: 12 },
+  container: { flex: 1, backgroundColor: colors.background },
+  content:   { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
   // ── Wide (desktop) two-pane layout ──────────────────────────────────────────
   wideRow: {
@@ -1690,27 +1954,26 @@ const styles = StyleSheet.create({
   },
   widePaneLeft: {
     width: 380, flexGrow: 0, flexShrink: 0,
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.border,
   },
-  widePaneLeftContent: { padding: 16, paddingBottom: 32, gap: 12 },
+  widePaneLeftContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
   widePaneRight: { flex: 1 },
   wideStepsContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
   // Compact header-slot save buttons (wide layout only).
   headerSaveBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 7, backgroundColor: "#2563eb", borderRadius: 10,
-    paddingVertical: 9, paddingHorizontal: 20, minWidth: 96,
-    shadowColor: "#2563eb", shadowOpacity: 0.3, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 3,
+    gap: spacing.sm, backgroundColor: colors.accent, borderRadius: radii.md,
+    paddingVertical: spacing.sm, paddingHorizontal: 20, minWidth: 96,
+    ...shadows.soft,
   },
-  headerSaveText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  headerSaveText: { fontSize: 14, fontWeight: "700", color: colors.onAccent },
   headerUploadBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 7, backgroundColor: "#f0fdf4", borderRadius: 10,
+    gap: spacing.sm, backgroundColor: colors.successSoft, borderRadius: radii.md,
     borderWidth: 1.5, borderColor: "#86efac",
-    paddingVertical: 8, paddingHorizontal: 14,
+    paddingVertical: spacing.sm, paddingHorizontal: 14,
   },
-  headerUploadText: { fontSize: 13, fontWeight: "600", color: "#16a34a" },
+  headerUploadText: { fontSize: 13, fontWeight: "600", color: colors.success },
 
   // Multi-select toolbar
   selectBar: {
@@ -1719,105 +1982,122 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: colors.border,
   },
-  selectCount: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  selectCount: { fontSize: 15, fontWeight: "700", color: colors.text },
   selectActions: { flex: 1 },
-  selectActionsContent: { gap: 8, alignItems: "center", flexGrow: 1, justifyContent: "flex-end" },
+  selectActionsContent: { gap: spacing.sm, alignItems: "center", flexGrow: 1, justifyContent: "flex-end" },
   selectAction: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
     paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 9,
-    backgroundColor: "#f3f4f6",
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.background,
   },
-  selectActionText: { fontSize: 13, fontWeight: "700", color: "#2563eb" },
+  selectActionText: { fontSize: 13, fontWeight: "700", color: colors.accent },
   selectActionDisabled: { opacity: 0.4 },
 
   metaCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
     overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 }, elevation: 3,
+    ...shadows.soft,
   },
   nameInput: {
-    fontSize: 17, fontWeight: "700", color: "#111827",
-    paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 17, fontWeight: "700", color: colors.text,
+    paddingHorizontal: spacing.lg, paddingVertical: 14,
   },
-  metaSep:  { height: StyleSheet.hairlineWidth, backgroundColor: "#e5e7eb" },
+  metaSep:  { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
   descInput: {
-    fontSize: 14, color: "#6b7280",
-    paddingHorizontal: 16, paddingVertical: 12,
+    fontSize: 14, color: colors.textMuted,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
 
   // Cover image row
   imageRow: {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingVertical: 12, gap: 14,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: 14,
   },
   imagePreviewWrap: {
-    width: 72, height: 72, borderRadius: 10, overflow: "hidden",
+    width: 72, height: 72, borderRadius: radii.md, overflow: "hidden",
   },
   imagePreview: { width: 72, height: 72 },
   imagePreviewPlaceholder: {
-    width: 72, height: 72, borderRadius: 10,
-    backgroundColor: "#f3f4f6", borderWidth: 1.5,
-    borderColor: "#e5e7eb", borderStyle: "dashed",
+    width: 72, height: 72, borderRadius: radii.md,
+    backgroundColor: colors.background, borderWidth: 1.5,
+    borderColor: colors.border, borderStyle: "dashed",
     justifyContent: "center", alignItems: "center",
   },
-  imageActions: { flex: 1, gap: 8 },
+  imageActions: { flex: 1, gap: spacing.sm },
   imageBtn: {
-    flexDirection: "row", alignItems: "center", gap: 7,
-    borderWidth: 1.5, borderColor: "#bfdbfe", borderRadius: 8,
-    paddingVertical: 8, paddingHorizontal: 12,
-    backgroundColor: "#eff6ff",
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    borderWidth: 1.5, borderColor: colors.accentBorder, borderRadius: radii.sm,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+    backgroundColor: colors.accentSoft,
   },
-  imageBtnText: { fontSize: 13, fontWeight: "600", color: "#2563eb" },
+  imageBtnText: { fontSize: 13, fontWeight: "600", color: colors.accent },
 
   sectionLabel: {
-    fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8,
+    fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.8,
+  },
+  sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  headerExitBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  headerExitText: { color: colors.textSecondary, fontSize: 13, fontWeight: "600" },
+  sectionCount: {
+    fontSize: 11, fontWeight: "700", color: colors.textFaint,
+    backgroundColor: colors.surface, borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm, paddingVertical: 1,
   },
 
   emptySteps: {
-    backgroundColor: "#fff", borderRadius: 14, paddingVertical: 32,
-    alignItems: "center", gap: 8,
-    shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8, elevation: 3,
+    backgroundColor: colors.surface, borderRadius: radii.lg, paddingVertical: spacing.xxl,
+    alignItems: "center", gap: spacing.sm,
+    ...shadows.soft,
   },
-  emptyStepsText: { fontSize: 14, color: "#9ca3af" },
+  emptyStepsText: { fontSize: 14, color: colors.textFaint },
+  emptyStepsHint: {
+    fontSize: 12.5, color: colors.textFaint, textAlign: "center",
+    paddingHorizontal: spacing.xl, lineHeight: 17, opacity: 0.85,
+  },
 
   // ── Variables card ──────────────────────────────────────────────────────────
 
   variablesCard: {
-    backgroundColor: "#fff", borderRadius: 14, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
-    paddingVertical: 4,
+    backgroundColor: colors.surface, borderRadius: radii.lg, overflow: "hidden",
+    ...shadows.soft,
+    paddingVertical: spacing.xs,
   },
   varRow: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingHorizontal: 14, paddingVertical: 10,
   },
-  varSep: { height: StyleSheet.hairlineWidth, backgroundColor: "#e5e7eb", marginHorizontal: 14 },
+  varSep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginHorizontal: 14 },
   varInfo: { flex: 1, minWidth: 0 },
-  varName: { fontSize: 14, fontWeight: "700", color: "#7c3aed" },
-  varDesc: { fontSize: 12, color: "#9ca3af" },
+  // Purple is the variables/routine accent used throughout this screen (name,
+  // "fx" computed-value badge, Add Variable, paste) — now the kit's accents.purple.
+  varName: { fontSize: 14, fontWeight: "700", color: accents.purple },
+  varDesc: { fontSize: 12, color: colors.textFaint },
   varEmptyText: {
-    fontSize: 13, color: "#9ca3af", paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 13, color: colors.textFaint, paddingHorizontal: 14, paddingVertical: spacing.md,
     lineHeight: 18,
   },
   varAddBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 14, paddingVertical: 12,
+    paddingHorizontal: 14, paddingVertical: spacing.md,
   },
   varAddBtnBorder: {
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
-  varAddText: { fontSize: 13, fontWeight: "600", color: "#7c3aed" },
+  varAddText: { fontSize: 13, fontWeight: "600", color: accents.purple },
 
   // ── Step cards ──────────────────────────────────────────────────────────────
 
@@ -1826,11 +2106,10 @@ const styles = StyleSheet.create({
   },
 
   stepCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
     borderLeftWidth: 4,
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    ...shadows.soft,
     overflow: "hidden",
   },
 
@@ -1841,18 +2120,18 @@ const styles = StyleSheet.create({
   },
 
   stepCardIcon: {
-    width: 36, height: 36, borderRadius: 10,
+    width: 36, height: 36, borderRadius: radii.md,
     justifyContent: "center", alignItems: "center",
     flexShrink: 0,
   },
-  stepCardIconSmall: { width: 30, height: 30, borderRadius: 8 },
+  stepCardIconSmall: { width: 30, height: 30, borderRadius: radii.md },
 
   stepCardText:   { flex: 1, minWidth: 0, gap: 1 },
   stepCardType:   { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
-  stepCardName:   { fontSize: 14, fontWeight: "600", color: "#111827" },
-  stepCardDetail: { fontSize: 12, color: "#6b7280" },
-  stepCardStatus: { fontSize: 12, color: "#93c5fd", fontStyle: "italic" },
-  cardAction:     { padding: 4 },
+  stepCardName:   { fontSize: 14, fontWeight: "600", color: colors.text },
+  stepCardDetail: { fontSize: 12, color: colors.textMuted },
+  stepCardStatus: { fontSize: 12, color: colors.accentFaded, fontStyle: "italic" },
+  cardAction:     { padding: spacing.xs },
 
   dragHandle: {
     paddingHorizontal: 2,
@@ -1863,22 +2142,22 @@ const styles = StyleSheet.create({
   draggingItem: { opacity: 0.35 },
   dropTargetItemTop: {
     borderTopWidth: 2.5,
-    borderTopColor: "#2563eb",
+    borderTopColor: colors.accent,
   },
   dropTargetItemBottom: {
     borderBottomWidth: 2.5,
-    borderBottomColor: "#2563eb",
+    borderBottomColor: colors.accent,
   },
 
   // ── Inner card (inside loop) ─────────────────────────────────────────────────
 
   innerCard: {
     flexDirection: "row", alignItems: "center",
-    backgroundColor: "#f8f9fb",
-    borderRadius: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.sm,
     borderLeftWidth: 3,
-    paddingLeft: 10, paddingRight: 8, paddingVertical: 11,
-    gap: 8,
+    paddingLeft: 10, paddingRight: spacing.sm, paddingVertical: spacing.md,
+    gap: spacing.sm,
   },
 
   // ── Loop expanded body ───────────────────────────────────────────────────────
@@ -1888,21 +2167,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 10,
     paddingBottom: 6,
-    gap: 4,
+    gap: spacing.xs,
   },
+  // Purple, matching the variables/routine accent above — no kit token.
   loopEmptyText: {
     fontSize: 12, color: "#c4b5fd", fontStyle: "italic",
     paddingVertical: 6,
   },
   loopAddRow: {
-    flexDirection: "row", gap: 8,
-    paddingTop: 8, marginTop: 2,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+    flexDirection: "row", gap: spacing.sm,
+    paddingTop: spacing.sm, marginTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   loopAddBtn: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingVertical: 7, paddingHorizontal: 10,
-    borderWidth: 1, borderRadius: 8,
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    paddingVertical: spacing.sm, paddingHorizontal: 10,
+    borderWidth: 1, borderRadius: radii.sm,
     backgroundColor: "transparent",
   },
   loopAddText: { fontSize: 12, fontWeight: "600" },
@@ -1912,16 +2192,16 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center",
     paddingHorizontal: 14, paddingVertical: 2, gap: 6,
   },
-  insertDividerInner: { paddingHorizontal: 8, paddingVertical: 1 },
-  insertLine: { flex: 1, height: 1, backgroundColor: "#e5e7eb" },
+  insertDividerInner: { paddingHorizontal: spacing.sm, paddingVertical: 1 },
+  insertLine: { flex: 1, height: 1, backgroundColor: colors.border },
   insertBtn: {
-    width: 18, height: 18, borderRadius: 9,
-    backgroundColor: "#eff6ff", borderWidth: 1, borderColor: "#bfdbfe",
+    width: 18, height: 18, borderRadius: radii.sm,
+    backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder,
     justifyContent: "center", alignItems: "center",
   },
   insertPasteBtn: {
-    width: 18, height: 18, borderRadius: 9,
-    backgroundColor: "#f5f3ff", borderWidth: 1, borderColor: "#ddd6fe",
+    width: 18, height: 18, borderRadius: radii.sm,
+    backgroundColor: accents.purpleSoft, borderWidth: 1, borderColor: accents.purpleBorder,
     justifyContent: "center", alignItems: "center",
   },
 
@@ -1930,66 +2210,66 @@ const styles = StyleSheet.create({
   },
   addCard: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, borderWidth: 1.5, borderColor: "#2563eb", borderRadius: 14,
+    gap: spacing.sm, borderWidth: 1.5, borderColor: colors.accent, borderRadius: radii.lg,
     paddingVertical: 14, backgroundColor: "transparent",
   },
-  addCardText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+  addCardText: { fontSize: 14, fontWeight: "600", color: colors.accent },
   pasteCard: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, borderWidth: 1.5, borderColor: "#7c3aed", borderRadius: 14,
-    paddingVertical: 14, paddingHorizontal: 18, backgroundColor: "transparent",
+    gap: spacing.sm, borderWidth: 1.5, borderColor: accents.purple, borderRadius: radii.lg,
+    paddingVertical: 14, paddingHorizontal: spacing.lg, backgroundColor: "transparent",
   },
-  pasteCardText: { fontSize: 14, fontWeight: "600", color: "#7c3aed" },
+  pasteCardText: { fontSize: 14, fontWeight: "600", color: accents.purple },
 
   // ── Scope overlay breadcrumb ───────────────────────────────────────────────
 
   scopeBreadcrumb: {
-    flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4,
-    paddingHorizontal: 16, paddingVertical: 8,
-    backgroundColor: "#fff",
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e7eb",
+    flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.xs,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
   },
-  scopeBreadcrumbRoot: { fontSize: 12, fontWeight: "600", color: "#2563eb" },
-  scopeBreadcrumbItem: { fontSize: 12, fontWeight: "600", color: "#374151" },
-  scopeBreadcrumbCurrent: { fontSize: 12, fontWeight: "700", color: "#111827" },
+  scopeBreadcrumbRoot: { fontSize: 12, fontWeight: "600", color: colors.accent },
+  scopeBreadcrumbItem: { fontSize: 12, fontWeight: "600", color: colors.textSecondary },
+  scopeBreadcrumbCurrent: { fontSize: 12, fontWeight: "700", color: colors.text },
 
   // Wide-mode scope header — lives above the steps pane, not the whole screen
-  scopeHeaderWide: { gap: 10, paddingVertical: 8, flexWrap: "nowrap" },
+  scopeHeaderWide: { gap: 10, paddingVertical: spacing.sm, flexWrap: "nowrap" },
   scopeBackBtn: {
-    width: 30, height: 30, borderRadius: 8, backgroundColor: "#f3f4f6",
+    width: 30, height: 30, borderRadius: radii.md, backgroundColor: colors.background,
     justifyContent: "center", alignItems: "center", flexShrink: 0,
   },
   scopeTrailWrap: {
-    flex: 1, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4,
+    flex: 1, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.xs,
   },
 
   bottomBar: {
-    flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16,
+    flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: spacing.lg,
     paddingTop: 10, paddingBottom: 14,
-    backgroundColor: "#f3f4f6",
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb",
+    backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   stopBtn: {
-    width: 48, height: 48, borderRadius: 12, backgroundColor: "#fee2e2",
+    width: 48, height: 48, borderRadius: radii.md, backgroundColor: colors.dangerSoft,
     justifyContent: "center", alignItems: "center",
   },
   saveBtn: {
     width: "33%", flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 7, borderWidth: 1.5, borderColor: "#2563eb", borderRadius: 12,
-    paddingVertical: 13, backgroundColor: "#eff6ff",
+    gap: spacing.sm, borderWidth: 1.5, borderColor: colors.accent, borderRadius: radii.md,
+    paddingVertical: spacing.md, backgroundColor: colors.accentSoft,
   },
-  saveBtnText: { fontSize: 15, fontWeight: "600", color: "#2563eb" },
+  saveBtnText: { fontSize: 15, fontWeight: "600", color: colors.accent },
   uploadBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 7, borderWidth: 1.5, borderColor: "#16a34a", borderRadius: 12,
-    paddingVertical: 13, backgroundColor: "#f0fdf4",
+    gap: spacing.sm, borderWidth: 1.5, borderColor: colors.success, borderRadius: radii.md,
+    paddingVertical: spacing.md, backgroundColor: colors.successSoft,
   },
-  uploadBtnText: { fontSize: 15, fontWeight: "600", color: "#16a34a" },
+  uploadBtnText: { fontSize: 15, fontWeight: "600", color: colors.success },
   runBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 7, backgroundColor: "#2563eb", borderRadius: 12, paddingVertical: 13,
+    gap: spacing.sm, backgroundColor: colors.accent, borderRadius: radii.md, paddingVertical: spacing.md,
   },
-  runBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  runBtnText: { fontSize: 15, fontWeight: "700", color: colors.onAccent },
 });
 
 

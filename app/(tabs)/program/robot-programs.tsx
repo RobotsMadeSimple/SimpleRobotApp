@@ -4,18 +4,16 @@ import { BuiltProgram, ProgramSummary, imageDataUri } from "@/src/models/robotMo
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Cpu, Layers } from "lucide-react-native";
+import { Box, Clock, Cpu, Layers, PlayCircle } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   Image,
-  Platform,
-  Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { Card, IconTile, InfoTip, SectionHeader, StatTile, StatusPill, colors, spacing } from "@/src/components/ui/kit";
 
 // ── Program Row ────────────────────────────────────────────────────────────────
 
@@ -46,9 +44,9 @@ function ProgramRow({
   if (stepCount !== null) metaParts.push(`${stepCount} step${stepCount !== 1 ? "s" : ""}`);
   if (lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(lastUpdatedUnixMs)}`);
 
-  const cardContent = (
-    <>
-      <View style={s.cardThumb}>
+  return (
+    <Card onPress={onPress} padded={false} style={s.card}>
+      <IconTile size={44} color={colors.background} style={s.thumb}>
         {image ? (
           <Image
             source={{ uri: imageDataUri(image)! }}
@@ -56,28 +54,20 @@ function ProgramRow({
             resizeMode="cover"
           />
         ) : (
-          <Box size={22} color="#9ca3af" />
+          <Box size={22} color={colors.textFaint} />
         )}
-      </View>
+      </IconTile>
 
       <View style={s.cardBody}>
         <View style={s.nameRow}>
           <Text style={s.cardName} numberOfLines={1}>{name}</Text>
           {isBackground ? (
-            <View style={[s.builtBadge, s.backgroundBadge]}>
-              <Layers size={10} color="#16a34a" />
-              <Text style={[s.builtBadgeText, { color: "#16a34a" }]}>BACKGROUND</Text>
-            </View>
+            <StatusPill label="BACKGROUND" tone="success" icon={<Layers size={10} color={colors.success} />} />
           ) : isBuilt ? (
-            <View style={s.builtBadge}>
-              <Cpu size={10} color="#2563eb" />
-              <Text style={s.builtBadgeText}>BUILT</Text>
-            </View>
+            <StatusPill label="BUILT" tone="accent" icon={<Cpu size={10} color={colors.accent} />} />
           ) : null}
           {isBackground && isRunning && (
-            <View style={[s.builtBadge, { backgroundColor: "#f0fdf4", borderWidth: 1, borderColor: "#bbf7d0" }]}>
-              <Text style={[s.builtBadgeText, { color: "#16a34a" }]}>RUNNING</Text>
-            </View>
+            <StatusPill label="RUNNING" tone="success" dot />
           )}
         </View>
         {!!description && <Text style={s.cardDesc} numberOfLines={2}>{description}</Text>}
@@ -85,21 +75,7 @@ function ProgramRow({
       </View>
 
       {onDelete && <DeleteIconButton onPress={onDelete} style={s.deleteBtn} />}
-    </>
-  );
-
-  if (Platform.OS === "web") {
-    return (
-      <Pressable style={({ pressed }) => [s.card, pressed && s.cardPressed]} onPress={onPress}>
-        {cardContent}
-      </Pressable>
-    );
-  }
-
-  return (
-    <TouchableOpacity style={s.card} onPress={onPress} activeOpacity={0.75}>
-      {cardContent}
-    </TouchableOpacity>
+    </Card>
   );
 }
 
@@ -201,10 +177,48 @@ export default function RobotProgramsScreen() {
     ]);
   }
 
+  // Summary numbers, all from state already held by the provider.
+  const runningNow = programSummaries.filter(
+    p => p.status === "Running" || p.status === "Starting" || p.status === "Finishing"
+  ).length;
+  const stepTotal  = builtPrograms.filter(bp => !bp.isRoutine).reduce((n, bp) => n + bp.steps.length, 0);
+  const lastSaved  = builtPrograms.reduce((ms, bp) => Math.max(ms, bp.lastUpdatedUnixMs ?? 0), 0);
+
+  const aside = isEmpty ? null : (
+    <>
+      <SectionHeader title="Summary" icon={Layers} />
+      <StatTile
+        label="Programs"
+        value={regularCards.length + externalCards.length}
+        icon={Box}
+        hint={externalCards.length > 0 ? `${externalCards.length} on robot only` : undefined}
+      />
+      <StatTile
+        label="Running now"
+        value={runningNow}
+        icon={PlayCircle}
+        tint={runningNow > 0 ? [colors.success, colors.successSoft] : undefined}
+      />
+      {backgroundPrograms.length > 0 && (
+        <StatTile
+          label="Background"
+          value={backgroundPrograms.length}
+          icon={Layers}
+          hint={`${runningBackgroundNames.size} running`}
+          tint={[colors.success, colors.successSoft]}
+        />
+      )}
+      <StatTile label="Steps total" value={stepTotal} icon={Cpu} />
+      {lastSaved > 0 && <StatTile label="Last saved" value={relativeTime(lastSaved)} icon={Clock} />}
+    </>
+  );
+
   return (
     <ProgramListLayout
       title="Programs"
-      accentColor="#2563eb"
+      subtitle="Programs stored on the robot — tap one to monitor or run it"
+      crumbs={[{ label: "Program", href: "/program" }, { label: "Programs" }]}
+      accentColor={colors.accent}
       addLabel="New Program"
       onAdd={() => router.navigate("/program/builder")}
       search={search}
@@ -213,10 +227,15 @@ export default function RobotProgramsScreen() {
       onSortChange={setSort}
       isEmpty={isEmpty}
       hasResults={hasResults}
-      emptyIcon={<Box size={44} color="#d1d5db" />}
+      emptyIcon={<Box size={32} color={colors.textFaint} />}
       emptyTitle="No Programs"
       emptySubtitle="Create a program below to get started."
+      aside={aside}
     >
+      <SectionHeader
+        title="Programs"
+        right={<InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller." />}
+      />
       {allRegularCards.map(c => (
         <ProgramRow
           key={c.summary.name}
@@ -233,7 +252,16 @@ export default function RobotProgramsScreen() {
 
       {filteredBackground.length > 0 && (
         <>
-          <Text style={s.sectionLabel}>BACKGROUND PROGRAMS</Text>
+          <SectionHeader
+            title="Background Programs"
+            icon={Layers}
+            right={
+              <View style={s.sectionHeaderRight}>
+                <InfoTip text="Background programs run in parallel with the main program." />
+                <StatusPill label={`${filteredBackground.length}`} tone="neutral" />
+              </View>
+            }
+          />
           {filteredBackground.map(bp => (
             <ProgramRow
               key={bp.name}
@@ -258,36 +286,18 @@ export default function RobotProgramsScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", color: "#9ca3af",
-    letterSpacing: 0.8, marginTop: 4, marginBottom: -4,
-  },
-
+  sectionHeaderRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   card: {
-    backgroundColor: "#fff", borderRadius: 14,
     flexDirection: "row", alignItems: "center",
-    padding: 14, gap: 12,
-    shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 }, elevation: 3,
+    padding: spacing.md + 2, gap: spacing.md,
   },
-  cardPressed: { opacity: 0.75 },
-  cardThumb: {
-    width: 48, height: 48, borderRadius: 10,
-    backgroundColor: "#f3f4f6", justifyContent: "center", alignItems: "center", overflow: "hidden",
-  },
-  thumbImage: { width: 48, height: 48 },
+  thumb:      { overflow: "hidden" },
+  thumbImage: { width: 44, height: 44 },
   cardBody:   { flex: 1, gap: 2 },
   nameRow:    { flexDirection: "row", alignItems: "center", gap: 7, flexWrap: "wrap" },
-  cardName:   { fontSize: 15, fontWeight: "700", color: "#111827", flexShrink: 1 },
-  cardDesc:   { fontSize: 13, color: "#6b7280", lineHeight: 18 },
-  cardMeta:   { fontSize: 11, color: "#9ca3af", marginTop: 2 },
-
-  builtBadge: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "#eff6ff", borderRadius: 20, paddingHorizontal: 7, paddingVertical: 2,
-  },
-  backgroundBadge: { backgroundColor: "#f0fdf4" },
-  builtBadgeText:  { fontSize: 10, fontWeight: "700", color: "#2563eb", letterSpacing: 0.4 },
+  cardName:   { fontSize: 15, fontWeight: "700", color: colors.text, flexShrink: 1 },
+  cardDesc:   { fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  cardMeta:   { fontSize: 11, color: colors.textFaint, marginTop: 2 },
 
   deleteBtn: { padding: 4 },
 });

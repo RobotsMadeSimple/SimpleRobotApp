@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Line as SvgLine, Path as SvgPath } from "react-native-svg";
 
+import { radii } from "@/src/components/ui/kit";
+
 // Live top-down (X/Y) map for the program monitor — blueprint styling to match
 // the points map, but instead of saved points it shows the robot's current
 // position, the point it is moving to, and a fading trail of where it has
@@ -201,9 +203,13 @@ export function RobotPathMap({
 }
 
 const styles = StyleSheet.create({
+  // Self-contained dark "blueprint" canvas (SVG drawing + its own intentional
+  // palette) — bg/grid/trail/target/robot colors are the visualization itself,
+  // not chrome, so they're left as-is (see migration report). Only the corner
+  // radius, a pure-chrome detail, is tokenized.
   map: {
     backgroundColor: BP_BG,
-    borderRadius: 12,
+    borderRadius: radii.md,
     overflow: "hidden",
   },
   scaleText: {

@@ -1,4 +1,5 @@
 import { JogButton } from "@/src/components/ui/JogButton";
+import { colors, radii } from "@/src/components/ui/kit";
 import { ChevronDown, ChevronUp } from "lucide-react-native";
 import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
@@ -35,7 +36,7 @@ export function JointJogPanel({ onStart, onStop }: Props) {
           {/* Up */}
           <JogButton
             label={`+${label}`}
-            icon={<ChevronUp size={iconSize} color="#666" />}
+            icon={<ChevronUp size={iconSize} color={colors.textMuted} />}
             iconPosition="above"
             onStart={() => onStart(key,  1)}
             onStop={onStop}
@@ -50,7 +51,7 @@ export function JointJogPanel({ onStart, onStop }: Props) {
           {/* Down */}
           <JogButton
             label={`-${label}`}
-            icon={<ChevronDown size={iconSize} color="#666" />}
+            icon={<ChevronDown size={iconSize} color={colors.textMuted} />}
             iconPosition="below"
             onStart={() => onStart(key, -1)}
             onStop={onStop}
@@ -76,13 +77,13 @@ const styles = StyleSheet.create({
   labelWrap: {
     paddingVertical:   4,
     paddingHorizontal: 10,
-    backgroundColor:   "#f3f4f6",
-    borderRadius:      6,
+    backgroundColor:   colors.background,
+    borderRadius:      radii.sm,
   },
   axisLabel: {
     fontSize:   13,
     fontWeight: "700",
-    color:      "#374151",
+    color:      colors.textSecondary,
     letterSpacing: 0.5,
   },
 });

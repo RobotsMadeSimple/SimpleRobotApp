@@ -1,8 +1,8 @@
-import { wide } from "@/src/components/ui/responsive";
 import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { useNanoIO,
+import { useConnected,
+  useNanoIO,
   useRelayIO,
   useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -10,13 +10,11 @@ import { AuxDeviceState,
   CameraState } from "@/src/models/robotModels";
 import {
   Camera,
-  ChevronRight,
   CircuitBoard,
   Cpu,
   Gauge,
   Plus,
   Radio,
-  Trash2,
   Wifi,
   WifiOff,
   X,
@@ -30,13 +28,32 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
+import { cameraSourceSummary, cameraSourceTag } from "@/src/components/ui/camera/cameraSource";
+
+import {
+  Button,
+  Card,
+  colors,
+  Divider,
+  InfoTip,
+  ListRow,
+  radii,
+  PageHeader,
+  Screen,
+  SectionHeader,
+  shadows,
+  spacing,
+  StatTile,
+  StatusPill,
+  type,
+} from "@/src/components/ui/kit";
 
 // ── IOConfig type ─────────────────────────────────────────────────────────────
 
@@ -58,6 +75,8 @@ function DeviceNavCard({
   connected,
   onPress,
   onDelete,
+  footer,
+  tag,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -66,31 +85,36 @@ function DeviceNavCard({
   connected: boolean;
   onPress: () => void;
   onDelete?: () => void;
+  /** Extra strip under the row (camera calibration); turns the card into Card + flat row. */
+  footer?: React.ReactNode;
+  /** Small source tag before the status pill ("RTSP" / "HTTP" network cameras). */
+  tag?: string | null;
 }) {
-  return (
-    <TouchableOpacity style={styles.navCard} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.navCardIcon, { backgroundColor: iconBg }]}>
-        {icon}
-      </View>
-      <View style={styles.navCardBody}>
-        <Text style={styles.navCardName}>{name}</Text>
-        <Text style={styles.navCardSub}>{subtitle}</Text>
-      </View>
-      <View style={[styles.connBadge, connected ? styles.connOn : styles.connOff]}>
-        {connected
-          ? <Wifi    size={11} color="#16a34a" />
-          : <WifiOff size={11} color="#dc2626" />
-        }
-        <Text style={[styles.connText, connected ? styles.connTextOn : styles.connTextOff]}>
-          {connected ? "Connected" : "Offline"}
-        </Text>
-      </View>
-      {onDelete && (
-        <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />
-      )}
-      <ChevronRight size={18} color="#9ca3af" />
-    </TouchableOpacity>
+  const row = (
+    <ListRow
+      card={!footer}
+      style={footer ? styles.rowInCard : undefined}
+      title={name}
+      subtitle={subtitle}
+      icon={icon}
+      iconColor={iconBg}
+      onPress={onPress}
+      chevron
+      right={
+        <View style={styles.rowAccessories}>
+          {!!tag && <StatusPill label={tag} tone="accent" />}
+          <StatusPill
+            label={connected ? "Connected" : "Offline"}
+            tone={connected ? "success" : "danger"}
+            dot
+          />
+          {onDelete && <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />}
+        </View>
+      }
+    />
   );
+  if (!footer) return row;
+  return <Card padded={false}>{row}{footer}</Card>;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -106,26 +130,37 @@ export default function IoPage() {
   const [addModal,    setAddModal]    = useState(false);
   const [enabling,    setEnabling]    = useState<keyof IOConfig | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      robotClient.getRobotConfig()
-        .then(cfg => setIoConfig({
-          enableStbCard:   cfg.enableStbCard   ?? true,
-          enableNanoCards: cfg.enableNanoCards ?? false,
-          enableRelayCard: cfg.enableRelayCard ?? false,
-          enableAuxAxis:   cfg.enableAuxAxis   ?? false,
-          enableCameras:   cfg.enableCameras   ?? false,
-        }))
-        .catch(() => setIoConfig({
-          enableStbCard: true, enableNanoCards: false,
-          enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
-        }));
-      robotClient.getCameras().catch(() => {});
-      // Refresh Nano + relay state so the IO summary cards reflect outputs a
-      // running program changed, not the stale state from the last app action.
-      robotClient.getIO().catch(() => {});
-    }, [])
-  );
+  // Which cards to show comes from the robot config. Load it when the tab gains
+  // focus AND whenever the connection comes up: if the controller starts while
+  // this tab is already open, the focus-time request has failed and would
+  // otherwise leave the page on the offline defaults until the user navigated away.
+  const connected = useConnected();
+  const loadIoPage = useCallback(() => {
+    if (!connected) {
+      setIoConfig(cfg => cfg ?? {
+        enableStbCard: true, enableNanoCards: false,
+        enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
+      });
+      return;
+    }
+    robotClient.getRobotConfig()
+      .then(cfg => setIoConfig({
+        enableStbCard:   cfg.enableStbCard   ?? true,
+        enableNanoCards: cfg.enableNanoCards ?? false,
+        enableRelayCard: cfg.enableRelayCard ?? false,
+        enableAuxAxis:   cfg.enableAuxAxis   ?? false,
+        enableCameras:   cfg.enableCameras   ?? false,
+      }))
+      .catch(() => {});
+    robotClient.getCameras().catch(() => {});
+    robotClient.getAuxState().catch(() => {});
+    // Refresh Nano + relay state so the IO summary cards reflect outputs a
+    // running program changed, not the stale state from the last app action.
+    robotClient.getIO().catch(() => {});
+  }, [connected]);
+
+  useFocusEffect(loadIoPage);
+  useEffect(() => { loadIoPage(); }, [loadIoPage]);
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
@@ -183,7 +218,7 @@ export default function IoPage() {
   const allDeviceTypes: AddableType[] = [
     {
       field: "enableNanoCards",
-      icon: <Cpu size={22} color="#4f46e5" />,
+      icon: <Cpu size={20} color="#4f46e5" />,
       iconBg: "#eef2ff",
       name: "Arduino Nano Device",
       subtitle: "Serial-connected microcontroller",
@@ -194,7 +229,7 @@ export default function IoPage() {
     },
     {
       field: "enableRelayCard",
-      icon: <Radio size={22} color="#0891b2" />,
+      icon: <Radio size={20} color="#0891b2" />,
       iconBg: "#ecfeff",
       name: "USB Relay Board",
       subtitle: "DCTTECH 4CH · HID",
@@ -205,7 +240,7 @@ export default function IoPage() {
     },
     {
       field: "enableAuxAxis",
-      icon: <Gauge size={22} color="#7c3aed" />,
+      icon: <Gauge size={20} color="#7c3aed" />,
       iconBg: "#ede9fe",
       name: "Aux Stepper Axis",
       subtitle: "External stepper driver",
@@ -216,10 +251,10 @@ export default function IoPage() {
     },
     {
       field: "enableCameras",
-      icon: <Camera size={22} color="#2563eb" />,
-      iconBg: "#eff6ff",
-      name: "USB Camera",
-      subtitle: "USB camera device",
+      icon: <Camera size={20} color={colors.accent} />,
+      iconBg: colors.accentSoft,
+      name: "Camera",
+      subtitle: "USB or network (RTSP / HTTP) camera",
       onAdd: () => {
         setAddModal(false);
         if (!ioConfig?.enableCameras) {
@@ -236,18 +271,44 @@ export default function IoPage() {
     t => !ioConfig?.[t.field as keyof IOConfig] || t.field === "enableCameras"
   );
 
+  // Devices online/offline summary — STB4100 is always present; the rest only
+  // count once their device type is enabled, mirroring the cards rendered below.
+  const connectionFlags = ioConfig ? [
+    status.driverConnected,
+    ...(ioConfig.enableNanoCards ? nanos.map(n => n.connected) : []),
+    ...(ioConfig.enableRelayCard ? [relay?.connected ?? false] : []),
+    ...(ioConfig.enableAuxAxis ? auxDevices.map(d => d.connected) : []),
+    ...(ioConfig.enableCameras ? cameras.map(c => c.connected) : []),
+  ] : [];
+  const totalDevices   = connectionFlags.length;
+  const onlineDevices  = connectionFlags.filter(Boolean).length;
+  const offlineDevices = totalDevices - onlineDevices;
+
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
+      <PageHeader title="I/O" subtitle="Connected devices, pins, and peripherals" />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
+      <Screen>
+        {ioConfig && (
+          <View style={styles.statRow}>
+            <StatTile label="Devices" value={totalDevices} icon={CircuitBoard} style={styles.statTile} />
+            <StatTile label="Online" value={onlineDevices} icon={Wifi}
+                      tint={[colors.success, colors.successSoft]} style={styles.statTile} />
+            <StatTile label="Offline" value={offlineDevices} icon={WifiOff}
+                      tint={[colors.danger, colors.dangerSoft]} style={styles.statTile} />
+          </View>
+        )}
+
+        <SectionHeader
+          title="Devices"
+          right={<InfoTip text="STB4100 is the robot's built-in I/O board and is always available. Add Nano boards, a relay board, aux stepper axes, or cameras for extra I/O — each becomes its own card below." />}
+        />
+
         {/* STB4100 — always visible, 1 card */}
         <DeviceNavCard
-          icon={<CircuitBoard size={22} color="#16a34a" />}
-          iconBg="#f0fdf4"
+          icon={<CircuitBoard size={20} color={colors.success} />}
+          iconBg={colors.successSoft}
           name="STB4100"
           subtitle="STB4100 · USB HID"
           connected={status.driverConnected}
@@ -258,7 +319,7 @@ export default function IoPage() {
         {ioConfig?.enableNanoCards && nanos.map((nano, idx) => (
           <DeviceNavCard
             key={nano.id}
-            icon={<Cpu size={22} color="#4f46e5" />}
+            icon={<Cpu size={20} color="#4f46e5" />}
             iconBg="#eef2ff"
             name={nano.name}
             subtitle={nano.name}
@@ -271,7 +332,7 @@ export default function IoPage() {
         {/* Relay board — 1 card */}
         {ioConfig?.enableRelayCard && (
           <DeviceNavCard
-            icon={<Radio size={22} color="#0891b2" />}
+            icon={<Radio size={20} color="#0891b2" />}
             iconBg="#ecfeff"
             name="USB Relay Board"
             subtitle="DCTTECH 4CH · HID"
@@ -285,7 +346,7 @@ export default function IoPage() {
         {ioConfig?.enableAuxAxis && auxDevices.map((dev, idx) => (
           <DeviceNavCard
             key={dev.deviceId}
-            icon={<Gauge size={22} color="#7c3aed" />}
+            icon={<Gauge size={20} color="#7c3aed" />}
             iconBg="#ede9fe"
             name={dev.deviceName}
             subtitle={`${dev.deviceId}${dev.portName ? ` · ${dev.portName}` : ""}`}
@@ -299,22 +360,26 @@ export default function IoPage() {
         {ioConfig?.enableCameras && cameras.map(cam => (
           <DeviceNavCard
             key={cam.id}
-            icon={<Camera size={22} color="#2563eb" />}
-            iconBg="#eff6ff"
+            icon={<Camera size={20} color={colors.accent} />}
+            iconBg={colors.accentSoft}
             name={cam.name}
-            subtitle={`Device ${cam.deviceIndex} · ${cam.width}×${cam.height} · ${cam.targetFps}fps`}
+            subtitle={`${cameraSourceSummary(cam)} · ${cam.targetFps}fps`}
+            tag={cameraSourceTag(cam)}
             connected={cam.connected}
             onPress={() => router.push({ pathname: "/(tabs)/io/cameras", params: { cameraId: cam.id } })}
             onDelete={() => confirmRemove(cam.name, () => robotClient.removeCamera(cam.id).catch(() => {}))}
+            footer={<CameraCalibrationControls camera={cam} layout="footer" />}
           />
         ))}
 
         {/* Add Device button */}
-        <TouchableOpacity style={styles.addBtn} onPress={() => setAddModal(true)}>
-          <Plus size={15} color="#2563eb" />
-          <Text style={styles.addBtnText}>Add Device</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        <Button
+          variant="dashed"
+          label="Add Device"
+          icon={<Plus size={15} color={colors.accent} />}
+          onPress={() => setAddModal(true)}
+        />
+      </Screen>
 
       {/* Add Device — centered modal */}
       <Modal
@@ -328,7 +393,7 @@ export default function IoPage() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Device</Text>
               <TouchableOpacity onPress={() => setAddModal(false)} hitSlop={8}>
-                <X size={20} color="#6b7280" />
+                <X size={20} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -341,28 +406,22 @@ export default function IoPage() {
                 <Text style={styles.allAddedText}>All device types are already added.</Text>
               </View>
             ) : (
-              addableTypes.map((type, idx, arr) => {
-                const busy = enabling === type.field;
+              addableTypes.map((devType, idx, arr) => {
+                const busy = enabling === devType.field;
                 return (
-                  <TouchableOpacity
-                    key={type.field}
-                    style={[styles.typeRow, idx < arr.length - 1 && styles.typeRowBorder]}
-                    onPress={type.onAdd}
-                    activeOpacity={0.7}
-                    disabled={!!enabling}
-                  >
-                    <View style={[styles.typeIcon, { backgroundColor: type.iconBg }]}>
-                      {type.icon}
-                    </View>
-                    <View style={styles.typeRowBody}>
-                      <Text style={styles.typeRowName}>{type.name}</Text>
-                      <Text style={styles.typeRowSub}>{type.subtitle}</Text>
-                    </View>
-                    {busy
-                      ? <ActivityIndicator size="small" color="#2563eb" />
-                      : <ChevronRight size={18} color="#9ca3af" />
-                    }
-                  </TouchableOpacity>
+                  <View key={devType.field}>
+                    <ListRow
+                      card={false}
+                      title={devType.name}
+                      subtitle={devType.subtitle}
+                      icon={devType.icon}
+                      iconColor={devType.iconBg}
+                      onPress={devType.onAdd}
+                      chevron={!busy}
+                      right={busy ? <ActivityIndicator size="small" color={colors.accent} /> : undefined}
+                    />
+                    {idx < arr.length - 1 && <Divider inset />}
+                  </View>
                 );
               })
             )}
@@ -376,127 +435,41 @@ export default function IoPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
-  content:   { padding: 16, paddingBottom: 40, gap: 10 },
+  container: { flex: 1, backgroundColor: colors.background },
 
-  // ── Nav cards ──────────────────────────────────────────────────────────────
-  navCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  navCardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  navCardBody: { flex: 1 },
-  navCardName: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  navCardSub:  { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+  statRow:  { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  statTile: { flex: 1, minWidth: 130 },
 
-  connBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  connOn:      { backgroundColor: "#f0fdf4" },
-  connOff:     { backgroundColor: "#fef2f2" },
-  connText:    { fontSize: 11, fontWeight: "600" },
-  connTextOn:  { color: "#16a34a" },
-  connTextOff: { color: "#dc2626" },
-
-  deleteBtn: {
-    padding: 6,
-    marginLeft: 4,
-  },
-
-  // ── Add Device button ──────────────────────────────────────────────────────
-  addBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#bfdbfe",
-    borderStyle: "dashed",
-    backgroundColor: "#f0f9ff",
-    marginTop: 4,
-  },
-  addBtnText: { fontSize: 14, fontWeight: "600", color: "#2563eb" },
+  rowAccessories: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  // ListRow's own card padding, for the flat row inside a camera card with a footer.
+  rowInCard: { paddingHorizontal: spacing.lg - 2, paddingTop: spacing.lg - 2, paddingBottom: spacing.md },
+  deleteBtn: { padding: spacing.xs + 2, marginLeft: 0 },
 
   // ── Add Device modal ───────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
     width: "100%",
     maxWidth: 400,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+    padding: spacing.lg + 4,
+    ...shadows.raised,
   },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: "#9ca3af",
-    marginBottom: 12,
-    lineHeight: 18,
-  },
+  modalTitle:    type.pageTitle,
+  modalSubtitle: { ...type.subtitle, marginBottom: spacing.md, lineHeight: 18 },
 
-  typeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 13,
-  },
-  typeRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
-  },
-  typeIcon: {
-    width: 44, height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  typeRowBody: { flex: 1 },
-  typeRowName: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  typeRowSub:  { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-
-  allAddedRow: { paddingVertical: 16, alignItems: "center" },
-  allAddedText: { fontSize: 14, color: "#9ca3af" },
+  allAddedRow: { paddingVertical: spacing.lg, alignItems: "center" },
+  allAddedText: { fontSize: 14, color: colors.textFaint },
 });

@@ -3,6 +3,7 @@ import { ScrollView, Text, TouchableOpacity } from "react-native";
 import { Check } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { VisionZone } from "@/src/models/robotModels";
+import { accents } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 
 export function ZonePickerModal({ visible, zones, selected, onSelect, onClose }: {
@@ -20,7 +21,7 @@ export function ZonePickerModal({ visible, zones, selected, onSelect, onClose }:
           onPress={() => { onSelect(null); onClose(); }}
         >
           <Text style={ves.sheetRowName}>Full image</Text>
-          {!selected && <Check size={16} color="#0891b2" />}
+          {!selected && <Check size={16} color={accents.cyan} />}
         </TouchableOpacity>
         {zones.map(z => (
           <TouchableOpacity
@@ -29,7 +30,7 @@ export function ZonePickerModal({ visible, zones, selected, onSelect, onClose }:
             onPress={() => { onSelect(z.id); onClose(); }}
           >
             <Text style={ves.sheetRowName}>{z.name}</Text>
-            {z.id === selected && <Check size={16} color="#0891b2" />}
+            {z.id === selected && <Check size={16} color={accents.cyan} />}
           </TouchableOpacity>
         ))}
         {zones.length === 0 && <Text style={ves.sheetEmpty}>No zones defined</Text>}

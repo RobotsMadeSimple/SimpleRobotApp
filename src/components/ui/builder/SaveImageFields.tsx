@@ -7,6 +7,7 @@ import { Camera, Check } from "lucide-react-native";
 import { CameraState, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { TemplateInput } from "./NumericInputs";
 import { ms } from "./builderStyles";
+import { colors, accents } from "@/src/components/ui/kit";
 
 // ── SaveImageFields ───────────────────────────────────────────────────────────
 
@@ -21,14 +22,14 @@ export function SaveImageFields({
   cameras: CameraState[];
   set: (p: Partial<ProgramStep>) => void;
 }) {
-  const accent = "#0891b2";
+  const accent = accents.cyan;
 
   return (
     <>
       <Text style={ms.hintText}>
         Save a camera snapshot to a file.{"\n"}
-        Use <Text style={{ fontWeight: "700", color: "#374151" }}>$variable</Text> in the path.{" "}
-        <Text style={{ fontWeight: "700", color: "#7c3aed" }}>$time_ms</Text> always holds the current Unix timestamp in ms — great for unique filenames.
+        Use <Text style={{ fontWeight: "700", color: colors.textSecondary }}>$variable</Text> in the path.{" "}
+        <Text style={{ fontWeight: "700", color: accents.purple }}>$time_ms</Text> always holds the current Unix timestamp in ms — great for unique filenames.
       </Text>
 
       <Text style={[ms.fieldLabel, { marginTop: 14 }]}>CAMERA</Text>
@@ -44,7 +45,7 @@ export function SaveImageFields({
               onPress={() => set({ saveImageCameraId: cam.id })}
               activeOpacity={0.7}
             >
-              <Camera size={14} color={active ? accent : "#6b7280"} />
+              <Camera size={14} color={active ? accent : colors.textMuted} />
               <Text style={[ms.rowLabel, { flex: 1 }, active && { color: accent }]}>{cam.name}</Text>
               {active && <Check size={14} color={accent} />}
             </TouchableOpacity>

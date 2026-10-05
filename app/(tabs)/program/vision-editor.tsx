@@ -1,8 +1,6 @@
-import {
-  SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
-import { FEED_HTML } from "@/src/vision/visionHtml";
+import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
 import {
   ArucoInspection,
   BarcodeInspection,
@@ -33,7 +31,6 @@ import {
   Copy,
   Eye,
   EyeOff,
-  Grid3x3,
   Hexagon,
   Minus,
   Palette,
@@ -61,9 +58,11 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { wide, usePaneLayout } from "@/src/components/ui/responsive";
-import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { accents, colors, spacing, radii, shadows, InfoTip, PageHeader, StatusPill } from "@/src/components/ui/kit";
+import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
+import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
+import { CameraCalibrationBadge } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { ZoneDrawModal } from "@/src/components/ui/vision-editor/ZoneDrawModal";
 import { InspectionTypePicker, InspItem } from "@/src/components/ui/vision-editor/InspectionTypePicker";
 import { InspectionConfigModal } from "@/src/components/ui/vision-editor/InspectionConfigModal";
@@ -78,6 +77,7 @@ export default function VisionEditorScreen() {
   const paneLayout = usePaneLayout();
   const isWide  = paneLayout !== "single";
   const isSplit = paneLayout === "split";
+  const wideContent = useWideContent();
   const [program, setProgram]     = useState<VisionProgram>(initialProg);
   const [name, setName]           = useState(initialProg.name);
   const [isRunning, setIsRunning]         = useState(initialRunning.has(initialProg.id));
@@ -105,6 +105,7 @@ export default function VisionEditorScreen() {
   const [snapshotUri, setSnapshotUri]     = useState<string | null>(null);
   const [configModal, setConfigModal]     = useState<InspItem | null>(null);
   const [typePicker, setTypePicker]       = useState(false);
+  const [hiddenZoneIds, setHiddenZoneIds] = useState<Set<string>>(new Set());
 
   const programRef  = useRef(program);
   const nameRef     = useRef(name);
@@ -144,13 +145,13 @@ export default function VisionEditorScreen() {
     return null;
   }, [isRunning, program.id, program.cameraId]);
 
-  const injectFeedUrl = useCallback(() => {
-    feedWebViewRef.current?.injectJavaScript(
-      `window.setFeed(${JSON.stringify(feedSourceUrl)});true;`
-    );
-  }, [feedSourceUrl]);
-
-  useEffect(() => { injectFeedUrl(); }, [injectFeedUrl]);
+  // The zones the feed should draw: every declared zone (so it shows whether or not an
+  // inspection uses it) minus any the user has hidden via its per-zone eye toggle. The
+  // shared VisionFeedViewer pushes these into the preview.
+  const visibleZones = useMemo(
+    () => program.zones.filter(z => !hiddenZoneIds.has(z.id)),
+    [program.zones, hiddenZoneIds],
+  );
 
   useEffect(() => {
     robotClient.getCameras().catch(() => {});
@@ -202,20 +203,25 @@ export default function VisionEditorScreen() {
   }, []);
 
   const fetchSnapshot = useCallback(async () => {
-    const grabbed = await grabFeedSnapshot();
-    if (grabbed) { setSnapshotUri(grabbed); return; }
+    // Zone editing wants the raw camera frame — never the annotated/debug feed shown
+    // while the program runs, and never the preview canvas (which now carries the zone
+    // overlay). A fresh HTTP snapshot from the camera is that raw source.
     const url = program.cameraId ? robotClient.cameraSnapshotUrl(program.cameraId) : null;
-    if (!url) { setSnapshotUri(null); return; }
-    try {
-      const res  = await fetch(url);
-      const blob = await res.blob();
-      await new Promise<void>(resolve => {
-        const reader = new FileReader();
-        reader.onload  = () => { setSnapshotUri(reader.result as string); resolve(); };
-        reader.onerror = () => resolve();
-        reader.readAsDataURL(blob);
-      });
-    } catch { setSnapshotUri(null); }
+    if (url) {
+      try {
+        const res  = await fetch(url + (url.includes('?') ? '&' : '?') + '_=' + Date.now());
+        const blob = await res.blob();
+        const ok = await new Promise<boolean>(resolve => {
+          const reader = new FileReader();
+          reader.onload  = () => { setSnapshotUri(reader.result as string); resolve(true); };
+          reader.onerror = () => resolve(false);
+          reader.readAsDataURL(blob);
+        });
+        if (ok) return;
+      } catch { /* fall through to the preview grab */ }
+    }
+    // Fallback only if the raw snapshot is unavailable.
+    setSnapshotUri(await grabFeedSnapshot());
   }, [program.cameraId, grabFeedSnapshot]);
 
   // Seeds the draw modal so an existing zone can be adjusted instead of redrawn.
@@ -358,7 +364,7 @@ export default function VisionEditorScreen() {
   function handleArucoLiveUpdate(insp: ArucoInspection)     { updateArucoInspection(insp); }
   function handleLineLiveUpdate(insp: LineInspection)       { updateLineInspection(insp); }
 
-  const allInspections: InspItem[] = [
+  const allInspectionsRaw: InspItem[] = [
     ...program.inspections.map(insp => ({ kind: 'blob' as const, insp })),
     ...(program.colorInspections ?? []).map(insp => ({ kind: 'color' as const, insp })),
     ...(program.polygonInspections ?? []).map(insp => ({ kind: 'polygon' as const, insp })),
@@ -366,6 +372,89 @@ export default function VisionEditorScreen() {
     ...(program.lineInspections ?? []).map(insp => ({ kind: 'line' as const, insp })),
     ...(program.barcodeInspections ?? []).map(insp => ({ kind: 'barcode' as const, insp })),
   ];
+  // Apply the user's drag order. Stable sort: ids missing from inspectionOrder (a
+  // freshly added inspection) keep their type-grouped position at the end.
+  const inspOrder = program.inspectionOrder ?? [];
+  const inspOrderRank = (id: string) => {
+    const i = inspOrder.indexOf(id);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  const allInspections: InspItem[] =
+    [...allInspectionsRaw].sort((a, b) => inspOrderRank(a.insp.id) - inspOrderRank(b.insp.id));
+
+  // Whether the current frame carries a result for a given inspection — gates the on-card
+  // result strip so it doesn't show as an empty bordered sliver before results land.
+  const inspHasResult = (id: string) => !!visionResult && (
+    (visionResult.inspections     ?? []).some(i => i.inspectionId === id) ||
+    (visionResult.colorResults    ?? []).some(c => c.inspectionId === id) ||
+    (visionResult.polygonResults  ?? []).some(p => p.inspectionId === id) ||
+    (visionResult.arucoResults    ?? []).some(a => a.inspectionId === id) ||
+    (visionResult.lineResults     ?? []).some(l => l.inspectionId === id) ||
+    (visionResult.barcodeResults  ?? []).some(b => b.inspectionId === id)
+  );
+
+  // ── Drag-to-reorder (zones + inspections) ──────────────────────────────────
+  // Mirrors the program builder's step drag: a grip handle drives a PanResponder,
+  // the drop index is worked out from measured row heights, and the parent ScrollView
+  // is frozen while dragging. Reorder lands on release.
+  type DragList = 'zone' | 'insp';
+  type DragState = { list: DragList; id: string; fromIndex: number; toIndex: number };
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef    = useRef<DragState | null>(null);
+  const rowHeights = useRef<Map<string, number>>(new Map());
+  const onRowLayout = useCallback((id: string, h: number) => { rowHeights.current.set(id, h); }, []);
+
+  const idsForList = (list: DragList) =>
+    list === 'zone' ? program.zones.map(z => z.id) : allInspections.map(i => i.insp.id);
+
+  function calcDropIndex(list: DragList, fromIndex: number, dy: number): number {
+    const ids = idsForList(list);
+    if (fromIndex < 0 || ids.length < 2) return Math.max(0, Math.min(ids.length - 1, fromIndex));
+    const DEFAULT_H = 60;
+    let target = fromIndex, acc = 0;
+    if (dy > 0) {
+      for (let i = fromIndex + 1; i < ids.length; i++) {
+        const h = rowHeights.current.get(ids[i]) ?? DEFAULT_H;
+        if (dy > acc + h / 2) { target = i; acc += h; } else break;
+      }
+    } else {
+      for (let i = fromIndex - 1; i >= 0; i--) {
+        const h = rowHeights.current.get(ids[i]) ?? DEFAULT_H;
+        if (-dy > acc + h / 2) { target = i; acc += h; } else break;
+      }
+    }
+    return target;
+  }
+
+  function onDragStart(list: DragList, id: string) {
+    const s: DragState = { list, id, fromIndex: idsForList(list).indexOf(id), toIndex: idsForList(list).indexOf(id) };
+    dragRef.current = s; setDrag(s);
+  }
+  function onDragMove(list: DragList, id: string, dy: number) {
+    const d = dragRef.current;
+    if (!d || d.id !== id) return;
+    const to = calcDropIndex(list, d.fromIndex, dy);
+    if (to !== d.toIndex) { const u = { ...d, toIndex: to }; dragRef.current = u; setDrag(u); }
+  }
+  function onDragEnd(list: DragList, id: string) {
+    const d = dragRef.current;
+    if (d && d.id === id && d.toIndex !== d.fromIndex) {
+      if (list === 'zone') {
+        setProgram(prev => {
+          const zones = [...prev.zones];
+          const [m] = zones.splice(d.fromIndex, 1);
+          zones.splice(d.toIndex, 0, m);
+          return { ...prev, zones };
+        });
+      } else {
+        const ids = allInspections.map(i => i.insp.id);
+        const [m] = ids.splice(d.fromIndex, 1);
+        ids.splice(d.toIndex, 0, m);
+        setProgram(prev => ({ ...prev, inspectionOrder: ids }));
+      }
+    }
+    dragRef.current = null; setDrag(null);
+  }
 
   async function toggleRunning() {
     if (transitioning) return;
@@ -400,53 +489,58 @@ export default function VisionEditorScreen() {
   }
 
   const selectedCam = cameras.find(c => c.id === program.cameraId);
+  // On wide screens the feed sizes to the pane width at the camera's own aspect ratio
+  // (default 4:3) so it's as large as the pane allows, rather than a short fixed strip.
+  const feedAspect = selectedCam?.width && selectedCam?.height
+    ? selectedCam.width / selectedCam.height
+    : 4 / 3;
 
   // ── Shared render fragments (used by both narrow and wide layouts) ─────────
 
-  const infoSection = (
-    <>
-      {/* Name */}
-      <View style={styles.card}>
+  // Program name + camera as one card. It lives in the same column as zones/inspections
+  // (the editor column in wide mode), kept separate from the feed and its controls.
+  const detailsCard = (
+    <View style={styles.detailsCard}>
+      <View style={styles.detailsRow}>
         <Text style={styles.rowLabel}>Name</Text>
         <TextInput
           style={styles.nameInput}
           value={name}
           onChangeText={setName}
           placeholder="Program name"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={colors.textFaint}
           returnKeyType="done"
           onSubmitEditing={Keyboard.dismiss}
         />
       </View>
-
-      {/* Camera */}
-      <TouchableOpacity style={styles.card} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
+      <View style={styles.detailsDivider} />
+      <TouchableOpacity style={styles.detailsRow} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
         <Text style={styles.rowLabel}>Camera</Text>
-        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? "#22c55e" : "#d1d5db" }]} />
+        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? colors.success : colors.borderStrong }]} />
         <Text style={styles.cameraValue} numberOfLines={1}>
           {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
         </Text>
-        <ChevronDown size={15} color="#9ca3af" />
-      </TouchableOpacity>
-
-      {/* Camera feed */}
-      <View style={styles.feedCard} pointerEvents="none">
-        <VisionCanvas
-          ref={feedWebViewRef}
-          html={FEED_HTML}
-          style={{ flex: 1, backgroundColor: "#111" }}
-          focusable={false}
-          onLoad={injectFeedUrl}
-          onMessage={onFeedMessage}
-        />
-        {!feedSourceUrl && (
-          <View style={styles.feedPlaceholder}>
-            <Text style={styles.feedPlaceholderText}>
-              {program.cameraId ? "Connecting to camera…" : "Select a camera above"}
-            </Text>
-          </View>
+        {!!program.cameraId && (
+          <CameraCalibrationBadge cameraId={program.cameraId} calibrated={selectedCam?.calibrated} />
         )}
-      </View>
+        <ChevronDown size={15} color={colors.textFaint} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const infoSection = (
+    <>
+      {/* Camera feed */}
+      <VisionFeedViewer
+        ref={feedWebViewRef}
+        feedUrl={feedSourceUrl}
+        zones={visibleZones}
+        isWide={isWide}
+        aspect={feedAspect}
+        pointerEvents="none"
+        onMessage={onFeedMessage}
+        placeholder={program.cameraId ? "Connecting to camera…" : "Select a camera above"}
+      />
 
       {/* Run / Stop */}
       <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
@@ -457,10 +551,10 @@ export default function VisionEditorScreen() {
           disabled={!!transitioning}
         >
           {transitioning
-            ? <ActivityIndicator size="small" color="#fff" />
+            ? <ActivityIndicator size="small" color={colors.onAccent} />
             : isRunning
-              ? <EyeOff size={16} color="#fff" />
-              : <Eye size={16} color="#fff" />
+              ? <EyeOff size={16} color={colors.onAccent} />
+              : <Eye size={16} color={colors.onAccent} />
           }
           <Text style={styles.runBtnText}>
             {transitioning === 'starting' ? "Starting..."
@@ -470,21 +564,20 @@ export default function VisionEditorScreen() {
           </Text>
         </TouchableOpacity>
       </Animated.View>
-
-      {/* ── Results ────────────────────────────────────────────────────────── */}
-      {isRunning && visionResult && (
-        <>
-          <Text style={styles.sectionLabel}>RESULTS</Text>
-          <VisionResults result={visionResult} />
-        </>
-      )}
+      {/* Per-inspection results now render on each inspection card below (see editorSection),
+          so there's no separate aggregate results block here. */}
     </>
   );
 
   const editorSection = (
     <>
       {/* ── Zones ──────────────────────────────────────────────────────────── */}
-      <Text style={styles.sectionLabel}>ZONES</Text>
+      <View style={styles.sectionLabelRow}>
+        <Text style={styles.sectionLabel}>ZONES</Text>
+        <Text style={styles.sectionCount}>{program.zones.length}</Text>
+        <View style={{ flex: 1 }} />
+        <InfoTip text="A zone is a shape drawn over the camera image — rectangle, circle, polygon or grid. Inspections only look inside the zone they are attached to." />
+      </View>
 
       {program.zones.length === 0 && (
         <View style={styles.emptyCard}>
@@ -492,18 +585,51 @@ export default function VisionEditorScreen() {
         </View>
       )}
 
-      {program.zones.map(zone => (
-        <View key={zone.id} style={styles.zoneCard}>
+      {program.zones.map((zone, index) => {
+        const isDragged = drag?.list === 'zone' && drag.id === zone.id;
+        const dropAbove = !!(drag && drag.list === 'zone' && drag.id !== zone.id && drag.toIndex === index && drag.toIndex < drag.fromIndex);
+        const dropBelow = !!(drag && drag.list === 'zone' && drag.id !== zone.id && drag.toIndex === index && drag.toIndex > drag.fromIndex);
+        return (
+        <View
+          key={zone.id}
+          onLayout={e => onRowLayout(zone.id, e.nativeEvent.layout.height)}
+          style={[styles.noSelect, isDragged && styles.dragDim, dropAbove && styles.dropAbove, dropBelow && styles.dropBelow]}
+        >
+          <View style={styles.zoneCard}>
           <View style={styles.zoneCardRow}>
+            <DragHandle
+              stepId={zone.id}
+              onStart={id => onDragStart('zone', id)}
+              onMove={(id, dy) => onDragMove('zone', id, dy)}
+              onEnd={id => onDragEnd('zone', id)}
+            />
+            {/* Cyan zone-marker dot: no kit token for this hue, kept as-is (see report). */}
             <View style={[styles.dot, { backgroundColor: "#22d3ee" }]} />
             <TextInput
               style={styles.zoneNameInput}
               value={zone.name}
               onChangeText={t => updateZone({ ...zone, name: t })}
             />
-            <Text style={styles.shapeBadge}>{zone.geometry.shape}</Text>
+            <Text style={styles.shapeBadge}>
+              {zone.grid && zone.grid.rows * zone.grid.cols > 1 ? 'Grid' : zone.geometry.shape}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setHiddenZoneIds(prev => {
+                const next = new Set(prev);
+                if (next.has(zone.id)) next.delete(zone.id); else next.add(zone.id);
+                return next;
+              })}
+              style={styles.iconBtn}
+              activeOpacity={1}
+              hitSlop={8}
+            >
+              {/* Muted grey when hidden, cyan when shown. */}
+              {hiddenZoneIds.has(zone.id)
+                ? <EyeOff size={14} color={colors.textFaint} />
+                : <Eye size={14} color={accents.cyan} />}
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => openZoneModal(zone.id)} style={styles.iconBtn} hitSlop={8}>
-              <Pencil size={14} color="#6b7280" />
+              <Pencil size={14} color={colors.textMuted} />
             </TouchableOpacity>
             <DeleteIconButton
               size={14}
@@ -514,17 +640,25 @@ export default function VisionEditorScreen() {
               ])}
             />
           </View>
-          <ZoneGridRow zone={zone} onChange={updateZone} />
+          </View>
         </View>
-      ))}
+        );
+      })}
 
       <TouchableOpacity style={styles.addBtn} onPress={() => openZoneModal()} activeOpacity={0.75}>
-        <Plus size={15} color="#0891b2" />
+        <Plus size={15} color={accents.cyan} />
         <Text style={styles.addBtnText}>Add Zone</Text>
       </TouchableOpacity>
+      {/* Zone/inspection domain accents: cyan and violet map to accents.cyan/accents.purple;
+          fuchsia (#d946ef) has no matching kit token and stays literal, see report. */}
 
       {/* ── Inspections ──────────────────────────────────────────────────── */}
-      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>INSPECTIONS</Text>
+      <View style={[styles.sectionLabelRow, { marginTop: 8 }]}>
+        <Text style={styles.sectionLabel}>INSPECTIONS</Text>
+        <Text style={styles.sectionCount}>{program.inspections.length}</Text>
+        <View style={{ flex: 1 }} />
+        <InfoTip text="An inspection is one measurement — blob count, colour coverage, a barcode, an ArUco tag, a line or a polygon match. Its result is what a Run Vision step reads back into program variables." />
+      </View>
 
       {allInspections.length === 0 && (
         <View style={styles.emptyCard}>
@@ -535,37 +669,59 @@ export default function VisionEditorScreen() {
       {allInspections.map((item, index) => {
         const { kind, insp } = item;
         const linkedZone = program.zones.find(z => z.id === insp.zoneId);
-        const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
-        const iconBg     = kind === 'blob' ? '#ecfeff' : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? '#f0fdf4' : kind === 'line' ? '#f5f3ff' : kind === 'barcode' ? '#eff6ff' : '#fdf4ff';
+        // Per-kind identity colors: polygon/aruco/barcode/blob/line happen to match kit
+        // status/accent tokens exactly, so those are tokenized; color-coverage's fuchsia
+        // has no kit equivalent hue and stays literal (see report).
+        const accent     = kind === 'blob' ? accents.cyan : kind === 'polygon' ? colors.warning : kind === 'aruco' ? colors.success : kind === 'line' ? accents.purple : kind === 'barcode' ? colors.accent : '#d946ef';
+        const iconBg     = kind === 'blob' ? accents.cyanSoft : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? colors.successSoft : kind === 'line' ? accents.purpleSoft : kind === 'barcode' ? colors.accentSoft : '#fdf4ff';
         const typeLabel  = kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : kind === 'barcode' ? 'BARCODE / QR CODE' : 'COLOR COVERAGE';
+        const isDragged = drag?.list === 'insp' && drag.id === insp.id;
+        const dropAbove = !!(drag && drag.list === 'insp' && drag.id !== insp.id && drag.toIndex === index && drag.toIndex < drag.fromIndex);
+        const dropBelow = !!(drag && drag.list === 'insp' && drag.id !== insp.id && drag.toIndex === index && drag.toIndex > drag.fromIndex);
         return (
-          <View key={insp.id} style={[styles.inspStepCard, { borderLeftColor: accent }]}>
-            <TouchableOpacity
-              style={styles.inspStepHeader}
-              onPress={() => setConfigModal(item)}
-              activeOpacity={0.75}
-            >
-              <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
-                {kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
-                 kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
-                 kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
-                 kind === 'line'    ? <Minus      size={18} color={accent} /> :
-                 kind === 'barcode' ? <Barcode    size={18} color={accent} /> :
-                                     <Palette    size={18} color={accent} />}
-              </View>
-              <View style={styles.inspStepText}>
-                <Text style={[styles.inspStepType, { color: accent }]}>
-                  {index + 1} · {typeLabel}
-                </Text>
-                <Text style={styles.inspStepName}>{insp.name}</Text>
-                <Text style={styles.inspStepDetail}>
-                  {linkedZone?.name ?? 'Full image'}
-                  {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
-                  {kind === 'aruco'   ? ` · dict ${(insp as ArucoInspection).dictionaryId}` : ''}
-                  {kind === 'barcode' && (insp as BarcodeInspection).formats.length > 0
-                    ? ` · ${(insp as BarcodeInspection).formats.length} format(s)` : ''}
-                </Text>
-              </View>
+          <View
+            key={insp.id}
+            onLayout={e => onRowLayout(insp.id, e.nativeEvent.layout.height)}
+            style={[styles.noSelect, isDragged && styles.dragDim, dropAbove && styles.dropAbove, dropBelow && styles.dropBelow]}
+          >
+          <View style={[styles.inspStepCard, { borderLeftColor: accent }]}>
+            <View style={styles.inspStepHeader}>
+              <DragHandle
+                stepId={insp.id}
+                onStart={id => onDragStart('insp', id)}
+                onMove={(id, dy) => onDragMove('insp', id, dy)}
+                onEnd={id => onDragEnd('insp', id)}
+              />
+              {/* Only the icon + text opens the inspection. The switch and action buttons
+                  are siblings, so a click on them doesn't also open it (on web the press
+                  would otherwise bubble up to a wrapping touchable). */}
+              <TouchableOpacity
+                style={styles.inspTapArea}
+                onPress={() => setConfigModal(item)}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
+                  {kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
+                   kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
+                   kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
+                   kind === 'line'    ? <Minus      size={18} color={accent} /> :
+                   kind === 'barcode' ? <Barcode    size={18} color={accent} /> :
+                                       <Palette    size={18} color={accent} />}
+                </View>
+                <View style={styles.inspStepText}>
+                  <Text style={[styles.inspStepType, { color: accent }]}>
+                    {index + 1} · {typeLabel}
+                  </Text>
+                  <Text style={styles.inspStepName}>{insp.name}</Text>
+                  <Text style={styles.inspStepDetail}>
+                    {linkedZone?.name ?? 'Full image'}
+                    {kind === 'polygon' ? ` · ${(insp as PolygonInspection).sides} sides` : ''}
+                    {kind === 'aruco'   ? ` · dict ${(insp as ArucoInspection).dictionaryId}` : ''}
+                    {kind === 'barcode' && (insp as BarcodeInspection).formats.length > 0
+                      ? ` · ${(insp as BarcodeInspection).formats.length} format(s)` : ''}
+                  </Text>
+                </View>
+              </TouchableOpacity>
               <Switch
                 value={insp.enabled}
                 onValueChange={v => {
@@ -580,7 +736,7 @@ export default function VisionEditorScreen() {
                 style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
               />
               <TouchableOpacity onPress={() => duplicateInspection(item)} hitSlop={8} style={styles.iconBtn}>
-                <Copy size={15} color="#6b7280" />
+                <Copy size={15} color={colors.textMuted} />
               </TouchableOpacity>
               <DeleteIconButton
                 size={15}
@@ -597,14 +753,29 @@ export default function VisionEditorScreen() {
                   }},
                 ])}
               />
-            </TouchableOpacity>
+            </View>
+            {isRunning && inspHasResult(insp.id) && (
+              <TouchableOpacity
+                style={styles.inspResult}
+                onPress={() => setConfigModal(item)}
+                activeOpacity={0.75}
+              >
+                <VisionResults
+                  result={visionResult}
+                  only={insp.id}
+                  colorInspections={program.colorInspections ?? []}
+                  embedded
+                />
+              </TouchableOpacity>
+            )}
+          </View>
           </View>
         );
       })}
 
       <TouchableOpacity style={styles.addBtn} onPress={() => setTypePicker(true)} activeOpacity={0.75}>
-        <Plus size={15} color="#7c3aed" />
-        <Text style={[styles.addBtnText, { color: '#7c3aed' }]}>Add Inspection</Text>
+        <Plus size={15} color={accents.purple} />
+        <Text style={[styles.addBtnText, { color: accents.purple }]}>Add Inspection</Text>
       </TouchableOpacity>
 
       <View style={{ height: 40 }} />
@@ -617,26 +788,50 @@ export default function VisionEditorScreen() {
           renders as a full-screen subpage in its place. */}
       {configModal === null && (
       <>
-      <SubPageHeader
-        title={name}
+      <PageHeader
+        title={name || "Vision Program"}
+        subtitle={`${program.zones.length} zone${program.zones.length !== 1 ? "s" : ""} · ${program.inspections.length} inspection${program.inspections.length !== 1 ? "s" : ""}${selectedCam ? ` · ${selectedCam.name || selectedCam.id}` : ""}${isRunning ? " · live" : ""}`}
+        crumbs={[
+          { label: "Program", href: "/program" },
+          { label: "Vision", href: "/(tabs)/program/vision" },
+          { label: name || "Vision Program" },
+        ]}
+        backTo="/(tabs)/program/vision"
         right={
           saveStatus === 'saving' ? (
             <View style={styles.saveStatusRow}>
-              <ActivityIndicator size="small" color="#6b7280" />
+              <ActivityIndicator size="small" color={colors.textMuted} />
               <Text style={styles.saveStatusText}>Saving…</Text>
             </View>
           ) : saveStatus === 'saved' ? (
             <View style={styles.saveStatusRow}>
-              <Check size={14} color="#16a34a" />
-              <Text style={[styles.saveStatusText, { color: '#16a34a' }]}>Saved</Text>
+              <Check size={14} color={colors.success} />
+              <Text style={[styles.saveStatusText, { color: colors.success }]}>Saved</Text>
             </View>
-          ) : null
+          ) : (
+            <StatusPill
+              label={isRunning ? "Live" : "Stopped"}
+              tone={isRunning ? "success" : "neutral"}
+              dot
+            />
+          )
         }
       />
 
       {isWide ? (
-        /* ── Wide layout: vision info + feed left, zones/inspections right ── */
+        /* ── Wide layout: zones/inspections left, vision info + feed on the right ── */
         <View style={styles.wideRow}>
+          <ScrollView
+            style={styles.widePaneRight}
+            contentContainerStyle={[styles.content, styles.wideEditorContent]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={drag === null}
+          >
+            {detailsCard}
+            {editorSection}
+          </ScrollView>
           <ScrollView
             style={[styles.widePaneLeft, isSplit && wide.paneSplit]}
             contentContainerStyle={styles.widePaneLeftContent}
@@ -646,24 +841,17 @@ export default function VisionEditorScreen() {
           >
             {infoSection}
           </ScrollView>
-          <ScrollView
-            style={styles.widePaneRight}
-            contentContainerStyle={[styles.content, styles.wideEditorContent]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-          >
-            {editorSection}
-          </ScrollView>
         </View>
       ) : (
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.content, wide.content]}
+          contentContainerStyle={[styles.content, wideContent]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
+          scrollEnabled={drag === null}
         >
+          {detailsCard}
           {infoSection}
           {editorSection}
         </ScrollView>
@@ -787,176 +975,130 @@ export default function VisionEditorScreen() {
   );
 }
 
-// ── Zone grid controls ─────────────────────────────────────────────────────────
-
-const MAX_GRID = 16;
-
-/**
- * Row/column controls for a zone's inspection grid. Off by default; turning it on gives a
- * 2×2 and the lattice appears over the zone in the draw view and on the annotated feed.
- *
- * Only color coverage inspections measure per cell today — the hint says so, because a
- * grid that silently does nothing on a blob inspection is worse than no grid at all.
- */
-function ZoneGridRow({ zone, onChange }: { zone: VisionZone; onChange: (z: VisionZone) => void }) {
-  const grid = zone.grid;
-  const on   = !!grid && grid.rows * grid.cols > 1;
-
-  function setGrid(next: VisionZoneGrid | undefined) {
-    onChange({ ...zone, grid: next });
-  }
-
-  function step(axis: keyof VisionZoneGrid, delta: number) {
-    const current = grid ?? { rows: 1, cols: 1 };
-    const value   = Math.max(1, Math.min(MAX_GRID, current[axis] + delta));
-    setGrid({ ...current, [axis]: value });
-  }
-
-  return (
-    <View style={styles.gridRow}>
-      <TouchableOpacity
-        style={[styles.gridToggle, on && styles.gridToggleOn]}
-        onPress={() => setGrid(on ? undefined : { rows: 2, cols: 2 })}
-        activeOpacity={0.75}
-      >
-        <Grid3x3 size={13} color={on ? "#0891b2" : "#9ca3af"} />
-        <Text style={[styles.gridToggleText, on && styles.gridToggleTextOn]}>GRID</Text>
-      </TouchableOpacity>
-
-      {!on ? (
-        <Text style={styles.gridHint}>Off — color inspections measure the whole zone</Text>
-      ) : (
-        <>
-          <View style={{ flex: 1 }} />
-          {(['rows', 'cols'] as const).map(axis => (
-            <View key={axis} style={styles.gridStepper}>
-              <Text style={styles.gridStepperLabel}>{axis === 'rows' ? 'R' : 'C'}</Text>
-              <TouchableOpacity style={styles.gridStepBtn} onPress={() => step(axis, -1)} hitSlop={6}>
-                <Minus size={12} color="#6b7280" />
-              </TouchableOpacity>
-              <Text style={styles.gridStepValue}>{grid![axis]}</Text>
-              <TouchableOpacity style={styles.gridStepBtn} onPress={() => step(axis, 1)} hitSlop={6}>
-                <Plus size={12} color="#6b7280" />
-              </TouchableOpacity>
-            </View>
-          ))}
-        </>
-      )}
-    </View>
-  );
-}
+// The zone's grid is edited in the draw modal now (via the Grid shape), so there is no
+// separate per-zone grid toggle here anymore — a gridded zone simply reads as "Grid".
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: "#f3f4f6" },
+  root:    { flex: 1, backgroundColor: colors.background },
+  // Keep drag targets from turning into text selections mid-drag on web.
+  noSelect: { userSelect: "none" },
   scroll:  { flex: 1 },
-  content: { padding: 14, gap: 8 },
+  content: { padding: spacing.lg, gap: spacing.sm },
 
   // ── Wide (desktop) two-pane layout ────────────────────────────────────────
   wideRow: {
     flex: 1, flexDirection: "row",
-    width: "100%", maxWidth: 1200, alignSelf: "center",
+    width: "100%",
   },
+  // The camera/feed pane. A proportion of the (uncapped) row width so the viewer grows
+  // with the screen, bounded so it stays sensible on very wide and very narrow desktops.
+  // In "split" mode wide.paneSplit overrides this to an even 50/50.
   widePaneLeft: {
-    width: 400, flexGrow: 0, flexShrink: 0,
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+    width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border,
   },
-  widePaneLeftContent: { padding: 14, paddingBottom: 32, gap: 8 },
+  widePaneLeftContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: spacing.xxl, gap: spacing.sm },
   widePaneRight: { flex: 1 },
   wideEditorContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 
   saveStatusRow:  { flexDirection: "row", alignItems: "center", gap: 5 },
-  saveStatusText: { fontSize: 13, color: "#6b7280" },
+  saveStatusText: { fontSize: 13, color: colors.textMuted },
 
   card: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: "#fff", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    backgroundColor: colors.surface, borderRadius: radii.md,
+    paddingHorizontal: 14, paddingVertical: spacing.md,
+    ...shadows.soft,
   },
-  rowLabel:    { fontSize: 12, fontWeight: "600", color: "#6b7280", width: 60 },
-  nameInput:   { flex: 1, fontSize: 14, color: "#111827" },
-  cameraValue: { flex: 1, fontSize: 14, color: "#111827" },
+  rowLabel:    { fontSize: 12, fontWeight: "600", color: colors.textMuted, width: 60 },
+  nameInput:   { flex: 1, fontSize: 14, color: colors.text },
+  cameraValue: { flex: 1, fontSize: 14, color: colors.text },
   dot:         { width: 8, height: 8, borderRadius: 4 },
 
-  feedCard: {
-    backgroundColor: "#111", borderRadius: 12, overflow: "hidden",
-    height: 220,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
-  },
-  feedPlaceholder:     { ...StyleSheet.absoluteFill, justifyContent: "center", alignItems: "center" },
-  feedPlaceholderText: { color: "#6b7280", fontSize: 13 },
-
   runBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    borderRadius: 12, paddingVertical: 13,
-    shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    borderRadius: radii.md, paddingVertical: 13,
+    ...shadows.soft,
   },
-  runBtnStart: { backgroundColor: "#0891b2" },
-  runBtnStop:  { backgroundColor: "#dc2626" },
-  runBtnText:  { color: "#fff", fontSize: 14, fontWeight: "700" },
+  // Cyan/red identity colors for the vision run state.
+  runBtnStart: { backgroundColor: accents.cyan },
+  runBtnStop:  { backgroundColor: colors.danger },
+  runBtnText:  { color: colors.onAccent, fontSize: 14, fontWeight: "700" },
 
-  sectionLabel: { fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.8, marginBottom: 2 },
+  sectionLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 2 },
+  sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  sectionCount: {
+    fontSize: 11, fontWeight: "700", color: colors.textFaint,
+    backgroundColor: colors.surface, borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm, paddingVertical: 1, marginBottom: 2,
+  },
 
   emptyCard: {
-    backgroundColor: "#fff", borderRadius: 12, padding: 16, alignItems: "center",
-    shadowColor: "#000", shadowOpacity: 0.03, shadowRadius: 3, elevation: 1,
+    backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.lg, alignItems: "center",
+    ...shadows.soft,
   },
-  emptyText: { fontSize: 13, color: "#9ca3af", textAlign: "center" },
+  emptyText: { fontSize: 13, color: colors.textFaint, textAlign: "center" },
 
   zoneCard: {
-    backgroundColor: "#fff", borderRadius: 12,
+    backgroundColor: colors.surface, borderRadius: radii.md,
     paddingHorizontal: 14, paddingVertical: 11,
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    ...shadows.soft,
   },
-  zoneCardRow:   { flexDirection: "row", alignItems: "center", gap: 8 },
-  zoneNameInput: { flex: 1, fontSize: 14, fontWeight: "600", color: "#111827" },
+  zoneCardRow:   { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  zoneNameInput: { flex: 1, fontSize: 14, fontWeight: "600", color: colors.text, userSelect: "text" },
 
-  gridRow:        { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
-  gridToggle: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5,
-    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
+  // Program details card (name + camera).
+  detailsCard: {
+    backgroundColor: colors.surface, borderRadius: radii.md, overflow: "hidden",
+    ...shadows.soft,
   },
-  gridToggleOn:      { borderColor: "#22d3ee", backgroundColor: "#ecfeff" },
-  gridToggleText:    { fontSize: 11, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.4 },
-  gridToggleTextOn:  { color: "#0891b2" },
-  gridHint:          { flex: 1, fontSize: 11, color: "#9ca3af" },
-  gridStepper:       { flexDirection: "row", alignItems: "center", gap: 2 },
-  gridStepperLabel:  { fontSize: 11, fontWeight: "700", color: "#6b7280", marginRight: 2 },
-  gridStepBtn: {
-    width: 24, height: 24, borderRadius: 6, justifyContent: "center", alignItems: "center",
-    borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#f9fafb",
-  },
-  gridStepValue: { fontSize: 13, fontWeight: "700", color: "#111827", minWidth: 20, textAlign: "center" },
-  shapeBadge:    { fontSize: 11, color: "#9ca3af", backgroundColor: "#f3f4f6", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  iconBtn:       { padding: 4 },
+  detailsRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: spacing.md },
+  // Slightly lighter than colors.border by design — no exact kit token, kept literal (see report).
+  detailsDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "#eef0f2" },
+
+  // Drag-to-reorder feedback (zones + inspections). Applied to a non-elevated OUTER
+  // wrapper, never the elevated card itself — Android renders a View blank when opacity
+  // < 1 is set on the same view that has elevation.
+  dragDim:    { opacity: 0.35 },
+  dropAbove:  { borderTopWidth: 2.5, borderTopColor: accents.cyan, borderTopLeftRadius: radii.md, borderTopRightRadius: radii.md },
+  dropBelow:  { borderBottomWidth: 2.5, borderBottomColor: accents.cyan, borderBottomLeftRadius: radii.md, borderBottomRightRadius: radii.md },
+
+  shapeBadge:    { fontSize: 11, color: colors.textFaint, backgroundColor: colors.background, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  iconBtn:       { padding: spacing.xs },
 
   addBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: "#fff", borderRadius: 12,
-    paddingVertical: 13, borderWidth: 1.5, borderColor: "#e5e7eb", borderStyle: "dashed",
+    backgroundColor: colors.surface, borderRadius: radii.md,
+    paddingVertical: 13, borderWidth: 1.5, borderColor: colors.border, borderStyle: "dashed",
   },
-  addBtnText: { fontSize: 14, fontWeight: "600", color: "#0891b2" },
+  addBtnText: { fontSize: 14, fontWeight: "600", color: accents.cyan },
 
   inspStepCard: {
-    backgroundColor: "#fff", borderRadius: 14, borderLeftWidth: 4,
-    shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    backgroundColor: colors.surface, borderRadius: radii.lg, borderLeftWidth: 4,
+    ...shadows.soft,
     overflow: "hidden",
   },
   inspStepHeader: {
     flexDirection: "row", alignItems: "center",
     paddingLeft: 10, paddingRight: 10, paddingVertical: 14, gap: 10,
   },
+  // The tappable region (icon + text) inside the header; siblings (switch, buttons)
+  // stay outside it so their clicks don't open the inspection.
+  inspTapArea: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10 },
   inspStepIcon: {
     width: 36, height: 36, borderRadius: 10,
-    backgroundColor: "#ecfeff",
+    // Default fallback fill (kind-specific iconBg is applied inline per row).
+    backgroundColor: accents.cyanSoft,
     justifyContent: "center", alignItems: "center", flexShrink: 0,
   },
   inspStepText:   { flex: 1, minWidth: 0, gap: 1 },
   inspStepType:   { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
-  inspStepName:   { fontSize: 14, fontWeight: "600", color: "#111827" },
-  inspStepDetail: { fontSize: 12, color: "#6b7280" },
+  inspStepName:   { fontSize: 14, fontWeight: "600", color: colors.text },
+  inspStepDetail: { fontSize: 12, color: colors.textMuted },
+  // Live result strip at the foot of an inspection card (while vision is running).
+  inspResult: {
+    paddingHorizontal: 14, paddingBottom: spacing.sm,
+  },
 });

@@ -1,9 +1,9 @@
-import React, { useRef } from "react";
+import React from "react";
 import {
   Modal,
   Pressable,
+  StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -14,10 +14,10 @@ import {
   ConditionOp,
   ProgramVariable,
 } from "@/src/models/robotModels";
-import { VarPickerModal } from "./VarPicker";
-import { exprStyles } from "./NumericInputs";
 import { svs } from "./builderStyles";
 import { newId } from "./stepUtils";
+import { colors, spacing, radii, accents } from "@/src/components/ui/kit";
+import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── Condition editor ──────────────────────────────────────────────────────────
 
@@ -54,111 +54,55 @@ function ConditionItemEditor({
   onDelete: () => void;
 }) {
   const [opOpen, setOpOpen] = React.useState(false);
-  const [leftPickerOpen, setLeftPickerOpen] = React.useState(false);
-  const [rightPickerOpen, setRightPickerOpen] = React.useState(false);
-  const rightRef = useRef<any>(null);
-  const hasVars = !!(variables && variables.length > 0);
-
-  function insertRightToken(token: string) {
-    const cur = (item.right ?? "").trimEnd();
-    const next = cur ? `${cur} ${token} ` : `${token} `;
-    onChange({ ...item, right: next });
-    rightRef.current?.focus();
-  }
-
-  const rightIsExpr = /[$+\-*\/()]/.test(item.right ?? "");
 
   return (
-    <View style={{ marginBottom: 10, borderWidth: 1, borderColor: "#e0f2fe", borderRadius: 10, padding: 10, backgroundColor: "#fff" }}>
+    <View style={{ marginBottom: 10, borderWidth: 1, borderColor: "#e0f2fe", borderRadius: radii.sm, padding: 10, backgroundColor: colors.surface }}>
       {/* Delete button */}
       <TouchableOpacity onPress={onDelete} hitSlop={8} activeOpacity={0.7} style={{ alignSelf: "flex-end", marginBottom: 6 }}>
-        <X size={14} color="#9ca3af" />
+        <X size={14} color={colors.textFaint} />
       </TouchableOpacity>
 
-      {/* Left */}
-      <Text style={{ fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.4, marginBottom: 4 }}>LEFT</Text>
-      <View style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}>
-        <TextInput
-          style={{ flex: 1, borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: "#7c3aed" }}
-          value={item.left ?? ""}
-          onChangeText={v => onChange({ ...item, left: v })}
-          placeholder="$var or $stb.in1"
-          placeholderTextColor="#c4b5fd"
-          autoCapitalize="none"
-        />
-        {hasVars && (
-          <TouchableOpacity
-            onPress={() => setLeftPickerOpen(true)}
-            activeOpacity={0.7}
-            style={{ backgroundColor: "#ede9fe", borderWidth: 1, borderColor: "#c4b5fd", borderRadius: 8, paddingHorizontal: 10, justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "700", color: "#7c3aed" }}>var</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* Left — both sides are expressions, so both open the one expression editor. */}
+      <Text style={condStyles.sideLabel}>LEFT</Text>
+      <ExpressionField
+        style={condStyles.field}
+        value={item.left ?? ""}
+        onChange={v => onChange({ ...item, left: v })}
+        title="Left side"
+        hint="The value this condition tests."
+        placeholder="$var or $stb.in1"
+        variables={variables}
+        contextVariables={contextVariables}
+        contextLabel="Caller Variables"
+      />
+      <View style={{ height: spacing.md }} />
 
       {/* Operator — full-width select button */}
-      <Text style={{ fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.4, marginBottom: 4 }}>OPERATOR</Text>
+      <Text style={condStyles.sideLabel}>OPERATOR</Text>
       <TouchableOpacity
         style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#e0f2fe", borderWidth: 1.5, borderColor: "#bae6fd", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 12 }}
         onPress={() => setOpOpen(true)}
         activeOpacity={0.75}
       >
-        <Text style={{ fontSize: 14, fontWeight: "700", color: "#0891b2", flex: 1 }}>{item.operator}</Text>
+        <Text style={{ fontSize: 14, fontWeight: "700", color: accents.cyan, flex: 1 }}>{item.operator}</Text>
         <Text style={{ fontSize: 12, color: "#67e8f9", flex: 2 }}>{COND_OP_LABELS[item.operator as ConditionOp] ?? ""}</Text>
-        <ChevronDown size={14} color="#0891b2" />
+        <ChevronDown size={14} color={accents.cyan} />
       </TouchableOpacity>
 
       {/* Right */}
-      <Text style={{ fontSize: 11, fontWeight: "700", color: "#6b7280", letterSpacing: 0.4, marginBottom: 4 }}>RIGHT</Text>
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        <TextInput
-          ref={rightRef}
-          style={{ flex: 1, borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: rightIsExpr ? "#7c3aed" : "#111827" }}
-          value={item.right ?? ""}
-          onChangeText={v => onChange({ ...item, right: v })}
-          placeholder="value or expression"
-          placeholderTextColor="#9ca3af"
-          autoCapitalize="none"
-        />
-        {hasVars && (
-          <TouchableOpacity
-            onPress={() => setRightPickerOpen(true)}
-            activeOpacity={0.7}
-            style={{ backgroundColor: "#ede9fe", borderWidth: 1, borderColor: "#c4b5fd", borderRadius: 8, paddingHorizontal: 10, justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 11, fontWeight: "700", color: "#7c3aed" }}>var</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
-        {([["×", "*"], ["+", "+"], ["−", "-"], ["÷", "/"]] as [string, string][]).map(([label, op]) => (
-          <TouchableOpacity key={op} onPress={() => insertRightToken(op)} activeOpacity={0.7} style={exprStyles.opChip}>
-            <Text style={exprStyles.opChipText}>{label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <Text style={condStyles.sideLabel}>RIGHT</Text>
+      <ExpressionField
+        style={condStyles.field}
+        value={item.right ?? ""}
+        onChange={v => onChange({ ...item, right: v })}
+        title="Right side"
+        hint="What the left side is compared against."
+        placeholder="value or expression"
+        variables={variables}
+        contextVariables={contextVariables}
+        contextLabel="Caller Variables"
+      />
 
-      <VarPickerModal
-        visible={leftPickerOpen}
-        onClose={() => setLeftPickerOpen(false)}
-        variables={variables ?? []}
-        contextVariables={contextVariables}
-        contextLabel="Caller Variables"
-        selected={(item.left ?? "").startsWith("$") ? item.left.slice(1) : undefined}
-        title="Left Variable"
-        onSelect={v => { if (v) onChange({ ...item, left: `$${v.name}` }); }}
-      />
-      <VarPickerModal
-        visible={rightPickerOpen}
-        onClose={() => setRightPickerOpen(false)}
-        variables={variables ?? []}
-        contextVariables={contextVariables}
-        contextLabel="Caller Variables"
-        selected={(item.right ?? "").startsWith("$") ? item.right.slice(1) : undefined}
-        title="Right Variable"
-        onSelect={v => { if (v) insertRightToken(`$${v.name}`); }}
-      />
       <Modal visible={opOpen} transparent animationType="fade" onRequestClose={() => setOpOpen(false)}>
         <Pressable style={svs.modalOverlay} onPress={() => setOpOpen(false)}>
           <Pressable style={svs.modalCard} onPress={() => {}}>
@@ -170,10 +114,10 @@ function ConditionItemEditor({
                 activeOpacity={0.7}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
-                  <Text style={{ fontSize: op.length > 3 ? 12 : 16, fontWeight: "700", color: op === item.operator ? "#0891b2" : "#374151", minWidth: 28 }}>{op}</Text>
-                  <Text style={{ fontSize: 13, color: "#6b7280", flex: 1 }}>{COND_OP_LABELS[op]}</Text>
+                  <Text style={{ fontSize: op.length > 3 ? 12 : 16, fontWeight: "700", color: op === item.operator ? accents.cyan : colors.textSecondary, minWidth: 28 }}>{op}</Text>
+                  <Text style={{ fontSize: 13, color: colors.textMuted, flex: 1 }}>{COND_OP_LABELS[op]}</Text>
                 </View>
-                {op === item.operator && <Check size={15} color="#0891b2" />}
+                {op === item.operator && <Check size={15} color={accents.cyan} />}
               </TouchableOpacity>
             ))}
           </Pressable>
@@ -194,25 +138,25 @@ export function ConditionGroupEditor({
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
 }) {
-  const accent = "#0891b2";
+  const accent = accents.cyan;
   return (
-    <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
-        <Text style={{ fontSize: 11, fontWeight: "700", color: "#6b7280", marginRight: 4 }}>MATCH</Text>
+    <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.md }}>
+        <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, marginRight: 4 }}>MATCH</Text>
         {(["ALL", "ANY"] as const).map(opt => (
           <TouchableOpacity key={opt}
             style={[{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
-              group.combinator === opt ? { borderColor: accent, backgroundColor: accent } : { borderColor: "#d1d5db", backgroundColor: "#fff" }]}
+              group.combinator === opt ? { borderColor: accent, backgroundColor: accent } : { borderColor: colors.borderStrong, backgroundColor: colors.surface }]}
             onPress={() => onChange({ ...group, combinator: opt })} activeOpacity={0.7}>
-            <Text style={{ fontSize: 12, fontWeight: "700", color: group.combinator === opt ? "#fff" : "#6b7280" }}>{opt}</Text>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: group.combinator === opt ? colors.onAccent : colors.textMuted }}>{opt}</Text>
           </TouchableOpacity>
         ))}
-        <Text style={{ fontSize: 11, color: "#6b7280" }}>
+        <Text style={{ fontSize: 11, color: colors.textMuted }}>
           {group.combinator === "ALL" ? "conditions must be true" : "one must be true"}
         </Text>
       </View>
       {(group.items ?? []).length === 0 && (
-        <Text style={{ fontSize: 12, color: "#9ca3af", marginBottom: 10, fontStyle: "italic" }}>No conditions — branch always runs.</Text>
+        <Text style={{ fontSize: 12, color: colors.textFaint, marginBottom: spacing.md, fontStyle: "italic" }}>No conditions — branch always runs.</Text>
       )}
       {(group.items ?? []).map((item, i) => (
         <ConditionItemEditor key={item.id} item={item} variables={variables} contextVariables={contextVariables}
@@ -220,7 +164,7 @@ export function ConditionGroupEditor({
           onDelete={() => onChange({ ...group, items: (group.items ?? []).filter((_, j) => j !== i) })} />
       ))}
       <TouchableOpacity
-        style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1.5, borderColor: "#bae6fd", borderStyle: "dashed", borderRadius: 10, paddingVertical: 12, backgroundColor: "#f0f9ff" }}
+        style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1.5, borderColor: "#bae6fd", borderStyle: "dashed", borderRadius: radii.sm, paddingVertical: spacing.md, backgroundColor: colors.accentSoft }}
         onPress={() => onChange({ ...group, items: [...(group.items ?? []), { id: newId(), left: "", operator: "==" as ConditionOp, right: "" }] })}
         activeOpacity={0.7}>
         <Plus size={14} color={accent} />
@@ -229,3 +173,11 @@ export function ConditionGroupEditor({
     </View>
   );
 }
+
+const condStyles = StyleSheet.create({
+  sideLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4, marginBottom: 4 },
+  field: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 9, minHeight: 38,
+  },
+});

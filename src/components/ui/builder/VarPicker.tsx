@@ -12,10 +12,12 @@ import {
 import { ChevronDown, X } from "lucide-react-native";
 import { ProgramVariable, variableList } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
+import { colors, radii } from "@/src/components/ui/kit";
+import { SymbolSections } from "./expressions/SymbolSections";
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
-export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "objects" | "string" | "image";
+export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "objects" | "string" | "image" | "computed";
 
 /**
  * The chip a variable wears. Lists are one type now, so the kind comes from the element
@@ -23,6 +25,9 @@ export type VarKind = "number" | "boolean" | "list" | "flags" | "points" | "obje
  * is the distinction worth showing.
  */
 export function varKind(v: ProgramVariable): VarKind {
+  // Checked first: a computed variable carries no stored-kind flags except isBoolean,
+  // and "this is a formula, not a slot" is the distinction that matters in a picker.
+  if (v.isComputed) return "computed";
   const list = variableList(v);
   if (list) {
     if (list.elementType === "Point")   return "points";
@@ -36,6 +41,8 @@ export function varKind(v: ProgramVariable): VarKind {
   return "number";
 }
 
+// Per-kind tints (purple/green/cyan/teal/orange) — semantically distinguish variable
+// kinds at a glance. No kit token maps to this many distinct hues; left as-is.
 export const VAR_KIND_META: Record<
   VarKind,
   { label: string; color: string; bg: string; border: string }
@@ -50,6 +57,7 @@ export const VAR_KIND_META: Record<
   objects: { label: "OBJ",  color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
   string:  { label: "STR",  color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
   image:   { label: "IMG",  color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
+  computed:{ label: "ƒ COMPUTED", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
 };
 
 /**
@@ -82,6 +90,8 @@ export function VarPickerModal({
   showNone = false,
   contextVariables,
   contextLabel,
+  onPickSymbol,
+  filter,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -92,6 +102,18 @@ export function VarPickerModal({
   showNone?: boolean;
   contextVariables?: ProgramVariable[];
   contextLabel?: string;
+  /**
+   * Set when the pick is inserted into an expression (not assigned to): adds the
+   * read-only Properties and the IO names below the variables. Receives the name
+   * without its `$`.
+   */
+  onPickSymbol?: (name: string) => void;
+  /**
+   * Narrows both `variables` and `contextVariables`. Assignment targets pass
+   * `isAssignableVariable` so computed variables — which cannot be written — are not
+   * offered.
+   */
+  filter?: (v: ProgramVariable) => boolean;
 }) {
   const [search,     setSearch]     = useState("");
   const [kindFilter, setKindFilter] = useState<VarKind | "all">("all");
@@ -100,25 +122,31 @@ export function VarPickerModal({
     if (visible) { setSearch(""); setKindFilter("all"); }
   }, [visible]);
 
+  const pickable = useMemo(
+    () => filter ? variables.filter(filter) : variables, [variables, filter]);
+  const pickableContext = useMemo(
+    () => filter ? (contextVariables ?? []).filter(filter) : (contextVariables ?? []),
+    [contextVariables, filter]);
+
   const kinds = useMemo(() => {
     const seen = new Set<VarKind>();
-    [...variables, ...(contextVariables ?? [])].forEach(v => seen.add(varKind(v)));
+    [...pickable, ...pickableContext].forEach(v => seen.add(varKind(v)));
     return [...seen];
-  }, [variables, contextVariables]);
+  }, [pickable, pickableContext]);
 
   const filtered = useMemo(() =>
-    variables.filter(v => {
+    pickable.filter(v => {
       if (kindFilter !== "all" && varKind(v) !== kindFilter) return false;
       const q = search.trim().toLowerCase();
       return !q || v.name.toLowerCase().includes(q);
-    }), [variables, kindFilter, search]);
+    }), [pickable, kindFilter, search]);
 
   const filteredContext = useMemo(() =>
-    (contextVariables ?? []).filter(v => {
+    pickableContext.filter(v => {
       if (kindFilter !== "all" && varKind(v) !== kindFilter) return false;
       const q = search.trim().toLowerCase();
       return !q || v.name.toLowerCase().includes(q);
-    }), [contextVariables, kindFilter, search]);
+    }), [pickableContext, kindFilter, search]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -128,26 +156,26 @@ export function VarPickerModal({
             <View style={{ width: 18 }} />
             <Text style={ms.title}>{title}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color="#9ca3af" />
+              <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
 
           {/* Search input */}
-          <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#e5e7eb",
-            borderRadius: 9, paddingHorizontal: 10, backgroundColor: "#f9fafb", marginBottom: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border,
+            borderRadius: radii.sm, paddingHorizontal: 10, backgroundColor: colors.surfaceMuted, marginBottom: 8 }}>
             <TextInput
-              style={{ flex: 1, fontSize: 14, color: "#111827", paddingVertical: 9 }}
+              style={{ flex: 1, fontSize: 14, color: colors.text, paddingVertical: 9 }}
               value={search}
               onChangeText={setSearch}
               placeholder="Search by name…"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={colors.textFaint}
               autoFocus
               autoCapitalize="none"
               returnKeyType="search"
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
-                <X size={13} color="#9ca3af" />
+                <X size={13} color={colors.textFaint} />
               </TouchableOpacity>
             )}
           </View>
@@ -166,13 +194,13 @@ export function VarPickerModal({
                     style={[{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
                       active
                         ? meta ? { backgroundColor: meta.bg, borderColor: meta.border }
-                               : { backgroundColor: "#374151", borderColor: "#374151" }
-                        : { backgroundColor: "#f3f4f6", borderColor: "#e5e7eb" }]}
+                               : { backgroundColor: colors.textSecondary, borderColor: colors.textSecondary }
+                        : { backgroundColor: colors.background, borderColor: colors.border }]}
                     onPress={() => setKindFilter(active && k !== "all" ? "all" : k as VarKind | "all")}
                     activeOpacity={0.7}
                   >
                     <Text style={{ fontSize: 12, fontWeight: "600",
-                      color: active ? (meta ? meta.color : "#fff") : "#6b7280" }}>
+                      color: active ? (meta ? meta.color : colors.onAccent) : colors.textMuted }}>
                       {k === "all" ? "All" : VAR_KIND_META[k as VarKind].label}
                     </Text>
                   </TouchableOpacity>
@@ -226,8 +254,8 @@ export function VarPickerModal({
 
             {filteredContext.length > 0 && (
               <>
-                <View style={{ paddingHorizontal: 4, paddingTop: 10, paddingBottom: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb", marginTop: filtered.length > 0 ? 6 : 0 }}>
-                  <Text style={{ fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5 }}>
+                <View style={{ paddingHorizontal: 4, paddingTop: 10, paddingBottom: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, marginTop: filtered.length > 0 ? 6 : 0 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5 }}>
                     FROM {(contextLabel ?? "CALLER PROGRAM").toUpperCase()}
                   </Text>
                 </View>
@@ -251,6 +279,10 @@ export function VarPickerModal({
                   );
                 })}
               </>
+            )}
+
+            {onPickSymbol && kindFilter === "all" && (
+              <SymbolSections search={search} onPick={name => { onPickSymbol(name); onClose(); }} />
             )}
           </ScrollView>
         </Pressable>
@@ -279,18 +311,18 @@ export function VarSelectorButton({
       <Text style={[ms.fieldLabel, marginTop && { marginTop: 10 }]}>{label}</Text>
       <TouchableOpacity
         style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4,
-          borderWidth: 1, borderColor: value ? accent : "#e5e7eb",
-          borderRadius: 10, backgroundColor: "#f9fafb",
+          borderWidth: 1, borderColor: value ? accent : colors.border,
+          borderRadius: radii.sm, backgroundColor: colors.surfaceMuted,
           paddingHorizontal: 12, paddingVertical: 10 }}
         onPress={onPress}
         activeOpacity={0.75}
       >
         <Text style={{ flex: 1, fontSize: 14,
           fontWeight: value ? "700" : "400",
-          color: value ? accent : "#9ca3af" }}>
+          color: value ? accent : colors.textFaint }}>
           {value ? `$${value}` : (placeholder ?? "None — tap to select")}
         </Text>
-        <ChevronDown size={14} color={value ? accent : "#9ca3af"} />
+        <ChevronDown size={14} color={value ? accent : colors.textFaint} />
       </TouchableOpacity>
     </>
   );

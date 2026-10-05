@@ -3,6 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Check } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { ARUCO_DICTIONARIES } from "@/src/models/robotModels";
+import { accents } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 
 export function DictionaryPickerModal({ visible, selected, onSelect, onClose }: {
@@ -23,7 +24,7 @@ export function DictionaryPickerModal({ visible, selected, onSelect, onClose }: 
             <View style={{ flex: 1 }}>
               <Text style={ves.sheetRowName}>{d.label}</Text>
             </View>
-            {d.id === selected && <Check size={16} color="#0891b2" />}
+            {d.id === selected && <Check size={16} color={accents.cyan} />}
           </TouchableOpacity>
         ))}
       </ScrollView>

@@ -1,142 +1,102 @@
-import { wide } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
+import { accents, Card, colors, Divider, ListRow, PageHeader, Screen, SectionHeader, spacing, StatTile } from "@/src/components/ui/kit";
+import { useGrids, usePoints, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { ChevronRight, Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
+import { StyleSheet, View } from "react-native";
 
 const MENU_ITEMS = [
   {
     label: "Points",
     description: "View, move to, and manage saved robot positions",
     icon: MapPin,
-    tileColor: "#f0fdf4",
-    iconColor: "#16a34a",
+    tileColor: colors.successSoft,
+    iconColor: colors.success,
     onPress: () => router.navigate("/space/points"),
   },
   {
     label: "Tools",
     description: "Define TCP offsets and tool frame configurations",
     icon: Wrench,
-    tileColor: "#eff6ff",
-    iconColor: "#2563eb",
+    tileColor: colors.accentSoft,
+    iconColor: colors.accent,
     onPress: () => router.navigate("/space/tools"),
   },
   {
     label: "Locals",
     description: "Configure local coordinate reference frames",
     icon: Grid3x3,
-    tileColor: "#f5f3ff",
-    iconColor: "#7c3aed",
+    tileColor: accents.purpleSoft,
+    iconColor: accents.purple,
     onPress: () => router.navigate("/space/locals"),
   },
   {
     label: "Grids",
     description: "Define 2D position arrays for pick-and-place and pallet operations",
     icon: LayoutGrid,
-    tileColor: "#fef3c7",
-    iconColor: "#d97706",
+    tileColor: colors.warningSoft,
+    iconColor: colors.warning,
     onPress: () => router.navigate("/space/grids"),
   },
   {
     label: "Stacks",
     description: "Define 1D position arrays with optional round-robin indexing",
     icon: Layers,
-    tileColor: "#f3e8ff",
-    iconColor: "#7c3aed",
+    tileColor: accents.purpleSoft,
+    iconColor: accents.purple,
     onPress: () => router.navigate("/space/stacks"),
   },
 ];
 
-const SUMMARY_ITEMS = [
-  { label: "Points",  color: "#16a34a", bgColor: "#f0fdf4" },
-  { label: "Tools",   color: "#2563eb", bgColor: "#eff6ff" },
-  { label: "Grids",   color: "#d97706", bgColor: "#fef3c7" },
-  { label: "Stacks",  color: "#7c3aed", bgColor: "#f3e8ff" },
-];
-
 export default function SpacePage() {
-  const status = useRobotStatus();
   const points = usePoints();
   const grids  = useGrids();
   const stacks = useStacks();
   const tools  = useTools();
 
-  const fmt = (v?: number) => (v ?? 0).toFixed(1);
-
-  const coords = [
-    { label: "X",  value: status.x  },
-    { label: "Y",  value: status.y  },
-    { label: "Z",  value: status.z  },
-    { label: "RZ", value: status.rz },
+  const summaryTiles = [
+    { label: "Points", value: points.length, icon: MapPin,     tint: [colors.success, colors.successSoft] as [string, string] },
+    { label: "Tools",  value: tools.length,  icon: Wrench,     tint: [colors.accent,  colors.accentSoft]  as [string, string] },
+    { label: "Grids",  value: grids.length,  icon: LayoutGrid, tint: [colors.warning, colors.warningSoft] as [string, string] },
+    { label: "Stacks", value: stacks.length, icon: Layers,     tint: [accents.purple, accents.purpleSoft] as [string, string] },
   ];
-
-  const counts = [points.length, tools.length, grids.length, stacks.length];
 
   return (
     <View style={styles.container}>
       <NotConnectedOverlay />
+      <PageHeader title="Space" subtitle="Points, tools, grids, and workspace setup" />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
-
-        {/* ── Current position ── */}
-        <Text style={styles.sectionLabel}>CURRENT POSITION</Text>
-        <View style={styles.card}>
-          <View style={styles.coordRow}>
-            {coords.map(({ label, value }) => (
-              <View key={label} style={styles.coordCell}>
-                <Text style={styles.coordLabel}>{label}</Text>
-                <Text style={styles.coordValue}>{fmt(value)}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
+      <Screen>
         {/* ── Workspace summary ── */}
-        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>WORKSPACE</Text>
-        <View style={styles.summaryRow}>
-          {SUMMARY_ITEMS.map(({ label, color, bgColor }, i) => (
-            <View key={label} style={[styles.summaryCard, { borderTopColor: color, borderTopWidth: 3 }]}>
-              <Text style={[styles.summaryCount, { color }]}>{counts[i]}</Text>
-              <Text style={styles.summaryLabel}>{label}</Text>
-            </View>
+        <SectionHeader title="Workspace" icon={LayoutGrid} style={styles.summaryHeader} />
+        <View style={styles.tileRow}>
+          {summaryTiles.map(({ label, value, icon, tint }) => (
+            <StatTile key={label} label={label} value={value} icon={icon} tint={tint} style={styles.tile} />
           ))}
         </View>
 
         {/* ── Navigation ── */}
-        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>NAVIGATE TO</Text>
-        <View style={styles.card}>
+        <SectionHeader title="Navigate to" style={styles.summaryHeader} />
+        <Card>
           {MENU_ITEMS.map((item, i) => {
             const Icon = item.icon;
             const isLast = i === MENU_ITEMS.length - 1;
             return (
-              <TouchableOpacity
-                key={i}
-                style={[styles.menuRow, !isLast && styles.menuRowBorder]}
-                onPress={item.onPress}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.iconTile, { backgroundColor: item.tileColor }]}>
-                  <Icon size={20} color={item.iconColor} />
-                </View>
-
-                <View style={styles.menuText}>
-                  <Text style={styles.menuLabel}>{item.label}</Text>
-                  <Text style={styles.menuDesc} numberOfLines={1}>
-                    {item.description}
-                  </Text>
-                </View>
-
-                <ChevronRight size={18} color="#d1d5db" />
-              </TouchableOpacity>
+              <View key={item.label}>
+                <ListRow
+                  card={false}
+                  title={item.label}
+                  subtitle={item.description}
+                  icon={<Icon size={20} color={item.iconColor} />}
+                  iconColor={item.tileColor}
+                  onPress={item.onPress}
+                />
+                {!isLast && <Divider inset />}
+              </View>
             );
           })}
-        </View>
-
-      </ScrollView>
+        </Card>
+      </Screen>
     </View>
   );
 }
@@ -144,117 +104,20 @@ export default function SpacePage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f3f4f6",
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
+    backgroundColor: colors.background,
   },
 
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
+  summaryHeader: { marginTop: spacing.sm },
 
-  // ── Card ──────────────────────────────────────────────────────────────────
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
-
-  // ── Position ──────────────────────────────────────────────────────────────
-  coordRow: {
+  // ── Stat tile rows ────────────────────────────────────────────────────────
+  // flexWrap so 4 tiles wrap to 2×2 on narrow phones instead of overflowing.
+  tileRow: {
     flexDirection: "row",
-    paddingVertical: 16,
-    paddingHorizontal: 8,
+    flexWrap: "wrap",
+    gap: spacing.sm + 2,
   },
-  coordCell: {
-    flex: 1,
-    alignItems: "center",
-  },
-  coordLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  coordValue: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-    fontFamily: "monospace",
-  },
-
-  // ── Summary tiles ─────────────────────────────────────────────────────────
-  summaryRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    gap: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  summaryCount: {
-    fontSize: 28,
-    fontWeight: "800",
-    lineHeight: 32,
-  },
-  summaryLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9ca3af",
-    letterSpacing: 0.4,
-  },
-
-  // ── Menu rows ─────────────────────────────────────────────────────────────
-  menuRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 14,
-  },
-  menuRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  iconTile: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  menuText: {
-    flex: 1,
-    gap: 2,
-  },
-  menuLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  menuDesc: {
-    fontSize: 12,
-    color: "#9ca3af",
+  tile: {
+    flexGrow: 1,
+    flexBasis: 130,
   },
 });

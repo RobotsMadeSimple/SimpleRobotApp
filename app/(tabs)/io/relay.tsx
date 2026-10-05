@@ -1,12 +1,24 @@
-import { wide } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { IORow } from "@/src/components/ui/io/ioShared";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Settings2 } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React from "react";
+import { StyleSheet, View } from "react-native";
+
+import {
+  Button,
+  buttonTextColor,
+  Card,
+  colors,
+  Divider,
+  PageHeader,
+  Screen,
+  SectionHeader,
+  spacing,
+  StatusPill,
+} from "@/src/components/ui/kit";
 
 export default function RelayPage() {
   const relay     = useRelayIO();
@@ -24,62 +36,47 @@ export default function RelayPage() {
     }, [])
   );
 
+  const activeRelays = relays.filter(Boolean).length;
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <SubPageHeader
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader
         title="USB Relay Board"
-        subtitle={`DCTTECH 4CH · HID${serial ? ` · ${serial}` : ""} · ${connected ? "Connected" : "Offline"}`}
+        subtitle={`DCTTECH 4CH · HID${serial ? ` · ${serial}` : ""}`}
         right={
-          <TouchableOpacity
-            onPress={() => router.push("/(tabs)/io/configure-relay")}
-            hitSlop={8}
-            style={styles.configBtn}
-          >
-            <Settings2 size={18} color="#6b7280" />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <StatusPill label={connected ? "Connected" : "Offline"} tone={connected ? "success" : "danger"} dot />
+            <Button
+              variant="secondary"
+              size="sm"
+              label="Configure"
+              icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
+              onPress={() => router.push("/(tabs)/io/configure-relay")}
+            />
+          </View>
         }
       />
-      <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
-        <View>
-          <Text style={styles.sectionLabel}>RELAYS</Text>
-          <View style={styles.sectionBody}>
-            {[0, 1, 2, 3].map((i) => (
+      <Screen>
+        <SectionHeader title="Relays" right={<StatusPill label={`${activeRelays}/4 on`} tone="neutral" />} />
+        <Card padded={false}>
+          {[0, 1, 2, 3].map((i) => (
+            <React.Fragment key={i}>
               <IORow
-                key={i}
                 label={names[i] ?? `Relay ${i + 1}`}
                 sublabel={`Channel ${i + 1}`}
                 type="Output"
                 value={relays[i] ?? false}
-                last={i === 3}
                 onToggle={() => robotClient.setRelay(i + 1, !(relays[i] ?? false))}
               />
-            ))}
-          </View>
-        </View>
-      </ScrollView>
+              {i < 3 && <Divider inset />}
+            </React.Fragment>
+          ))}
+        </Card>
+      </Screen>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", letterSpacing: 0.8,
-    color: "#6b7280", marginBottom: 6, paddingHorizontal: 16,
-  },
-  sectionBody: {
-    backgroundColor: "#fff",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-  },
-  configBtn: {
-    width: 36, height: 36,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
 });

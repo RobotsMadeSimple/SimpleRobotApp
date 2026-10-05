@@ -1,15 +1,15 @@
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
-import { wide } from "@/src/components/ui/responsive";
-import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search, X } from "lucide-react-native";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search } from "lucide-react-native";
 import { ReactNode } from "react";
 import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Button, EmptyState, Input, PageHeader, colors, radii, spacing } from "@/src/components/ui/kit";
+import type { Crumb } from "@/src/components/ui/kit";
 
 // ── Shared types & helpers ────────────────────────────────────────────────────
 
@@ -74,6 +74,10 @@ export function relativeTime(ms: number): string {
 
 interface Props {
   title: string;
+  /** One-line description of what this list is for — shown under the title. */
+  subtitle?: string;
+  /** Explicit breadcrumb trail when the route doesn't reflect the hierarchy. */
+  crumbs?: Crumb[];
   accentColor: string;
   addLabel: string;
   onAdd: () => void;
@@ -90,108 +94,141 @@ interface Props {
   emptySubtitle: string;
   /** Optional overlay rendered before the header (e.g. NotConnectedOverlay). */
   topOverlay?: ReactNode;
+  /**
+   * Summary/reference content (StatTiles, camera lists). Wide screens park it
+   * in a right-hand column beside the list so the extra width carries data
+   * instead of whitespace. Deliberately NOT rendered on narrow screens, where
+   * it would push the list itself below the fold.
+   */
+  aside?: ReactNode;
   children?: ReactNode;
 }
 
 export function ProgramListLayout({
-  title, accentColor, addLabel, onAdd,
+  title, subtitle, crumbs, accentColor, addLabel, onAdd,
   search, onSearchChange, sort, onSortChange,
   isEmpty, hasResults, emptyIcon, emptyTitle, emptySubtitle,
-  topOverlay, children,
+  topOverlay, aside, children,
 }: Props) {
   const activeChipBg = accentColor + "22"; // ~13 % opacity tint
+  const wideContent = useWideContent();
+  const isWide = useIsWide();
+
+  // Search + sort. Wide puts them on one line inside the content gutter; narrow
+  // keeps them in a sticky surface bar directly under the header.
+  const toolbar = (
+    <View style={[s.toolbarInner, isWide && s.toolbarInnerWide]}>
+      <View style={isWide ? s.searchWide : undefined}>
+        <Input
+          icon={<Search size={15} color={colors.textFaint} />}
+          clearable
+          placeholder="Search…"
+          value={search}
+          onChangeText={onSearchChange}
+          autoCapitalize="none"
+          returnKeyType="search"
+          style={s.searchInput}
+        />
+      </View>
+
+      <View style={s.sortRow}>
+        <ArrowUpDown size={13} color={colors.textFaint} />
+        <Text style={s.sortLabel}>SORT</Text>
+        {(["name", "modified"] as SortKey[]).map(key => {
+          const active = sort.key === key;
+          // An inactive chip previews the direction it would land in, so the arrow is
+          // always there. That keeps the chip from resizing as the selection moves and
+          // makes the second tap — the one that flips it — discoverable.
+          const dir   = active ? sort.dir : DEFAULT_DIR[key];
+          const Arrow = dir === "asc" ? ArrowUp : ArrowDown;
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[s.sortChip, active && { backgroundColor: activeChipBg }]}
+              onPress={() => onSortChange(nextSort(sort, key))}
+              hitSlop={6}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`Sort by ${key === "name" ? "name" : "last modified"}, ${
+                dir === "asc" ? "ascending" : "descending"}${active ? "" : " — currently off"}`}
+            >
+              <Text style={[s.sortChipText, active && { color: accentColor }]}>
+                {key === "name" ? "Name" : "Modified"}
+              </Text>
+              <Arrow size={12} strokeWidth={2.5} color={active ? accentColor : colors.borderStrong} />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  const list = isEmpty ? (
+    <EmptyState icon={emptyIcon} title={emptyTitle} subtitle={emptySubtitle} />
+  ) : !hasResults ? (
+    <EmptyState
+      icon={<Search size={32} color={colors.textFaint} />}
+      title="No Results"
+      subtitle={`Nothing matches "${search}".`}
+    />
+  ) : children;
+
+  // Dashed "add" CTA — the thumb-reachable primary action at the end of the list
+  // on narrow screens (wide screens also get one in the header).
+  const addCta = (
+    <Button
+      variant="dashed"
+      label={addLabel}
+      icon={<Plus size={16} color={accentColor} />}
+      style={[s.addCard, { borderColor: accentColor }]}
+      textStyle={{ color: accentColor }}
+      onPress={onAdd}
+    />
+  );
 
   return (
     <View style={s.root}>
       {topOverlay}
 
-      <SubPageHeader
+      <PageHeader
         title={title}
+        subtitle={subtitle}
+        crumbs={crumbs}
         right={
-          <TouchableOpacity onPress={onAdd} style={[s.addBtn, { backgroundColor: accentColor }]}>
-            <Plus size={18} color="#fff" />
-          </TouchableOpacity>
+          <Button
+            size="sm"
+            label={isWide ? addLabel : "New"}
+            icon={<Plus size={15} color={colors.onAccent} />}
+            style={{ backgroundColor: accentColor }}
+            onPress={onAdd}
+          />
         }
       />
 
-      {/* Search + sort toolbar */}
-      <View style={s.toolbar}>
-        <View style={s.searchBox}>
-          <Search size={15} color="#9ca3af" />
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search…"
-            placeholderTextColor="#9ca3af"
-            value={search}
-            onChangeText={onSearchChange}
-            autoCapitalize="none"
-            returnKeyType="search"
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => onSearchChange("")} hitSlop={8}>
-              <X size={14} color="#9ca3af" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <View style={s.sortRow}>
-          <ArrowUpDown size={13} color="#9ca3af" />
-          <Text style={s.sortLabel}>SORT</Text>
-          {(["name", "modified"] as SortKey[]).map(key => {
-            const active = sort.key === key;
-            // An inactive chip previews the direction it would land in, so the arrow is
-            // always there. That keeps the chip from resizing as the selection moves and
-            // makes the second tap — the one that flips it — discoverable.
-            const dir   = active ? sort.dir : DEFAULT_DIR[key];
-            const Arrow = dir === "asc" ? ArrowUp : ArrowDown;
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[s.sortChip, active && { backgroundColor: activeChipBg }]}
-                onPress={() => onSortChange(nextSort(sort, key))}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`Sort by ${key === "name" ? "name" : "last modified"}, ${
-                  dir === "asc" ? "ascending" : "descending"}${active ? "" : " — currently off"}`}
-              >
-                <Text style={[s.sortChipText, active && { color: accentColor }]}>
-                  {key === "name" ? "Name" : "Modified"}
-                </Text>
-                <Arrow size={12} strokeWidth={2.5} color={active ? accentColor : "#d1d5db"} />
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
+      {!isWide && <View style={s.toolbarBar}>{toolbar}</View>}
 
       <ScrollView
         style={s.scroll}
-        contentContainerStyle={[s.content, wide.content]}
+        contentContainerStyle={[s.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
-        {isEmpty ? (
-          <View style={s.empty}>
-            {emptyIcon}
-            <Text style={s.emptyTitle}>{emptyTitle}</Text>
-            <Text style={s.emptySubtitle}>{emptySubtitle}</Text>
-          </View>
-        ) : !hasResults ? (
-          <View style={s.empty}>
-            <Search size={36} color="#d1d5db" />
-            <Text style={s.emptyTitle}>No Results</Text>
-            <Text style={s.emptySubtitle}>Nothing matches "{search}".</Text>
-          </View>
-        ) : children}
+        {isWide && toolbar}
 
-        <TouchableOpacity
-          style={[s.addCard, { borderColor: accentColor }]}
-          onPress={onAdd}
-          activeOpacity={0.7}
-        >
-          <Plus size={16} color={accentColor} />
-          <Text style={[s.addCardText, { color: accentColor }]}>{addLabel}</Text>
-        </TouchableOpacity>
+        {isWide && aside ? (
+          <View style={s.wideRow}>
+            <View style={s.wideMain}>
+              {list}
+              {addCta}
+            </View>
+            <View style={s.wideAside}>{aside}</View>
+          </View>
+        ) : (
+          <>
+            {list}
+            {addCta}
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -200,67 +237,43 @@ export function ProgramListLayout({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: "#f3f4f6" },
+  root:    { flex: 1, backgroundColor: colors.background },
   scroll:  { flex: 1 },
-  content: { padding: 16, paddingBottom: 32, gap: 12 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
-  addBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    justifyContent: "center", alignItems: "center",
-  },
+  // Wide: list on the left, summary/reference column on the right.
+  wideRow:   { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
+  wideMain:  { flex: 1, gap: spacing.md, minWidth: 0 },
+  wideAside: { width: 300, gap: spacing.md },
 
-  toolbar: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
-    gap: 8,
+  toolbarBar: {
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm + 2,
+    paddingBottom: spacing.sm + 2,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: colors.background,
   },
-  searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f3f4f6",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    gap: 8,
-    height: 38,
-  },
+  toolbarInner:     { gap: spacing.sm },
+  toolbarInnerWide: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  searchWide:       { flex: 1 },
   searchInput: {
-    flex: 1,
     fontSize: 14,
-    color: "#111827",
-    paddingVertical: 0,
+    color: colors.text,
   },
-  sortRow:      { flexDirection: "row", alignItems: "center", gap: 6 },
-  sortLabel:    { fontSize: 10, fontWeight: "700", color: "#9ca3af", letterSpacing: 0.5, marginRight: 1 },
+  sortRow:      { flexDirection: "row", alignItems: "center", gap: spacing.sm - 2 },
+  sortLabel:    { fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5, marginRight: 1 },
   sortChip: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    paddingLeft: 12, paddingRight: 9, paddingVertical: 5,
-    borderRadius: 20, backgroundColor: "#f3f4f6",
+    minHeight: 36,
+    paddingLeft: spacing.md, paddingRight: spacing.sm + 1, paddingVertical: spacing.xs + 1,
+    borderRadius: radii.pill, backgroundColor: colors.background,
   },
-  sortChipText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
+  sortChipText: { fontSize: 12, fontWeight: "600", color: colors.textMuted },
 
   addCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
     borderWidth: 1.5,
-    borderRadius: 14,
-    paddingVertical: 14,
-    backgroundColor: "transparent",
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md + 2,
   },
-  addCardText: { fontSize: 14, fontWeight: "600" },
-
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 60,
-    paddingBottom: 24,
-    gap: 12,
-  },
-  emptyTitle:    { fontSize: 18, fontWeight: "700", color: "#374151" },
-  emptySubtitle: { fontSize: 13, color: "#9ca3af", textAlign: "center", paddingHorizontal: 40, lineHeight: 20 },
 });

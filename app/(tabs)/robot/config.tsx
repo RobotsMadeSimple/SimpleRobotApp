@@ -1,5 +1,26 @@
-import { wide } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import {
+  accents,
+  Button,
+  buttonTextColor,
+  Card,
+  Chip,
+  ChipGroup,
+  colors,
+  Divider,
+  Input,
+  InfoTip,
+  ListRow,
+  PageHeader,
+  radii,
+  Screen,
+  SectionHeader,
+  SegmentedControl,
+  shadows,
+  spacing,
+  type,
+} from "@/src/components/ui/kit";
+import { useIsWide } from "@/src/components/ui/responsive";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   Gauge,
@@ -14,12 +35,9 @@ import {
 import { useEffect, useState } from "react";
 import {
   Modal,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -43,6 +61,19 @@ type RobotConfig = {
   jogSlowSpeed:   number;
   jogNormalSpeed: number;
   jogFastSpeed:   number;
+  // ASTRO motor config (steps/rev + gear ratio per motor)
+  astroStepsPerRevM1: number;
+  astroStepsPerRevM2: number;
+  astroStepsPerRevM3: number;
+  astroStepsPerRevM4: number;
+  astroGearRatioM1: number;
+  astroGearRatioM2: number;
+  astroGearRatioM3: number;
+  astroGearRatioM4: number;
+  // ASTRO joint gearing (drivetrain reduction used by the kinematics)
+  astroJoint1GearRatio: number;
+  astroJoint4GearRatio: number;
+  astroCoreXyPulleyPcdMm: number;
   // CNC4Axis motor config
   cncStepsPerRevX:  number;
   cncStepsPerRevY:  number;
@@ -74,11 +105,13 @@ type RobotConfig = {
 
 type EditingField = {
   label: string;
-  type: "number" | "direction" | "homing" | "cncAxis" | "jointLimit";
+  type: "number" | "direction" | "homing" | "cncAxis" | "astroMotor" | "jointLimit";
   numKey?: keyof RobotConfig;
   numText: string;
   unit?: string;
   placeholder?: string;
+  /** Overrides the default "OFFSET (unit)/VALUE" caption in the number editor. */
+  editLabel?: string;
   dirKey?: keyof RobotConfig;
   dirValue: number;
   // cncAxis only
@@ -87,6 +120,13 @@ type EditingField = {
   cncMeasureKey?: keyof RobotConfig;
   cncMeasureText?: string;
   cncIsRotary?: boolean;
+  // astroMotor only (steps/rev + gear ratio)
+  astroStepsKey?: keyof RobotConfig;
+  astroStepsText?: string;
+  astroGearKey?: keyof RobotConfig;
+  astroGearText?: string;
+  defaultSteps?: number;
+  defaultGear?: number;
   // jointLimit only
   minKey?: keyof RobotConfig;
   minText?: string;
@@ -95,6 +135,9 @@ type EditingField = {
 };
 
 // ── Config row ────────────────────────────────────────────────────────────────
+//
+// Flat kit ListRow (icon tile + label + value/right) for use inside a Card,
+// with the trailing Divider baked in so call sites don't need to manage it.
 
 function ConfigRow({
   icon,
@@ -114,18 +157,18 @@ function ConfigRow({
   right?: React.ReactNode;
 }) {
   return (
-    <TouchableOpacity
-      style={[styles.infoRow, !last && styles.infoRowBorder]}
-      onPress={onPress}
-      activeOpacity={onPress ? 0.55 : 1}
-      disabled={!onPress}
-    >
-      <View style={[styles.rowTile, { backgroundColor: tileBg ?? "#f3f4f6" }]}>
-        {icon}
-      </View>
-      <Text style={styles.infoLabel}>{label}</Text>
-      {right ?? <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>}
-    </TouchableOpacity>
+    <>
+      <ListRow
+        card={false}
+        icon={icon}
+        iconColor={tileBg}
+        title={label}
+        chevron={false}
+        onPress={onPress}
+        right={right ?? <Text style={styles.rowValue} numberOfLines={1}>{value}</Text>}
+      />
+      {!last && <Divider inset />}
+    </>
   );
 }
 
@@ -139,22 +182,12 @@ function DirectionToggle({
   onChange: (v: number) => void;
 }) {
   return (
-    <View style={styles.dirToggleRow}>
-      <TouchableOpacity
-        style={[styles.dirBtn, value === -1 && styles.dirBtnActive]}
-        onPress={() => onChange(-1)}
-        activeOpacity={0.7}
-      >
-        <Text style={[styles.dirBtnText, value === -1 && styles.dirBtnTextActive]}>−</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.dirBtn, value === 1 && styles.dirBtnActive]}
-        onPress={() => onChange(1)}
-        activeOpacity={0.7}
-      >
-        <Text style={[styles.dirBtnText, value === 1 && styles.dirBtnTextActive]}>+</Text>
-      </TouchableOpacity>
-    </View>
+    <SegmentedControl
+      options={[{ label: "−", value: "-1" }, { label: "+", value: "1" }]}
+      value={String(value)}
+      onChange={(v) => onChange(Number(v))}
+      style={styles.dirToggleRow}
+    />
   );
 }
 
@@ -164,10 +197,29 @@ export default function ConfigureRobot() {
   const [config, setConfig] = useState<RobotConfig | null>(null);
   const [editing, setEditing] = useState<EditingField | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmReset, setConfirmReset] = useState<null | "motorSetup" | "all">(null);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     robotClient.getRobotConfig().then(setConfig).catch(() => {});
   }, []);
+
+  // Reset to defaults on the controller, then re-pull the resulting config so the
+  // page reflects exactly what was applied. "all" is refused while moving/homing.
+  async function resetConfig(section: "motorSetup" | "all") {
+    setResetting(true);
+    try {
+      await robotClient.resetRobotConfig(section);
+      const fresh = await robotClient.getRobotConfig();
+      setConfig(fresh);
+      setConfirmReset(null);
+    } catch (e) {
+      setConfirmReset(null);
+      appAlert("Couldn't reset", String(e ?? "Reset failed"), [{ text: "OK" }]);
+    } finally {
+      setResetting(false);
+    }
+  }
 
   const isCNC = config?.robotType === "CNC4Axis";
 
@@ -190,6 +242,11 @@ export default function ConfigureRobot() {
       if (editing.type === "cncAxis") {
         if (editing.cncStepsKey)   patch[editing.cncStepsKey]   = parseInt(editing.cncStepsText  ?? "1600") || 1600;
         if (editing.cncMeasureKey) patch[editing.cncMeasureKey] = parseFloat(editing.cncMeasureText ?? "5") || 5;
+      }
+      if (editing.type === "astroMotor") {
+        if (editing.astroStepsKey) patch[editing.astroStepsKey] = parseInt(editing.astroStepsText ?? "") || (editing.defaultSteps ?? 1600);
+        // Gear ratio must be > 0 (0/blank falls back to the default; the controller also guards this).
+        if (editing.astroGearKey)  patch[editing.astroGearKey]  = parseFloat(editing.astroGearText ?? "") || (editing.defaultGear ?? 1);
       }
       if (editing.type === "jointLimit") {
         // Blank (or unparseable) clears the bound — send null so it becomes unset.
@@ -228,25 +285,31 @@ export default function ConfigureRobot() {
         { key: "m4Direction", label: "M4 — J4 Rotation" },
       ];
 
-  return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <SubPageHeader title="Configure Robot" />
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={[styles.content, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
+  // ASTRO per-motor step resolution + gear ratio. Defaults mirror the controller
+  // (M1–M3 = 1600 spr, M4 = 400 spr, all gear 1:1).
+  const astroMotorRows: { label: string; stepsKey: keyof RobotConfig; gearKey: keyof RobotConfig; defSteps: number; defGear: number }[] = [
+    { label: "M1 — J1 Rotation", stepsKey: "astroStepsPerRevM1", gearKey: "astroGearRatioM1", defSteps: 1600, defGear: 1 },
+    { label: "M2 — CoreXY A",    stepsKey: "astroStepsPerRevM2", gearKey: "astroGearRatioM2", defSteps: 1600, defGear: 1 },
+    { label: "M3 — CoreXY B",    stepsKey: "astroStepsPerRevM3", gearKey: "astroGearRatioM3", defSteps: 1600, defGear: 1 },
+    { label: "M4 — J4 Rotation", stepsKey: "astroStepsPerRevM4", gearKey: "astroGearRatioM4", defSteps: 400,  defGear: 1 },
+  ];
 
+  const isWide = useIsWide();
+
+  const motionSection = (
+    <>
         {/* ── Motor Directions ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>MOTOR DIRECTIONS</Text>
-        </View>
-        <View style={styles.card}>
+        <SectionHeader
+          title="Motor Directions"
+          icon={Zap}
+          right={<InfoTip text="Flips a motor's electrical direction in software. Use it if commanding '+' moves that axis the wrong way — it only changes which sign counts as forward, not how far or which axis moves. Changes here take effect on the connected controller as soon as you save, so double-check values before saving." />}
+        />
+        <Card padded={false}>
           {motorRows.map(({ key, label }, idx) => (
             <ConfigRow
               key={key}
-              icon={<Zap size={16} color="#d97706" />}
-              tileBg="#fffbeb"
+              icon={<Zap size={16} color={colors.warning} />}
+              tileBg={colors.warningSoft}
               label={label}
               value={config ? dirLabel(config[key] as number) : "—"}
               last={idx === motorRows.length - 1}
@@ -259,18 +322,20 @@ export default function ConfigureRobot() {
               }) : undefined}
             />
           ))}
-        </View>
+        </Card>
 
         {/* ── Homing — ASTRO ── */}
         {!isCNC && (
           <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>HOMING</Text>
-            </View>
-            <View style={styles.card}>
+            <SectionHeader
+              title="Homing"
+              icon={Home}
+              right={<InfoTip text="Used only during the homing cycle: how fast each axis drives toward its home switch, which direction it drives to find that switch, and the position or angle assigned once it gets there." />}
+            />
+            <Card padded={false}>
               <ConfigRow
-                icon={<Home size={16} color="#7c3aed" />}
-                tileBg="#f5f3ff"
+                icon={<Home size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
                 label="Homing Speed"
                 value={config ? `${config.homingSpeed} u/s` : "—"}
                 onPress={config ? () => setEditing({
@@ -280,8 +345,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<RotateCcw size={16} color="#0891b2" />}
-                tileBg="#ecfeff"
+                icon={<RotateCcw size={16} color={accents.cyan} />}
+                tileBg={accents.cyanSoft}
                 label="J1 Homing"
                 value={config ? `${config.j1HomeOffsetDeg}° · ${dirLabel(config.j1HomingDirection)}` : "—"}
                 onPress={config ? () => setEditing({
@@ -292,8 +357,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<MoveVertical size={16} color="#16a34a" />}
-                tileBg="#f0fdf4"
+                icon={<MoveVertical size={16} color={colors.success} />}
+                tileBg={colors.successSoft}
                 label="Vertical Homing"
                 value={config ? `${config.verticalHomePosition} mm · ${dirLabel(config.verticalHomingDirection)}` : "—"}
                 onPress={config ? () => setEditing({
@@ -304,8 +369,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<MoveHorizontal size={16} color="#ea580c" />}
-                tileBg="#fff7ed"
+                icon={<MoveHorizontal size={16} color={accents.orange} />}
+                tileBg={accents.orangeSoft}
                 label="Horizontal Homing"
                 value={config ? `${config.horizontalHomePosition} mm · ${dirLabel(config.horizontalHomingDirection)}` : "—"}
                 onPress={config ? () => setEditing({
@@ -316,8 +381,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<RotateCcw size={16} color="#7c3aed" />}
-                tileBg="#f5f3ff"
+                icon={<RotateCcw size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
                 label="J4 Home Offset"
                 value={config ? `${config.j4HomeOffsetDeg}°` : "—"}
                 last
@@ -327,20 +392,97 @@ export default function ConfigureRobot() {
                   unit: "°", placeholder: "0", dirValue: 1,
                 }) : undefined}
               />
-            </View>
+            </Card>
+
+            {/* ── Motor Setup (ASTRO) ── */}
+            <SectionHeader
+              title="Motor Setup"
+              icon={Gauge}
+              right={<InfoTip text="Microstep resolution (steps per motor revolution) and gear ratio (motor turns per output turn) for each motor — used to convert motion into step pulses. Match them to your driver's microstepping and any joint gearing. Defaults: M1–M3 1600 spr, M4 400 spr, all 1:1." />}
+            />
+            <Card padded={false}>
+              {astroMotorRows.map(({ label, stepsKey, gearKey, defSteps, defGear }) => (
+                <ConfigRow
+                  key={stepsKey}
+                  icon={<Gauge size={16} color={accents.purple} />}
+                  tileBg={accents.purpleSoft}
+                  label={label}
+                  value={config ? `${config[stepsKey] ?? defSteps} spr · ${config[gearKey] ?? defGear}:1` : "—"}
+                  onPress={config ? () => setEditing({
+                    label, type: "astroMotor", numText: "", dirValue: 1,
+                    astroStepsKey: stepsKey, astroStepsText: String(config[stepsKey] ?? defSteps),
+                    astroGearKey: gearKey,   astroGearText:  String(config[gearKey] ?? defGear),
+                    defaultSteps: defSteps,  defaultGear:    defGear,
+                  }) : undefined}
+                />
+              ))}
+              <ConfigRow
+                icon={<RotateCcw size={16} color={colors.textMuted} />}
+                tileBg={colors.background}
+                label="Reset Motor Setup"
+                value="Defaults"
+                last
+                onPress={config && !resetting ? () => setConfirmReset("motorSetup") : undefined}
+              />
+            </Card>
+
+            {/* ── Joint Gearing (ASTRO) ── */}
+            <SectionHeader
+              title="Joint Gearing"
+              icon={RotateCcw}
+              right={<InfoTip text="Drivetrain reduction the kinematics uses to turn joint motion into motor motion — separate from the per-motor gear above. J1/J4 are gear ratios (motor turns per joint turn); CoreXY is the belt pulley pitch diameter (linear travel per motor rev = π · PCD). Defaults: J1 4:1, J4 10:1, CoreXY 19.099 mm." />}
+            />
+            <Card padded={false}>
+              <ConfigRow
+                icon={<RotateCcw size={16} color={accents.cyan} />}
+                tileBg={accents.cyanSoft}
+                label="J1 — Base Rotation"
+                value={config ? `${config.astroJoint1GearRatio}:1` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "J1 Gear Ratio", type: "number",
+                  numKey: "astroJoint1GearRatio", numText: String(config.astroJoint1GearRatio),
+                  editLabel: "GEAR RATIO (motor : joint)", placeholder: "4", dirValue: 1,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<RotateCcw size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
+                label="J4 — EOAT Rotation"
+                value={config ? `${config.astroJoint4GearRatio}:1` : "—"}
+                onPress={config ? () => setEditing({
+                  label: "J4 Gear Ratio", type: "number",
+                  numKey: "astroJoint4GearRatio", numText: String(config.astroJoint4GearRatio),
+                  editLabel: "GEAR RATIO (motor : joint)", placeholder: "10", dirValue: 1,
+                }) : undefined}
+              />
+              <ConfigRow
+                icon={<Ruler size={16} color={colors.success} />}
+                tileBg={colors.successSoft}
+                label="CoreXY Pulley PCD"
+                value={config ? `${config.astroCoreXyPulleyPcdMm} mm` : "—"}
+                last
+                onPress={config ? () => setEditing({
+                  label: "CoreXY Pulley PCD", type: "number",
+                  numKey: "astroCoreXyPulleyPcdMm", numText: String(config.astroCoreXyPulleyPcdMm),
+                  unit: "mm", editLabel: "PULLEY PITCH DIAMETER (mm)", placeholder: "19.099", dirValue: 1,
+                }) : undefined}
+              />
+            </Card>
           </>
         )}
 
         {/* ── Homing — CNC4Axis ── */}
         {isCNC && (
           <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>HOMING</Text>
-            </View>
-            <View style={styles.card}>
+            <SectionHeader
+              title="Homing"
+              icon={Home}
+              right={<InfoTip text="Used only during the homing cycle: how fast each axis drives toward its home switch, which direction it drives to find that switch, and the position or angle assigned once it gets there." />}
+            />
+            <Card padded={false}>
               <ConfigRow
-                icon={<Home size={16} color="#7c3aed" />}
-                tileBg="#f5f3ff"
+                icon={<Home size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
                 label="Homing Speed"
                 value={config ? `${config.homingSpeed} u/s` : "—"}
                 onPress={config ? () => setEditing({
@@ -350,8 +492,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<MoveHorizontal size={16} color="#16a34a" />}
-                tileBg="#f0fdf4"
+                icon={<MoveHorizontal size={16} color={colors.success} />}
+                tileBg={colors.successSoft}
                 label="X Home Position"
                 value={config ? `${config.cncXHomePosition} mm · ${dirLabel(config.cncXHomingDirection)}` : "—"}
                 onPress={config ? () => setEditing({
@@ -362,8 +504,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<MoveHorizontal size={16} color="#ea580c" />}
-                tileBg="#fff7ed"
+                icon={<MoveHorizontal size={16} color={accents.orange} />}
+                tileBg={accents.orangeSoft}
                 label="Y Home Position"
                 value={config ? `${config.cncYHomePosition} mm · ${dirLabel(config.cncYHomingDirection)}` : "—"}
                 onPress={config ? () => setEditing({
@@ -374,8 +516,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<MoveVertical size={16} color="#0891b2" />}
-                tileBg="#ecfeff"
+                icon={<MoveVertical size={16} color={accents.cyan} />}
+                tileBg={accents.cyanSoft}
                 label="Z Home Position"
                 value={config ? `${config.cncZHomePosition} mm · ${dirLabel(config.cncZHomingDirection)}` : "—"}
                 onPress={config ? () => setEditing({
@@ -386,8 +528,8 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
               <ConfigRow
-                icon={<RotateCcw size={16} color="#7c3aed" />}
-                tileBg="#f5f3ff"
+                icon={<RotateCcw size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
                 label="RZ Home Angle"
                 value={config ? `${config.cncRzHomePosition}°` : "—"}
                 last
@@ -397,13 +539,15 @@ export default function ConfigureRobot() {
                   unit: "°", placeholder: "0", dirValue: 1,
                 }) : undefined}
               />
-            </View>
+            </Card>
 
             {/* ── Motor Setup (CNC only) ── */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>MOTOR SETUP</Text>
-            </View>
-            <View style={styles.card}>
+            <SectionHeader
+              title="Motor Setup"
+              icon={Gauge}
+              right={<InfoTip text="Steps per motor revolution and how far one revolution moves the axis (mm) or spindle (degrees) — used to convert motion commands into step pulses. Match these to your driver's microstepping and leadscrew or pulley." />}
+            />
+            <Card padded={false}>
               {([
                 { label: "X Axis",    stepsKey: "cncStepsPerRevX"  as const, measureKey: "cncMmPerRevX"   as const, isRotary: false },
                 { label: "Y Axis",    stepsKey: "cncStepsPerRevY"  as const, measureKey: "cncMmPerRevY"   as const, isRotary: false },
@@ -412,11 +556,10 @@ export default function ConfigureRobot() {
               ] as { label: string; stepsKey: keyof RobotConfig; measureKey: keyof RobotConfig; isRotary: boolean }[]).map(({ label, stepsKey, measureKey, isRotary }, idx, arr) => (
                 <ConfigRow
                   key={stepsKey}
-                  icon={<Gauge size={16} color="#7c3aed" />}
-                  tileBg="#f5f3ff"
+                  icon={<Gauge size={16} color={accents.purple} />}
+                  tileBg={accents.purpleSoft}
                   label={label}
                   value={config ? `${config[stepsKey]} spr · ${config[measureKey]} ${isRotary ? "°/rev" : "mm/rev"}` : "—"}
-                  last={idx === arr.length - 1}
                   onPress={config ? () => setEditing({
                     label, type: "cncAxis",
                     numText: "", dirValue: 1,
@@ -428,15 +571,29 @@ export default function ConfigureRobot() {
                   }) : undefined}
                 />
               ))}
-            </View>
+              <ConfigRow
+                icon={<RotateCcw size={16} color={colors.textMuted} />}
+                tileBg={colors.background}
+                label="Reset Motor Setup"
+                value="Defaults"
+                last
+                onPress={config && !resetting ? () => setConfirmReset("motorSetup") : undefined}
+              />
+            </Card>
           </>
         )}
+    </>
+  );
 
+  const tuningSection = (
+    <>
         {/* ── Jog Speeds ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>JOGGING</Text>
-        </View>
-        <View style={styles.card}>
+        <SectionHeader
+          title="Jogging"
+          icon={Gauge}
+          right={<InfoTip text="Speeds used by the Slow / Normal / Fast toggle on the Jog & Teach screen." />}
+        />
+        <Card padded={false}>
           {([
             { key: "jogSlowSpeed"   as const, label: "Slow Speed"   },
             { key: "jogNormalSpeed" as const, label: "Normal Speed" },
@@ -444,8 +601,8 @@ export default function ConfigureRobot() {
           ] as { key: keyof RobotConfig; label: string }[]).map(({ key, label }, idx, arr) => (
             <ConfigRow
               key={key}
-              icon={<Gauge size={16} color="#16a34a" />}
-              tileBg="#f0fdf4"
+              icon={<Gauge size={16} color={colors.success} />}
+              tileBg={colors.successSoft}
               label={label}
               value={config ? `${config[key]} u/s` : "—"}
               last={idx === arr.length - 1}
@@ -456,24 +613,26 @@ export default function ConfigureRobot() {
               }) : undefined}
             />
           ))}
-        </View>
+        </Card>
 
         {/* ── Joint Limits ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>JOINT LIMITS</Text>
-        </View>
-        <View style={styles.card}>
+        <SectionHeader
+          title="Joint Limits"
+          icon={ShieldAlert}
+          right={<InfoTip text="When Soft Limits is on, the controller faults and stops motion if a joint would move past its Min or Max below. Leave a bound blank to leave that side unenforced." />}
+        />
+        <Card padded={false}>
           <ConfigRow
-            icon={<ShieldAlert size={16} color={config?.jointLimitsEnabled ? "#16a34a" : "#9ca3af"} />}
-            tileBg={config?.jointLimitsEnabled ? "#f0fdf4" : "#f3f4f6"}
+            icon={<ShieldAlert size={16} color={config?.jointLimitsEnabled ? colors.success : colors.textFaint} />}
+            tileBg={config?.jointLimitsEnabled ? colors.successSoft : colors.background}
             label="Soft Limits"
             right={
               <Switch
                 value={!!config?.jointLimitsEnabled}
                 onValueChange={toggleJointLimits}
                 disabled={!config}
-                trackColor={{ true: "#16a34a", false: "#d1d5db" }}
-                thumbColor="#fff"
+                trackColor={{ true: colors.success, false: colors.borderStrong }}
+                thumbColor={colors.surface}
               />
             }
           />
@@ -493,8 +652,8 @@ export default function ConfigureRobot() {
             .map(({ label, minKey, maxKey, unit }, idx, arr) => (
               <ConfigRow
                 key={minKey}
-                icon={<Ruler size={16} color="#0891b2" />}
-                tileBg="#ecfeff"
+                icon={<Ruler size={16} color={accents.cyan} />}
+                tileBg={accents.cyanSoft}
                 label={label}
                 value={config
                   ? (config[minKey] == null && config[maxKey] == null
@@ -510,7 +669,76 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
             ))}
+        </Card>
+    </>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader title="Configure" subtitle="Homing offsets, speeds and motion settings" />
+      <Screen>
+        {isWide ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideCol}>{motionSection}</View>
+            <View style={styles.wideCol}>{tuningSection}</View>
+          </View>
+        ) : (
+          <>
+            {motionSection}
+            {tuningSection}
+          </>
+        )}
+
+        {/* ── Reset all to defaults ── */}
+        <View style={styles.resetAllWrap}>
+          <Button
+            label={resetting ? "Resetting…" : "Reset All Settings to Defaults"}
+            variant="destructive"
+            icon={<RotateCcw size={16} color={buttonTextColor("destructive")} />}
+            onPress={() => setConfirmReset("all")}
+            disabled={!config || resetting}
+          />
+          <Text style={styles.resetAllHint}>
+            Restores homing, motor setup, jog speeds and joint limits to defaults. Robot type and device toggles are kept.
+          </Text>
         </View>
+
+        {/* ── Reset confirmation ── */}
+        <Modal
+          visible={confirmReset !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setConfirmReset(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>
+                {confirmReset === "all" ? "Reset all settings?" : "Reset motor setup?"}
+              </Text>
+              <Text style={styles.confirmBody}>
+                {confirmReset === "all"
+                  ? "Homing offsets, motor setup, jog speeds and joint limits will be restored to defaults. Robot type and device toggles are kept. This can't be undone."
+                  : "Steps per revolution and gear ratios will be restored to their default values. This can't be undone."}
+              </Text>
+              <View style={styles.modalButtons}>
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={() => setConfirmReset(null)}
+                  disabled={resetting}
+                  style={styles.modalBtn}
+                />
+                <Button
+                  label={resetting ? "Resetting…" : "Reset"}
+                  variant="destructive"
+                  onPress={() => confirmReset && resetConfig(confirmReset)}
+                  disabled={resetting}
+                  style={styles.modalBtn}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* ── Edit modal ── */}
         <Modal
@@ -526,15 +754,14 @@ export default function ConfigureRobot() {
               {(editing?.type === "number" || editing?.type === "homing") && (
                 <>
                   <Text style={styles.editLabel}>
-                    {editing.unit ? `OFFSET (${editing.unit})` : "VALUE"}
+                    {editing.editLabel ?? (editing.unit ? `OFFSET (${editing.unit})` : "VALUE")}
                   </Text>
-                  <TextInput
+                  <Input
                     style={styles.editInput}
                     value={editing.numText}
                     onChangeText={v => setEditing(e => e ? { ...e, numText: v } : e)}
                     keyboardType="numeric"
                     placeholder={editing.placeholder ?? "0"}
-                    placeholderTextColor="#9ca3af"
                     autoFocus={editing.type === "number"}
                   />
                 </>
@@ -553,23 +780,21 @@ export default function ConfigureRobot() {
               {editing?.type === "jointLimit" && (
                 <>
                   <Text style={styles.editLabel}>MINIMUM {editing.unit ? `(${editing.unit})` : ""}</Text>
-                  <TextInput
+                  <Input
                     style={styles.editInput}
                     value={editing.minText}
                     onChangeText={v => setEditing(e => e ? { ...e, minText: v } : e)}
                     keyboardType="numbers-and-punctuation"
                     placeholder="Unset"
-                    placeholderTextColor="#9ca3af"
                     autoFocus
                   />
                   <Text style={styles.editLabel}>MAXIMUM {editing.unit ? `(${editing.unit})` : ""}</Text>
-                  <TextInput
+                  <Input
                     style={styles.editInput}
                     value={editing.maxText}
                     onChangeText={v => setEditing(e => e ? { ...e, maxText: v } : e)}
                     keyboardType="numbers-and-punctuation"
                     placeholder="Unset"
-                    placeholderTextColor="#9ca3af"
                   />
                   <Text style={styles.limitHint}>Leave a field blank to disable that bound.</Text>
                 </>
@@ -578,69 +803,103 @@ export default function ConfigureRobot() {
               {editing?.type === "cncAxis" && (
                 <>
                   <Text style={styles.editLabel}>STEPS PER REVOLUTION</Text>
-                  <View style={styles.presetRow}>
+                  <ChipGroup style={styles.presetRow}>
                     {([
                       { label: "Full",  steps: 200  },
                       { label: "1/2",   steps: 400  },
                       { label: "1/4",   steps: 800  },
                       { label: "1/8",   steps: 1600 },
                       { label: "1/16",  steps: 3200 },
-                    ] as const).map(({ label, steps }) => {
-                      const active = editing.cncStepsText === String(steps);
-                      return (
-                        <TouchableOpacity
-                          key={steps}
-                          style={[styles.presetBtn, active && styles.presetBtnActive]}
-                          onPress={() => setEditing(e => e ? { ...e, cncStepsText: String(steps) } : e)}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={[styles.presetBtnLabel, active && styles.presetBtnLabelActive]}>{label}</Text>
-                          <Text style={[styles.presetBtnSub, active && styles.presetBtnSubActive]}>{steps}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  <TextInput
+                    ] as const).map(({ label, steps }) => (
+                      <Chip
+                        key={steps}
+                        label={`${label} · ${steps}`}
+                        selected={editing.cncStepsText === String(steps)}
+                        onPress={() => setEditing(e => e ? { ...e, cncStepsText: String(steps) } : e)}
+                        tint={[accents.purple, accents.purpleSoft]}
+                      />
+                    ))}
+                  </ChipGroup>
+                  <Input
                     style={styles.editInput}
                     value={editing.cncStepsText ?? ""}
                     onChangeText={v => setEditing(e => e ? { ...e, cncStepsText: v } : e)}
                     keyboardType="numeric"
                     placeholder="Custom"
-                    placeholderTextColor="#9ca3af"
                   />
-                  <Text style={[styles.editLabel, { marginTop: 8 }]}>
+                  <Text style={[styles.editLabel, { marginTop: spacing.sm }]}>
                     {editing.cncIsRotary ? "DEG PER REVOLUTION" : "MM PER REVOLUTION"}
                   </Text>
-                  <TextInput
+                  <Input
                     style={styles.editInput}
                     value={editing.cncMeasureText ?? ""}
                     onChangeText={v => setEditing(e => e ? { ...e, cncMeasureText: v } : e)}
                     keyboardType="decimal-pad"
                     placeholder={editing.cncIsRotary ? "360" : "5"}
-                    placeholderTextColor="#9ca3af"
                   />
                 </>
               )}
 
+              {editing?.type === "astroMotor" && (
+                <>
+                  <Text style={styles.editLabel}>STEPS PER REVOLUTION</Text>
+                  <ChipGroup style={styles.presetRow}>
+                    {([
+                      { label: "Full",  steps: 200  },
+                      { label: "1/2",   steps: 400  },
+                      { label: "1/4",   steps: 800  },
+                      { label: "1/8",   steps: 1600 },
+                      { label: "1/16",  steps: 3200 },
+                    ] as const).map(({ label, steps }) => (
+                      <Chip
+                        key={steps}
+                        label={`${label} · ${steps}`}
+                        selected={editing.astroStepsText === String(steps)}
+                        onPress={() => setEditing(e => e ? { ...e, astroStepsText: String(steps) } : e)}
+                        tint={[accents.purple, accents.purpleSoft]}
+                      />
+                    ))}
+                  </ChipGroup>
+                  <Input
+                    style={styles.editInput}
+                    value={editing.astroStepsText ?? ""}
+                    onChangeText={v => setEditing(e => e ? { ...e, astroStepsText: v } : e)}
+                    keyboardType="numeric"
+                    placeholder={String(editing.defaultSteps ?? 1600)}
+                  />
+                  <Text style={[styles.editLabel, { marginTop: spacing.sm }]}>GEAR RATIO (motor : output)</Text>
+                  <Input
+                    style={styles.editInput}
+                    value={editing.astroGearText ?? ""}
+                    onChangeText={v => setEditing(e => e ? { ...e, astroGearText: v } : e)}
+                    keyboardType="decimal-pad"
+                    placeholder={String(editing.defaultGear ?? 1)}
+                  />
+                  <Text style={styles.limitHint}>
+                    Default: {editing.defaultSteps} steps/rev · {editing.defaultGear}:1
+                  </Text>
+                </>
+              )}
+
               <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
+                <Button
+                  label="Cancel"
+                  variant="secondary"
                   onPress={() => setEditing(null)}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.saveButton, saving && { opacity: 0.6 }]}
+                  style={styles.modalBtn}
+                />
+                <Button
+                  label={saving ? "Saving…" : "Save"}
+                  variant="primary"
                   onPress={saveField}
                   disabled={saving}
-                >
-                  <Text style={styles.saveButtonText}>{saving ? "Saving…" : "Save"}</Text>
-                </TouchableOpacity>
+                  style={styles.modalBtn}
+                />
               </View>
             </View>
           </View>
         </Modal>
-      </ScrollView>
+      </Screen>
     </View>
   );
 }
@@ -648,206 +907,86 @@ export default function ConfigureRobot() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
-  content:   { padding: 16, paddingBottom: 36 },
-
-  sectionHeader: {
-    marginBottom: 8,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-  },
-
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
-  infoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    gap: 12,
-  },
-  infoRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  rowTile: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  infoLabel: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#374151",
-  },
-  infoValue: {
-    fontSize: 14,
-    color: "#6b7280",
+  rowValue: {
+    ...type.body,
+    color: colors.textMuted,
     maxWidth: "45%",
     textAlign: "right",
   },
 
+  // ── Wide two-column layout ──────────────────────────────────────────────────
+  // Motor directions/homing/motor-setup on the left, jog speeds and joint
+  // limits on the right — turns the long single-column scroll into two.
+  wideRow: {
+    flexDirection: "row",
+    gap: spacing.lg,
+    alignItems: "flex-start",
+  },
+  wideCol: { flex: 1, gap: spacing.md },
+
+  // ── Reset-all footer ─────────────────────────────────────────────────────────
+  resetAllWrap: {
+    marginTop: spacing.lg,
+    gap: spacing.xs,
+  },
+  resetAllHint: {
+    ...type.caption,
+    textAlign: "center",
+  },
+
   // ── Modal ──────────────────────────────────────────────────────────────────
+  confirmBody: {
+    ...type.body,
+    color: colors.textMuted,
+    marginBottom: spacing.lg,
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
   modalCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.xl - 4,
     width: 300,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    ...shadows.raised,
   },
   modalTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111827",
-    marginBottom: 16,
+    color: colors.text,
+    marginBottom: spacing.lg,
   },
   editLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#6b7280",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    marginBottom: 4,
+    ...type.sectionLabel,
+    marginBottom: spacing.xs,
   },
   editInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: "#111827",
-    backgroundColor: "#f9fafb",
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   limitHint: {
-    fontSize: 11,
-    color: "#9ca3af",
+    ...type.caption,
     marginTop: -4,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
 
   // ── Direction toggle ───────────────────────────────────────────────────────
   dirToggleRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
-  dirBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    alignItems: "center",
-    backgroundColor: "#f9fafb",
-  },
-  dirBtnActive: {
-    borderColor: "#2563eb",
-    backgroundColor: "#eff6ff",
-  },
-  dirBtnText: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#9ca3af",
-  },
-  dirBtnTextActive: {
-    color: "#2563eb",
-  },
-
-  // ── CNC preset picker ─────────────────────────────────────────────────────
   presetRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginBottom: 8,
-    flexWrap: "wrap",
-  },
-  presetBtn: {
-    flex: 1,
-    minWidth: 44,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    alignItems: "center",
-    backgroundColor: "#f9fafb",
-  },
-  presetBtnActive: {
-    borderColor: "#7c3aed",
-    backgroundColor: "#f5f3ff",
-  },
-  presetBtnLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#6b7280",
-  },
-  presetBtnLabelActive: {
-    color: "#7c3aed",
-  },
-  presetBtnSub: {
-    fontSize: 10,
-    color: "#9ca3af",
-  },
-  presetBtnSubActive: {
-    color: "#a78bfa",
+    marginBottom: spacing.sm,
   },
 
   // ── Modal buttons ──────────────────────────────────────────────────────────
   modalButtons: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
+    gap: spacing.sm + 2,
+    marginTop: spacing.xs,
   },
-  cancelButton: {
+  modalBtn: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  saveButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#ffffff",
   },
 });

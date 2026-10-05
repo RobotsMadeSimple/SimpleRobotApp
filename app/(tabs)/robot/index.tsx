@@ -1,22 +1,29 @@
-import { wide } from "@/src/components/ui/responsive";
 import { RobotCard } from "@/src/components/ui/RobotCards";
+import {
+  Button,
+  Card,
+  colors,
+  Divider,
+  EmptyState,
+  IconTile,
+  Input,
+  InfoTip,
+  PageHeader,
+  Screen,
+  SectionHeader,
+  spacing,
+  StatTile,
+  type,
+} from "@/src/components/ui/kit";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, router } from "expo-router";
-import { ArrowRight, Clock, Wifi, WifiOff } from "lucide-react-native";
+import { ArrowRight, Clock, Radar, Wifi, WifiOff } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 const LAST_IP_KEY = "lastManualIp";
 
@@ -30,12 +37,18 @@ export default function Robot() {
     AsyncStorage.getItem(LAST_IP_KEY).then(v => { if (v) setLastIp(v); }).catch(() => {});
   }, []);
 
+  // Hooks must run unconditionally every render, so this is read before the
+  // early Redirect below even though only the non-redirect branch needs it.
+  const isWide = useIsWide();
+
   if (selectedRobot) {
     return <Redirect href="/robot/connected-robot" />;
   }
 
   function connectTo(ip: string) {
-    const trimmed = ip.trim();
+    // Connections always go out on port 9000 (below) — strip a typed
+    // trailing ":<port>" so e.g. "192.168.1.50:9000" still resolves.
+    const trimmed = ip.trim().replace(/:\d+$/, "");
     if (!trimmed) return;
     AsyncStorage.setItem(LAST_IP_KEY, trimmed).catch(() => {});
     setLastIp(trimmed);
@@ -56,166 +69,147 @@ export default function Robot() {
     connectTo(manualIp);
   }
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.scrollContent, wide.content]}>
-      {/* Manual connection card */}
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>MANUAL CONNECTION</Text>
-        <View style={styles.card}>
-          <View style={styles.inputRow}>
-            <View style={styles.iconTile}>
-              <Wifi size={18} color="#2563eb" />
-            </View>
-            <TextInput
-              value={manualIp}
-              onChangeText={setManualIp}
-              placeholder="192.168.x.x:9000"
-              placeholderTextColor="#9ca3af"
-              style={styles.input}
-              keyboardType="default"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="go"
-              onSubmitEditing={connectManual}
-            />
-            <TouchableOpacity
-              style={[styles.connectBtn, !manualIp.trim() && styles.connectBtnDisabled]}
-              onPress={connectManual}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.connectBtnText}>Connect</Text>
+  const manualSection = (
+    <>
+      <SectionHeader
+        title="Manual Connection"
+        right={<InfoTip text="Type just the robot's IP address — the app always connects on port 9000, so there's no need to include it." />}
+      />
+      <Card>
+        <View style={styles.inputRow}>
+          <IconTile size={36}>
+            <Wifi size={18} color={colors.accent} />
+          </IconTile>
+          <Input
+            value={manualIp}
+            onChangeText={setManualIp}
+            placeholder="192.168.1.50"
+            style={styles.input}
+            keyboardType="default"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="go"
+            onSubmitEditing={connectManual}
+          />
+          <Button label="Connect" size="sm" onPress={connectManual} disabled={!manualIp.trim()} />
+        </View>
+
+        {lastIp && (
+          <>
+            <Divider style={styles.lastIpDivider} />
+            <TouchableOpacity style={styles.lastIpRow} onPress={() => connectTo(lastIp)} activeOpacity={0.7}>
+              <Clock size={13} color={colors.textFaint} />
+              <Text style={styles.lastIpText} numberOfLines={1}>{lastIp}</Text>
+              <ArrowRight size={13} color={colors.accent} />
             </TouchableOpacity>
+          </>
+        )}
+      </Card>
+
+      <View style={styles.statRow}>
+        <StatTile
+          label="Robots Found"
+          value={robots.length}
+          icon={Radar}
+          style={styles.statTile}
+        />
+        <StatTile
+          label="Last Manual IP"
+          value={lastIp ?? "None"}
+          icon={Clock}
+          mono={!!lastIp}
+          style={styles.statTile}
+        />
+      </View>
+    </>
+  );
+
+  const discoveredSection = (
+    <>
+      <SectionHeader
+        title="Discovered Robots"
+        icon={Radar}
+        right={
+          <View style={styles.discoveredHeaderRight}>
+            {robots.length === 0 && <ActivityIndicator size="small" color={colors.accent} />}
+            <InfoTip text="Robots on the same network announce themselves automatically — no setup needed. If nothing shows up here, the robot may be on a different network or subnet (mDNS discovery doesn't cross routers or VPNs); connect by IP manually instead." />
           </View>
-
-          {lastIp && (
-            <>
-              <View style={styles.lastIpDivider} />
-              <TouchableOpacity style={styles.lastIpRow} onPress={() => connectTo(lastIp)} activeOpacity={0.7}>
-                <Clock size={13} color="#9ca3af" />
-                <Text style={styles.lastIpText} numberOfLines={1}>{lastIp}</Text>
-                <ArrowRight size={13} color="#2563eb" />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </View>
-
-      {/* Discovered robots */}
-      <View style={styles.section}>
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionLabel}>DISCOVERED ROBOTS</Text>
-          {robots.length === 0 && (
-            <ActivityIndicator size="small" color="#2563eb" style={{ marginLeft: 8 }} />
-          )}
-        </View>
-      </View>
+        }
+      />
 
       {robots.length === 0 ? (
-        <View style={styles.emptyState}>
-          <View style={styles.emptyIcon}>
-            <WifiOff size={32} color="#9ca3af" />
-          </View>
-          <Text style={styles.emptyTitle}>Scanning for robots…</Text>
-          <Text style={styles.emptySubtext}>
-            Make sure your robot is powered on and on the same network.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          scrollEnabled={false}
-          contentContainerStyle={[styles.list, wide.content]}
-          data={robots}
-          keyExtractor={(r) => r.serialNumber || r.ipAddress}
-          renderItem={({ item }) => <RobotCard robot={item} />}
+        <EmptyState
+          icon={<WifiOff size={32} color={colors.textFaint} />}
+          title="Scanning for robots…"
+          subtitle="Make sure your robot is powered on and on the same network."
         />
+      ) : (
+        <View>
+          {robots.map((r) => (
+            <RobotCard key={r.serialNumber || r.ipAddress} robot={r} />
+          ))}
+        </View>
       )}
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader title="Robot" subtitle="Discover and connect to robots on your network" />
+      <Screen>
+        {isWide ? (
+          <View style={styles.wideRow}>
+            <View style={styles.wideLeftCol}>{manualSection}</View>
+            <View style={styles.wideRightCol}>{discoveredSection}</View>
+          </View>
+        ) : (
+          <>
+            {manualSection}
+            <View style={styles.narrowGap}>{discoveredSection}</View>
+          </>
+        )}
+      </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container:     { flex: 1, backgroundColor: "#f3f4f6" },
-  scrollContent: { paddingBottom: 32 },
-  section:       { paddingHorizontal: 16, paddingTop: 16 },
-  sectionRow:    { flexDirection: "row", alignItems: "center" },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.8,
-    marginBottom: 6,
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    padding: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  inputRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconTile: {
-    width: 36,
-    height: 36,
-    borderRadius: 9,
-    backgroundColor: "#eff6ff",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  input: {
-    flex: 1,
-    height: 38,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    fontSize: 14,
-    backgroundColor: "#f9fafb",
-    color: "#111827",
-  },
-  connectBtn:         { backgroundColor: "#2563eb", paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9 },
-  connectBtnDisabled: { backgroundColor: "#93c5fd" },
-  connectBtnText:     { color: "#ffffff", fontWeight: "600", fontSize: 14 },
-  lastIpDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#e5e7eb",
-    marginTop: 10,
-    marginBottom: 2,
-  },
+  inputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm + 2 },
+  input:    { flex: 1 },
+
+  lastIpDivider: { marginTop: spacing.sm, marginBottom: 2 },
   lastIpRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingVertical: 8,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
     paddingHorizontal: 2,
   },
   lastIpText: {
     flex: 1,
-    fontSize: 13,
-    color: "#374151",
+    ...type.body,
+    color: colors.textSecondary,
     fontWeight: "500",
   },
-  list:               { paddingHorizontal: 16, paddingTop: 8 },
-  emptyState: {
-    alignItems: "center",
-    paddingTop: 40,
-    paddingHorizontal: 32,
-    gap: 10,
-    marginBottom: 8,
+
+  statRow:  { flexDirection: "row", gap: spacing.md },
+  statTile: { flex: 1 },
+
+  discoveredHeaderRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+
+  // ── Wide two-column layout ──────────────────────────────────────────────────
+  // Manual connect + stats in a fixed left column, discovered robots in the
+  // wider right one — mirrors the connected-robot page's split.
+  wideRow: {
+    flexDirection: "row",
+    gap: spacing.lg,
+    alignItems: "flex-start",
   },
-  emptyIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#f3f4f6",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  emptyTitle:   { fontSize: 16, fontWeight: "600", color: "#374151" },
-  emptySubtext: { fontSize: 13, color: "#9ca3af", textAlign: "center", lineHeight: 19 },
+  wideLeftCol:  { width: 360, gap: spacing.md },
+  // gap so the "Discovered Robots" title doesn't get overlapped by the list
+  // below it — same fix as the left column already had.
+  wideRightCol: { flex: 1, gap: spacing.md },
+  // gap here too — narrow mode wraps discoveredSection in this View, so
+  // without it "Discovered Robots" overlaps the RobotCard/EmptyState below.
+  narrowGap:    { marginTop: spacing.xl, gap: spacing.md },
 });

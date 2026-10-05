@@ -27,20 +27,108 @@ import {
   PolygonInspection,
   VisionResult,
   VisionZone,
+  VisionZoneGeometry,
   defaultBlobParams,
   defaultColorEntry,
 } from "@/src/models/robotModels";
-import { FEED_HTML } from "@/src/vision/visionHtml";
+import { colors as kitColors, spacing, radii, shadows, accents, PageHeader, FormRow } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { VisionResults } from "@/src/components/ui/VisionResults";
-import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
 import { ves } from "./visionEditorStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { ZonePickerModal } from "./ZonePickerModal";
 import { DictionaryPickerModal } from "./DictionaryPickerModal";
 import { ColorEditModal } from "./ColorEditModal";
 import { FormatPickerSheet } from "./InspectionTypePicker";
+
+// ── Tap-to-select zone hit-testing ──────────────────────────────────────────────
+//
+// VisionFeedViewer reports a tap as a normalized (0-1) point in image space — see its
+// onTapImagePoint prop. Hit-testing that point against the zones' stored geometry (also
+// normalized) mirrors the "inside" test ZoneDrawModal's canvas runs in screen-pixel space
+// (src/vision/visionHtml.ts, makeZoneDrawHtml: axes/rectFrame/inside) — that code is a
+// string embedded in a WebView document and cannot be imported, so the rotation-aware
+// rectangle math is replicated here rather than reused directly.
+//
+// Rotation and the circle's radius (defined relative to min(imageWidth, imageHeight), same
+// as drawZones in visionHtml.ts) only read correctly in a space where x and y share one
+// scale — which normalized image coordinates do not, since the image is rarely square. This
+// modal has no exact camera resolution to work with (only a feed URL), so FEED_ASPECT_GUESS
+// stands in for it, matching the 4:3 default VisionFeedViewer itself falls back to when no
+// aspect is given. An axis-aligned rectangle and a polygon test correctly regardless (ray
+// casting and an unrotated box compare each axis independently), so only a rotated rectangle
+// or a circle is affected by the guess being off.
+const FEED_ASPECT_GUESS = 4 / 3;
+
+function zoneAxes(rotationDeg: number) {
+  const a = (rotationDeg * Math.PI) / 180;
+  return { ux: Math.cos(a), uy: Math.sin(a), vx: -Math.sin(a), vy: Math.cos(a) };
+}
+
+// Point-in-shape tests below take (px, py) in a "pixel-space" stand-in — normalized
+// coordinates with x rescaled by the assumed aspect ratio (H=1, W=aspect) — so a rotated
+// rectangle's axes and a circle's radius mean the same thing they do on screen.
+function pointInRectPx(g: VisionZoneGeometry, aspect: number, px: number, py: number): boolean {
+  const cx = (g.x + g.width / 2) * aspect;
+  const cy = g.y + g.height / 2;
+  const hw = (g.width * aspect) / 2;
+  const hh = g.height / 2;
+  const ax = zoneAxes(g.rotation ?? 0);
+  const dx = px - cx, dy = py - cy;
+  return Math.abs(dx * ax.ux + dy * ax.uy) <= hw && Math.abs(dx * ax.vx + dy * ax.vy) <= hh;
+}
+
+function pointInCirclePx(g: VisionZoneGeometry, aspect: number, px: number, py: number): boolean {
+  const cx = g.cx * aspect, cy = g.cy;
+  const rad = g.radius * Math.min(aspect, 1);
+  const dx = px - cx, dy = py - cy;
+  return dx * dx + dy * dy <= rad * rad;
+}
+
+// Ray casting needs no aspect correction — it only compares each axis independently, so it
+// reads the same whether run in normalized or pixel space (same as ZoneDrawModal's `inside`).
+function pointInPolygonNorm(points: [number, number][], nx: number, ny: number): boolean {
+  let hit = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i], [xj, yj] = points[j];
+    if ((yi > ny) !== (yj > ny) && nx < ((xj - xi) * (ny - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+
+// Rough normalized-space area, used only to rank overlapping hits (smallest = most
+// specific) — not required to be exact, just consistently ordered across shapes.
+function zoneArea(g: VisionZoneGeometry): number {
+  if (g.shape === 'Rectangle') return g.width * g.height;
+  if (g.shape === 'Circle') return Math.PI * g.radius * g.radius;
+  if (g.shape === 'Polygon' && g.points.length >= 3) {
+    let sum = 0;
+    for (let i = 0, j = g.points.length - 1; i < g.points.length; j = i++) {
+      sum += g.points[j][0] * g.points[i][1] - g.points[i][0] * g.points[j][1];
+    }
+    return Math.abs(sum) / 2;
+  }
+  return Infinity;
+}
+
+/** Smallest zone whose geometry contains the tapped point, or null if none does. */
+function hitTestZones(zones: VisionZone[], nx: number, ny: number): VisionZone | null {
+  const px = nx * FEED_ASPECT_GUESS, py = ny;
+  let best: VisionZone | null = null;
+  let bestArea = Infinity;
+  for (const z of zones) {
+    const g = z.geometry;
+    let hit = false;
+    if (g.shape === 'Rectangle') hit = pointInRectPx(g, FEED_ASPECT_GUESS, px, py);
+    else if (g.shape === 'Circle') hit = pointInCirclePx(g, FEED_ASPECT_GUESS, px, py);
+    else if (g.shape === 'Polygon' && g.points.length >= 3) hit = pointInPolygonNorm(g.points, nx, ny);
+    if (!hit) continue;
+    const area = zoneArea(g);
+    if (area < bestArea) { bestArea = area; best = z; }
+  }
+  return best;
+}
 
 export function InspectionConfigModal({
   visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode, zones,
@@ -92,38 +180,49 @@ export function InspectionConfigModal({
   const [minCoverageText, setMinCoverageText] = useState('50');
   const [maxCoverageText, setMaxCoverageText] = useState('90');
 
-  const minCovBarWRef  = useRef(1);
-  const minCovValRef   = useRef(50);
-  const minCovStartRef = useRef(50);
+  // One range slider drives both bounds. Refs (not state) because the PanResponder is
+  // created once and would otherwise close over stale values.
+  const covBarWRef   = useRef(1);
+  const minCovValRef = useRef(50);
+  const maxCovValRef = useRef(90);
+  const minOnRef     = useRef(false);
+  const maxOnRef     = useRef(false);
   minCovValRef.current = minCoverage ?? 50;
-
-  const maxCovBarWRef  = useRef(1);
-  const maxCovValRef   = useRef(90);
-  const maxCovStartRef = useRef(90);
   maxCovValRef.current = maxCoverage ?? 90;
+  minOnRef.current     = minCoverage !== null;
+  maxOnRef.current     = maxCoverage !== null;
 
-  const minCovPan = useRef(PanResponder.create({
+  // One pan responder per thumb — each thumb owns its own drag. Detecting which thumb
+  // from the touch position was unreliable (locationX reads as ~0 on web, so it always
+  // picked the min); giving each thumb its own handler is robust everywhere. Each is
+  // clamped against the other so the min can never pass the max (an empty pass band).
+  const minDragStart = useRef(0);
+  const maxDragStart = useRef(0);
+  const dxToPct = (g: { dx: number }) => (g.dx / Math.max(1, covBarWRef.current)) * 100;
+  const clampPct = (v: number) => Math.round(Math.max(0, Math.min(100, v)) * 10) / 10;
+
+  const minThumbPan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { minCovStartRef.current = minCovValRef.current; },
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { minDragStart.current = minCovValRef.current; },
     onPanResponderMove: (_, g) => {
       if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const v = Math.round(Math.max(0, Math.min(100,
-        minCovStartRef.current + (g.dx / Math.max(1, minCovBarWRef.current)) * 100)) * 10) / 10;
+      let v = clampPct(minDragStart.current + dxToPct(g));
+      if (maxOnRef.current) v = Math.min(v, maxCovValRef.current);
       setMinCoverage(v); setMinCoverageText(String(v));
     },
-    onPanResponderRelease: () => {},
   })).current;
 
-  const maxCovPan = useRef(PanResponder.create({
+  const maxThumbPan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { maxCovStartRef.current = maxCovValRef.current; },
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { maxDragStart.current = maxCovValRef.current; },
     onPanResponderMove: (_, g) => {
       if (Math.abs(g.dy) > Math.abs(g.dx) + 5) return;
-      const v = Math.round(Math.max(0, Math.min(100,
-        maxCovStartRef.current + (g.dx / Math.max(1, maxCovBarWRef.current)) * 100)) * 10) / 10;
+      let v = clampPct(maxDragStart.current + dxToPct(g));
+      if (minOnRef.current) v = Math.max(v, minCovValRef.current);
       setMaxCoverage(v); setMaxCoverageText(String(v));
     },
-    onPanResponderRelease: () => {},
   })).current;
 
   // Polygon-specific state
@@ -160,7 +259,6 @@ export function InspectionConfigModal({
 
   const [zonePickerOpen, setZonePickerOpen]   = useState(false);
   const [colorEditState, setColorEditState]   = useState<{ entry: ColorEntry } | null>(null);
-  const debugWebviewRef = useRef<any>(null);
 
   // Pulse the Start/Stop button while a start/stop transition is in flight — mirrors the main view.
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -215,6 +313,16 @@ export function InspectionConfigModal({
     });
   }
 
+  // Tap-to-select: same state change the Zone dropdown makes (see ZonePickerModal's
+  // onSelect below), just driven by a hit-test on the tapped point instead of a picked
+  // row. A tap that lands on no zone does nothing.
+  function handleZoneTap(x: number, y: number) {
+    const hit = hitTestZones(zones, x, y);
+    if (!hit) return;
+    setZoneId(hit.id);
+    notifyLiveUpdate({ zoneId: hit.id });
+  }
+
   // Debounced live-update saves for non-polygon kinds
   useEffect(() => {
     if (!visible || kind !== 'blob') return;
@@ -261,16 +369,6 @@ export function InspectionConfigModal({
     return () => clearTimeout(t);
   }, [lineCannyT1, lineCannyT2, lineHoughThresh, lineMinLineLen, lineMaxLineGap,
       lineFilterByAngle, lineMinAngle, lineMaxAngle, name, enabled, zoneId]);
-
-  // Start / stop the debug feed when visibility, URL, or paused state changes
-  useEffect(() => {
-    if (!debugWebviewRef.current) return;
-    if (visible && feedUrl) {
-      debugWebviewRef.current.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
-    } else {
-      debugWebviewRef.current.injectJavaScript(`window.pauseFeed();true;`);
-    }
-  }, [visible, feedUrl]);
 
   useEffect(() => {
     if (!visible) return;
@@ -369,47 +467,39 @@ export function InspectionConfigModal({
 
   const linkedZone = zones.find(z => z.id === zoneId);
   const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
+  const configTitle = kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage';
 
   // Live feed — mirrors the main editor view: annotated stream while running,
   // raw camera stream otherwise, with the same Start/Stop control. Rendered
   // above the config fields on phones, in a left pane on wide screens.
   const feedSection = (
-    <>
-        <View style={ws.feedCard}>
-            <VisionCanvas
-              ref={debugWebviewRef}
-              html={FEED_HTML}
-              style={{ flex: 1, backgroundColor: '#0d1117' }}
-              onLoad={() => {
-                if (feedUrl)
-                  debugWebviewRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
-              }}
-            />
-            {!feedUrl && (
-              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#9ca3af', fontSize: 13 }}>No camera feed</Text>
-              </View>
-            )}
-        </View>
+    <View style={ws.feedPad}>
+        {/* Shared with the vision editor: same frame, same padding, zones always drawn. */}
+        <VisionFeedViewer
+          feedUrl={feedUrl ?? null}
+          zones={zones}
+          isWide={isWide}
+          placeholder="No camera feed"
+          onTapImagePoint={handleZoneTap}
+        />
 
         {onToggleRunning && (
-          <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+          <View>
             <Animated.View style={{ opacity: transitioning ? pulseAnim : 1 }}>
               <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  borderRadius: 12, paddingVertical: 13,
-                  backgroundColor: isRunning ? '#dc2626' : '#0891b2' }}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+                  borderRadius: radii.md, paddingVertical: spacing.md,
+                  backgroundColor: isRunning ? kitColors.danger : accents.cyan }}
                 onPress={onToggleRunning}
                 activeOpacity={0.8}
                 disabled={!!transitioning}
               >
                 {transitioning
-                  ? <ActivityIndicator size="small" color="#fff" />
+                  ? <ActivityIndicator size="small" color={kitColors.onAccent} />
                   : isRunning
-                    ? <EyeOff size={16} color="#fff" />
-                    : <Eye size={16} color="#fff" />}
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                    ? <EyeOff size={16} color={kitColors.onAccent} />
+                    : <Eye size={16} color={kitColors.onAccent} />}
+                <Text style={{ color: kitColors.onAccent, fontSize: 14, fontWeight: '700' }}>
                   {transitioning === 'starting' ? 'Starting...'
                     : transitioning === 'stopping' ? 'Stopping...'
                     : isRunning ? 'Stop Vision'
@@ -421,80 +511,83 @@ export function InspectionConfigModal({
         )}
 
         {isRunning && (
-          <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+          <View>
             <VisionResults
               result={visionResult ?? null}
               only={initialBlob?.id ?? initialColor?.id ?? initialPolygon?.id ?? initialAruco?.id ?? initialLine?.id ?? initialBarcode?.id}
+              // Feed the thresholds being edited so the coverage bar tracks them live.
+              colorInspections={initialColor ? [{ ...initialColor, minCoverage, maxCoverage }] : undefined}
             />
           </View>
         )}
-    </>
+    </View>
   );
 
   return (
     <View style={ves.configRoot}>
-        <SubPageHeader
-          title={kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage'}
+        <PageHeader
+          title={configTitle}
           subtitle={name || undefined}
+          // Full-screen modal, not a route — ancestor crumb is a plain label
+          // (no href, so it's non-tappable) purely to surface the "‹ Vision
+          // Editor" back affordance on narrow; onBack always runs handleClose
+          // (commit + close) regardless of which affordance is tapped.
+          crumbs={[{ label: "Vision Editor" }, { label: configTitle }]}
           onBack={handleClose}
           right={
             <TouchableOpacity onPress={handleClose} style={ves.configDoneBtn}>
-              <Check size={15} color="#fff" />
+              <Check size={15} color={kitColors.onAccent} />
               <Text style={ves.configDoneBtnText}>Done</Text>
             </TouchableOpacity>
           }
         />
 
         <View style={isWide ? ws.wideRow : ws.stack}>
-        {isWide ? (
-          /* Wide layout: feed + run + results in a fixed left pane */
-          <ScrollView
-            style={[ws.leftPane, isSplit && wide.paneSplit]}
-            contentContainerStyle={ws.leftPaneContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {feedSection}
-          </ScrollView>
-        ) : (
-          feedSection
-        )}
 
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[{ padding: 14, gap: 10 }, isWide && ws.rightPaneContent]}
+          contentContainerStyle={[{ padding: spacing.lg, gap: spacing.sm }, isWide && ws.rightPaneContent]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Name */}
-          <View style={ves.configCard}>
-            <Text style={ves.configFieldLabel}>Name</Text>
-            <TextInput
-              style={ves.configNameInput}
-              value={name}
-              onChangeText={setName}
-              placeholder="Inspection name"
-              placeholderTextColor="#9ca3af"
-            />
-          </View>
+          {/* Narrow: the debug feed scrolls WITH the settings (it used to be
+              pinned above this ScrollView). Wide: it stays in the right pane. */}
+          {!isWide && feedSection}
 
-          {/* Enabled */}
-          <View style={ves.configCard}>
-            <Text style={[ves.configFieldLabel, { flex: 1 }]}>Enabled</Text>
-            <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: accent }} />
+          {/* Name + Enabled + Zone grouped under one header */}
+          <View style={ves.groupCard}>
+            <Text style={ves.groupTitle}>DETAILS</Text>
+            <View style={ves.groupRow}>
+              <Text style={ves.configFieldLabel}>Name</Text>
+              <TextInput
+                style={ves.configNameInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="Inspection name"
+                placeholderTextColor={kitColors.textFaint}
+              />
+            </View>
+            {/* Standard kit labeled-switch row (label left, control right) — see
+                robot/config.tsx / io/auxiliary.tsx for the same pattern elsewhere. It was
+                previously a bare Text+Switch styled with the Name row's narrow field-label,
+                which read as the switch stranded on its own at the card's right edge. */}
+            <FormRow label="Enabled" inline style={ves.groupRowBorder}>
+              <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: accent }} />
+            </FormRow>
+            {/* Zone — was its own card below the DETAILS group; now a row of it, same
+                trigger opening the same ZonePickerModal. */}
+            <TouchableOpacity
+              style={[ves.groupRow, ves.groupRowBorder]}
+              onPress={() => setZonePickerOpen(true)}
+              activeOpacity={0.75}
+            >
+              <Text style={ves.configFieldLabel}>Zone</Text>
+              <Text style={{ flex: 1, fontSize: 14, color: kitColors.text }}>
+                {linkedZone?.name ?? 'Full image'}
+              </Text>
+              <ChevronDown size={15} color={kitColors.textFaint} />
+            </TouchableOpacity>
           </View>
-
-          {/* Zone */}
-          <TouchableOpacity
-            style={ves.configCard}
-            onPress={() => setZonePickerOpen(true)}
-            activeOpacity={0.75}
-          >
-            <Text style={ves.configFieldLabel}>Zone</Text>
-            <Text style={{ flex: 1, fontSize: 14, color: '#111827' }}>
-              {linkedZone?.name ?? 'Full image'}
-            </Text>
-            <ChevronDown size={15} color="#9ca3af" />
-          </TouchableOpacity>
 
           {/* Blob params */}
           {kind === 'blob' && (
@@ -532,15 +625,15 @@ export function InspectionConfigModal({
               <Text style={ves.blobPanelTitle}>ArUco Detection</Text>
 
               <TouchableOpacity
-                style={[ves.configCard, { marginBottom: 8 }]}
+                style={[ves.configCard, { marginBottom: spacing.sm }]}
                 onPress={() => setDictPickerOpen(true)}
                 activeOpacity={0.75}
               >
                 <Text style={ves.paramLabel}>Dictionary</Text>
-                <Text style={{ flex: 1, fontSize: 13, color: '#111827' }}>
+                <Text style={{ flex: 1, fontSize: 13, color: kitColors.text }}>
                   {ARUCO_DICTIONARIES.find(d => d.id === arucoDictId)?.label ?? String(arucoDictId)}
                 </Text>
-                <ChevronDown size={14} color="#9ca3af" />
+                <ChevronDown size={14} color={kitColors.textFaint} />
               </TouchableOpacity>
               <Text style={ves.paramDesc}>
                 Must match the dictionary used to generate the printed markers.
@@ -596,17 +689,17 @@ export function InspectionConfigModal({
             <View style={ves.blobPanel}>
               <Text style={ves.blobPanelTitle}>Barcode / QR Detection</Text>
               <TouchableOpacity
-                style={[ves.configCard, { marginBottom: 4 }]}
+                style={[ves.configCard, { marginBottom: spacing.xs }]}
                 onPress={() => setFormatPickerOpen(true)}
                 activeOpacity={0.75}
               >
                 <Text style={ves.paramLabel}>Formats</Text>
-                <Text style={{ flex: 1, fontSize: 13, color: '#111827' }}>
+                <Text style={{ flex: 1, fontSize: 13, color: kitColors.text }}>
                   {barcodeFormats.length === 0
                     ? 'All formats'
                     : barcodeFormats.map(f => BARCODE_FORMATS.find(b => b.id === f)?.label ?? f).join(', ')}
                 </Text>
-                <ChevronDown size={14} color="#9ca3af" />
+                <ChevronDown size={14} color={kitColors.textFaint} />
               </TouchableOpacity>
               <Text style={ves.paramDesc}>
                 Select specific formats to speed up detection, or leave as "All formats" to scan everything.
@@ -625,66 +718,69 @@ export function InspectionConfigModal({
           {/* Color coverage */}
           {kind === 'color' && (
             <>
-              <Text style={[ves.sectionLabel, { marginTop: 4 }]}>COLORS TO MATCH</Text>
+              <View style={ves.groupCard}>
+                <Text style={ves.groupTitle}>COLORS TO MATCH</Text>
 
-              {colors.length === 0 && (
-                <View style={ves.emptyCard}>
-                  <Text style={ves.emptyText}>No colors yet — add at least one</Text>
-                </View>
-              )}
+                {colors.length === 0 && (
+                  <View style={ves.emptyCard}>
+                    <Text style={ves.emptyText}>No colors yet — add at least one</Text>
+                  </View>
+                )}
 
-              {colors.map(ce => (
+                {colors.map(ce => (
+                  <TouchableOpacity
+                    key={ce.id}
+                    style={ves.colorEntryRow}
+                    onPress={() => setColorEditState({ entry: ce })}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{
+                      width: 28, height: 28, borderRadius: 6,
+                      backgroundColor: `rgb(${ce.r},${ce.g},${ce.b})`,
+                      borderWidth: 1, borderColor: kitColors.borderStrong,
+                    }} />
+                    <Text style={{ flex: 1, fontSize: 12, color: kitColors.textSecondary }}>
+                      rgb({ce.r}, {ce.g}, {ce.b})
+                    </Text>
+                    <View style={{
+                      backgroundColor: '#f0f9ff', borderRadius: 5,
+                      paddingHorizontal: 6, paddingVertical: 2,
+                      borderWidth: 1, borderColor: '#bae6fd',
+                    }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: accents.cyan }}>
+                        ±{ce.tolerance}
+                      </Text>
+                    </View>
+                    <DeleteIconButton
+                      size={13}
+                      onPress={() => setColors(prev => prev.filter(c => c.id !== ce.id))}
+                      style={ves.iconBtn}
+                    />
+                  </TouchableOpacity>
+                ))}
+
                 <TouchableOpacity
-                  key={ce.id}
-                  style={ves.colorEntryRow}
-                  onPress={() => setColorEditState({ entry: ce })}
+                  style={ves.addBtn}
+                  onPress={() => setColorEditState({ entry: defaultColorEntry() })}
                   activeOpacity={0.75}
                 >
-                  <View style={{
-                    width: 28, height: 28, borderRadius: 6,
-                    backgroundColor: `rgb(${ce.r},${ce.g},${ce.b})`,
-                    borderWidth: 1, borderColor: '#d1d5db',
-                  }} />
-                  <Text style={{ flex: 1, fontSize: 12, color: '#374151' }}>
-                    rgb({ce.r}, {ce.g}, {ce.b})
-                  </Text>
-                  <View style={{
-                    backgroundColor: '#f0f9ff', borderRadius: 5,
-                    paddingHorizontal: 6, paddingVertical: 2,
-                    borderWidth: 1, borderColor: '#bae6fd',
-                  }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#0891b2' }}>
-                      ±{ce.tolerance}
-                    </Text>
-                  </View>
-                  <DeleteIconButton
-                    size={13}
-                    onPress={() => setColors(prev => prev.filter(c => c.id !== ce.id))}
-                    style={ves.iconBtn}
-                  />
+                  <Plus size={13} color="#d946ef" />
+                  <Text style={[ves.addBtnText, { color: '#d946ef' }]}>Add Color</Text>
                 </TouchableOpacity>
-              ))}
-
-              <TouchableOpacity
-                style={ves.addBtn}
-                onPress={() => setColorEditState({ entry: defaultColorEntry() })}
-                activeOpacity={0.75}
-              >
-                <Plus size={13} color="#d946ef" />
-                <Text style={[ves.addBtnText, { color: '#d946ef' }]}>Add Color</Text>
-              </TouchableOpacity>
+              </View>
 
               <Text style={[ves.sectionLabel, { marginTop: 4 }]}>PASS / FAIL THRESHOLDS</Text>
 
-              <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: 10 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: spacing.sm }]}>
+                {/* Min row */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
                   <Switch
                     value={minCoverage !== null}
                     onValueChange={v => { setMinCoverage(v ? 50 : null); if (v) setMinCoverageText('50'); }}
-                    trackColor={{ true: '#16a34a' }}
+                    trackColor={{ true: kitColors.success }}
                     style={{ transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }] }}
                   />
-                  <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>Min coverage</Text>
+                  <Text style={{ fontSize: 13, color: kitColors.textSecondary, flex: 1 }}>Min coverage</Text>
                   {minCoverage !== null && (
                     <>
                       <TextInput
@@ -694,54 +790,28 @@ export function InspectionConfigModal({
                         onChangeText={t => {
                           setMinCoverageText(t);
                           const n = parseFloat(t);
-                          if (!isNaN(n)) setMinCoverage(Math.min(100, Math.max(0, n)));
+                          // Clamp to the max, so the min can never be set above it.
+                          if (!isNaN(n)) setMinCoverage(Math.min(maxCoverage ?? 100, Math.max(0, n)));
                         }}
                         onBlur={() => {
                           if (minCoverageText.trim() === '' || isNaN(parseFloat(minCoverageText)))
                             setMinCoverageText(String(minCoverage));
                         }}
                       />
-                      <Text style={{ fontSize: 11, color: '#9ca3af' }}>%</Text>
+                      <Text style={{ fontSize: 11, color: kitColors.textFaint }}>%</Text>
                     </>
                   )}
                 </View>
-                {minCoverage !== null && (
-                  <View
-                    style={{ marginTop: 10, height: 22, position: 'relative' }}
-                    onLayout={e => { minCovBarWRef.current = e.nativeEvent.layout.width; }}
-                    {...minCovPan.panHandlers}
-                  >
-                    <View style={{
-                      position: 'absolute', left: 0, right: 0,
-                      top: (22 - 5) / 2, height: 5, borderRadius: 3,
-                      backgroundColor: '#e5e7eb', overflow: 'hidden',
-                    }}>
-                      <View style={{ width: `${minCoverage}%`, height: '100%', borderRadius: 3, backgroundColor: '#16a34a' }} />
-                    </View>
-                    <View style={{
-                      position: 'absolute', left: `${minCoverage}%`, top: 0,
-                      width: 22, height: 22, marginLeft: -11,
-                      justifyContent: 'center', alignItems: 'center',
-                    }}>
-                      <View style={{
-                        width: 18, height: 18, borderRadius: 9,
-                        backgroundColor: '#fff', borderWidth: 2, borderColor: '#16a34a',
-                        shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
-                      }} />
-                    </View>
-                  </View>
-                )}
-              </View>
 
-              <View style={[ves.configCard, { flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingVertical: 10 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {/* Max row */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm }}>
                   <Switch
                     value={maxCoverage !== null}
                     onValueChange={v => { setMaxCoverage(v ? 90 : null); if (v) setMaxCoverageText('90'); }}
-                    trackColor={{ true: '#dc2626' }}
+                    trackColor={{ true: kitColors.danger }}
                     style={{ transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }] }}
                   />
-                  <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>Max coverage</Text>
+                  <Text style={{ fontSize: 13, color: kitColors.textSecondary, flex: 1 }}>Max coverage</Text>
                   {maxCoverage !== null && (
                     <>
                       <TextInput
@@ -751,41 +821,72 @@ export function InspectionConfigModal({
                         onChangeText={t => {
                           setMaxCoverageText(t);
                           const n = parseFloat(t);
-                          if (!isNaN(n)) setMaxCoverage(Math.min(100, Math.max(0, n)));
+                          // Clamp to the min, so the max can never be set below it.
+                          if (!isNaN(n)) setMaxCoverage(Math.max(minCoverage ?? 0, Math.min(100, n)));
                         }}
                         onBlur={() => {
                           if (maxCoverageText.trim() === '' || isNaN(parseFloat(maxCoverageText)))
                             setMaxCoverageText(String(maxCoverage));
                         }}
                       />
-                      <Text style={{ fontSize: 11, color: '#9ca3af' }}>%</Text>
+                      <Text style={{ fontSize: 11, color: kitColors.textFaint }}>%</Text>
                     </>
                   )}
                 </View>
-                {maxCoverage !== null && (
+
+                {/* One merged range slider — green min thumb, red max thumb, the pass band
+                    (coverage between them) filled between. */}
+                {(minCoverage !== null || maxCoverage !== null) && (
                   <View
-                    style={{ marginTop: 10, height: 22, position: 'relative' }}
-                    onLayout={e => { maxCovBarWRef.current = e.nativeEvent.layout.width; }}
-                    {...maxCovPan.panHandlers}
+                    style={{ marginTop: 14, height: 28, position: 'relative' }}
+                    onLayout={e => { covBarWRef.current = e.nativeEvent.layout.width; }}
                   >
                     <View style={{
                       position: 'absolute', left: 0, right: 0,
-                      top: (22 - 5) / 2, height: 5, borderRadius: 3,
-                      backgroundColor: '#e5e7eb', overflow: 'hidden',
-                    }}>
-                      <View style={{ width: `${maxCoverage}%`, height: '100%', borderRadius: 3, backgroundColor: '#dc2626' }} />
-                    </View>
-                    <View style={{
-                      position: 'absolute', left: `${maxCoverage}%`, top: 0,
-                      width: 22, height: 22, marginLeft: -11,
-                      justifyContent: 'center', alignItems: 'center',
+                      top: (28 - 5) / 2, height: 5, borderRadius: 3,
+                      backgroundColor: kitColors.border, overflow: 'hidden',
                     }}>
                       <View style={{
-                        width: 18, height: 18, borderRadius: 9,
-                        backgroundColor: '#fff', borderWidth: 2, borderColor: '#dc2626',
-                        shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+                        position: 'absolute', top: 0, bottom: 0,
+                        left: `${minCoverage ?? 0}%`,
+                        right: `${maxCoverage !== null ? 100 - maxCoverage : 0}%`,
+                        backgroundColor: '#86efac',
                       }} />
                     </View>
+                    {minCoverage !== null && (
+                      <View
+                        {...minThumbPan.panHandlers}
+                        hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                        style={{
+                          position: 'absolute', left: `${minCoverage}%`, top: 0,
+                          width: 28, height: 28, marginLeft: -14,
+                          justifyContent: 'center', alignItems: 'center',
+                        }}
+                      >
+                        <View style={{
+                          width: 18, height: 18, borderRadius: radii.sm,
+                          backgroundColor: kitColors.surface, borderWidth: 2, borderColor: kitColors.success,
+                          ...shadows.soft,
+                        }} />
+                      </View>
+                    )}
+                    {maxCoverage !== null && (
+                      <View
+                        {...maxThumbPan.panHandlers}
+                        hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                        style={{
+                          position: 'absolute', left: `${maxCoverage}%`, top: 0,
+                          width: 28, height: 28, marginLeft: -14,
+                          justifyContent: 'center', alignItems: 'center',
+                        }}
+                      >
+                        <View style={{
+                          width: 18, height: 18, borderRadius: radii.sm,
+                          backgroundColor: kitColors.surface, borderWidth: 2, borderColor: kitColors.danger,
+                          ...shadows.soft,
+                        }} />
+                      </View>
+                    )}
                   </View>
                 )}
               </View>
@@ -794,6 +895,17 @@ export function InspectionConfigModal({
 
           <View style={{ height: 40 }} />
         </ScrollView>
+
+        {isWide && (
+          /* Wide layout: feed + run + results in a fixed pane on the right */
+          <ScrollView
+            style={[ws.feedPane, isSplit && wide.paneSplit]}
+            contentContainerStyle={ws.leftPaneContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {feedSection}
+          </ScrollView>
+        )}
         </View>
 
       <ZonePickerModal
@@ -834,21 +946,24 @@ export function InspectionConfigModal({
 
 const ws = StyleSheet.create({
   stack: { flex: 1 },
-  // Matches the main vision editor's feedCard so both feeds read the same.
-  feedCard: {
-    height: 220, backgroundColor: "#0d1117",
-    borderRadius: 12, overflow: "hidden",
-    marginHorizontal: 14, marginTop: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 6, elevation: 3,
-  },
+  // Padding around the frame + its controls. Matches the vision editor's feed pane
+  // (paddingHorizontal 20 / paddingTop 18) so the frame sits identically in both editors.
+  // No horizontal padding: on narrow the feed now lives inside the ScrollView,
+  // whose contentContainer already supplies the side gutter; the wide feed
+  // pane brings its own padding too.
+  feedPad: { gap: 10 },
   wideRow: {
     flex: 1, flexDirection: "row",
-    width: "100%", maxWidth: 1200, alignSelf: "center",
+    width: "100%",
   },
-  leftPane: {
-    width: 420, flexGrow: 0, flexShrink: 0,
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+  // Feed pane (on the right) grows with the (uncapped) row width, bounded for very
+  // wide/narrow desktops. "split" mode overrides this to an even 50/50 via wide.paneSplit.
+  feedPane: {
+    width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: kitColors.border,
   },
-  leftPaneContent: { paddingBottom: 24 },
+  // Horizontal/top padding lives here now that feedPad no longer carries it
+  // (the narrow layout's ScrollView gutter supplies it there instead).
+  leftPaneContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: spacing.xl },
   rightPaneContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 });

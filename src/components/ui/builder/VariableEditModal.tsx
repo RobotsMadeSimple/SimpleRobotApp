@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Check, ChevronDown, Minus, Plus, X } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
+import { colors, accents } from "@/src/components/ui/kit";
 import {
   ListElementType,
   ProgramVariable,
@@ -22,10 +23,10 @@ import {
   variableList,
 } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
-import { COMPARISON_OPS, ExpressionInput } from "./NumericInputs";
+import { ExpressionInput } from "./NumericInputs";
 import { newId } from "./stepUtils";
 
-export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "image";
+export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "image" | "computed";
 
 /**
  * Module scope rather than rebuilt per render — it is a constant, and the trigger button
@@ -37,11 +38,12 @@ export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "
  */
 const TYPE_OPTIONS: { key: VarType; label: string; desc: string; color: string; bg: string; border: string }[] = [
   { key: "number",    label: "Number",    desc: "A numeric value",                     color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
-  { key: "boolean",   label: "Boolean",   desc: "True or false, stored as 1 or 0",     color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+  { key: "boolean",   label: "Boolean",   desc: "True or false, stored as 1 or 0",     color: colors.success, bg: colors.successSoft, border: "#bbf7d0" },
   { key: "string",    label: "String",    desc: "Text, with $var interpolation",       color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
   { key: "image",     label: "Image",     desc: "A camera frame, from CaptureImage",   color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
   { key: "list",      label: "List",      desc: "Numbers, booleans, points or records", color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
   { key: "stopwatch", label: "Stopwatch", desc: "Elapsed milliseconds",                color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
+  { key: "computed",  label: "Computed",  desc: "A formula, re-evaluated every time it is read", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
 ];
 
 /**
@@ -54,7 +56,7 @@ const TYPE_OPTIONS: { key: VarType; label: string; desc: string; color: string; 
  */
 const ELEMENT_OPTIONS: { key: ListElementType; label: string; desc: string; color: string; bg: string; border: string }[] = [
   { key: "Number",  label: "Numbers",  desc: "Numeric values",                  color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
-  { key: "Boolean", label: "Booleans", desc: "True/false flags",                color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+  { key: "Boolean", label: "Booleans", desc: "True/false flags",                color: colors.success, bg: colors.successSoft, border: "#bbf7d0" },
   { key: "Point",   label: "Points",   desc: "Poses — x, y, z, rx, ry, rz",     color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
   { key: "Record",  label: "Objects",  desc: "Records of named number fields",  color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
 ];
@@ -116,8 +118,30 @@ export function VariableEditModal({
   const [isGlobal,          setIsGlobal]          = useState(false);
   const [displayOnMonitor,  setDisplayOnMonitor]  = useState(false);
   const [isPersistent,      setIsPersistent]      = useState(false);
+  /**
+   * The Computed kind's formula and its "Is boolean" toggle. Kept apart from valueExpr /
+   * the Boolean kind so switching between Computed and a stored kind in the picker does
+   * not turn an initial-value expression into a live formula or back without being asked.
+   */
+  const [formula,      setFormula]      = useState("");
+  const [computedBool, setComputedBool] = useState(false);
 
   useEffect(() => {
+    if (variable?.isComputed) {
+      // Checked before the stored kinds: a computed variable's isBoolean is a display
+      // flag on the formula, not the Boolean kind.
+      setName(variable.name);
+      setDesc(variable.description ?? "");
+      setVarType("computed");
+      setFormula(variable.valueExpression ?? "");
+      setComputedBool(variable.isBoolean ?? false);
+      setIsGlobal(variable.isGlobal ?? false);
+      setDisplayOnMonitor(variable.displayOnMonitor ?? false);
+      setIsPersistent(false);
+      setValueExpr(undefined); setValue("0"); setStringVal(""); setListValues([]); setElemType("Number");
+      return;
+    }
+    setFormula(""); setComputedBool(false);
     if (variable) {
       setName(variable.name);
       setDesc(variable.description ?? "");
@@ -171,7 +195,9 @@ export function VariableEditModal({
   // up attached to a list claiming to hold poses.
   const existingList = variable ? variableList(variable) : null;
   const keptItems    = existingList?.elementType === elemType ? existingList.items : [];
-  const canSave      = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
+  const nameOk       = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
+  // A computed variable is nothing but its formula, so it cannot be saved without one.
+  const canSave      = nameOk && (varType !== "computed" || formula.trim().length > 0);
   const selectedType = TYPE_OPTIONS.find(o => o.key === varType)!;
   const selectedElem = ELEMENT_OPTIONS.find(o => o.key === elemType)!;
   // A variable cannot open with its own value — it does not have one yet when the
@@ -192,6 +218,13 @@ export function VariableEditModal({
     // Boolean only understands 0 and 1, so a number typed before the switch would
     // otherwise survive into a checkbox that cannot represent it.
     if (key === "boolean" && value !== "0" && value !== "1") setValue("0");
+    // Name and description are shared state, so they carry over on their own. A Boolean
+    // switched to Computed is most likely becoming a condition, so it keeps reading as
+    // true/false; an initial-value expression is the natural first draft of a formula.
+    if (key === "computed" && varType !== "computed") {
+      if (varType === "boolean") setComputedBool(true);
+      if (!formula.trim() && valueExpr?.trim()) setFormula(valueExpr.trim());
+    }
     setVarType(key);
     setTypePickerOpen(false);
   }
@@ -226,14 +259,16 @@ export function VariableEditModal({
       : elemType === "Record"
       ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0d9488", fontWeight: "600" }}>${name.trim() || "name"}[0].field</Text> in expressions. Elements are added while the program runs.</Text>
       : elemType === "Boolean"
-      ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0</Text>, so it drops straight into a condition.</Text>
+      ? <Text style={ms.hintText}>Referenced as <Text style={{ color: colors.success, fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0</Text>, so it drops straight into a condition.</Text>
       : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}[0]</Text> in expressions.</Text>
     : varType === "boolean"
-    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#16a34a", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
+    ? <Text style={ms.hintText}>Referenced as <Text style={{ color: colors.success, fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. <Text style={{ fontWeight: "600" }}>True = 1, False = 0.</Text></Text>
     : varType === "stopwatch"
     ? <Text style={ms.hintText}>Referenced as <Text style={{ color: "#0891b2", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions. Value is elapsed milliseconds.</Text>
     : varType === "string"
     ? <Text style={ms.hintText}>Use <Text style={{ color: "#ea580c", fontWeight: "600" }}>${name.trim() || "name"}</Text> in StatusUpdate messages or string expressions. Supports <Text style={{ fontWeight: "600" }}>$otherVar</Text> interpolation in values.</Text>
+    : varType === "computed"
+    ? <Text style={ms.hintText}>Read as <Text style={{ color: "#be185d", fontWeight: "600" }}>${name.trim() || "name"}</Text> anywhere an expression is accepted. It has no stored value and cannot be assigned.</Text>
     : varType === "image"
     ? <Text style={ms.hintText}>Stores a camera frame as a base64 JPEG. Populated by a <Text style={{ fontWeight: "600" }}>CaptureImage</Text> step at runtime.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
@@ -247,7 +282,7 @@ export function VariableEditModal({
             <View style={{ width: 18 }} />
             <Text style={ms.title}>{isNew ? "New Variable" : "Edit Variable"}</Text>
             <TouchableOpacity onPress={closeAll} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color="#9ca3af" />
+              <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -258,12 +293,12 @@ export function VariableEditModal({
             value={name}
             onChangeText={setName}
             placeholder="e.g. speed, pickHeight, counter"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={colors.textFaint}
             autoFocus={isNew}
             autoCapitalize="none"
             returnKeyType="next"
           />
-          {name.trim().length > 0 && !canSave && (
+          {name.trim().length > 0 && !nameOk && (
             <Text style={ms.fieldError}>Use letters, digits, and _ only. Must start with a letter.</Text>
           )}
 
@@ -297,6 +332,7 @@ export function VariableEditModal({
                 onChangeValue={n => setValue(n === undefined ? "0" : String(n))}
                 onChangeExpr={(_k, e) => setValueExpr(e)}
                 style={ms.input}
+                label="Initial value"
                 variables={exprVars}
               />
               {usingExpr && <InitialValueExprHint />}
@@ -315,12 +351,12 @@ export function VariableEditModal({
                       key={opt.v}
                       style={[{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center",
                         borderWidth: 1.5,
-                        borderColor: active ? "#16a34a" : "#e5e7eb",
-                        backgroundColor: active ? "#f0fdf4" : "#f9fafb" }]}
+                        borderColor: active ? colors.success : colors.border,
+                        backgroundColor: active ? colors.successSoft : colors.surfaceMuted }]}
                       onPress={() => { setValueExpr(undefined); setValue(opt.v); }}
                       activeOpacity={0.7}
                     >
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: active ? "#16a34a" : "#6b7280" }}>
+                      <Text style={{ fontSize: 14, fontWeight: "700", color: active ? colors.success : colors.textMuted }}>
                         {opt.label}
                       </Text>
                     </TouchableOpacity>
@@ -329,8 +365,8 @@ export function VariableEditModal({
                 <TouchableOpacity
                   style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 9, alignItems: "center",
                     borderWidth: 1.5,
-                    borderColor: usingExpr ? "#7c3aed" : "#e5e7eb",
-                    backgroundColor: usingExpr ? "#f5f3ff" : "#f9fafb" }}
+                    borderColor: usingExpr ? accents.purple : colors.border,
+                    backgroundColor: usingExpr ? accents.purpleSoft : colors.surfaceMuted }}
                   onPress={() => setValueExpr(valueExpr ?? "")}
                   activeOpacity={0.7}
                   accessibilityRole="button"
@@ -338,7 +374,7 @@ export function VariableEditModal({
                   accessibilityLabel="Set the initial value from an expression"
                 >
                   <Text style={{ fontSize: 14, fontWeight: "700", fontStyle: "italic",
-                    color: usingExpr ? "#7c3aed" : "#6b7280" }}>
+                    color: usingExpr ? accents.purple : colors.textMuted }}>
                     fx
                   </Text>
                 </TouchableOpacity>
@@ -354,9 +390,11 @@ export function VariableEditModal({
                     // the buttons — leaving the field is what the fx segment is for.
                     onChangeExpr={(_k, e) => setValueExpr(e ?? "")}
                     style={ms.input}
+                    label="Initial value"
+                    hint="The variable starts true when this is true."
                     placeholder="e.g.  $count > 5"
                     variables={exprVars}
-                    ops={COMPARISON_OPS}
+                    comparisons
                   />
                   <InitialValueExprHint boolean />
                 </View>
@@ -407,21 +445,21 @@ export function VariableEditModal({
                   booleans share it; a boolean is stored as the 0/1 a record field can
                   hold, so only the per-row control differs. */}
               <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUES</Text>
-              <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "#d1d5db",
+              <View style={{ borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong,
                 borderLeftWidth: 3, borderLeftColor: selectedElem.color,
-                backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
+                backgroundColor: colors.surfaceMuted, marginTop: 4, marginBottom: 4 }}>
                 <Text style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4,
-                  fontSize: 15, color: "#64748b" }}>[</Text>
+                  fontSize: 15, color: colors.textMuted }}>[</Text>
                 {listValues.length === 0 && (
                   <Text style={{ paddingLeft: 28, paddingBottom: 6, fontSize: 13,
-                    color: "#9ca3af", fontStyle: "italic" }}>
+                    color: colors.textFaint, fontStyle: "italic" }}>
                     {"// empty — items can also be added while the program runs"}
                   </Text>
                 )}
                 {listValues.map((v, idx) => (
                   <View key={idx} style={{ flexDirection: "row", alignItems: "center",
                     paddingLeft: 26, paddingRight: 6, paddingVertical: 5 }}>
-                    <Text style={{ fontSize: 11, color: "#cbd5e1", width: 20 }}>{idx}</Text>
+                    <Text style={{ fontSize: 11, color: colors.textFaint, width: 20 }}>{idx}</Text>
                     {elemType === "Boolean" ? (
                       <View style={{ flex: 1, flexDirection: "row", gap: 6 }}>
                         {([{ label: "false", on: false }, { label: "true", on: true }] as const).map(opt => {
@@ -431,13 +469,13 @@ export function VariableEditModal({
                               key={opt.label}
                               style={{ flex: 1, paddingVertical: 6, borderRadius: 7, alignItems: "center",
                                 borderWidth: 1,
-                                borderColor: active ? "#16a34a" : "#e2e8f0",
-                                backgroundColor: active ? "#f0fdf4" : "#ffffff" }}
+                                borderColor: active ? colors.success : colors.border,
+                                backgroundColor: active ? colors.successSoft : colors.surface }}
                               onPress={() => setListBool(idx, opt.on)}
                               activeOpacity={0.7}
                             >
                               <Text style={{ fontSize: 13, fontWeight: active ? "700" : "500",
-                                color: active ? "#16a34a" : "#94a3b8" }}>
+                                color: active ? colors.success : colors.textFaint }}>
                                 {opt.label}
                               </Text>
                             </TouchableOpacity>
@@ -451,17 +489,17 @@ export function VariableEditModal({
                         value={v}
                         onChangeText={raw => updateListItem(idx, raw)}
                         placeholder="0"
-                        placeholderTextColor="#9ca3af"
+                        placeholderTextColor={colors.textFaint}
                         keyboardType="numbers-and-punctuation"
                         selectTextOnFocus
                       />
                     )}
                     {idx < listValues.length - 1 && (
-                      <Text style={{ fontSize: 14, color: "#94a3b8", marginLeft: 2, marginRight: 2 }}>,</Text>
+                      <Text style={{ fontSize: 14, color: colors.textFaint, marginLeft: 2, marginRight: 2 }}>,</Text>
                     )}
                     <TouchableOpacity onPress={() => removeListItem(idx)}
                       hitSlop={8} style={{ padding: 5 }} activeOpacity={0.7}>
-                      <Minus size={13} color="#dc2626" />
+                      <Minus size={13} color={colors.danger} />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -471,11 +509,11 @@ export function VariableEditModal({
                   onPress={addListItem}
                   activeOpacity={0.7}
                 >
-                  <Plus size={12} color="#9ca3af" />
-                  <Text style={{ fontSize: 12, color: "#9ca3af" }}>add item</Text>
+                  <Plus size={12} color={colors.textFaint} />
+                  <Text style={{ fontSize: 12, color: colors.textFaint }}>add item</Text>
                 </TouchableOpacity>
                 <Text style={{ paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10,
-                  fontSize: 15, color: "#64748b" }}>]</Text>
+                  fontSize: 15, color: colors.textMuted }}>]</Text>
               </View>
                 </>
               )}
@@ -495,6 +533,47 @@ export function VariableEditModal({
                 This variable stores a camera frame as a base64 JPEG string. It starts empty and is populated at runtime by a <Text style={{ fontWeight: "700" }}>Capture Image</Text> step.
               </Text>
             </View>
+          ) : varType === "computed" ? (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>FORMULA</Text>
+              {/* The step fields' ExpressionInput, so the formula gets the same $
+                  autocomplete, functions sheet and live value. The assist reads the
+                  builder's ExpressionEnv, which this modal is rendered inside.
+
+                  ExpressionInput reports a plain number through onChangeValue and then
+                  clears the expression; for a formula a bare number is still the formula,
+                  so both callbacks write the one text state and a cleared expression is
+                  ignored (the value callback has already recorded what was typed). */}
+              <ExpressionInput
+                fieldKey="value"
+                value={undefined}
+                expressions={formula ? { value: formula } : undefined}
+                onChangeValue={n => setFormula(n === undefined ? "" : String(n))}
+                onChangeExpr={(_k, e) => { if (e !== undefined) setFormula(e); }}
+                style={ms.input}
+                label="Formula"
+                hint="Re-evaluated every time the variable is read."
+                placeholder={computedBool ? "e.g.  $partsDone >= $target" : "e.g.  $robot.z - $tableHeight"}
+                variables={exprVars}
+                comparisons={computedBool}
+              />
+              <Text style={[ms.hintText, { marginTop: 6 }]}>
+                Evaluated every time <Text style={{ fontWeight: "700" }}>${name.trim() || "name"}</Text> is read, against the live variables, IO and properties, like <Text style={{ fontWeight: "700" }}>$robot.x</Text>. It may use other computed variables, but not itself.
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10, paddingVertical: 8 }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Is boolean</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+                    Show the result as True/False. The formula still yields 1 or 0.
+                  </Text>
+                </View>
+                <Switch
+                  value={computedBool}
+                  onValueChange={setComputedBool}
+                  trackColor={{ false: colors.border, true: colors.success }}
+                />
+              </View>
+            </>
           ) : varType === "string" ? (
             <>
               <Text style={[ms.fieldLabel, { marginTop: 12 }]}>INITIAL VALUE</Text>
@@ -518,49 +597,54 @@ export function VariableEditModal({
             value={desc}
             onChangeText={setDesc}
             placeholder="What this variable controls…"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={colors.textFaint}
             returnKeyType="done"
           />
 
-          {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") && (
+          {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image" || varType === "computed") && (
             <>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Show on Monitor</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Show on Monitor</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
                     Display the live value on the program detail page while running.
                   </Text>
                 </View>
                 <Switch
                   value={displayOnMonitor}
                   onValueChange={setDisplayOnMonitor}
-                  trackColor={{ false: "#e5e7eb", true: "#2563eb" }}
+                  trackColor={{ false: colors.border, true: colors.accent }}
                 />
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Global Variable</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
-                    Shared across all programs running at the same time. First program to start sets the initial value.
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Global Variable</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+                    {varType === "computed"
+                      ? "Readable from every program. The formula can then use only globals, IO and properties."
+                      : "Shared across all programs running at the same time. First program to start sets the initial value."}
                   </Text>
                 </View>
                 <Switch
                   value={isGlobal}
                   onValueChange={setIsGlobal}
-                  trackColor={{ false: "#e5e7eb", true: "#16a34a" }}
+                  trackColor={{ false: colors.border, true: colors.success }}
                 />
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "#111827" }}>Persistent</Text>
-                  <Text style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 15 }}>
-                    Value is saved to disk when the program finishes and restored on the next run.
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: varType === "computed" ? colors.textFaint : colors.text }}>Persistent</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+                    {varType === "computed"
+                      ? "Not available: computed values are derived, not stored."
+                      : "Value is saved to disk when the program finishes and restored on the next run."}
                   </Text>
                 </View>
                 <Switch
-                  value={isPersistent}
+                  value={varType === "computed" ? false : isPersistent}
+                  disabled={varType === "computed"}
                   onValueChange={setIsPersistent}
-                  trackColor={{ false: "#e5e7eb", true: "#7c3aed" }}
+                  trackColor={{ false: colors.border, true: "#7c3aed" }}
                 />
               </View>
             </>
@@ -575,6 +659,25 @@ export function VariableEditModal({
               style={[ms.saveBtn, !canSave && { opacity: 0.4 }]}
               onPress={() => {
                 if (!canSave) return;
+                if (varType === "computed") {
+                  // Built from scratch so every stored-kind field (value, items, the kind
+                  // flags, persistence) is dropped: the controller rejects them alongside
+                  // isComputed (computedKindConflict). `value` is required by the type and
+                  // ignored by the controller.
+                  onSave({
+                    id: variable?.id ?? newId(),
+                    name: name.trim(),
+                    value: 0,
+                    isComputed: true,
+                    valueExpression: formula.trim(),
+                    isBoolean:        computedBool     || undefined,
+                    isGlobal:         isGlobal         || undefined,
+                    displayOnMonitor: displayOnMonitor || undefined,
+                    description: desc.trim() || undefined,
+                  });
+                  onClose();
+                  return;
+                }
                 onSave({
                   id: variable?.id ?? newId(),
                   name: name.trim(),
@@ -612,7 +715,7 @@ export function VariableEditModal({
               activeOpacity={0.7}
               disabled={!canSave}
             >
-              <Check size={15} color="white" />
+              <Check size={15} color={colors.onAccent} />
               <Text style={ms.saveText}>Save</Text>
             </TouchableOpacity>
           </View>
@@ -638,17 +741,17 @@ export function VariableEditModal({
               style={[
                 { flexDirection: "row", alignItems: "center", gap: 12,
                   paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6" },
+                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
                 active && { backgroundColor: opt.bg },
               ]}
             >
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : "#111827" }}>
+                  color: active ? opt.color : colors.text }}>
                   {opt.label}
                 </Text>
-                <Text style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{opt.desc}</Text>
+                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
               </View>
               {active && <Check size={16} color={opt.color} />}
             </TouchableOpacity>
@@ -675,17 +778,17 @@ export function VariableEditModal({
               style={[
                 { flexDirection: "row", alignItems: "center", gap: 12,
                   paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#f3f4f6" },
+                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
                 active && { backgroundColor: opt.bg },
               ]}
             >
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : "#111827" }}>
+                  color: active ? opt.color : colors.text }}>
                   {opt.label}
                 </Text>
-                <Text style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{opt.desc}</Text>
+                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
               </View>
               {active && <Check size={16} color={opt.color} />}
             </TouchableOpacity>

@@ -1,16 +1,29 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   PanResponder,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
 import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
+import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { STEP_THEME, StepIcon, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
+import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
+import { DisabledPill, ProblemBadge, StepComment, stepHasError } from "./StepAnnotations";
+import type { StepProblems } from "./useProgramValidation";
 
 // ── Insert divider ────────────────────────────────────────────────────────────
 
@@ -30,13 +43,13 @@ export function InsertDivider({
       <View style={sharedStyles.insertLine} />
       <TouchableOpacity onPress={disabled ? undefined : onPress} activeOpacity={disabled ? 1 : 0.6} hitSlop={4} disabled={disabled}>
         <View style={sharedStyles.insertBtn}>
-          <Plus size={10} color={disabled ? "#d1d5db" : "#2563eb"} />
+          <Plus size={10} color={disabled ? colors.borderStrong : colors.accent} />
         </View>
       </TouchableOpacity>
       {onPaste && (
         <TouchableOpacity onPress={disabled ? undefined : onPaste} activeOpacity={disabled ? 1 : 0.6} hitSlop={4} disabled={disabled}>
           <View style={sharedStyles.insertPasteBtn}>
-            <ClipboardPaste size={10} color={disabled ? "#d1d5db" : "#7c3aed"} />
+            <ClipboardPaste size={10} color={disabled ? colors.borderStrong : accents.purple} />
           </View>
         </TouchableOpacity>
       )}
@@ -80,7 +93,7 @@ export function DragHandle({
 
   return (
     <View {...responder.panHandlers} style={sharedStyles.dragHandle} hitSlop={6}>
-      <GripVertical size={16} color="#d1d5db" />
+      <GripVertical size={16} color={colors.borderStrong} />
     </View>
   );
 }
@@ -114,6 +127,7 @@ export function StepRow({
   selected,
   onLongPress,
   onToggleSelect,
+  problems,
 }: {
   step: ProgramStep;
   index: number;
@@ -141,15 +155,45 @@ export function StepRow({
   selected?: boolean;
   onLongPress?: () => void;
   onToggleSelect?: () => void;
+  /** Validation problems on this step or nested inside it. */
+  problems?: StepProblems;
 }) {
+  // Pulsing red wash over cards with validation ERRORS (warnings stay static).
+  // A translucent danger overlay breathes 4%→14% opacity under the content.
+  const isError = problems ? stepHasError(problems) : false;
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    if (isError) {
+      pulse.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 850, easing: Easing.inOut(Easing.quad) }),
+          withTiming(0, { duration: 850, easing: Easing.inOut(Easing.quad) }),
+        ),
+        -1,
+      );
+    } else {
+      cancelAnimation(pulse);
+      pulse.value = 0;
+    }
+    return () => cancelAnimation(pulse);
+  }, [isError, pulse]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: 0.04 + pulse.value * 0.1 }));
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
   const isSetSpeed    = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
                      || step.type === "Label"      || step.type === "GoToLabel";
   const innerSteps    = step.loopSteps ?? [];
   const theme         = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  // The 4px rail carries the block's *category* colour, so a program reads as
+  // bands of Motion / Logic / I-O at a glance; the icon tile and type label keep
+  // the step's own theme so individual steps stay distinguishable within a band.
+  const category      = categoryForStep(step.type);
   const detail        = stepDetail(step);
   const detailLines   = detail ? detail.split("\n") : [];
+  // Disabled steps stay fully editable and draggable; they only read as switched off.
+  const disabled      = step.enabled === false;
+  const showName      = !(isSetSpeed || isIfCondition) || !!step.name;
+  const strike        = disabled ? sharedStyles.stepCardStruck : null;
 
   return (
     <View
@@ -160,7 +204,24 @@ export function StepRow({
         isDropBelow    && sharedStyles.dropTargetItemBottom,
       ]}
     >
-      <View style={[sharedStyles.stepCard, { borderLeftColor: theme.accent }, selected && sharedStyles.stepCardSelected]}>
+      {problems && (
+        <View style={sharedStyles.problemBadgeAnchor} pointerEvents="box-none">
+          <ProblemBadge problems={problems} />
+        </View>
+      )}
+      <View style={[
+        sharedStyles.stepCard,
+        { borderLeftColor: category.color },
+        problems && (stepHasError(problems) ? sharedStyles.stepCardError : sharedStyles.stepCardWarning),
+        selected && sharedStyles.stepCardSelected,
+        disabled && sharedStyles.stepCardDisabled,
+      ]}>
+        {isError && (
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger }, pulseStyle]}
+          />
+        )}
 
         {/* Card header row */}
         <TouchableOpacity
@@ -173,7 +234,7 @@ export function StepRow({
           {selectMode ? (
             <View style={sharedStyles.dragHandle}>
               <View style={[sharedStyles.selectCheckbox, selected && sharedStyles.selectCheckboxOn]}>
-                {selected && <Check size={13} color="#fff" strokeWidth={3} />}
+                {selected && <Check size={13} color={colors.onAccent} strokeWidth={3} />}
               </View>
             </View>
           ) : (
@@ -185,11 +246,14 @@ export function StepRow({
           </View>
 
           <View style={sharedStyles.stepCardText}>
-            <Text style={[sharedStyles.stepCardType, { color: theme.accent }]}>
-              {index + 1} · {theme.label.toUpperCase()}
-            </Text>
-            {(!(isSetSpeed || isIfCondition) || !!step.name) && (
-              <Text style={sharedStyles.stepCardName} numberOfLines={1}>
+            <View style={sharedStyles.stepCardTypeRow}>
+              <Text style={[sharedStyles.stepCardType, { color: theme.accent }, !showName && strike]}>
+                {index + 1} · {theme.label.toUpperCase()}
+              </Text>
+              {disabled && <DisabledPill />}
+            </View>
+            {showName && (
+              <Text style={[sharedStyles.stepCardName, strike]} numberOfLines={1}>
                 {step.name || detailLines[0] || step.type}
               </Text>
             )}
@@ -199,12 +263,13 @@ export function StepRow({
             {step.statusMessage && !step.name && step.type !== "StatusUpdate" && (
               <Text style={sharedStyles.stepCardStatus} numberOfLines={1}>{step.statusMessage}</Text>
             )}
+            {!!step.comment && <StepComment text={step.comment} />}
           </View>
 
           {!selectMode && (
             <>
               <TouchableOpacity onPress={onCopy}   hitSlop={8} style={sharedStyles.cardAction} activeOpacity={0.7}>
-                <Copy   size={15} color="#9ca3af" />
+                <Copy   size={15} color={colors.textFaint} />
               </TouchableOpacity>
               <DeleteIconButton onPress={onDelete} size={15} style={sharedStyles.cardAction} />
             </>
@@ -230,7 +295,7 @@ export function StepRow({
               onPress={() => selectMode ? onToggleSelect?.() : onEnterRoutine(step.routineName!)}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>{step.routineName}</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>{step.routineName}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Enter</Text>
                 <ArrowRight size={13} color={theme.iconColor} />
@@ -247,7 +312,7 @@ export function StepRow({
               onPress={() => selectMode ? onToggleSelect?.() : onEnterScope({ kind: "loop", stepId: step.id, label: stepLabel(step) })}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 12, color: "#64748b" }}>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>
                 {innerSteps.length} step{innerSteps.length !== 1 ? "s" : ""} inside
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -267,7 +332,7 @@ export function StepRow({
               activeOpacity={0.7}
             >
               {/* Counts and file live in the detail rows above — this is just the door */}
-              <Text style={{ fontSize: 12, color: "#64748b" }}>Edit toolpath</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>Edit toolpath</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: theme.iconColor }}>Open</Text>
                 <ArrowRight size={13} color={theme.iconColor} />

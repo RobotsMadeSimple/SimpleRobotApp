@@ -70,7 +70,167 @@ export type CameraState = {
   targetFps: number;
   enabled: boolean;
   supportedResolutions: { width: number; height: number }[];
+  /** Has a saved camera-to-robot calibration (docs/camera-calibration.md). Absent on older controllers. */
+  calibrated?: boolean;
+  // ── Network cameras (docs/network-cameras.md). All absent on older controllers. ──
+  /** Absent = "usb". */
+  sourceType?: CameraSourceType;
+  /** Stream URL without credentials (network cameras). */
+  url?: string;
+  username?: string;
+  /** Returned so the app can edit it; never render it. */
+  password?: string;
+  /** RTSP only. Default "tcp". */
+  transport?: CameraTransport;
+  /** Size the stream actually delivers (0 until connected). */
+  streamWidth?: number;
+  streamHeight?: number;
+  /** Best-effort decode latency estimate, 0 when unknown. */
+  latencyMs?: number;
+  // ── Sofia / DVRIP (XMeye) cameras (docs/network-cameras.md). `url`/`transport` unused. ──
+  /** Sofia only: camera IP / hostname. */
+  host?: string;
+  /** Sofia only. Default 34567. */
+  port?: number;
+  /** Sofia only. "Main" (primary, default) or "Extra1" (sub-stream). */
+  stream?: CameraStream;
+  /** Sofia only: what the camera streams; hints the decoder. Default "h264". */
+  codec?: CameraCodec;
+  /** Sofia only. "opencv": in-process via a loopback FFmpeg demux (default). "ffmpeg": external process. */
+  decoder?: CameraDecoder;
+  /** Sofia "ffmpeg" decoder only. Default "ffmpeg". */
+  ffmpegPath?: string;
+  /** Sofia "ffmpeg" decoder only: "", "auto", "d3d11va", … */
+  hwaccel?: string;
 };
+
+export type CameraSourceType = "usb" | "network" | "sofia";
+export type CameraTransport = "tcp" | "udp";
+export type CameraStream = "Main" | "Extra1";
+export type CameraCodec = "h264" | "hevc";
+export type CameraDecoder = "opencv" | "ffmpeg";
+
+/** Error codes from TestCameraSource for network cameras (docs/network-cameras.md). */
+export type CameraSourceTestError = "invalidUrl" | "openFailed" | "noFrame" | "timeout";
+
+/** Error codes from TestCameraSource for Sofia cameras (docs/network-cameras.md). */
+export type SofiaSourceTestError =
+  "connectFailed" | "loginFailed" | "claimFailed" | "noFrame" | "timeout" | "decoderUnavailable";
+
+export type CameraSourceTestResult = {
+  ok: boolean;
+  width: number;
+  height: number;
+  openMs: number;
+  firstFrameMs: number;
+  /** Sofia only: DVRIP login time, ms. */
+  loginMs?: number;
+  /** Sofia only: codec identified from the decoded stream. */
+  detectedCodec?: "h264" | "hevc" | "unknown";
+  /** Sofia only: byte size of the first video frame. */
+  firstFrameBytes?: number;
+  /** A CameraSourceTestError / SofiaSourceTestError code, or another controller message. */
+  error?: string;
+};
+
+// ── Camera-to-robot calibration (docs/camera-calibration.md) ─────────────────
+
+export type CalibrationRobotPoint = { x: number; y: number; z: number };
+
+/** A dot found on the calibration sheet. `u, v` are normalized image coordinates (0–1). */
+export type CalibrationDot = {
+  index: number;
+  i: number;
+  j: number;
+  u: number;
+  v: number;
+  areaPx: number;
+};
+
+/** A dot the robot tip was taught on, as the session reports it. */
+export type CalibrationTaughtDot = {
+  dotIndex: number;
+  i: number;
+  j: number;
+  robot: CalibrationRobotPoint;
+};
+
+/** A taught dot as stored in the saved calibration. */
+export type CalibrationStoredDot = {
+  i: number;
+  j: number;
+  u: number;
+  v: number;
+  robot: CalibrationRobotPoint;
+  /** Residual after the rigid fit, when the controller reports it per dot. */
+  residualMm?: number;
+};
+
+export type Matrix3 = [[number, number, number], [number, number, number], [number, number, number]];
+
+/** Persisted `cameraCalibrations/<cameraId>.json`. */
+export type CameraCalibration = {
+  cameraId: string;
+  imageWidth: number;
+  imageHeight: number;
+  dotPitchMm: number;
+  /** Pixel (px) → sheet mm homography. */
+  pixelToSheet: Matrix3;
+  /** Sheet mm → robot XY rigid transform. */
+  sheetToRobot: { cos: number; sin: number; tx: number; ty: number };
+  /** Composed pixel (px) → robot mm homography. */
+  pixelToRobot: Matrix3;
+  planeZ: number;
+  taughtDots: CalibrationStoredDot[];
+  gridRows: number;
+  gridCols: number;
+  dotCount: number;
+  gridRmsPx: number;
+  taughtRmsMm: number;
+  taughtMaxMm: number;
+  /** > 1 means the taught distances are longer than the pitch implies. */
+  pitchScaleEstimate: number;
+  /** The sheet→robot fit needed a reflection (grid axes assigned mirrored). */
+  mirrored?: boolean;
+  /** Tool that was active while teaching. */
+  activeTool: string;
+  calibratedUnixMs: number;
+};
+
+/** A detection pass: CalibrationStart / CalibrationRedetect. */
+export type CalibrationSession = {
+  sessionId: string;
+  imageWidth: number;
+  imageHeight: number;
+  dots: CalibrationDot[];
+  gridRows: number;
+  gridCols: number;
+  gridRmsPx: number;
+  warnings: string[];
+  /** Server-relative path of the annotated JPEG (`/calibration/{sessionId}/image`). */
+  imageUrl: string;
+  /** Taught dots kept across a re-detect, when the controller reports them. */
+  taught?: CalibrationTaughtDot[];
+};
+
+export type CalibrationDetectOptions = {
+  minDotAreaPx?: number;
+  maxDotAreaPx?: number;
+  /** Dark dots on white (default true) or white on dark. */
+  darkDots?: boolean;
+};
+
+/** CalibrationSolve result. */
+export type CalibrationSolveResult = {
+  calibration: CameraCalibration;
+  taughtRmsMm: number;
+  taughtMaxMm: number;
+  pitchScaleEstimate: number;
+  warnings: string[];
+};
+
+/** RunVision output coordinate frame. Absent = the controller's default (today's behaviour). */
+export type VisionOutputFrame = "pixel" | "normalized" | "robot";
 
 // ── USB Relay ─────────────────────────────────────────────────────────────────
 
@@ -186,12 +346,19 @@ export type VisionProgram = {
   arucoInspections?: ArucoInspection[];
   lineInspections?: LineInspection[];
   barcodeInspections?: BarcodeInspection[];
+  /**
+   * Display order of inspections, as a flat list of inspection ids across all the typed
+   * lists above. Lets the user drag inspections into any order regardless of type. Ids
+   * missing from this list (e.g. a freshly added inspection) fall to the end in their
+   * type-grouped order; an empty/absent list means "keep the default type grouping".
+   */
+  inspectionOrder?: string[];
   lastUpdatedUnixMs: number;
 };
 
 export type BlobResult       = { x: number; y: number; size: number };
 export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[] };
+export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[]; timings?: Record<string, number> };
 
 export type ArucoResult = {
   inspectionId: string;
@@ -677,7 +844,22 @@ export type ProgramVariable = {
    * which is often a PNG. Use `imageDataUri` rather than assuming a format.
    */
   isImage?: boolean;
+  /**
+   * When true, this is a computed variable (a user-defined property): `valueExpression`
+   * is a formula re-evaluated every time the variable is read, against the live
+   * variables, IO and properties. It has no stored value and cannot be assigned.
+   * Only `isBoolean`, `isGlobal` and `displayOnMonitor` combine with it; `value`,
+   * `items`, `isPersistent`, `isString`, `isImage` and `isStopwatch` do not.
+   * See docs/expressions-and-variables.md section 7 in the controller.
+   */
+  isComputed?: boolean;
 };
+
+/** True for a computed variable — readable in expressions, never a write target. */
+export const isComputedVariable = (v: ProgramVariable): boolean => v.isComputed === true;
+
+/** Can be a write target (Set Variable, loop index/value, vision/HTTP outputs). */
+export const isAssignableVariable = (v: ProgramVariable): boolean => !isComputedVariable(v);
 
 /**
  * A variable's list elements, folding in the legacy `values` / `points` / `objects` fields
@@ -770,6 +952,14 @@ export type ProgramStep = {
   id: string;
   type: StepType;
   name?: string;
+  /**
+   * `false` = the executor skips this step (still counted for progress, logged as
+   * "[Skipped — disabled] …"). Absent or `true` runs it, so the editor only ever
+   * writes `false` and clears the field otherwise.
+   */
+  enabled?: boolean;
+  /** Free text shown under the step in the editor. Never executed. */
+  comment?: string;
   pointName?: string;
   speed?: number;
   accel?: number;
@@ -844,6 +1034,8 @@ export type ProgramStep = {
   visionZoneId?: string;
   visionZoneVar?: string;
   visionOutputs?: VisionStepOutput[];
+  /** Coordinate frame point outputs are written in ("robot" needs a calibrated camera). */
+  outputFrame?: VisionOutputFrame;
   colorOutputs?: ColorVisionStepOutput[];
   polygonOutputs?: PolygonVisionStepOutput[];
   arucoOutputs?: ArucoVisionStepOutput[];
@@ -900,6 +1092,8 @@ export type ProgramStep = {
   threadPitch?: number;
   threadPeck?: boolean;
   threadPeckDepth?: number;
+  threadPeckRetract?: number; // retract per peck; omitted = full retract to start each peck
+  threadExitHeight?: number;  // finish this far past the start on the way out (exit higher)
   threadReverseOut?: boolean;
   // CncProgram — cncSpec is the current format (steps generated at runtime by
   // the controller); cncProgramSteps holds baked steps from older versions.
@@ -1000,6 +1194,76 @@ export type BuiltProgram = {
   killBackgroundOnStop?: boolean;
 };
 
+// ── Program-editor services (docs/expressions-and-variables.md) ──────────────
+
+export type ValidationSeverity = "error" | "warning";
+
+/** Codes the controller documents today. Others may appear later, so `code` stays a string. */
+export type KnownValidationCode =
+  | "unknownPoint" | "unknownTool" | "unknownLocal" | "unknownRoutine" | "unknownVisionProgram"
+  | "unknownGrid" | "unknownStack" | "unknownLabel" | "duplicateLabel" | "unknownVariable"
+  | "unknownProperty" | "expressionSyntax" | "emptyLoop" | "emptyBranch" | "missingField"
+  | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable"
+  | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict";
+
+/** One problem reported by `ValidateBuiltProgram`. */
+export type ValidationProblem = {
+  /** The step the problem is on. Empty for program-level problems (e.g. unusedVariable). */
+  stepId: string;
+  /** Human-readable location of the step in the tree, as the controller renders it. */
+  stepPath: string;
+  /** The step field at fault, when the problem is about one field. */
+  field?: string;
+  severity: ValidationSeverity;
+  code: KnownValidationCode | (string & {});
+  message: string;
+};
+
+export type ExpressionVariableKind = "number" | "boolean" | "string" | "image" | "list" | "computed";
+
+export type ExpressionSymbolVariable = {
+  name: string;
+  kind: ExpressionVariableKind;
+  elementType?: ListElementType;
+  /** The formula of a `kind: "computed"` variable. */
+  expression?: string;
+  isGlobal: boolean;
+  isPersistent: boolean;
+  value?: number | string | boolean | null;
+};
+
+/** A read-only system variable such as `robot.x` (stored without the `$`). */
+export type ExpressionProperty = { name: string; description: string; type: string };
+export type ExpressionFunction = { name: string; signature: string; description: string };
+/** An IO name such as `stb.in1` (stored without the `$`). */
+export type ExpressionIoSymbol = { name: string; description: string };
+
+/** What `GetExpressionSymbols` answers: everything an expression may reference. */
+export type ExpressionSymbols = {
+  variables: ExpressionSymbolVariable[];
+  properties: ExpressionProperty[];
+  functions: ExpressionFunction[];
+  io: ExpressionIoSymbol[];
+};
+
+/** Result of `EvaluateExpression`. `ok: false` carries the evaluator's error text. */
+export type ExpressionEvaluation = {
+  ok: boolean;
+  value?: number;
+  error?: string;
+  isBoolean?: boolean;
+};
+
+/** One stored revision of a built program, newest first from `GetBuiltProgramRevisions`. */
+export type ProgramRevision = {
+  /** The unix-ms file stem, kept as a string so it round-trips exactly. */
+  id: string;
+  savedUnixMs: number;
+  stepCount: number;
+  variableCount: number;
+  note?: string;
+};
+
 export type BackgroundProgramStatus = {
   id?: string;
   name: string;
@@ -1021,6 +1285,14 @@ export type ProgramSummary = {
   maxStepCount: number;
   errorDescription: string;
   warningDescription: string;
+  /** Times the program has been started since the controller booted. */
+  runCount?: number;
+  /**
+   * Unix ms of the most recent start. Changes on every start, so a poller can
+   * notice a run that began and finished between two polls (status reads
+   * "Complete" both times — e.g. a single move whose target is already reached).
+   */
+  lastStartedUnixMs?: number;
   currentPointName: string;
   currentOffsetX?: number;  currentOffsetY?: number;  currentOffsetZ?: number;
   currentOffsetRX?: number; currentOffsetRY?: number; currentOffsetRZ?: number;

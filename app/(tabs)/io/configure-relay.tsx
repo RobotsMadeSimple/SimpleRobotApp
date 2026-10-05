@@ -1,22 +1,38 @@
-import { wide } from "@/src/components/ui/responsive";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { ArrowLeft, Check, Radio } from "lucide-react-native";
+import { Check } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
+import {
+  accents,
+  Button,
+  colors,
+  InfoTip,
+  Input,
+  PageHeader,
+  radii,
+  Screen,
+  SectionHeader,
+  spacing,
+} from "@/src/components/ui/kit";
+
 const RELAY_COUNT = 4;
+
+// Relay board device-type tint (cyan) — matches its icon tile on the IO index
+// page, via the kit's cyan accent family.
+const RELAY_TINT      = accents.cyan;
+const RELAY_TINT_SOFT = accents.cyanSoft;
+const RELAY_TINT_DIRTY_BORDER = "#67e8f9";
+const RELAY_TINT_DIRTY_BG     = "#f0fdff";
 
 export default function ConfigureRelayPage() {
   const relay   = useRelayIO();
@@ -47,8 +63,12 @@ export default function ConfigureRelayPage() {
         }
       }
       router.back();
-    } catch {
-      // Stay on page so user can retry
+    } catch (err) {
+      // Stay on page so the user can retry — and say why it failed.
+      appAlert(
+        "Save Failed",
+        typeof err === "string" ? err : "The relay names could not be saved. Check the controller connection.",
+      );
     } finally {
       setSaving(false);
     }
@@ -59,48 +79,34 @@ export default function ConfigureRelayPage() {
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.container}>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <PageHeader
+          title="Configure Relay Board"
+          subtitle="DCTTECH 4-Channel USB HID"
+          crumbs={[
+            { label: "I/O", href: "/io" },
+            { label: "USB Relay Board", href: "/(tabs)/io/relay" },
+            { label: "Configure Relay" },
+          ]}
+          right={
+            <Button
+              variant="primary"
+              size="sm"
+              label="Save"
+              icon={<Check size={16} color={colors.onAccent} />}
+              loading={saving}
+              disabled={!dirty}
+              onPress={saveAll}
+              style={{ backgroundColor: RELAY_TINT }}
+            />
+          }
+        />
 
-        {/* ── Top bar ── */}
-        <View style={styles.topBar}>
-          <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
-            <ArrowLeft size={20} color="#111827" />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.topTitle}>Configure Relay Board</Text>
-            <View style={styles.topSubRow}>
-              <Radio size={11} color="#9ca3af" />
-              <Text style={styles.topSub}>DCTTECH 4-Channel USB HID</Text>
-            </View>
-          </View>
-          <Pressable
-            style={[styles.saveBtn, (!dirty || saving) && styles.saveBtnDim]}
-            onPress={saveAll}
-            disabled={!dirty || saving}
-          >
-            {saving
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Check size={16} color="#fff" />
-            }
-            <Text style={styles.saveBtnText}>
-              {saving ? "Saving…" : "Save"}
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* ── Column headers ── */}
-        <View style={[styles.colHeaders, wide.bar]}>
-          <Text style={[styles.colHeader, { width: 60 }]}>CHANNEL</Text>
-          <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
-        </View>
-
-        {/* ── Relay rows ── */}
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={[styles.listContent, wide.content]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
+        <Screen>
+          <SectionHeader
+            title="Channels"
+            right={<InfoTip text="Names appear throughout the app wherever this relay is used, so rename each channel to match what it switches (e.g. “Conveyor” or “Cabinet Light”)." />}
+          />
           {Array.from({ length: RELAY_COUNT }, (_, i) => {
             const isDirty = edits[i] !== names[i];
             return (
@@ -114,102 +120,40 @@ export default function ConfigureRelayPage() {
                   <Text style={styles.channelSub}>CH{i + 1}</Text>
                 </View>
 
-                <TextInput
+                <Input
                   style={[styles.nameInput, isDirty && styles.nameInputDirty]}
                   value={edits[i] ?? ""}
                   onChangeText={v => updateName(i, v)}
                   placeholder={`Relay ${i + 1}`}
-                  placeholderTextColor="#c4c9d4"
                   returnKeyType="next"
                   maxLength={32}
                 />
               </View>
             );
           })}
-        </ScrollView>
+        </Screen>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
-
-  // ── Top bar ────────────────────────────────────────────────────────────────
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  topTitle:  { fontSize: 16, fontWeight: "700", color: "#111827" },
-  topSubRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
-  topSub:    { fontSize: 11, color: "#9ca3af" },
-  saveBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#0891b2",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  saveBtnDim:  { opacity: 0.4 },
-  saveBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
-
-  // ── Column headers ─────────────────────────────────────────────────────────
-  colHeaders: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  colHeader: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#9ca3af",
-    letterSpacing: 0.6,
-  },
-
-  // ── List ───────────────────────────────────────────────────────────────────
-  listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 32,
-    gap: 6,
-  },
-
-  // ── Row ────────────────────────────────────────────────────────────────────
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: spacing.sm + 2,
+    backgroundColor: colors.surface,
+    borderRadius: radii.sm + 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: colors.border,
   },
   rowDirty: {
-    borderColor: "#67e8f9",
-    backgroundColor: "#f0fdff",
+    borderColor: RELAY_TINT_DIRTY_BORDER,
+    backgroundColor: RELAY_TINT_DIRTY_BG,
   },
 
-  // ── Channel badge ──────────────────────────────────────────────────────────
   channelWrap: {
     width: 48,
     alignItems: "center",
@@ -218,47 +162,38 @@ const styles = StyleSheet.create({
   channelBadge: {
     width: 30,
     height: 30,
-    borderRadius: 8,
-    backgroundColor: "#ecfeff",
+    borderRadius: radii.sm - 1,
+    backgroundColor: RELAY_TINT_SOFT,
     borderWidth: 1.5,
-    borderColor: "#a5f3fc",
+    borderColor: accents.cyanBorder,
     justifyContent: "center",
     alignItems: "center",
   },
   channelBadgeDirty: {
     backgroundColor: "#cffafe",
-    borderColor: "#0891b2",
+    borderColor: RELAY_TINT,
   },
   channelNum: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#0891b2",
+    color: RELAY_TINT,
   },
   channelNumDirty: {
     color: "#0e7490",
   },
   channelSub: {
     fontSize: 9,
-    color: "#9ca3af",
+    color: colors.textFaint,
     fontWeight: "600",
     letterSpacing: 0.4,
   },
 
-  // ── Name input ─────────────────────────────────────────────────────────────
   nameInput: {
     flex: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    fontSize: 14,
-    color: "#111827",
-    backgroundColor: "#f9fafb",
   },
   nameInputDirty: {
-    borderColor: "#0891b2",
-    backgroundColor: "#ecfeff",
+    borderColor: RELAY_TINT,
+    backgroundColor: RELAY_TINT_SOFT,
     color: "#0e7490",
   },
 });

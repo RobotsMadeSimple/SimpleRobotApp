@@ -1,10 +1,10 @@
-import { wide, useIsWide } from "@/src/components/ui/responsive";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
 import { Point } from "@/src/models/robotModels";
-import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useConnected, usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { Button, colors, Divider, EmptyState, FormRow, InfoTip, Input, PageHeader, radii, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
 import { useFocusEffect } from "expo-router";
 import {
   MapPin,
@@ -25,7 +25,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -37,6 +36,9 @@ import Animated, {
 } from "react-native-reanimated";
 
 // ── Blueprint palette ──────────────────────────────────────────────────────────
+// This is a self-contained dark technical-blueprint visualization (canvas), not
+// standard app chrome — its palette is intentional and stays outside the light
+// kit tokens (see migration report). Drawing logic is untouched per scope.
 const BP_BG         = "#1a3a5c";
 const BP_AXIS       = "rgba(186, 230, 255, 0.85)";
 const BP_GRID_MAJOR = "rgba(147, 197, 253, 0.45)";
@@ -319,6 +321,7 @@ export default function PointsPage() {
   const points = usePoints();
   const robot = useSelectedRobot();
   const isWide = useIsWide();
+  const wideContent = useWideContent();
   const [selectedPoint, setSelectedPoint] = useState<Point | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movingFromPage, setMovingFromPage] = useState(false);
@@ -331,13 +334,17 @@ export default function PointsPage() {
   const [moveSpeeds, setMoveSpeeds] = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
   const [selectedSpeed, setSelectedSpeed] = useState<"Slow" | "Normal" | "Fast">("Normal");
 
-  useFocusEffect(
-    useCallback(() => {
-      robotClient.getRobotConfig()
-        .then(cfg => setMoveSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
-        .catch(() => {});
-    }, [])
-  );
+  // Re-run on (re)connect as well as on focus: if the controller starts while
+  // this page is open, the focus-time request has already failed.
+  const connected = useConnected();
+  const loadMoveSpeeds = useCallback(() => {
+    if (!connected) return;
+    robotClient.getRobotConfig()
+      .then(cfg => setMoveSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
+      .catch(() => {});
+  }, [connected]);
+  useFocusEffect(loadMoveSpeeds);
+  useEffect(() => { loadMoveSpeeds(); }, [loadMoveSpeeds]);
 
   const AT_THRESHOLD = 0.5;
 
@@ -443,22 +450,15 @@ export default function PointsPage() {
 
   // Speed selector + table — right pane in wide mode, stacked below the map on phones.
   const speedBarEl = (
-    <View style={[styles.speedBar, wide.bar]}>
+    <View style={[styles.speedBar, wideContent]}>
       <Text style={styles.speedBarLabel}>SPEED</Text>
-      <View style={styles.speedSegRow}>
-        {(["Slow", "Normal", "Fast"] as const).map((spd) => {
-          const active = selectedSpeed === spd;
-          return (
-            <Pressable
-              key={spd}
-              style={[styles.speedSeg, active && styles.speedSegActive]}
-              onPress={() => setSelectedSpeed(spd)}
-            >
-              <Text style={[styles.speedSegText, active && styles.speedSegTextActive]}>{spd}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <SegmentedControl
+        options={["Slow", "Normal", "Fast"] as const}
+        value={selectedSpeed}
+        onChange={setSelectedSpeed}
+        size="sm"
+        style={styles.speedSegRow}
+      />
     </View>
   );
 
@@ -469,9 +469,13 @@ export default function PointsPage() {
       renderItem={renderItem}
       ListHeaderComponent={Header}
       stickyHeaderIndices={[0]}
-      contentContainerStyle={[styles.list, wide.content]}
+      contentContainerStyle={[styles.list, wideContent]}
       ListEmptyComponent={
-        <Text style={styles.empty}>No points available</Text>
+        <EmptyState
+          icon={<MapPin size={28} color={colors.textFaint} />}
+          title="No points saved yet"
+          subtitle="Jog the robot to a position, then save it as a point from Jog & Teach."
+        />
       }
     />
   );
@@ -479,7 +483,15 @@ export default function PointsPage() {
   return (
     <View style={styles.page}>
       <NotConnectedOverlay />
-      <SubPageHeader title="Points" />
+      <PageHeader
+        title="Points"
+        subtitle="Move to, edit, or delete saved robot positions"
+        right={
+          <InfoTip
+            text={`Tap a point on the map or in the list to line/joint move the robot there, edit its coordinates, or delete it. ${Platform.OS === "web" ? "Scroll to zoom, drag to pan" : "Pinch to zoom, drag to pan"} the map.`}
+          />
+        }
+      />
 
       {isWide ? (
         /* ── Wide layout: map fills the left half, speed + table on the right ── */
@@ -512,11 +524,11 @@ export default function PointsPage() {
           <Pressable style={styles.dialog} onPress={() => {}}>
             <View style={styles.dialogHeader}>
               <View style={styles.dialogTitleRow}>
-                <MapPin size={16} color="#6b7280" style={{ marginTop: 1 }} />
+                <MapPin size={16} color={colors.textMuted} style={{ marginTop: 1 }} />
                 <Text style={styles.dialogTitle}>{selectedPoint?.name}</Text>
               </View>
               <Pressable onPress={closeMenu} hitSlop={10}>
-                <X size={18} color="#9ca3af" />
+                <X size={18} color={colors.textFaint} />
               </Pressable>
             </View>
 
@@ -527,24 +539,24 @@ export default function PointsPage() {
               RZ {selectedPoint?.rz.toFixed(1)}
             </Text>
 
-            <View style={styles.divider} />
+            <Divider style={styles.divider} />
 
             {!confirmDelete ? (
               <>
                 <Pressable style={styles.actionRow} onPress={moveL}>
-                  <Navigation size={18} color="#2563eb" />
+                  <Navigation size={18} color={colors.accent} />
                   <Text style={styles.actionText}>Line Move</Text>
                 </Pressable>
                 <Pressable style={styles.actionRow} onPress={moveJ}>
-                  <RotateCw size={18} color="#2563eb" />
+                  <RotateCw size={18} color={colors.accent} />
                   <Text style={styles.actionText}>Joint Move</Text>
                 </Pressable>
                 <Pressable style={styles.actionRow} onPress={openEdit}>
-                  <Pencil size={18} color="#2563eb" />
+                  <Pencil size={18} color={colors.accent} />
                   <Text style={styles.actionText}>Edit Point</Text>
                 </Pressable>
                 <AnimatedPressable style={styles.actionRow} onPress={() => setConfirmDelete(true)}>
-                  <Trash2 size={18} color="#dc2626" />
+                  <Trash2 size={18} color={colors.danger} />
                   <Text style={styles.deleteActionText}>Delete</Text>
                 </AnimatedPressable>
               </>
@@ -554,13 +566,14 @@ export default function PointsPage() {
                   Delete <Text style={{ fontWeight: "700" }}>{selectedPoint?.name}</Text>? This cannot be undone.
                 </Text>
                 <View style={styles.confirmButtons}>
-                  <Pressable style={styles.confirmCancel} onPress={() => setConfirmDelete(false)}>
-                    <Text style={styles.confirmCancelText}>Cancel</Text>
-                  </Pressable>
-                  <AnimatedPressable style={styles.confirmDelete} onPress={deletePoint}>
-                    <Trash2 size={15} color="white" />
-                    <Text style={styles.confirmDeleteText}>Delete</Text>
-                  </AnimatedPressable>
+                  <Button label="Cancel" variant="secondary" style={styles.confirmBtn} onPress={() => setConfirmDelete(false)} />
+                  <Button
+                    label="Delete"
+                    variant="destructive"
+                    style={styles.confirmBtn}
+                    icon={<Trash2 size={15} color={colors.onAccent} />}
+                    onPress={deletePoint}
+                  />
                 </View>
               </>
             )}
@@ -572,20 +585,21 @@ export default function PointsPage() {
       <Modal visible={movingFromPage} transparent animationType="fade">
         <View style={styles.stopOverlay}>
           <View style={styles.stopCard}>
-            <Navigation size={28} color="#2563eb" />
+            <Navigation size={28} color={colors.accent} />
             <Text style={styles.stopTitle}>Moving to point</Text>
             {movingToName && <Text style={styles.stopPointName}>{movingToName}</Text>}
-            <Pressable
-              style={styles.stopButton}
+            <Button
+              label="STOP"
+              variant="destructive"
+              icon={<OctagonX size={22} color={colors.onAccent} />}
               onPress={() => {
                 robotClient.sendCommand("HardStop");
                 setMovingFromPage(false);
                 setMovingToName(null);
               }}
-            >
-              <OctagonX size={22} color="white" />
-              <Text style={styles.stopButtonText}>STOP</Text>
-            </Pressable>
+              style={styles.stopButton}
+              textStyle={styles.stopButtonText}
+            />
           </View>
         </View>
       </Modal>
@@ -604,44 +618,39 @@ export default function PointsPage() {
           <Pressable style={styles.overlay} onPress={() => setEditVisible(false)}>
             <Pressable style={styles.editCard} onPress={() => {}}>
               <View style={styles.editHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Pencil size={16} color="#6b7280" />
+                <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                  <Pencil size={16} color={colors.textMuted} />
                   <Text style={styles.editTitle}>Edit Point</Text>
                 </View>
                 <Pressable onPress={() => setEditVisible(false)} hitSlop={10}>
-                  <X size={18} color="#9ca3af" />
+                  <X size={18} color={colors.textFaint} />
                 </Pressable>
               </View>
 
-              <Text style={styles.editLabel}>Name</Text>
-              <TextInput
-                style={styles.editInput}
-                value={editDraft.name}
-                onChangeText={(v) => setEditDraft((d) => ({ ...d, name: v }))}
-                autoCapitalize="none"
-                returnKeyType="next"
-              />
+              <FormRow label="Name" style={styles.editRow}>
+                <Input
+                  value={editDraft.name}
+                  onChangeText={(v) => setEditDraft((d) => ({ ...d, name: v }))}
+                  autoCapitalize="none"
+                  returnKeyType="next"
+                />
+              </FormRow>
 
               {(["x", "y", "z", "rz"] as const).map((field) => (
-                <View key={field}>
-                  <Text style={styles.editLabel}>{field.toUpperCase()}</Text>
-                  <TextInput
-                    style={styles.editInput}
+                <FormRow key={field} label={field.toUpperCase()} style={styles.editRow}>
+                  <Input
+                    style={styles.coordInput}
                     value={editDraft[field]}
                     onChangeText={(v) => setEditDraft((d) => ({ ...d, [field]: v }))}
                     keyboardType="numeric"
                     returnKeyType="done"
                   />
-                </View>
+                </FormRow>
               ))}
 
               <View style={styles.editActions}>
-                <Pressable style={styles.editCancel} onPress={() => setEditVisible(false)}>
-                  <Text style={styles.editCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable style={styles.editSave} onPress={saveEdit}>
-                  <Text style={styles.editSaveText}>Save</Text>
-                </Pressable>
+                <Button label="Cancel" variant="secondary" style={styles.editBtn} onPress={() => setEditVisible(false)} />
+                <Button label="Save" variant="primary" style={styles.editBtn} onPress={saveEdit} />
               </View>
             </Pressable>
           </Pressable>
@@ -652,15 +661,13 @@ export default function PointsPage() {
       <Modal visible={alreadyHere} transparent animationType="fade" onRequestClose={() => setAlreadyHere(false)}>
         <Pressable style={styles.overlay} onPress={() => setAlreadyHere(false)}>
           <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
-            <MapPin size={28} color="#2563eb" />
+            <MapPin size={28} color={colors.accent} />
             <Text style={styles.alreadyHereTitle}>Already Here</Text>
             <Text style={styles.alreadyHereBody}>
               The robot is already at{"\n"}
               <Text style={{ fontWeight: "700" }}>{selectedPoint?.name}</Text>
             </Text>
-            <Pressable style={styles.alreadyHereButton} onPress={() => setAlreadyHere(false)}>
-              <Text style={styles.alreadyHereButtonText}>OK</Text>
-            </Pressable>
+            <Button label="OK" variant="primary" style={styles.alreadyHereButton} onPress={() => setAlreadyHere(false)} />
           </Pressable>
         </Pressable>
       </Modal>
@@ -671,9 +678,10 @@ export default function PointsPage() {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surface,
   },
 
+  // ── Blueprint map canvas — intentional dark theme, left untouched ──────────
   mapContainer: {
     height: MAP_HEIGHT,
     backgroundColor: BP_BG,
@@ -685,7 +693,7 @@ const styles = StyleSheet.create({
   wideRow:  { flex: 1, flexDirection: "row" },
   mapPane:  {
     flex: 1,
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "#e5e7eb",
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.border,
   },
   listPane: { flex: 1 },
   axisH: {
@@ -756,351 +764,237 @@ const styles = StyleSheet.create({
     color: "rgba(148, 163, 184, 0.55)",
   },
 
+  // ── Speed selector ───────────────────────────────────────────────────────────
   speedBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-    backgroundColor: "#fff",
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
   },
   speedBarLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    color: "#6b7280",
+    ...type.sectionLabel,
   },
   speedSegRow: {
     flex: 1,
-    flexDirection: "row",
-    gap: 6,
-  },
-  speedSeg: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    backgroundColor: "#f9fafb",
-    alignItems: "center",
-  },
-  speedSegActive: {
-    backgroundColor: "#2563eb",
-    borderColor: "#2563eb",
-  },
-  speedSegText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-  speedSegTextActive: {
-    color: "#fff",
   },
 
+  // ── Points table ──────────────────────────────────────────────────────────
   list: {
-    paddingHorizontal: 8,
-    paddingBottom: 8,
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.sm,
   },
   headerRow: {
     flexDirection: "row",
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: 1,
-    borderBottomColor: "#333",
-    backgroundColor: "#fff",
+    borderBottomColor: colors.borderStrong,
+    backgroundColor: colors.surface,
   },
   headerCell: {
     flex: 1,
     fontWeight: "600",
     fontSize: 13,
-    color: "#000",
+    color: colors.text,
     textAlign: "center",
   },
   row: {
     flexDirection: "row",
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ddd",
+    borderBottomColor: colors.border,
   },
   cell: {
+    ...type.mono,
     flex: 1,
-    fontFamily: "monospace",
     textAlign: "center",
-    color: "#000",
+    color: colors.text,
     fontSize: 13,
   },
   name: {
     flex: 2,
     textAlign: "left",
-    paddingLeft: 6,
+    paddingLeft: spacing.xs + 2,
   },
-  empty: {
-    textAlign: "center",
-    marginTop: 40,
-    color: "#888",
-  },
-
+  // ── Point options dialog ─────────────────────────────────────────────────
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
   dialog: {
     width: 280,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingHorizontal: spacing.lg + 4,
+    paddingVertical: spacing.lg + 2,
+    ...shadows.raised,
   },
   dialogHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   dialogTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.xs + 2,
   },
   dialogTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
   },
   coordText: {
+    ...type.mono,
     fontSize: 11,
-    color: "#9ca3af",
-    fontFamily: "monospace",
-    marginBottom: 14,
+    color: colors.textFaint,
+    marginBottom: spacing.md + 2,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#e5e7eb",
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   actionRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 13,
+    gap: spacing.md,
+    paddingVertical: spacing.md + 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: colors.background,
   },
   actionText: {
     fontSize: 15,
-    color: "#2563eb",
+    color: colors.accent,
     fontWeight: "500",
   },
   deleteActionText: {
     fontSize: 15,
-    color: "#dc2626",
+    color: colors.danger,
     fontWeight: "500",
   },
   confirmText: {
     fontSize: 14,
-    color: "#374151",
-    marginVertical: 12,
+    color: colors.textSecondary,
+    marginVertical: spacing.md,
     lineHeight: 20,
   },
   confirmButtons: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
+    gap: spacing.sm + 2,
+    marginTop: spacing.xs,
   },
-  confirmCancel: {
+  confirmBtn: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#d1d5db",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  confirmCancelText: {
-    color: "#6b7280",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  confirmDelete: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#dc2626",
-    borderRadius: 8,
-    paddingVertical: 10,
-  },
-  confirmDeleteText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "600",
   },
 
+  // ── Move stop overlay ─────────────────────────────────────────────────────
   stopOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
   stopCard: {
     width: 240,
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xl + 4,
+    paddingHorizontal: spacing.xl,
     alignItems: "center",
-    gap: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
+    gap: spacing.sm,
+    ...shadows.raised,
   },
   stopTitle: {
     fontSize: 15,
-    color: "#374151",
+    color: colors.textSecondary,
     fontWeight: "600",
-    marginTop: 4,
+    marginTop: spacing.xs,
   },
   stopPointName: {
     fontSize: 20,
     fontWeight: "700",
-    color: "#111",
-    marginBottom: 8,
+    color: colors.text,
+    marginBottom: spacing.sm,
   },
   stopButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#dc2626",
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 36,
-    marginTop: 8,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.xl - 4,
+    marginTop: spacing.sm,
   },
   stopButtonText: {
-    color: "white",
     fontSize: 18,
     fontWeight: "bold",
     letterSpacing: 2,
   },
 
+  // ── Already-here popup ───────────────────────────────────────────────────
   alreadyHereCard: {
     width: 220,
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.xl + 4,
+    paddingHorizontal: spacing.xl,
     alignItems: "center",
-    gap: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
+    gap: spacing.xs + 2,
+    ...shadows.raised,
   },
   alreadyHereTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111",
-    marginTop: 4,
+    color: colors.text,
+    marginTop: spacing.xs,
   },
   alreadyHereBody: {
     fontSize: 13,
-    color: "#6b7280",
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   alreadyHereButton: {
-    backgroundColor: "#2563eb",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 36,
-    marginTop: 4,
-  },
-  alreadyHereButtonText: {
-    color: "white",
-    fontSize: 15,
-    fontWeight: "600",
+    paddingHorizontal: spacing.xl - 4,
+    marginTop: spacing.xs,
   },
 
+  // ── Edit point modal ──────────────────────────────────────────────────────
   editCard: {
     width: 300,
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    ...shadows.raised,
   },
   editHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   editTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111",
+    color: colors.text,
   },
-  editLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#6b7280",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 4,
+  editRow: {
+    marginBottom: spacing.sm + 2,
   },
-  editInput: {
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: "#111",
-    backgroundColor: "#f9fafb",
-    marginBottom: 12,
+  coordInput: {
+    ...type.mono,
   },
   editActions: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 8,
+    gap: spacing.sm + 2,
+    marginTop: spacing.sm,
   },
-  editCancel: {
+  editBtn: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#d1d5db",
-    borderRadius: 8,
-    paddingVertical: 11,
-    alignItems: "center",
-  },
-  editCancelText: {
-    color: "#6b7280",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  editSave: {
-    flex: 1,
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
-    paddingVertical: 11,
-    alignItems: "center",
-  },
-  editSaveText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "600",
   },
 });

@@ -1,9 +1,17 @@
-import { wide } from "@/src/components/ui/responsive";
-import { SubPageHeader } from "@/src/components/ui/SubPageHeader";
+import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { CameraState } from "@/src/models/robotModels";
+import { CameraSourceType, CameraState } from "@/src/models/robotModels";
+import { NetworkSourceFields } from "@/src/components/ui/camera/NetworkSourceFields";
+import { SofiaSourceFields } from "@/src/components/ui/camera/SofiaSourceFields";
+import {
+  cameraSourceParams, cameraSourceSummary, cameraSourceTag, cameraUrlProblem,
+  EMPTY_NETWORK_SOURCE, EMPTY_SOFIA_SOURCE, isNetworkCamera, isSofiaCamera, NetworkSource, networkSourceOf,
+  SofiaSource, sofiaSourceOf, sofiaSourceProblem, SOURCE_OPTIONS,
+} from "@/src/components/ui/camera/cameraSource";
 import { router, useLocalSearchParams } from "expo-router";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { CameraLiveFeed, makeCameraHtml } from "@/src/components/vision/CameraLiveFeed";
+import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Camera,
@@ -18,113 +26,30 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 
-// ── Camera HTML builder ───────────────────────────────────────────────────────
-
-function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
-  const viewport = zoomable
-    ? 'width=device-width,initial-scale=1,maximum-scale=10,user-scalable=yes'
-    : 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no';
-  const tapScript = zoomable ? '' :
-    `document.addEventListener('click',function(){try{window.ReactNativeWebView.postMessage('tap');}catch(e){}});`;
-  return `<!DOCTYPE html><html>
-<head>
-  <meta name="viewport" content="${viewport}">
-  <style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}canvas{width:100%;height:100%;object-fit:contain;display:block}</style>
-</head>
-<body>
-  <canvas id="c"></canvas>
-  <script>
-    var c=document.getElementById('c'),x=c.getContext('2d'),dec=false,pend=null;
-    function draw(src){dec=true;var i=new Image();i.onload=function(){if(c.width!==i.naturalWidth||c.height!==i.naturalHeight){c.width=i.naturalWidth;c.height=i.naturalHeight;}x.drawImage(i,0,0,c.width,c.height);dec=false;if(pend!==null){var n=pend;pend=null;draw(n);}};i.src=src;}
-    var ws=new WebSocket(${JSON.stringify(wsUrl)});
-    ws.onmessage=function(e){if(dec){pend=e.data;}else{draw(e.data);}};
-    ${tapScript}
-  <\/script>
-</body></html>`;
-}
-
-// ── CameraWebSocketFeed ───────────────────────────────────────────────────────
-
-function CameraWebSocketFeed({ cameraId, onTap }: { cameraId: string; onTap?: () => void }) {
-  const [hasFrame, setHasFrame] = useState(false);
-  const canvasRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const wsUrl = robotClient.cameraWsUrl(cameraId);
-    if (!wsUrl) return;
-    let cancelled = false;
-    let decoding  = false;
-    let pending: string | null = null;
-    function decode(data: string) {
-      decoding = true;
-      const img = new (window as any).Image() as HTMLImageElement;
-      img.onload = () => {
-        if (cancelled) { decoding = false; return; }
-        const canvas = canvasRef.current;
-        if (canvas) {
-          if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-            canvas.width  = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-          }
-          canvas.getContext('2d')?.drawImage(img, 0, 0);
-          setHasFrame(true);
-        }
-        decoding = false;
-        if (pending !== null) { const next = pending; pending = null; decode(next); }
-      };
-      img.src = data;
-    }
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (e) => { if (decoding) { pending = e.data as string; } else { decode(e.data as string); } };
-    ws.onerror = () => {};
-    return () => { cancelled = true; ws.close(); };
-  }, [cameraId]);
-
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.cameraFeed}>
-        {/* @ts-ignore */}
-        <canvas
-          ref={canvasRef}
-          onClick={() => canvasRef.current?.requestFullscreen?.()}
-          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', backgroundColor: '#000', cursor: 'pointer' }}
-        />
-        {!hasFrame && (
-          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#000' }]}>
-            <Camera size={28} color="#4b5563" />
-            <Text style={styles.feedPlaceholderText}>Connecting…</Text>
-          </View>
-        )}
-      </View>
-    );
-  }
-
-  const wsUrl = robotClient.cameraWsUrl(cameraId);
-  if (!wsUrl) {
-    return (
-      <View style={styles.feedPlaceholder}>
-        <Camera size={28} color="#4b5563" />
-        <Text style={styles.feedPlaceholderText}>Not connected</Text>
-      </View>
-    );
-  }
-
-  return (
-    <VisionCanvas
-      html={makeCameraHtml(wsUrl, false)}
-      style={styles.cameraFeed}
-      onMessage={(e) => { if (e.nativeEvent.data === 'tap') onTap?.(); }}
-    />
-  );
-}
+import {
+  Button,
+  Card,
+  colors,
+  Divider,
+  FormRow,
+  InfoTip,
+  Input,
+  PageHeader,
+  radii,
+  SegmentedControl,
+  Screen,
+  SectionHeader,
+  spacing,
+  StatusPill,
+  type,
+} from "@/src/components/ui/kit";
 
 // ── CameraFullscreenModal ─────────────────────────────────────────────────────
+// Unchanged orientation/feed logic; only the close affordance is restyled.
 
 function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClose: () => void }) {
   useEffect(() => {
@@ -143,7 +68,7 @@ function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClo
           style={{ flex: 1 }}
         />
         <TouchableOpacity style={styles.fullscreenClose} onPress={onClose} activeOpacity={0.8}>
-          <X size={18} color="#fff" />
+          <X size={18} color={colors.onAccent} />
         </TouchableOpacity>
       </View>
     </Modal>
@@ -186,20 +111,22 @@ function ResolutionSheet({
         <View style={styles.sheetHandle} />
         <Text style={styles.sheetTitle}>Select Resolution</Text>
         <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
-          {options.map((r) => {
+          {options.map((r, i) => {
             const sel = !isCustom && String(r.width) === selectedWidth && String(r.height) === selectedHeight;
             return (
-              <TouchableOpacity
-                key={`${r.width}x${r.height}`}
-                style={[styles.sheetRow, styles.rowBorder]}
-                onPress={() => { onSelect(r); onClose(); }}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.sheetRowText, sel && styles.sheetRowTextSelected]}>
-                  {r.width} × {r.height}
-                </Text>
-                {sel && <Check size={16} color="#2563eb" />}
-              </TouchableOpacity>
+              <React.Fragment key={`${r.width}x${r.height}`}>
+                <TouchableOpacity
+                  style={styles.sheetRow}
+                  onPress={() => { onSelect(r); onClose(); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.sheetRowText, sel && styles.sheetRowTextSelected]}>
+                    {r.width} × {r.height}
+                  </Text>
+                  {sel && <Check size={16} color={colors.accent} />}
+                </TouchableOpacity>
+                <Divider />
+              </React.Fragment>
             );
           })}
           <TouchableOpacity
@@ -210,7 +137,7 @@ function ResolutionSheet({
             <Text style={[styles.sheetRowText, isCustom && styles.sheetRowTextSelected]}>
               Custom
             </Text>
-            {isCustom && <Check size={16} color="#2563eb" />}
+            {isCustom && <Check size={16} color={colors.accent} />}
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -227,6 +154,9 @@ function CameraConfigFields({
   height, setHeight,
   targetFps, setTargetFps,
   savedResolutions,
+  source, setSource,
+  network, setNetwork,
+  sofia, setSofia,
 }: {
   name: string;        setName: (v: string) => void;
   deviceIndex: string; setDeviceIndex: (v: string) => void;
@@ -234,6 +164,9 @@ function CameraConfigFields({
   height: string;      setHeight: (v: string) => void;
   targetFps: string;   setTargetFps: (v: string) => void;
   savedResolutions:    Resolution[];
+  source:  CameraSourceType; setSource:  (v: CameraSourceType) => void;
+  network: NetworkSource;    setNetwork: (v: NetworkSource) => void;
+  sofia:   SofiaSource;      setSofia:   (v: SofiaSource) => void;
 }) {
   const [sheetOpen,      setSheetOpen]      = useState(false);
   const [customSelected, setCustomSelected] = useState(false);
@@ -244,124 +177,122 @@ function CameraConfigFields({
   const isCustom      = customSelected || !matchedOption;
 
   return (
-    <View>
-      <Text style={styles.sectionLabel}>CONFIGURATION</Text>
-      <View style={styles.sectionBody}>
-
-        <View style={[styles.formRow, styles.rowBorder]}>
-          <Text style={styles.formLabel}>Name</Text>
-          <TextInput
-            style={styles.formInput}
+    // gap, not a bare View: SectionHeader relies on the parent's flex gap for
+    // its bottom spacing (Screen's gap can't reach inside this wrapper).
+    <View style={{ gap: spacing.md }}>
+      <SectionHeader
+        title="Configuration"
+        right={
+          <InfoTip text="A USB camera is opened by Device Index; a network camera by its RTSP or HTTP stream URL. Device Index selects which USB camera the controller opens, in the same order the OS enumerates them (0, 1, 2…). Resolution and Target FPS should match a mode the camera actually supports — an unsupported combination can leave the feed blank." />
+        }
+      />
+      <Card>
+        <FormRow label="Name">
+          <Input
             value={name}
             onChangeText={setName}
             placeholder="Camera"
-            placeholderTextColor="#9ca3af"
             returnKeyType="done"
-            textAlign="right"
           />
-        </View>
+        </FormRow>
 
-        <View style={[styles.formRow, styles.rowBorder]}>
-          <Text style={styles.formLabel}>Device Index</Text>
-          <TextInput
-            style={styles.formInput}
-            value={deviceIndex}
-            onChangeText={setDeviceIndex}
-            placeholder="0"
-            placeholderTextColor="#9ca3af"
-            keyboardType="numeric"
-            returnKeyType="done"
-            textAlign="right"
-          />
-        </View>
+        <FormRow label="Source" style={styles.fieldGap}>
+          <SegmentedControl options={SOURCE_OPTIONS} value={source} onChange={setSource} />
+        </FormRow>
 
-        {/* Resolution row — tappable when options exist */}
-        {hasOptions ? (
-          <TouchableOpacity
-            style={[styles.formRow, styles.rowBorder]}
-            onPress={() => setSheetOpen(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.formLabel}>Resolution</Text>
-            <Text style={styles.dropdownValue}>
-              {isCustom ? "Custom" : `${matchedOption!.width} × ${matchedOption!.height}`}
-            </Text>
-            <ChevronDown size={16} color="#6b7280" style={{ marginLeft: 6 }} />
-          </TouchableOpacity>
+        {source === "network" ? (
+          <NetworkSourceFields value={network} onChange={setNetwork} rowStyle={styles.fieldGap} />
+        ) : source === "sofia" ? (
+          <SofiaSourceFields value={sofia} onChange={setSofia} rowStyle={styles.fieldGap} />
         ) : (
-          <View style={[styles.formRow, styles.rowBorder]}>
-            <Text style={styles.formLabel}>Resolution</Text>
-            <View style={styles.resolutionRow}>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
-                value={width}
-                onChangeText={setWidth}
-                placeholder="640"
-                placeholderTextColor="#9ca3af"
+          <>
+            <FormRow label="Device Index" style={styles.fieldGap}>
+              <Input
+                value={deviceIndex}
+                onChangeText={setDeviceIndex}
+                placeholder="0"
                 keyboardType="numeric"
                 returnKeyType="done"
-                textAlign="right"
               />
-              <Text style={styles.resolutionSep}>×</Text>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
-                value={height}
-                onChangeText={setHeight}
-                placeholder="480"
-                placeholderTextColor="#9ca3af"
-                keyboardType="numeric"
-                returnKeyType="done"
-                textAlign="right"
-              />
-            </View>
-          </View>
+            </FormRow>
+
+            {/* Resolution row — tappable when options exist */}
+            <FormRow label="Resolution" style={styles.fieldGap}>
+              {hasOptions ? (
+                <TouchableOpacity
+                  style={styles.dropdownRow}
+                  onPress={() => setSheetOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.dropdownValue}>
+                    {isCustom ? "Custom" : `${matchedOption!.width} × ${matchedOption!.height}`}
+                  </Text>
+                  <ChevronDown size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.resolutionRow}>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={width}
+                    onChangeText={setWidth}
+                    placeholder="640"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                  <Text style={styles.resolutionSep}>×</Text>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={height}
+                    onChangeText={setHeight}
+                    placeholder="480"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                </View>
+              )}
+            </FormRow>
+
+            {/* Custom W×H inputs — sub-row visually attached to Resolution row above */}
+            {hasOptions && isCustom && (
+              <FormRow label="W × H" style={styles.fieldGap}>
+                <View style={styles.resolutionRow}>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={width}
+                    onChangeText={setWidth}
+                    placeholder="640"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                  <Text style={styles.resolutionSep}>×</Text>
+                  <Input
+                    style={styles.resolutionInput}
+                    value={height}
+                    onChangeText={setHeight}
+                    placeholder="480"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    textAlign="center"
+                  />
+                </View>
+              </FormRow>
+            )}
+          </>
         )}
 
-        {/* Custom W×H inputs — sub-row visually attached to Resolution row above */}
-        {hasOptions && isCustom && (
-          <View style={[styles.formRow, styles.rowBorder, styles.customResolutionRow]}>
-            <Text style={styles.formLabel}>W × H</Text>
-            <View style={styles.resolutionRow}>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
-                value={width}
-                onChangeText={setWidth}
-                placeholder="640"
-                placeholderTextColor="#9ca3af"
-                keyboardType="numeric"
-                returnKeyType="done"
-                textAlign="right"
-              />
-              <Text style={styles.resolutionSep}>×</Text>
-              <TextInput
-                style={[styles.formInput, styles.resolutionInput]}
-                value={height}
-                onChangeText={setHeight}
-                placeholder="480"
-                placeholderTextColor="#9ca3af"
-                keyboardType="numeric"
-                returnKeyType="done"
-                textAlign="right"
-              />
-            </View>
-          </View>
-        )}
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Target FPS</Text>
-          <TextInput
-            style={styles.formInput}
+        <FormRow label="Target FPS" style={styles.fieldGap}>
+          <Input
             value={targetFps}
             onChangeText={setTargetFps}
             placeholder="15"
-            placeholderTextColor="#9ca3af"
             keyboardType="numeric"
             returnKeyType="done"
-            textAlign="right"
           />
-        </View>
-
-      </View>
+        </FormRow>
+      </Card>
 
       <ResolutionSheet
         visible={sheetOpen}
@@ -378,15 +309,30 @@ function CameraConfigFields({
 }
 
 // ── CameraDetailPage ──────────────────────────────────────────────────────────
+// Two-pane on wide screens (settings left, live feed right) — kept as a manual
+// useIsWide/useWideContent screen per the kit README (Screen only supports a
+// single scrolling column).
 
 function CameraDetailPage({ camera }: { camera: CameraState }) {
+  const wideContent = useWideContent();
+  const isWide = useIsWide();
   const [fullscreen,  setFullscreen]  = useState(false);
   const [name,        setName]        = useState(camera.name);
   const [deviceIndex, setDeviceIndex] = useState(String(camera.deviceIndex));
   const [width,       setWidth]       = useState(String(camera.width));
   const [height,      setHeight]      = useState(String(camera.height));
   const [targetFps,   setTargetFps]   = useState(String(camera.targetFps));
+  const [source,      setSource]      = useState<CameraSourceType>(
+    isSofiaCamera(camera) ? "sofia" : isNetworkCamera(camera) ? "network" : "usb"
+  );
+  const [network,     setNetwork]     = useState(() => networkSourceOf(camera));
+  const [sofia,       setSofia]       = useState(() => sofiaSourceOf(camera));
   const [saving,      setSaving]      = useState(false);
+  const sourceProblem =
+    source === "network" ? cameraUrlProblem(network.url) :
+    source === "sofia"   ? sofiaSourceProblem(sofia) :
+    null;
+  const tag = cameraSourceTag(camera);
 
   const save = async () => {
     setSaving(true);
@@ -398,52 +344,95 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       width:       parseInt(width)     || 640,
       height:      parseInt(height)    || 480,
       targetFps:   parseInt(targetFps) || 15,
+      ...cameraSourceParams(source, network, sofia),
     });
     await robotClient.getCameras().catch(() => {});
     setSaving(false);
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       {fullscreen && Platform.OS !== 'web' && (
         <CameraFullscreenModal camera={camera} onClose={() => setFullscreen(false)} />
       )}
-      <SubPageHeader
+      <PageHeader
         title={camera.name}
-        subtitle={`Device ${camera.deviceIndex} · ${camera.width}×${camera.height} · ${camera.connected ? "Connected" : "Offline"}`}
+        subtitle={cameraSourceSummary(camera)}
+        right={
+          <View style={styles.headerRight}>
+            {tag && <StatusPill label={tag} tone="accent" />}
+            <CameraCalibrationControls camera={camera} layout="inline" />
+            <StatusPill
+              label={camera.connected ? "Connected" : "Offline"}
+              tone={camera.connected ? "success" : "danger"}
+              dot
+            />
+          </View>
+        }
       />
-      <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
-        {camera.connected
-          ? <CameraWebSocketFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />
+      {(() => {
+        const feed = camera.connected
+          ? <CameraLiveFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />
           : (
             <View style={styles.feedPlaceholder}>
               <Camera size={28} color="#4b5563" />
               <Text style={styles.feedPlaceholderText}>Offline</Text>
             </View>
-          )
+          );
+        const feedBlock = (
+          <View style={styles.feedBlock}>
+            {feed}
+          </View>
+        );
+        const editables = (
+          <>
+            <CameraConfigFields
+              name={name}               setName={setName}
+              deviceIndex={deviceIndex} setDeviceIndex={setDeviceIndex}
+              width={width}             setWidth={setWidth}
+              height={height}           setHeight={setHeight}
+              targetFps={targetFps}     setTargetFps={setTargetFps}
+              savedResolutions={camera.supportedResolutions ?? []}
+              source={source}           setSource={setSource}
+              network={network}         setNetwork={setNetwork}
+              sofia={sofia}             setSofia={setSofia}
+            />
+            <Button
+              label={saving ? "Saving…" : "Save"}
+              loading={saving}
+              disabled={!!sourceProblem}
+              onPress={save}
+            />
+          </>
+        );
+
+        // Wide: the editable settings fill a wider left column, the live frame a column
+        // on the right. Narrow: everything stacked in one scroll as before.
+        if (isWide) {
+          return (
+            <View style={styles.camWideRow}>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.camWideScrollContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {editables}
+              </ScrollView>
+              <View style={styles.camFeedPane}>{feedBlock}</View>
+            </View>
+          );
         }
-
-        <CameraConfigFields
-          name={name}               setName={setName}
-          deviceIndex={deviceIndex} setDeviceIndex={setDeviceIndex}
-          width={width}             setWidth={setWidth}
-          height={height}           setHeight={setHeight}
-          targetFps={targetFps}     setTargetFps={setTargetFps}
-          savedResolutions={camera.supportedResolutions ?? []}
-        />
-
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && { opacity: 0.5 }]}
-          onPress={save}
-          disabled={saving}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.saveBtnText}>{saving ? "Saving…" : "Save"}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        return (
+          <ScrollView
+            contentContainerStyle={[styles.scrollContent, wideContent]}
+            showsVerticalScrollIndicator={false}
+          >
+            {feedBlock}
+            {editables}
+          </ScrollView>
+        );
+      })()}
     </View>
   );
 }
@@ -456,33 +445,70 @@ function NewCameraPage() {
   const [width,       setWidth]       = useState("640");
   const [height,      setHeight]      = useState("480");
   const [targetFps,   setTargetFps]   = useState("15");
+  const [source,      setSource]      = useState<CameraSourceType>("usb");
+  const [network,     setNetwork]     = useState<NetworkSource>(EMPTY_NETWORK_SOURCE);
+  const [sofia,       setSofia]       = useState<SofiaSource>(EMPTY_SOFIA_SOURCE);
   const [saving,      setSaving]      = useState(false);
+  const sourceProblem =
+    source === "network" ? cameraUrlProblem(network.url) :
+    source === "sofia"   ? sofiaSourceProblem(sofia) :
+    null;
 
   const add = async () => {
     setSaving(true);
     try {
+      const trimmedName  = name.trim();
+      const idx          = parseInt(deviceIndex) || 0;
+
+      // AddCamera's ack carries no payload (see CameraCommands.cs — it returns
+      // void), so the new camera's id can't be read off the response. Snapshot
+      // the ids we have *before* submitting, then diff against the refreshed
+      // list to find the one that just appeared.
+      let before: CameraState[] = [];
+      robotClient.onCameras(cams => { before = cams; })();
+
       await robotClient.addCamera({
-        name:        name.trim(),
-        deviceIndex: parseInt(deviceIndex) || 0,
+        name:        trimmedName,
+        deviceIndex: idx,
         enabled:     true,
         width:       parseInt(width)     || 640,
         height:      parseInt(height)    || 480,
         targetFps:   parseInt(targetFps) || 15,
+        ...cameraSourceParams(source, network, sofia),
       });
       await robotClient.getCameras().catch(() => {});
-      router.back();
+
+      let after: CameraState[] = [];
+      robotClient.onCameras(cams => { after = cams; })();
+
+      const beforeIds = new Set(before.map(c => c.id));
+      const added     = after.filter(c => !beforeIds.has(c.id));
+      const newCamera =
+        added.find(c => c.name === trimmedName && c.deviceIndex === idx) ??
+        added[0] ??
+        after.find(c => c.name === trimmedName && c.deviceIndex === idx);
+
+      if (newCamera) {
+        // Land in the editor, not the form — Back from there shouldn't return
+        // here.
+        router.replace({ pathname: "/(tabs)/io/cameras", params: { cameraId: newCamera.id } });
+      } else {
+        // Controller was slow to reflect the add (or it genuinely failed) —
+        // never strand the user on a spinner.
+        router.back();
+      }
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <SubPageHeader title="New Camera" subtitle="USB Camera" />
-      <ScrollView
-        contentContainerStyle={[{ paddingTop: 24, paddingBottom: 40, gap: 24 }, wide.content]}
-        showsVerticalScrollIndicator={false}
-      >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <PageHeader
+        title="New Camera"
+        subtitle={source === "network" ? "Network camera" : source === "sofia" ? "Sofia / XMeye camera" : "USB camera"}
+      />
+      <Screen>
         <CameraConfigFields
           name={name}               setName={setName}
           deviceIndex={deviceIndex} setDeviceIndex={setDeviceIndex}
@@ -490,17 +516,18 @@ function NewCameraPage() {
           height={height}           setHeight={setHeight}
           targetFps={targetFps}     setTargetFps={setTargetFps}
           savedResolutions={[]}
+          source={source}           setSource={setSource}
+          network={network}         setNetwork={setNetwork}
+          sofia={sofia}             setSofia={setSofia}
         />
 
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && { opacity: 0.5 }]}
+        <Button
+          label={saving ? "Adding…" : "Add Camera"}
+          loading={saving}
+          disabled={!!sourceProblem}
           onPress={add}
-          disabled={saving}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.saveBtnText}>{saving ? "Adding…" : "Add Camera"}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        />
+      </Screen>
     </View>
   );
 }
@@ -522,8 +549,8 @@ export default function CamerasPage() {
     const camera = cameras.find(c => c.id === cameraId) ?? null;
     if (!camera) {
       return (
-        <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-          <SubPageHeader title="Camera" subtitle="Loading…" />
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
+          <PageHeader title="Camera" subtitle="Loading…" />
         </View>
       );
     }
@@ -536,53 +563,29 @@ export default function CamerasPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  sectionLabel: {
-    fontSize: 11, fontWeight: "700", letterSpacing: 0.8,
-    color: "#6b7280", marginBottom: 6, paddingHorizontal: 16,
-  },
-  sectionBody: {
-    backgroundColor: "#fff",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-  },
+  scrollContent: { paddingTop: spacing.lg + 8, paddingBottom: spacing.xxl + 8, paddingHorizontal: spacing.lg, gap: spacing.xl },
+  fieldGap: { marginTop: spacing.md + 2 },
+  headerRight: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: spacing.sm },
 
-  formRow: {
+  dropdownRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
-    minHeight: 48,
   },
-  rowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e7eb",
-  },
-  formLabel: { fontSize: 15, color: "#111827", flex: 1 },
-  formInput: {
-    fontSize: 15,
-    color: "#374151",
-    flex: 1,
-    paddingVertical: 0,
-  },
+  dropdownValue: { fontSize: 15, color: colors.textSecondary },
 
-  resolutionRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  resolutionRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
   resolutionInput: { flex: 0, width: 52 },
-  resolutionSep: { fontSize: 14, color: "#6b7280" },
-
-  dropdownValue: { fontSize: 15, color: "#374151" },
-  customResolutionRow: { backgroundColor: "#f9fafb", paddingLeft: 28 },
+  resolutionSep: { fontSize: 14, color: colors.textMuted },
 
   sheetBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: colors.overlay,
   },
   sheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 32,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.md + 2,
+    borderTopRightRadius: radii.md + 2,
+    paddingBottom: spacing.xl,
     maxHeight: "60%",
   },
   sheetHandle: {
@@ -590,53 +593,53 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#d1d5db",
-    marginTop: 10,
-    marginBottom: 4,
+    backgroundColor: colors.borderStrong,
+    marginTop: spacing.sm + 2,
+    marginBottom: spacing.xs,
   },
   sheetTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#6b7280",
+    ...type.sectionLabel,
     textAlign: "center",
-    paddingVertical: 10,
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
+    paddingVertical: spacing.sm + 2,
   },
   sheetRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
+    paddingHorizontal: spacing.xl - 4,
+    paddingVertical: spacing.md + 2,
+    backgroundColor: colors.surface,
   },
-  sheetRowText: { fontSize: 16, color: "#111827", flex: 1 },
-  sheetRowTextSelected: { color: "#2563eb", fontWeight: "600" },
-
-  saveBtn: {
-    marginHorizontal: 16,
-    backgroundColor: "#2563eb",
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-  saveBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
-
+  sheetRowText: { fontSize: 16, color: colors.text, flex: 1 },
+  sheetRowTextSelected: { color: colors.accent, fontWeight: "600" },
 
   cameraFeed: {
     width: "100%",
     aspectRatio: 4 / 3,
     backgroundColor: "#000",
+    borderRadius: radii.lg,
+    overflow: "hidden",
   },
   feedPlaceholder: {
     width: "100%",
     aspectRatio: 4 / 3,
-    backgroundColor: "#111827",
+    backgroundColor: colors.text,
     justifyContent: "center",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
+    borderRadius: radii.lg,
+    overflow: "hidden",
   },
-  feedPlaceholderText: { fontSize: 13, color: "#6b7280" },
+  feedPlaceholderText: { fontSize: 13, color: colors.textMuted },
+  feedBlock: { gap: spacing.md },
+
+  // Wide (desktop) camera edit layout: frame left, settings right.
+  camWideRow: { flex: 1, flexDirection: "row" },
+  camWideScrollContent: { paddingTop: spacing.lg + 4, paddingBottom: spacing.xxl, gap: spacing.xl, paddingHorizontal: spacing.lg },
+  camFeedPane: {
+    width: "48%", minWidth: 380, maxWidth: 820,
+    padding: spacing.lg,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border,
+  },
 
   fullscreenClose: {
     position: "absolute",
