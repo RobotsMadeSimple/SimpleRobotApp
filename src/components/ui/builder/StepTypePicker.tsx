@@ -63,7 +63,8 @@ export function StepTypePicker({
   isBackgroundMode?: boolean;
 }) {
   const contributions = usePluginContributions();
-  const pluginSteps = onPickPlugin ? contributions.data.steps : [];
+  const allPluginSteps = contributions.data.steps;
+  const pluginSteps = useMemo(() => (onPickPlugin ? allPluginSteps : []), [onPickPlugin, allPluginSteps]);
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState<StepCategoryKey | null>(null);
   const [gridWidth, setGridWidth] = useState(360);

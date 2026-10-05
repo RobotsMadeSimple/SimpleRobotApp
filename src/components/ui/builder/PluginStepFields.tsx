@@ -4,7 +4,6 @@ import { Check, ChevronDown, ChevronRight, CircleAlert, Plug, Plus, TriangleAler
 import {
   PluginOutputDef,
   PluginParamDef,
-  PluginStepContribution,
   PluginStepOutput,
   ProgramStep,
   ProgramVariable,
@@ -103,11 +102,7 @@ export function PluginStepFields({
     set({ pluginOutputs: next });
   };
 
-  const issues = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof paramIssues>[number]>();
-    paramIssues(draft, c).forEach(i => map.set(i.key, i));
-    return map;
-  }, [draft, c]);
+  const issues = new Map(paramIssues(draft, c).map(i => [i.key, i] as const));
 
   if (!c) {
     return (
