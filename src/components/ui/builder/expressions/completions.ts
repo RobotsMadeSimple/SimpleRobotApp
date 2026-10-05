@@ -54,7 +54,8 @@ export function completionsAt(
     return items.length ? { start: sigil.index, items: items.slice(0, MAX) } : null;
   }
 
-  const word = /(^|[^\w$.\]])([A-Za-z_]\w*)$/.exec(before);
+  // Dotted so plugin functions complete past their prefix: `scale.ta` → `scale.tare(`.
+  const word = /(^|[^\w$.\]])([A-Za-z_]\w*(?:\.\w*)?)$/.exec(before);
   if (word && symbols?.functions.length) {
     const prefix = word[2].toLowerCase();
     if (KEYWORDS.has(prefix)) return null;

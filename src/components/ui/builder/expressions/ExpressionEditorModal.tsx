@@ -18,6 +18,7 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { useExpressionEnv } from "./ExpressionEnv";
 import { SymbolSections } from "./SymbolSections";
 import { FunctionsList } from "./FunctionsList";
+import { pluginGroupTitle, useSplitSymbols } from "./pluginSymbols";
 import { applyCompletion, completionsAt, insertAt, isExpressionText } from "./completions";
 import { useLiveValue } from "./useLiveValue";
 
@@ -186,10 +187,20 @@ function EditorCard({
   // a program variable of the same name.
   const shownGlobals = (env?.symbols?.variables ?? [])
     .filter(v => v.isGlobal && !localNames.has(v.name.toLowerCase()) && matches(v.name));
-  const functions    = env?.symbols?.functions ?? [];
+  // Built-in functions; plugin ones (scale.tare) are listed under their plugin below.
+  const split        = useSplitSymbols();
+  const functions    = split.functions;
+  const pluginFns    = split.plugins
+    .map(g => ({
+      g,
+      fns: g.functions.filter(f => !q || f.name.toLowerCase().includes(q)
+        || f.description.toLowerCase().includes(q) || g.name.toLowerCase().includes(q)),
+    }))
+    .filter(x => x.fns.length > 0);
+  const allFunctionCount = env?.symbols?.functions.length ?? 0;
 
   const hasReference = shownVars.length + shownContext.length + shownGlobals.length > 0
-    || (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) + functions.length > 0;
+    || (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) + allFunctionCount > 0;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -342,6 +353,12 @@ function EditorCard({
           <FunctionsList functions={functions} search={search} onInsert={name => insertToken(`${name}(`)} />
         </>
       )}
+      {pluginFns.map(({ g, fns }) => (
+        <React.Fragment key={g.id}>
+          <SectionHeader title={pluginGroupTitle(g)} />
+          <FunctionsList functions={fns} search="" onInsert={name => insertToken(`${name}(`)} />
+        </React.Fragment>
+      ))}
     </ScrollView>
   );
 
