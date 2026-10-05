@@ -24,6 +24,7 @@ import {
   OctagonX,
   PauseCircle,
   Play,
+  Plug,
   Radio,
   RefreshCw,
   RotateCw,
@@ -37,6 +38,8 @@ import {
 import React from "react";
 import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
 import { accents, colors } from "@/src/components/ui/kit";
+import { findPluginStep, pluginDisplayName } from "./usePluginContributions";
+import { outputsSummary, paramsSummary } from "./pluginSteps";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -179,6 +182,8 @@ export function stepLabel(step: ProgramStep): string {
       return step.httpReceiveName
         ? `HTTP Receive  ←  ${step.httpReceiveName}`
         : "HTTP Receive";
+    case "Plugin":
+      return pluginStepTitle(step);
     case "Unknown":
       return step.unknownStepType ? `Unknown (${step.unknownStepType})` : "Unknown Step";
     default:              return step.type;
@@ -225,6 +230,7 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "HttpRequest":       return <Globe         size={size} color={color} />;
     case "CaptureImage":       return <Camera        size={size} color={color} />;
     case "HttpReceive":        return <Inbox         size={size} color={color} />;
+    case "Plugin":             return <Plug          size={size} color={color} />;
     case "Unknown":            return <HelpCircle    size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
@@ -269,6 +275,8 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   HttpRequest:     { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Request"        },
   CaptureImage:     { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Capture Image"       },
   HttpReceive:      { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Receive"        },
+  // Ink/slate: the one kit tone no built-in family uses, so plugin blocks read as "external".
+  Plugin:           { accent: colors.surfaceDark, iconBg: colors.border, iconColor: colors.surfaceDark, label: "Plugin" },
   Unknown:          { accent: "#9ca3af", iconBg: "#f3f4f6", iconColor: "#6b7280", label: "Unknown Step"        },
 };
 
@@ -602,6 +610,15 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (timeout != null) lines.push(`timeout: ${timeout / 1000}s`);
       return lines.length ? lines.join("\n") : null;
     }
+    case "Plugin": {
+      const c = findPluginStep(step.pluginId, step.pluginStepId);
+      const lines = [pluginStepTitle(step)];
+      const params = paramsSummary(step, c);
+      if (params) lines.push(params);
+      const outs = outputsSummary(step);
+      if (outs) lines.push(outs);
+      return lines.join("\n");
+    }
     case "Unknown":
       return step.unknownStepType
         ? `Original type: "${step.unknownStepType}" — delete this step to fix the program`
@@ -609,6 +626,19 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
     default:
       return null;
   }
+}
+
+// ── Plugin step title ─────────────────────────────────────────────────────────
+
+/**
+ * `<plugin name> · <step label>` from the cached contributions, falling back to the
+ * raw ids while they load or when the plugin is no longer installed.
+ */
+export function pluginStepTitle(step: ProgramStep): string {
+  const c = findPluginStep(step.pluginId, step.pluginStepId);
+  const plugin = c?.pluginName || pluginDisplayName(step.pluginId);
+  const label  = c?.step.label || step.pluginStepId || "?";
+  return `${plugin} · ${label}`;
 }
 
 // ── Step type list, map, and categories ───────────────────────────────────────
@@ -673,7 +703,7 @@ export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
  */
 export type StepCategoryKey =
   | "motion" | "motionSettings" | "flow" | "variables"
-  | "io" | "vision" | "background" | "comms";
+  | "io" | "vision" | "background" | "comms" | "plugins";
 
 export type StepCategory = {
   key: StepCategoryKey;
@@ -738,10 +768,22 @@ export const STEP_CATEGORIES: StepCategory[] = [
   },
 ];
 
+/**
+ * Plugin-contributed blocks. Not in STEP_CATEGORIES: its tiles are one per
+ * (plugin, step) from GetPluginContributions, so the picker renders it from that
+ * list and hides it when no plugin is installed.
+ */
+export const PLUGIN_CATEGORY: StepCategory = {
+  key: "plugins", label: "Plugins", icon: Plug,
+  desc: "Steps provided by installed plugins.",
+  color: colors.surfaceDark, soft: colors.background,
+  types: ["Plugin"],
+};
+
 /** The category a step type belongs to (undefined only for Unknown steps). */
 export const STEP_CATEGORY_OF: Partial<Record<StepType, StepCategory>> =
   Object.fromEntries(
-    STEP_CATEGORIES.flatMap(cat => cat.types.map(t => [t, cat] as const))
+    [...STEP_CATEGORIES, PLUGIN_CATEGORY].flatMap(cat => cat.types.map(t => [t, cat] as const))
   ) as Partial<Record<StepType, StepCategory>>;
 
 /** Category for a step type, falling back to a neutral "Other" family. */

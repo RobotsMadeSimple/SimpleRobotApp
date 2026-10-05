@@ -5,7 +5,7 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
+import { BuiltProgram, ListElementType, PluginStepContribution, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
@@ -50,6 +50,8 @@ import {
 
 import { StepConfigModal } from "@/src/components/ui/builder/StepConfigModal";
 import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
+import { usePluginContributions } from "@/src/components/ui/builder/usePluginContributions";
+import { pluginStepFields } from "@/src/components/ui/builder/pluginSteps";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
 import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
@@ -128,6 +130,8 @@ export default function BuilderScreen() {
   const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected     = useConnected();
+  // Plugin steps/functions for the picker, config form and step labels; refetched on reconnect.
+  usePluginContributions(connected);
   const paneLayout    = usePaneLayout();
   const isWide        = paneLayout !== "single";
   const isSplit       = paneLayout === "split";
@@ -702,8 +706,15 @@ export default function BuilderScreen() {
   }
 
   function addStep(type: StepType) {
+    insertNewStep(defaultStep(type));
+  }
+
+  function addPluginStep(c: PluginStepContribution) {
+    insertNewStep({ ...defaultStep("Plugin"), ...pluginStepFields(c) });
+  }
+
+  function insertNewStep(step: ProgramStep) {
     const target = insertTargetRef.current;
-    const step = defaultStep(type);
 
     setSteps(prev => {
       const scoped = getStepsAtScope(prev, scopeStackRef.current);
@@ -1692,6 +1703,7 @@ export default function BuilderScreen() {
       <StepTypePicker
         visible={typePickerOpen}
         onPick={addStep}
+        onPickPlugin={addPluginStep}
         onClose={() => setTypePickerOpen(false)}
         isBackgroundMode={isBackgroundMode}
       />
