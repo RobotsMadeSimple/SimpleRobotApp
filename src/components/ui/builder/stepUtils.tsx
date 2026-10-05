@@ -7,6 +7,7 @@ import {
   CornerUpLeft,
   Clock,
   Cpu,
+  FileCode,
   Gauge,
   Globe,
   Grid3x3,
@@ -222,6 +223,7 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "StopwatchControl":   return <Timer         size={size} color={color} />;
     case "ThreadMove":         return <RotateCw      size={size} color={color} />;
     case "CncProgram":         return <Cpu           size={size} color={color} />;
+    case "GcodeProgram":       return <FileCode      size={size} color={color} />;
     case "HttpRequest":       return <Globe         size={size} color={color} />;
     case "CaptureImage":       return <Camera        size={size} color={color} />;
     case "HttpReceive":        return <Inbox         size={size} color={color} />;
@@ -266,6 +268,7 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   StopwatchControl: { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Stopwatch"          },
   ThreadMove:       { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Thread Move"        },
   CncProgram:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "CNC Program"         },
+  GcodeProgram:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "G-code Program"     },
   HttpRequest:     { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Request"        },
   CaptureImage:     { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Capture Image"       },
   HttpReceive:      { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Receive"        },
@@ -574,6 +577,14 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.cncSafeZ != null) parts.push(`safe Z ${step.cncSafeZ} mm`);
       return parts.join('  ·  ');
     }
+    case "GcodeProgram": {
+      if (step.gcodeFile) return step.gcodeFile;
+      if (step.gcodeText) {
+        const lines = step.gcodeText.split('\n').filter(l => l.trim() !== '').length;
+        return `inline · ${lines} line${lines !== 1 ? 's' : ''}`;
+      }
+      return 'no file selected';
+    }
     case "HttpRequest": {
       const lines: string[] = [];
       if (step.jsonUrl) lines.push(step.jsonUrl);
@@ -647,6 +658,7 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "StopwatchControl", label: "Stopwatch",             desc: "Start, stop, or reset a stopwatch variable — value holds elapsed milliseconds" },
   { type: "SaveImage",        label: "Save Image",             desc: "Capture a camera snapshot and save to a file path — supports $variable interpolation including $time_ms" },
   { type: "CncProgram",      label: "CNC Program",            desc: "Generate a toolpath from a DXF or SVG file — thread selected holes, or follow contours as continuous blended moves" },
+  { type: "GcodeProgram",    label: "G-code Program",         desc: "Run a stored G-code file (or pasted G-code) — common G0-G3/M3-M5 codes expand into moves at runtime" },
   { type: "HttpRequest",   label: "HTTP Request",           desc: "POST a JSON payload to a server and optionally load values from the response back into program variables" },
   { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with HTTP Request to send it to a server" },
   { type: "HttpReceive",    label: "HTTP Receive",           desc: "Wait for an incoming HTTP POST to a named webhook endpoint — other robots or servers can trigger this step by POSTing to /webhook/{name}" },
@@ -655,7 +667,7 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
 export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
 
 export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
-  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram", "GcodeProgram",
   "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
 ]);
 
@@ -692,7 +704,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "CncProgram", "GcodeProgram"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,

@@ -63,6 +63,7 @@ import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType, VariableEditModal } from "./VariableEditModal";
 import { StepMetaFields } from "./StepMetaFields";
+import { GcodeProgramFields } from "./GcodeProgramFields";
 import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
@@ -1866,6 +1867,9 @@ export function StepConfigModal({
             The robot must be in a safe position before homing begins.
           </Text>
         );
+
+      case "GcodeProgram":
+        return <GcodeProgramFields draft={draft!} set={set} />;
 
       case "ThreadMove": {
         const pitch = draft!.threadPitch;

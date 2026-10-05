@@ -23,7 +23,9 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
+  FileCode,
   Gauge,
+  Hash,
   Home,
   MoveHorizontal,
   MoveVertical,
@@ -91,6 +93,14 @@ type RobotConfig = {
   cncXHomingDirection: number;
   cncYHomingDirection: number;
   cncZHomingDirection: number;
+  // G-code
+  gcodeSpindleOutputType: string;
+  gcodeSpindleOutputPin: number;
+  gcodeRapidSpeed: number;
+  gcodeDefaultFeed: number;
+  gcodeArcToleranceMm: number;
+  gcodeStreamTcpPort: number;
+  gcodeStreamTcpEnabled: boolean;
   // Joint soft limits — null means the bound is unset (not enforced)
   jointLimitsEnabled: boolean;
   joint1Min: number | null;
@@ -228,6 +238,19 @@ export default function ConfigureRobot() {
     const next = !config.jointLimitsEnabled;
     setConfig({ ...config, jointLimitsEnabled: next });
     try { await robotClient.setRobotConfig({ jointLimitsEnabled: next }); } catch {}
+  }
+
+  async function setSpindleType(type: string) {
+    if (!config) return;
+    setConfig({ ...config, gcodeSpindleOutputType: type });
+    try { await robotClient.setRobotConfig({ gcodeSpindleOutputType: type }); } catch {}
+  }
+
+  async function toggleGcodeTcp() {
+    if (!config) return;
+    const next = !config.gcodeStreamTcpEnabled;
+    setConfig({ ...config, gcodeStreamTcpEnabled: next });
+    try { await robotClient.setRobotConfig({ gcodeStreamTcpEnabled: next }); } catch {}
   }
 
   async function saveField() {
@@ -669,6 +692,101 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
             ))}
+        </Card>
+
+        {/* ── G-code ── */}
+        <SectionHeader
+          title="G-code"
+          icon={FileCode}
+          right={<InfoTip text="Settings for running G-code files, the G-code Program step, and the live TCP/WebSocket streams. Spindle output routes M3/M4/M5. Rapid is the G0 speed; feed is the fallback when a G1 has no F word. TCP port changes need a controller restart." />}
+        />
+        <Card padded={false}>
+          <ConfigRow
+            icon={<Zap size={16} color={colors.warning} />}
+            tileBg={colors.warningSoft}
+            label="Spindle Output"
+            right={
+              <SegmentedControl
+                options={[{ label: "None", value: "none" }, { label: "STB", value: "stb" }, { label: "Relay", value: "relay" }]}
+                value={config?.gcodeSpindleOutputType ?? "none"}
+                onChange={setSpindleType}
+                size="sm"
+                style={{ minWidth: 190 }}
+              />
+            }
+          />
+          {config && config.gcodeSpindleOutputType !== "none" && (
+            <ConfigRow
+              icon={<Hash size={16} color={accents.purple} />}
+              tileBg={accents.purpleSoft}
+              label="Spindle Output Pin"
+              value={`${config.gcodeSpindleOutputPin}`}
+              onPress={() => setEditing({
+                label: "Spindle Output Pin", type: "number",
+                numKey: "gcodeSpindleOutputPin", numText: String(config.gcodeSpindleOutputPin),
+                placeholder: "1", dirValue: 1,
+              })}
+            />
+          )}
+          <ConfigRow
+            icon={<Gauge size={16} color={colors.success} />}
+            tileBg={colors.successSoft}
+            label="Rapid Speed"
+            value={config ? `${config.gcodeRapidSpeed} u/s` : "—"}
+            onPress={config ? () => setEditing({
+              label: "Rapid Speed (G0)", type: "number",
+              numKey: "gcodeRapidSpeed", numText: String(config.gcodeRapidSpeed),
+              unit: "u/s", placeholder: "100", dirValue: 1,
+            }) : undefined}
+          />
+          <ConfigRow
+            icon={<Gauge size={16} color={accents.cyan} />}
+            tileBg={accents.cyanSoft}
+            label="Default Feed"
+            value={config ? `${config.gcodeDefaultFeed} u/s` : "—"}
+            onPress={config ? () => setEditing({
+              label: "Default Feed", type: "number",
+              numKey: "gcodeDefaultFeed", numText: String(config.gcodeDefaultFeed),
+              unit: "u/s", placeholder: "50", dirValue: 1,
+            }) : undefined}
+          />
+          <ConfigRow
+            icon={<RotateCcw size={16} color={accents.orange} />}
+            tileBg={accents.orangeSoft}
+            label="Arc Tolerance"
+            value={config ? `${config.gcodeArcToleranceMm} mm` : "—"}
+            onPress={config ? () => setEditing({
+              label: "Arc Tolerance", type: "number",
+              numKey: "gcodeArcToleranceMm", numText: String(config.gcodeArcToleranceMm),
+              unit: "mm", placeholder: "0.1", dirValue: 1,
+            }) : undefined}
+          />
+          <ConfigRow
+            icon={<FileCode size={16} color={accents.purple} />}
+            tileBg={accents.purpleSoft}
+            label="Stream TCP Port"
+            value={config ? `${config.gcodeStreamTcpPort}` : "—"}
+            onPress={config ? () => setEditing({
+              label: "Stream TCP Port", type: "number",
+              numKey: "gcodeStreamTcpPort", numText: String(config.gcodeStreamTcpPort),
+              placeholder: "8500", dirValue: 1,
+            }) : undefined}
+          />
+          <ConfigRow
+            icon={<FileCode size={16} color={config?.gcodeStreamTcpEnabled ? colors.success : colors.textFaint} />}
+            tileBg={config?.gcodeStreamTcpEnabled ? colors.successSoft : colors.background}
+            label="TCP Stream Enabled"
+            last
+            right={
+              <Switch
+                value={!!config?.gcodeStreamTcpEnabled}
+                onValueChange={toggleGcodeTcp}
+                disabled={!config}
+                trackColor={{ true: colors.success, false: colors.borderStrong }}
+                thumbColor={colors.surface}
+              />
+            }
+          />
         </Card>
     </>
   );

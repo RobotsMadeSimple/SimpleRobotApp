@@ -1315,6 +1315,13 @@ export class RobotConnectService {
     cncXHomingDirection: number;
     cncYHomingDirection: number;
     cncZHomingDirection: number;
+    gcodeSpindleOutputType: string;
+    gcodeSpindleOutputPin: number;
+    gcodeRapidSpeed: number;
+    gcodeDefaultFeed: number;
+    gcodeArcToleranceMm: number;
+    gcodeStreamTcpPort: number;
+    gcodeStreamTcpEnabled: boolean;
     jointLimitsEnabled: boolean;
     joint1Min: number | null;
     joint1Max: number | null;
@@ -1372,6 +1379,13 @@ export class RobotConnectService {
     cncXHomingDirection?: number;
     cncYHomingDirection?: number;
     cncZHomingDirection?: number;
+    gcodeSpindleOutputType?: string;
+    gcodeSpindleOutputPin?: number;
+    gcodeRapidSpeed?: number;
+    gcodeDefaultFeed?: number;
+    gcodeArcToleranceMm?: number;
+    gcodeStreamTcpPort?: number;
+    gcodeStreamTcpEnabled?: boolean;
     jointLimitsEnabled?: boolean;
     joint1Min?: number | null;
     joint1Max?: number | null;
@@ -1728,6 +1742,58 @@ export class RobotConnectService {
   public dxfFileUrl(name: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/dxf/${encodeURIComponent(name)}` : null;
+  }
+
+  // ── G-code files + streaming ────────────────────────────────────────────────
+
+  public async listGcodeFiles(): Promise<string[]> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/gcode`);
+    if (!res.ok) throw new Error(`listGcodeFiles: ${res.status}`);
+    return res.json();
+  }
+
+  public async uploadGcodeFile(name: string, content: string): Promise<void> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/gcode?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: content,
+    });
+    if (!res.ok) throw new Error(`uploadGcodeFile: ${res.status}`);
+  }
+
+  public async getGcodeFile(name: string): Promise<string> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/gcode/${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(`getGcodeFile: ${res.status}`);
+    return res.text();
+  }
+
+  public async deleteGcodeFile(name: string): Promise<void> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const res = await fetch(`${base}/gcode/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`deleteGcodeFile: ${res.status}`);
+  }
+
+  /** WebSocket URL for the G-code stream — send lines as text, receive ok/error lines. */
+  public gcodeStreamWsUrl(): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + '/gcode/stream';
+  }
+
+  /** Runs a stored G-code file through the executor (stop via StopBuiltProgram). */
+  public runGcodeFile(name: string) {
+    return this.sendCommand('RunGcodeFile', { name });
+  }
+
+  /** Parses a stored file without running it — resolves { ok, lines, moves, error? }. */
+  public validateGcodeFile(name: string): Promise<{ ok: boolean; lines?: number; moves?: number; error?: string }> {
+    return this.sendCommand('ValidateGcodeFile', { name }) as any;
   }
 }
 

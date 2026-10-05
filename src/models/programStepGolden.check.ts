@@ -138,4 +138,6 @@ export const goldenProgramStep = {
     contourStarts: { "0": { x: 5, y: 5 } },
     expressions: { activeSpeed: "$feed * 2" },
   },
+  gcodeFile: "part.nc",
+  gcodeText: "G21 G90\nG1 X10 F600",
 } satisfies ProgramStep;

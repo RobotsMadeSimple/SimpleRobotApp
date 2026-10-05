@@ -6,7 +6,7 @@ import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
-import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Cpu, FileCode, Gauge, PlayCircle, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -386,6 +386,14 @@ export default function ProgramScreen() {
           onPress={() => router.navigate("/(tabs)/program/vision")}
         />
       )}
+
+      <ListRow
+        title="G-code Files"
+        subtitle="Upload, run, and stream G-code"
+        icon={<FileCode size={20} color={accents.purple} />}
+        iconColor={accents.purpleSoft}
+        onPress={() => router.navigate("/(tabs)/program/gcode-files")}
+      />
     </>
   );
 
