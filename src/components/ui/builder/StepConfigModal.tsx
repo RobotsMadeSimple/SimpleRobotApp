@@ -1916,7 +1916,7 @@ export function StepConfigModal({
               <View style={{ flex: 1 }}>
                 <Text style={ms.switchLabel}>Pecking</Text>
                 <Text style={[ms.hintText, { marginTop: 2, marginBottom: 0 }]}>
-                  Advance in steps, retracting to start between each peck to clear chips.
+                  Advance in steps, retracting between each peck to clear chips.
                 </Text>
               </View>
               <Switch
@@ -1927,13 +1927,22 @@ export function StepConfigModal({
             </View>
             {peckOn && (
               <>
-                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PECK DEPTH  (mm per peck)</Text>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PECK DEPTH  (mm deeper per peck)</Text>
                 <ExpressionInput style={ms.input} fieldKey="threadPeckDepth"
                   value={draft!.threadPeckDepth} expressions={draft!.expressions}
                   onChangeValue={v => set({ threadPeckDepth: v })} onChangeExpr={setExpr}
-                  placeholder="e.g. 3" variables={variables} />
+                  placeholder="e.g. 1" variables={variables} />
                 <Text style={ms.hintText}>
-                  How far to advance per peck. The last peck covers any remaining distance.
+                  How much deeper each peck goes. The last peck covers any remaining distance.
+                </Text>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PECK RETRACT  (mm up per peck)</Text>
+                <ExpressionInput style={ms.input} fieldKey="threadPeckRetract"
+                  value={draft!.threadPeckRetract} expressions={draft!.expressions}
+                  onChangeValue={v => set({ threadPeckRetract: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="full retract" variables={variables} />
+                <Text style={ms.hintText}>
+                  How far to pull back after each peck. Leave blank to fully retract to the start
+                  each peck. E.g. 1 mm deeper / 2 mm up = 1 mm down, 2 mm up, then 3 mm down, 2 mm up…
                 </Text>
               </>
             )}
@@ -1950,6 +1959,19 @@ export function StepConfigModal({
                 trackColor={{ false: colors.border, true: colors.accent }}
               />
             </View>
+            {(draft!.threadReverseOut ?? true) && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>EXIT HEIGHT  (mm past start)</Text>
+                <ExpressionInput style={ms.input} fieldKey="threadExitHeight"
+                  value={draft!.threadExitHeight} expressions={draft!.expressions}
+                  onChangeValue={v => set({ threadExitHeight: v })} onChangeExpr={setExpr}
+                  allowUndefined placeholder="0" variables={variables} />
+                <Text style={ms.hintText}>
+                  Finish this far beyond the start on the way out, so the move exits higher than
+                  it began. Leave blank to return to the start.
+                </Text>
+              </>
+            )}
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (deg/s)</Text>
             <ExpressionInput style={ms.input} fieldKey="speed"
               value={draft!.speed} expressions={draft!.expressions}

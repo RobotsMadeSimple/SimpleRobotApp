@@ -485,8 +485,13 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         const preset = THREAD_PRESETS.find(p => Math.abs(p.pitch - step.threadPitch!) < 0.001);
         parts.push(preset ? preset.label : `${step.threadPitch} mm/rev`);
       }
-      if (step.threadPeck) parts.push(`peck ${step.threadPeckDepth ?? '?'} mm`);
-      if (step.threadReverseOut) parts.push('reverse out');
+      if (step.threadPeck) {
+        const retract = step.threadPeckRetract != null ? ` / ${step.threadPeckRetract} up` : ' full';
+        parts.push(`peck ${step.threadPeckDepth ?? '?'} mm${retract}`);
+      }
+      if (step.threadReverseOut !== false) {
+        parts.push(step.threadExitHeight ? `exit +${step.threadExitHeight} mm` : 'reverse out');
+      }
       return parts.length ? parts.join('  ·  ') : null;
     }
     case "CncProgram": {

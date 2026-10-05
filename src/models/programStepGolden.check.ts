@@ -98,6 +98,8 @@ export const goldenProgramStep = {
   threadPitch: 1.25,
   threadPeck: true,
   threadPeckDepth: 3,
+  threadPeckRetract: 2,
+  threadExitHeight: 5,
   threadReverseOut: true,
   cncDxfFile: "part.dxf",
   cncSafeZ: 10,

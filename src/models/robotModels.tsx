@@ -1092,6 +1092,8 @@ export type ProgramStep = {
   threadPitch?: number;
   threadPeck?: boolean;
   threadPeckDepth?: number;
+  threadPeckRetract?: number; // retract per peck; omitted = full retract to start each peck
+  threadExitHeight?: number;  // finish this far past the start on the way out (exit higher)
   threadReverseOut?: boolean;
   // CncProgram — cncSpec is the current format (steps generated at runtime by
   // the controller); cncProgramSteps holds baked steps from older versions.
