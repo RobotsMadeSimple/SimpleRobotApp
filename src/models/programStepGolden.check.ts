@@ -138,4 +138,9 @@ export const goldenProgramStep = {
     contourStarts: { "0": { x: 5, y: 5 } },
     expressions: { activeSpeed: "$feed * 2" },
   },
+  pluginId: "scale",
+  pluginStepId: "weigh",
+  pluginParams: { samples: "$n * 2", unit: "g", label: "Bin {$i}", stable: "true", target: "P1", weights: "history" },
+  pluginOutputs: [{ key: "grams", variableName: "weight" }, { key: "where", variableName: "pickPts" }],
+  pluginTimeoutMs: 5000,
 } satisfies ProgramStep;

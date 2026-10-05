@@ -390,7 +390,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Unknown';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -1115,9 +1115,27 @@ export type ProgramStep = {
   httpReceiveName?: string;
   httpReceiveTimeoutMs?: number;
   httpReceiveInbound?: JsonInboundMapping[];
+  // Plugin (docs/plugins.md §6) — a step contributed by an installed plugin.
+  /** Manifest `id` of the plugin that provides the step. */
+  pluginId?: string;
+  /** The plugin manifest's `steps[].id`. */
+  pluginStepId?: string;
+  /**
+   * One entry per declared param, every value TEXT interpreted by the param's type
+   * (number/boolean → expression, string → template, enum → option, point → point ref,
+   * list/image/variable → variable name). An absent key means the manifest default.
+   */
+  pluginParams?: Record<string, string>;
+  /** Which outputs to write and into which variable. Unmapped outputs are not written. */
+  pluginOutputs?: PluginStepOutput[];
+  /** Overrides the manifest step timeout (0 = none). Absent = manifest default. */
+  pluginTimeoutMs?: number;
   // Unknown — preserved original type name for display and recovery
   unknownStepType?: string;
 };
+
+/** One output mapping of a Plugin step: manifest output `key` → program variable. */
+export type PluginStepOutput = { key: string; variableName: string };
 
 /** Hole position for CNC threading (robot coordinates, mm). */
 export type CncHole = { x: number; y: number };
@@ -1204,7 +1222,10 @@ export type KnownValidationCode =
   | "unknownGrid" | "unknownStack" | "unknownLabel" | "duplicateLabel" | "unknownVariable"
   | "unknownProperty" | "expressionSyntax" | "emptyLoop" | "emptyBranch" | "missingField"
   | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable"
-  | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict";
+  | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict"
+  // Plugins (docs/plugins.md §6)
+  | "unknownPlugin" | "unknownPluginStep" | "pluginNotRunning" | "pluginParamMissing"
+  | "pluginParamEnum" | "pluginOutputType" | "unknownPluginFunction";
 
 /** One problem reported by `ValidateBuiltProgram`. */
 export type ValidationProblem = {
@@ -1232,9 +1253,21 @@ export type ExpressionSymbolVariable = {
   value?: number | string | boolean | null;
 };
 
-/** A read-only system variable such as `robot.x` (stored without the `$`). */
-export type ExpressionProperty = { name: string; description: string; type: string };
-export type ExpressionFunction = { name: string; signature: string; description: string };
+/**
+ * A read-only system variable such as `robot.x` (stored without the `$`). Plugin
+ * properties are named `<pluginId>.<name>` and carry their `pluginId`.
+ */
+export type ExpressionProperty = { name: string; description: string; type: string; pluginId?: string };
+/** Plugin functions are named `<pluginId>.<name>` and carry their `pluginId`. */
+export type ExpressionFunction = { name: string; signature: string; description: string; pluginId?: string };
+/** One plugin's contributions to expressions (`GetExpressionSymbols.plugins`), names fully qualified. */
+export type ExpressionPluginSymbols = {
+  id: string;
+  name: string;
+  running: boolean;
+  functions: ExpressionFunction[];
+  properties: ExpressionProperty[];
+};
 /** An IO name such as `stb.in1` (stored without the `$`). */
 export type ExpressionIoSymbol = { name: string; description: string };
 
@@ -1244,6 +1277,8 @@ export type ExpressionSymbols = {
   properties: ExpressionProperty[];
   functions: ExpressionFunction[];
   io: ExpressionIoSymbol[];
+  /** Newer controllers: the plugin functions/properties above, grouped per plugin. */
+  plugins?: ExpressionPluginSymbols[];
 };
 
 /** Result of `EvaluateExpression`. `ok: false` carries the evaluator's error text. */
@@ -1687,10 +1722,14 @@ export type PluginDetail = PluginSummary & {
 };
 
 /** GetPluginContributions: everything the builder needs in one call. */
+export type PluginStepContribution = { pluginId: string; pluginName: string; running: boolean; step: PluginStepDef };
+export type PluginFunctionContribution = { pluginId: string; pluginName: string; running: boolean; function: PluginFunctionDef };
+export type PluginPropertyContribution = { pluginId: string; pluginName: string; running: boolean; property: PluginPropertyDef; value?: number };
+
 export type PluginContributions = {
-  steps: { pluginId: string; pluginName: string; running: boolean; step: PluginStepDef }[];
-  functions: { pluginId: string; pluginName: string; running: boolean; function: PluginFunctionDef }[];
-  properties: { pluginId: string; pluginName: string; running: boolean; property: PluginPropertyDef }[];
+  steps: PluginStepContribution[];
+  functions: PluginFunctionContribution[];
+  properties: PluginPropertyContribution[];
 };
 
 export type PluginLogPage = {

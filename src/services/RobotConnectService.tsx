@@ -1007,15 +1007,24 @@ export class RobotConnectService {
         expression:   typeof v.expression === "string" ? v.expression : undefined,
         value:        typeof v.value === "number" || typeof v.value === "string" || typeof v.value === "boolean" ? v.value : undefined,
       })),
-      properties: wireArray(ack.properties).filter(isNamed).map(p => ({
-        name: stripSigil(p.name), description: str(p.description), type: str(p.type),
-      })),
-      functions: wireArray(ack.functions).filter(isNamed).map(f => ({
-        name: f.name, signature: str(f.signature) || `${f.name}()`, description: str(f.description),
-      })),
+      properties: wireArray(ack.properties).filter(isNamed).map(p => toExpressionProperty(p)),
+      functions: wireArray(ack.functions).filter(isNamed).map(f => toExpressionFunction(f)),
       io: wireArray(ack.io).filter(isNamed).map(i => ({
         name: stripSigil(i.name), description: str(i.description),
       })),
+      // Newer controllers group plugin symbols per plugin (docs/plugins.md §6).
+      plugins: ack.plugins === undefined ? undefined : wireArray(ack.plugins)
+        .filter(g => typeof g.id === "string" && g.id.length > 0)
+        .map(g => {
+          const id = g.id as string;
+          return {
+            id,
+            name: str(g.name) || id,
+            running: g.running === true,
+            functions: wireArray(g.functions).filter(isNamed).map(f => toExpressionFunction(f, id)),
+            properties: wireArray(g.properties).filter(isNamed).map(p => toExpressionProperty(p, id)),
+          };
+        }),
     };
   }
 
@@ -1938,6 +1947,25 @@ function isNamed(r: WireRecord): r is WireRecord & { name: string } {
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * A `GetExpressionSymbols` function entry. Inside a `plugins[]` group the controller may
+ * spell names bare (`tare`, as in the manifest) or qualified (`scale.tare`); both come
+ * out qualified so a group's entries insert the same text as the flat `functions` list.
+ */
+function toExpressionFunction(f: WireRecord & { name: string }, groupId?: string) {
+  const pluginId = typeof f.pluginId === "string" && f.pluginId ? f.pluginId : groupId;
+  const name = groupId && !f.name.includes(".") ? `${groupId}.${f.name}` : f.name;
+  return { name, signature: str(f.signature) || `${name}()`, description: str(f.description), pluginId };
+}
+
+/** A `GetExpressionSymbols` property entry; qualified the same way as functions. */
+function toExpressionProperty(p: WireRecord & { name: string }, groupId?: string) {
+  const pluginId = typeof p.pluginId === "string" && p.pluginId ? p.pluginId : groupId;
+  const bare = stripSigil(p.name);
+  const name = groupId && !bare.includes(".") ? `${groupId}.${bare}` : bare;
+  return { name, description: str(p.description), type: str(p.type), pluginId };
+}
 
 /** Symbols are stored without their `$` whichever way the controller spells them. */
 const stripSigil = (name: string): string => name.replace(/^\$/, "");
