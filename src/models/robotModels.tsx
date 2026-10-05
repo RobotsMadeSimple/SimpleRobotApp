@@ -1449,6 +1449,8 @@ export type RobotStatus = {
   driverOk: boolean,
 
   programs: ProgramSummary[],
+  /** Additive (GetStatus.plugins): lets the IO index show a badge without extra calls. */
+  plugins?: PluginStatusEntry[],
 
   lastToolUpdate: number,
   activeTool: string,
@@ -1550,3 +1552,150 @@ export function createDefaultStatus(): RobotStatus {
     robotType: "ASTRO",
   };
 }
+
+
+// ── Plugins (docs/plugins.md §2, §3, §7) ─────────────────────────────────────
+
+export type PluginState =
+  | 'disabled' | 'stopped' | 'installing' | 'starting'
+  | 'running' | 'degraded' | 'crashed' | 'error';
+
+/** Plugin-reported health (`status` event); independent of the process state. */
+export type PluginStatusState = 'ok' | 'degraded' | 'error';
+
+export type PluginRuntime = 'python' | 'dotnet' | 'exe' | 'external';
+
+/** One entry of GetStatus.plugins. */
+export type PluginStatusEntry = {
+  id: string;
+  name: string;
+  state: PluginState;
+  statusState?: PluginStatusState | '' | null;
+};
+
+export type PluginParamType = 'number' | 'boolean' | 'string' | 'enum' | 'point' | 'list' | 'image' | 'variable';
+export type PluginOutputType = 'number' | 'boolean' | 'string' | 'point' | 'list' | 'image';
+
+export type PluginParamDef = {
+  key: string;
+  label: string;
+  type: PluginParamType;
+  default?: unknown;
+  options?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
+  required?: boolean;
+  help?: string;
+};
+
+export type PluginOutputDef = {
+  key: string;
+  label: string;
+  type: PluginOutputType;
+};
+
+export type PluginStepDef = {
+  id: string;
+  label: string;
+  description?: string;
+  params?: PluginParamDef[];
+  outputs?: PluginOutputDef[];
+  timeoutMs?: number;
+  cancellable?: boolean;
+};
+
+export type PluginFunctionDef = {
+  name: string;
+  signature?: string;
+  description?: string;
+  minArgs?: number;
+  maxArgs?: number;
+  timeoutMs?: number;
+};
+
+export type PluginPropertyDef = {
+  name: string;
+  description?: string;
+  type?: 'number' | 'boolean';
+};
+
+export type PluginConfigFieldType = 'string' | 'password' | 'number' | 'boolean' | 'enum';
+
+export type PluginConfigField = {
+  key: string;
+  label?: string;
+  type: PluginConfigFieldType;
+  default?: string | number | boolean;
+  help?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  required?: boolean;
+};
+
+export type PluginManifest = {
+  id: string;
+  name: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  protocolVersion?: number;
+  runtime?: PluginRuntime;
+  entry?: string;
+  args?: string[];
+  autoStart?: boolean;
+  configSchema?: PluginConfigField[];
+  steps?: PluginStepDef[];
+  functions?: PluginFunctionDef[];
+  properties?: PluginPropertyDef[];
+};
+
+export type PluginSummary = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  runtime: PluginRuntime;
+  state: PluginState;
+  message: string;
+  enabled: boolean;
+  connected: boolean;
+  pid: number;
+  startedUnixMs: number;
+  restartCount: number;
+  lastExitCode?: number | null;
+  stepCount: number;
+  functionCount: number;
+  propertyCount: number;
+  hasConfig: boolean;
+  statusState: PluginStatusState | '' | null;
+  statusMessage: string;
+};
+
+export type PluginConfigValues = Record<string, string | number | boolean>;
+
+export type PluginDetail = PluginSummary & {
+  manifest: PluginManifest;
+  config: PluginConfigValues;
+  /** Present for runtime `external` only. */
+  token?: string;
+  properties: Record<string, number>;
+  logTail: string[];
+};
+
+/** GetPluginContributions: everything the builder needs in one call. */
+export type PluginContributions = {
+  steps: { pluginId: string; pluginName: string; running: boolean; step: PluginStepDef }[];
+  functions: { pluginId: string; pluginName: string; running: boolean; function: PluginFunctionDef }[];
+  properties: { pluginId: string; pluginName: string; running: boolean; property: PluginPropertyDef }[];
+};
+
+export type PluginLogPage = {
+  id: string;
+  totalCount: number;
+  start: number;
+  logs: string[];
+};

@@ -1,5 +1,5 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -240,6 +240,12 @@ export class RobotConnectService {
         if (!Array.isArray(data.backgroundPrograms)) {
           data.backgroundPrograms = [];
         }
+        if (typeof data.plugins === "string") {
+          try { data.plugins = JSON.parse(data.plugins); } catch { data.plugins = []; }
+        }
+        if (data.plugins !== undefined && !Array.isArray(data.plugins)) {
+          data.plugins = [];
+        }
         // Relay board state now rides along in the status broadcast so relays
         // changed by a running program update live (not just on page entry).
         this.updateRelayFromStatus(data.relay);
@@ -436,7 +442,7 @@ export class RobotConnectService {
 
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
     // Non-primitive fields that require deep comparison
-    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms']);
+    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms', 'plugins']);
 
     // Compare over the union of all keys so newly added fields are never silently skipped
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof RobotStatus>;
@@ -1729,6 +1735,148 @@ export class RobotConnectService {
     const base = this.httpBaseUrl();
     return base ? `${base}/dxf/${encodeURIComponent(name)}` : null;
   }
+
+  // ── Plugins (docs/plugins.md §7, §9) ───────────────────────────────────────
+
+  private pluginList(ack: Record<string, unknown>): PluginSummary[] {
+    return Array.isArray(ack.plugins) ? (ack.plugins as PluginSummary[]) : [];
+  }
+
+  public async getPlugins(): Promise<PluginSummary[]> {
+    return this.pluginList(await this.request("GetPlugins", {}));
+  }
+
+  public async getPlugin(id: string): Promise<PluginDetail> {
+    const ack = await this.request("GetPlugin", { id });
+    return ack.plugin as PluginDetail;
+  }
+
+  public async getPluginContributions(): Promise<PluginContributions> {
+    const ack = await this.request("GetPluginContributions", {});
+    return {
+      steps:      Array.isArray(ack.steps)      ? ack.steps      as PluginContributions["steps"]      : [],
+      functions:  Array.isArray(ack.functions)  ? ack.functions  as PluginContributions["functions"]  : [],
+      properties: Array.isArray(ack.properties) ? ack.properties as PluginContributions["properties"] : [],
+    };
+  }
+
+  public async setPluginEnabled(id: string, enabled: boolean): Promise<PluginSummary> {
+    return (await this.request("SetPluginEnabled", { id, enabled })).plugin as PluginSummary;
+  }
+
+  public async startPlugin(id: string): Promise<PluginSummary> {
+    return (await this.request("StartPlugin", { id })).plugin as PluginSummary;
+  }
+
+  public async stopPlugin(id: string): Promise<PluginSummary> {
+    return (await this.request("StopPlugin", { id })).plugin as PluginSummary;
+  }
+
+  public async restartPlugin(id: string): Promise<PluginSummary> {
+    return (await this.request("RestartPlugin", { id })).plugin as PluginSummary;
+  }
+
+  /** Throws PluginConfigError (with `field`) when the controller answers `badConfig`. */
+  public async setPluginConfig(id: string, config: PluginConfigValues): Promise<PluginSummary> {
+    try {
+      return (await this.request("SetPluginConfig", { id, config })).plugin as PluginSummary;
+    } catch (e) {
+      throw toPluginConfigError(e);
+    }
+  }
+
+  public async getPluginLogs(id: string, start?: number, end?: number): Promise<PluginLogPage> {
+    const ack = await this.request("GetPluginLogs", {
+      id,
+      ...(start !== undefined && { start }),
+      ...(end   !== undefined && { end }),
+    });
+    return {
+      id,
+      totalCount: typeof ack.totalCount === "number" ? ack.totalCount : 0,
+      start:      typeof ack.start === "number" ? ack.start : 0,
+      logs:       Array.isArray(ack.logs) ? ack.logs as string[] : [],
+    };
+  }
+
+  public async clearPluginLogs(id: string): Promise<void> {
+    await this.request("ClearPluginLogs", { id });
+  }
+
+  public async uninstallPlugin(id: string): Promise<void> {
+    await this.request("UninstallPlugin", { id });
+  }
+
+  public async reloadPlugins(): Promise<PluginSummary[]> {
+    return this.pluginList(await this.request("ReloadPlugins", {}));
+  }
+
+  public async rotatePluginToken(id: string): Promise<PluginDetail> {
+    return (await this.request("RotatePluginToken", { id })).plugin as PluginDetail;
+  }
+
+  /** The `ws://` address an `external` plugin connects to. */
+  public pluginWsUrl(): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + '/plugin';
+  }
+
+  /**
+   * Upload a plugin zip (`POST /plugins/install`). `fileUri` is a picker URI
+   * (file:// / content:// on native, blob: or data: on web); the bytes are read
+   * with fetch(uri).blob(). Rejects with PluginInstallError carrying the
+   * controller's 400 `code` (badZip | badManifest | idExists) and `message`.
+   */
+  public async installPluginZip(fileUri: string, opts: { replace?: boolean } = {}): Promise<{ id: string; plugin: PluginSummary }> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const blob = await (await fetch(fileUri)).blob();
+    const res = await fetch(`${base}/plugins/install${opts.replace ? '?replace=true' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/zip' },
+      body: blob,
+    });
+    let body: any = null;
+    try { body = await res.json(); } catch { /* non-JSON error body */ }
+    if (!res.ok) {
+      throw new PluginInstallError(
+        typeof body?.error === 'string' ? body.error : `http${res.status}`,
+        typeof body?.message === 'string' && body.message ? body.message : `Install failed (${res.status})`,
+      );
+    }
+    return { id: body?.id ?? body?.plugin?.id ?? '', plugin: body?.plugin as PluginSummary };
+  }
+}
+
+// ── Plugin errors ────────────────────────────────────────────────────────────
+
+/** HTTP install failure; `code` is the controller's `error` (badZip / badManifest / idExists). */
+export class PluginInstallError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = "PluginInstallError";
+  }
+}
+
+/** SetPluginConfig rejected with `badConfig`; `field` names the offending key when given. */
+export class PluginConfigError extends Error {
+  constructor(public readonly code: string, message: string, public readonly field?: string) {
+    super(message);
+    this.name = "PluginConfigError";
+  }
+}
+
+// The controller reports ok:false as an `error` code plus optional `message`/`field`;
+// sendCommand rejects with just the `error` string, so the field name is recovered
+// from the text when the controller encodes it ("badConfig: samples", "badConfig (samples)",
+// "badConfig: ... field 'samples'").
+function toPluginConfigError(e: unknown): unknown {
+  if (!(e instanceof CommandFailedError)) return e;
+  const text = e.message;
+  const field =
+    /field\W+['"]?([A-Za-z0-9_]+)/i.exec(text)?.[1] ??
+    /badConfig\W+([A-Za-z0-9_]+)/.exec(text)?.[1];
+  return new PluginConfigError(/badConfig/i.test(text) ? "badConfig" : "failed", text, field);
 }
 
 // ── Wire helpers for the program-editor commands ─────────────────────────────
