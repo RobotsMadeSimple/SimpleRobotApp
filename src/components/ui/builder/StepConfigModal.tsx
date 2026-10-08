@@ -1867,6 +1867,49 @@ export function StepConfigModal({
           </Text>
         );
 
+      case "SetJointPosition": {
+        const JOINTS = [
+          { i: 0, label: "Joint 1  —  J1 base / X" },
+          { i: 1, label: "Joint 2  —  Horizontal / Y" },
+          { i: 2, label: "Joint 3  —  Vertical / Z" },
+          { i: 3, label: "Joint 4  —  J4 / RZ" },
+        ];
+        const sel = draft!.jointIndex ?? 0;
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Declares a joint to be at a known value right now — no motion. Manually homes a single
+              joint when its position is known: read off the mechanism, or supplied by a sensor via an
+              expression. The robot counts as homed once every joint has been referenced.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>JOINT</Text>
+            {JOINTS.map((j, i) => {
+              const active = sel === j.i;
+              return (
+                <TouchableOpacity
+                  key={j.i}
+                  style={[ms.row, i < JOINTS.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ jointIndex: j.i })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{j.label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE  (deg or mm)</Text>
+            <ExpressionInput style={ms.input} fieldKey="jointValue"
+              value={draft!.jointValue} expressions={draft!.expressions}
+              onChangeValue={v => set({ jointValue: v })} onChangeExpr={setExpr} variables={variables} />
+            <Text style={ms.hintText}>Use 0 to zero the joint.</Text>
+          </>
+        );
+      }
+
       case "ThreadMove": {
         const pitch = draft!.threadPitch;
         const pitchLabel = pitch != null

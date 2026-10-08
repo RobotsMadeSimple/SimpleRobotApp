@@ -390,7 +390,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -1022,6 +1022,11 @@ export type ProgramStep = {
   elseSteps?: ProgramStep[];
   // SetTool
   toolName?: string;
+  // SetJointPosition — manually home one joint by declaring its value (no motion).
+  // jointIndex: 0=J1/X, 1=Horizontal/Y, 2=Vertical/Z, 3=J4/RZ. jointValue is the literal;
+  // an expressions.jointValue entry overrides it at runtime (e.g. an external reading).
+  jointIndex?: number;
+  jointValue?: number;
   // SetLocal / ClearLocal — also used as per-step local override on move steps
   localName?: string;
   // JumpL / JumpJ
@@ -1391,6 +1396,9 @@ export type RobotStatus = {
   connected: boolean,
   moving: boolean,
   wasHomed: boolean,
+  // Per-joint referenced state [J1/X, Horizontal/Y, Vertical/Z, J4/RZ] — a joint is
+  // referenced once homed or set to a known value; wasHomed is all four.
+  jointReferenced: boolean[],
   lastPointUpdate: number,
 
   x: number,
@@ -1479,6 +1487,7 @@ export function createDefaultStatus(): RobotStatus {
     connected: false,
     moving: false,
     wasHomed: false,
+    jointReferenced: [false, false, false, false],
     lastPointUpdate: 0,
     x: 0,
     y: 0,

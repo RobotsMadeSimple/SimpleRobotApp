@@ -1,5 +1,6 @@
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import JogPad from "@/src/components/ui/JogPad";
+import { ManualJointHoming } from "@/src/components/ui/jog/ManualJointHoming";
 import {
   Button,
   buttonTextColor,
@@ -934,6 +935,7 @@ export default function JogScreen() {
             >
               {configCard}
               {dro}
+              <View style={{ marginTop: spacing.md }}><ManualJointHoming /></View>
               {/* Two-column widths have no room for a third pane — the points
                   list rides along under the config column instead. */}
               {twoColumn && pointsCollapsible}
@@ -965,6 +967,7 @@ export default function JogScreen() {
             {configGrid}
             {pointsTrigger}
             {droInline}
+            <View style={{ marginTop: spacing.md }}><ManualJointHoming /></View>
           </ScrollView>
           <View style={styles.pinnedPad}>{jogPad}</View>
           {stopTeach(false)}
