@@ -20,7 +20,7 @@ import {
 import { useRobotStatus, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Check, Edit2, Plus, Wrench, X } from "lucide-react-native";
-import { useRef, useState } from "react";
+import { ComponentProps, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -48,7 +48,26 @@ const EMPTY_DRAFT: ToolDraft = {
   rx: "0", ry: "0", rz: "0",
 };
 
-// ── Coordinate field ──────────────────────────────────────────────────────────
+// ── Inputs ──────────────────────────────────────────────────────────────────
+
+/**
+ * A text input that holds its own copy of the value while being edited, so frequent parent
+ * re-renders don't push the value back into the field mid-type. This screen subscribes to the
+ * ~20Hz status broadcast (for the active tool), so the modal re-renders constantly; a plain
+ * controlled input would have its native text re-set on every tick, which — with
+ * selectTextOnFocus — reselects and overwrites what you're typing. The local copy is re-seeded
+ * only when the value changes from outside (e.g. opening the modal on a different tool).
+ */
+type LocalInputProps = Omit<ComponentProps<typeof Input>, "value" | "onChangeText" | "onChange"> & {
+  value: string;
+  onChange: (v: string) => void;
+};
+function LocalInput({ value, onChange, ...rest }: LocalInputProps) {
+  const [text, setText] = useState(value);
+  const [seed, setSeed] = useState(value);
+  if (value !== seed) { setSeed(value); setText(value); }   // external change → re-seed
+  return <Input value={text} onChangeText={t => { setText(t); onChange(t); }} {...rest} />;
+}
 
 function CoordField({
   label, value, onChange,
@@ -56,10 +75,10 @@ function CoordField({
   return (
     <View style={styles.coordField}>
       <Text style={styles.coordFieldLabel}>{label}</Text>
-      <Input
+      <LocalInput
         style={styles.coordInput}
         value={value}
-        onChangeText={onChange}
+        onChange={onChange}
         keyboardType="numeric"
         selectTextOnFocus
       />
@@ -110,9 +129,9 @@ function ToolFormModal({
 
               {/* Name */}
               <FormRow label="Name" style={styles.formRow}>
-                <Input
+                <LocalInput
                   value={draft.name}
-                  onChangeText={set("name")}
+                  onChange={set("name")}
                   placeholder="e.g. Gripper"
                   returnKeyType="next"
                 />
@@ -120,9 +139,9 @@ function ToolFormModal({
 
               {/* Description */}
               <FormRow label="Description" style={styles.formRow}>
-                <Input
+                <LocalInput
                   value={draft.description}
-                  onChangeText={set("description")}
+                  onChange={set("description")}
                   placeholder="Optional"
                   returnKeyType="next"
                 />
