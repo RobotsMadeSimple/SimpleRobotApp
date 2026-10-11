@@ -32,6 +32,7 @@ import {
   Square,
   Wrench,
   Home,
+  LocateFixed,
   Zap,
 } from "lucide-react-native";
 import React from "react";
@@ -135,6 +136,12 @@ export function stepLabel(step: ProgramStep): string {
     case "SetLocal":   return step.localName ? `Set Local  →  ${step.localName}` : "Set Local  →  None";
     case "ClearLocal": return "Clear Local";
     case "RunHoming":  return "Run Homing";
+    case "SetJointPosition": {
+      const names = ["J1/X", "Horizontal/Y", "Vertical/Z", "J4/RZ"];
+      const jn = names[step.jointIndex ?? 0] ?? `#${step.jointIndex ?? 0}`;
+      const v  = step.expressions?.jointValue ?? `${step.jointValue ?? 0}`;
+      return `Set Joint  →  ${jn}  =  ${v}`;
+    }
     case "AuxMove": {
       const axis = step.auxAxisIndex ?? 0;
       const isAbs = step.auxAbsolute;
@@ -212,6 +219,7 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "SetLocal":
     case "ClearLocal":     return <Grid3x3       size={size} color={color} />;
     case "RunHoming":      return <Home          size={size} color={color} />;
+    case "SetJointPosition": return <LocateFixed size={size} color={color} />;
     case "AuxMove":            return <ChevronsRight size={size} color={color} />;
     case "AuxContinuous":      return <Play          size={size} color={color} />;
     case "AuxStop":            return <OctagonX      size={size} color={color} />;
@@ -254,6 +262,7 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   SetLocal:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Local"   },
   ClearLocal:   { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Clear Local" },
   RunHoming:     { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"         },
+  SetJointPosition: { accent: "#d97706", iconBg: "#fef3c7", iconColor: "#d97706", label: "Set Joint"       },
   AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
   AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
@@ -450,6 +459,12 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return null;
     case "RunHoming":
       return "Runs the full homing sequence";
+    case "SetJointPosition": {
+      const names = ["J1/X", "Horizontal/Y", "Vertical/Z", "J4/RZ"];
+      const jn = names[step.jointIndex ?? 0] ?? `#${step.jointIndex ?? 0}`;
+      const v  = step.expressions?.jointValue ?? `${step.jointValue ?? 0}`;
+      return `${jn} = ${v}`;
+    }
     case "AuxMove": {
       const unit   = step.auxUnit ?? "steps";
       const amount = step.auxUnit && step.auxDistance != null ? `${step.auxDistance} ${unit}`
@@ -636,6 +651,7 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SetLocal",     label: "Set Local",     desc: "Activate a local coordinate frame — all subsequent moves are offset by this local" },
   { type: "ClearLocal",   label: "Clear Local",   desc: "Deactivate the current local coordinate frame and return to world origin" },
   { type: "RunHoming",    label: "Run Homing",    desc: "Run the full homing sequence and wait for it to complete before continuing" },
+  { type: "SetJointPosition", label: "Set Joint Position", desc: "Manually home one joint — declare its value (deg/mm) with no motion; use 0 to zero it. Value can be an expression" },
   { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
   { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
@@ -656,7 +672,7 @@ export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])
 
 export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
   "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram",
-  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
+  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
 ]);
 
 /**
@@ -692,7 +708,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,

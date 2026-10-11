@@ -52,6 +52,8 @@ export const goldenProgramStep = {
   elseIfBranches: [{ id: "elif-1", condition: { combinator: "ANY", items: [] }, steps: [{ id: "nested-elif-1", type: "Wait", waitMs: 100 }] }],
   elseSteps: [{ id: "nested-else-1", type: "Wait", waitMs: 100 }],
   toolName: "Gripper",
+  jointIndex: 2,
+  jointValue: 90,
   localName: "Fixture1",
   jumpZ: 50,
   jumpZStart: 40,

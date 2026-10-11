@@ -436,7 +436,7 @@ export class RobotConnectService {
 
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
     // Non-primitive fields that require deep comparison
-    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms']);
+    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms', 'jointReferenced']);
 
     // Compare over the union of all keys so newly added fields are never silently skipped
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof RobotStatus>;
@@ -1404,6 +1404,21 @@ export class RobotConnectService {
   /** Enter/exit recovery bypass so a faulted robot can be jogged back into range. */
   public setLimitBypass(enable: boolean) {
     return this.sendCommand("SetLimitBypass", { enable });
+  }
+
+  // ── Manual joint homing ────────────────────────────────────────────────────
+
+  /**
+   * Declare one joint to be at a known value right now — manual homing of a single joint, no
+   * motion. joint: 0=J1/X, 1=Horizontal/Y, 2=Vertical/Z, 3=J4/RZ. Refused while moving/homing.
+   */
+  public setJointPosition(joint: number, value: number) {
+    return this.sendCommand("SetJointPosition", { joint, value });
+  }
+
+  /** Zero a joint — shorthand for setJointPosition(joint, 0). */
+  public zeroJoint(joint: number) {
+    return this.setJointPosition(joint, 0);
   }
 
   // ── Aux Axis ───────────────────────────────────────────────────────────────
