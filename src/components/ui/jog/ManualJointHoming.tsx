@@ -17,12 +17,21 @@ function fmt(v: number | undefined): string {
   return typeof v === "number" && Number.isFinite(v) ? v.toFixed(2) : "—";
 }
 
+// Shared so a host (e.g. the control-page modal header) can show the same help text.
+export const MANUAL_HOMING_INFO =
+  "Declare a joint to be at a known value right now — no motion. Use it to manually home a joint " +
+  "when its position is known (read off the mechanism, or from a sensor). A joint shows 'referenced' " +
+  "once homed or set; the robot is homed once all four are referenced. Disabled while the robot is moving or homing.";
+
 /**
  * Manually home a single joint: declare it to be at a known value right now (no motion), or
  * zero it. Used when a joint's position is known — read off the mechanism, or from an external
  * stimulus. A joint reads "referenced" once homed or set; the robot is homed once all four are.
+ *
+ * `embedded`: drop the outer Card and the built-in title header so it sits cleanly inside a modal
+ * sheet that already supplies the title + info; otherwise it renders as a standalone titled Card.
  */
-export function ManualJointHoming() {
+export function ManualJointHoming({ embedded = false }: { embedded?: boolean }) {
   const status     = useRobotStatus();
   const referenced = status.jointReferenced ?? [false, false, false, false];
   const readouts   = [status.joint1Angle, status.joint2X, status.joint2Z, status.joint4Angle];
@@ -38,12 +47,16 @@ export function ManualJointHoming() {
     setVals(p => { const n = [...p]; n[i] = ""; return n; });
   }
 
+  const Wrapper = embedded ? View : Card;
+
   return (
-    <Card>
-      <View style={styles.header}>
-        <Text style={type.title}>Manual Joint Homing</Text>
-        <InfoTip text="Declare a joint to be at a known value right now — no motion. Use it to manually home a joint when its position is known (read off the mechanism, or from a sensor). A joint shows 'referenced' once homed or set; the robot is homed once all four are referenced. Disabled while the robot is moving or homing." />
-      </View>
+    <Wrapper>
+      {!embedded && (
+        <View style={styles.header}>
+          <Text style={type.title}>Manual Joint Homing</Text>
+          <InfoTip text={MANUAL_HOMING_INFO} />
+        </View>
+      )}
 
       {JOINTS.map((j, i) => (
         <View key={i} style={[styles.joint, i < JOINTS.length - 1 && styles.jointBorder]}>
@@ -70,7 +83,7 @@ export function ManualJointHoming() {
           </View>
         </View>
       ))}
-    </Card>
+    </Wrapper>
   );
 }
 
