@@ -2403,6 +2403,175 @@ export function StepConfigModal({
         );
       }
 
+      case "GripperAction":
+      case "ConveyorAction":
+      case "RotaryIndex": {
+        const deviceId    = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
+        const axisIndex   = draft!.auxAxisIndex ?? 0;
+        const auxDevice   = auxDevices.find(d => d.deviceId === deviceId);
+        const displayAxes = auxDevice?.axes.length ? auxDevice.axes : [0,1,2,3].map(n => ({ axisIndex: n, name: "" }));
+
+        const deviceAndMotor = (
+          <>
+            <Text style={[ms.fieldLabel, { marginTop: 0 }]}>DEVICE</Text>
+            {auxDevices.length === 0 ? (
+              <Text style={[ms.emptyHint, { marginTop: 4 }]}>No aux devices connected.</Text>
+            ) : auxDevices.map((d, i) => {
+              const active = deviceId === d.deviceId;
+              return (
+                <TouchableOpacity key={d.deviceId}
+                  style={[ms.row, i < auxDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ auxDeviceId: d.deviceId })} activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]} numberOfLines={1}>
+                      {d.deviceName || d.deviceId}
+                    </Text>
+                    {d.deviceName && d.deviceName !== d.deviceId
+                      ? <Text style={ms.rowDesc}>{d.deviceId}</Text>
+                      : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MOTOR</Text>
+            {displayAxes.map((a, i) => {
+              const active = axisIndex === a.axisIndex;
+              const label  = a.name ? `${a.name}` : `Axis ${a.axisIndex}`;
+              return (
+                <TouchableOpacity key={a.axisIndex}
+                  style={[ms.row, i < displayAxes.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  onPress={() => set({ auxAxisIndex: a.axisIndex })} activeOpacity={0.7}>
+                  <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                    {active && <View style={ms.radioDot} />}
+                  </View>
+                  <View style={ms.rowText}>
+                    <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </>
+        );
+
+        const settingsHint = (
+          <Text style={ms.hintText}>
+            Move distance and speed come from this axis's role settings — set them on the I/O → Aux screen.
+          </Text>
+        );
+
+        if (draft!.type === "GripperAction") {
+          const action   = draft!.gripperAction ?? "Open";
+          const gripAxis = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
+          const lo = gripAxis ? Math.min(gripAxis.gripperOpenMm || 0, gripAxis.gripperClosedMm || 0) : 0;
+          const hi = gripAxis ? Math.max(gripAxis.gripperOpenMm || 0, gripAxis.gripperClosedMm || 0) : 0;
+          return (
+            <>
+              {deviceAndMotor}
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ACTION</Text>
+              <View style={ms.segRow}>
+                {([{ label: "Open", val: "Open" }, { label: "Close", val: "Close" }, { label: "Grip to", val: "GripTo" }] as const).map(({ label, val }) => {
+                  const active = action === val;
+                  return (
+                    <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ gripperAction: val })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {action === "GripTo" && (
+                <>
+                  <Text style={[ms.fieldLabel, { marginTop: 12 }]}>TARGET GAP  (mm)</Text>
+                  <ExpressionInput style={ms.input} fieldKey="gripTargetMm"
+                    value={draft!.gripTargetMm} expressions={draft!.expressions}
+                    onChangeValue={v => set({ gripTargetMm: v })} onChangeExpr={setExpr}
+                    placeholder={hi > lo ? `${lo.toFixed(0)}–${hi.toFixed(0)}` : "30"} variables={variables} />
+                  {hi > lo && <Text style={ms.hintText}>{`Jaw gap, clamped to ${lo.toFixed(0)}–${hi.toFixed(0)} mm.`}</Text>}
+                </>
+              )}
+              <View style={ms.twoCol}>
+                <View style={ms.twoColItem}>
+                  <Text style={[ms.fieldLabel, { marginTop: 10 }]}>SPEED  (mm/s)</Text>
+                  <ExpressionInput style={ms.input} fieldKey="auxVelocity"
+                    value={draft!.auxVelocity} expressions={draft!.expressions}
+                    onChangeValue={v => set({ auxVelocity: v })} onChangeExpr={setExpr}
+                    allowUndefined placeholder="from settings" variables={variables} />
+                </View>
+                <View style={ms.twoColItem}>
+                  <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
+                  <ExpressionInput style={ms.input} fieldKey="auxAccel"
+                    value={draft!.auxAccel} expressions={draft!.expressions}
+                    onChangeValue={v => set({ auxAccel: v })} onChangeExpr={setExpr}
+                    allowUndefined placeholder="from settings" variables={variables} />
+                </View>
+              </View>
+              <Text style={ms.hintText}>
+                Open and Close drive to the configured gap limits; Grip to drives to the gap above.
+                Speed and accel fall back to the gripper's configured open/close time when left blank.
+              </Text>
+            </>
+          );
+        }
+
+        if (draft!.type === "ConveyorAction") {
+          const action = draft!.conveyorAction ?? "RunForward";
+          return (
+            <>
+              {deviceAndMotor}
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ACTION</Text>
+              <View style={ms.segRow}>
+                {([
+                  { label: "Run Forward", val: "RunForward" },
+                  { label: "Run Reverse", val: "RunReverse" },
+                  { label: "Stop",        val: "Stop" },
+                ] as const).map(({ label, val }) => {
+                  const active = action === val;
+                  return (
+                    <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ conveyorAction: val })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {settingsHint}
+            </>
+          );
+        }
+
+        // RotaryIndex
+        const dir = draft!.rotaryDirection ?? 1;
+        return (
+          <>
+            {deviceAndMotor}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
+            <View style={ms.segRow}>
+              {([{ label: "+", val: 1 }, { label: "−", val: -1 }] as const).map(({ label, val }) => {
+                const active = dir === val;
+                return (
+                  <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ rotaryDirection: val })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>COUNT</Text>
+            <ExpressionInput style={ms.input} fieldKey="rotaryCount"
+              value={draft!.rotaryCount}
+              expressions={draft!.expressions}
+              onChangeValue={v => set({ rotaryCount: v !== undefined ? Math.round(v) : undefined })}
+              onChangeExpr={setExpr}
+              placeholder="1"
+              variables={variables} />
+            {settingsHint}
+          </>
+        );
+      }
+
       case "IfCondition":
         return (
           <Text style={ms.hintText}>

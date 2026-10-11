@@ -71,11 +71,11 @@ export function PositionReadout({ axes, size = "md", inline = false, card = true
       <View style={[styles.inlineRow, style]}>
         {axes.map((axis, i) => (
           <RowWrap key={axis.label} style={styles.inlineAxis} {...rowProps(axis, i)}>
-            <View style={[styles.axisTile, styles.axisTileInline, axis.active && styles.axisTileActive]}>
-              <Text style={[styles.axisLabel, axis.active && styles.axisLabelActive]}>{axis.label}</Text>
+            <View style={[styles.axisTile, styles.axisTileInline, lg && styles.axisTileInlineLg, axis.active && styles.axisTileActive]}>
+              <Text style={[styles.axisLabel, lg && styles.axisLabelLg, axis.active && styles.axisLabelActive]}>{axis.label}</Text>
             </View>
             <Text
-              style={[styles.value, styles.valueInline, axis.active && styles.valueActive]}
+              style={[styles.value, styles.valueInline, lg && styles.valueInlineLg, axis.active && styles.valueActive]}
               numberOfLines={1}
             >
               {fmtValue(axis.value)}
@@ -234,6 +234,7 @@ const styles = StyleSheet.create({
     minWidth: 96,
   },
   axisTileInline: { minWidth: 26, height: 22 },
+  axisTileInlineLg: { minWidth: 30, height: 26 },
   // Left-aligned, right beside its axis tile — a right-aligned flex:1 value
   // drifted to the cell edge and read as belonging to the NEXT axis. Leftover
   // cell width now falls after the value, i.e. between axis groups.
@@ -241,5 +242,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 14,
     textAlign: "left",
+  },
+  valueInlineLg: {
+    fontSize: 19,
+    fontWeight: "700",
   },
 });

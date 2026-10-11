@@ -3,15 +3,18 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { ios } from "@/src/components/ui/io/ioShared";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxAxisChannelState, AuxDeviceState, auxUnitLabel } from "@/src/models/robotModels";
+import { AuxAxisChannelState, AuxDeviceState, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
 import {
   ChevronLeft,
   ChevronRight,
+  Crosshair,
   Gauge,
   Settings2,
+  Square,
 } from "lucide-react-native";
-import { useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { auxRoleMeta } from "@/src/components/ui/io/auxRoles";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { ReactNode, useEffect, useState } from "react";
 import {
   Modal,
   StyleSheet,
@@ -25,8 +28,6 @@ import {
   accents,
   Button,
   Card,
-  Chip,
-  ChipGroup,
   colors,
   Divider,
   EmptyState,
@@ -37,7 +38,6 @@ import {
   radii,
   Screen,
   SectionHeader,
-  SegmentedControl,
   shadows,
   spacing,
   StatTile,
@@ -95,9 +95,48 @@ function AuxJogButton({
   );
 }
 
-// ── AuxAxisConfigModal ────────────────────────────────────────────────────────
+// ── Action helpers ────────────────────────────────────────────────────────────
 
-function AuxAxisConfigModal({
+/** The configured action distance converted to motor steps.
+ *  Physical (typed) axes convert distance→steps via auxStepsPerUnit; untyped
+ *  axes treat actionDistance as raw steps. */
+function actionSteps(axis: AuxAxisChannelState): number {
+  const spu = auxStepsPerUnit(axis);
+  return axis.axisType && spu > 0
+    ? Math.round((axis.actionDistance || 0) * spu)
+    : Math.round(axis.actionDistance || 0);
+}
+
+// ── AuxActionButton ───────────────────────────────────────────────────────────
+// Tap (one-shot) companion to AuxJogButton — used for role actions like gripper
+// Open/Close, conveyor Run/Stop and rotary indexing.
+
+function AuxActionButton({
+  label,
+  icon,
+  onPress,
+  tone = "default",
+}: {
+  label: string;
+  icon?: ReactNode;
+  onPress: () => void;
+  tone?: "default" | "danger";
+}) {
+  const tint = tone === "danger" ? colors.danger : AUX_TINT;
+  return (
+    <AnimatedPressable style={[styles.actionBtn, { borderColor: tint }]} onPress={onPress}>
+      <View style={styles.actionBtnContent}>
+        {icon}
+        <Text style={[styles.actionBtnText, { color: tint }]} numberOfLines={1}>{label}</Text>
+      </View>
+    </AnimatedPressable>
+  );
+}
+
+// ── AuxSetPositionModal ─────────────────────────────────────────────────────────
+// Type a position (in the axis unit, or raw steps when untyped) to set, or zero.
+
+function AuxSetPositionModal({
   deviceId,
   axis,
   onClose,
@@ -106,36 +145,24 @@ function AuxAxisConfigModal({
   axis: AuxAxisChannelState;
   onClose: () => void;
 }) {
-  const [name,        setName]        = useState(axis.name);
-  const [axisType,    setAxisType]    = useState(axis.axisType || "");
-  const [stepsPerRev, setStepsPerRev] = useState(String(axis.stepsPerRev || 1600));
-  const [gearRatio,   setGearRatio]   = useState(String(axis.gearRatio ?? 1));
-  const [mmPerRev,    setMmPerRev]    = useState(String(axis.mmPerRev ?? 0));
-  const [invertDir,   setInvertDir]   = useState(axis.invertDirection ?? false);
-  const [saving,      setSaving]      = useState(false);
+  const unitLabel = auxUnitLabel(axis);
+  const spu       = auxStepsPerUnit(axis);
+  const [value, setValue] = useState("");
 
-  const save = async () => {
-    setSaving(true);
-    await robotClient.setAuxAxisConfig({
-      deviceId,
-      axisIndex:       axis.axisIndex,
-      name:            name.trim(),
-      stepsPerRev:     parseInt(stepsPerRev)  || 1600,
-      invertDirection: invertDir,
-      axisType,
-      gearRatio:       parseFloat(gearRatio)  || 1,
-      mmPerRev:        parseFloat(mmPerRev)   || 0,
-    });
-    await robotClient.getAuxState().catch(() => {});
-    setSaving(false);
-    onClose();
+  const g         = gripperGeom(axis);
+  const isGripper = axis.role === "Gripper" && g.ok;
+
+  const toSteps = (v: string): number => {
+    const n = parseFloat(v);
+    if (!isFinite(n)) return 0;
+    return axis.axisType && spu > 0 ? Math.round(n * spu) : Math.round(n);
   };
 
-  const typeOptions: { label: string; value: string }[] = [
-    { label: "Unconfigured", value: "" },
-    { label: "Rotary (°)",   value: "Rotary" },
-    { label: "Linear (mm)",  value: "Linear" },
-  ];
+  const apply = async (steps: number) => {
+    await robotClient.setAuxPosition(deviceId, axis.axisIndex, steps);
+    await robotClient.getAuxState().catch(() => {});
+    onClose();
+  };
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
@@ -143,101 +170,212 @@ function AuxAxisConfigModal({
         <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
             <View style={styles.modalTitleRow}>
-              <Text style={styles.modalTitle}>Axis {axis.axisIndex} Configuration</Text>
-              <InfoTip text="Steps per revolution should match your stepper driver's microstepping setting. Gear ratio and mm per revolution convert motor turns into real-world degrees or millimeters for jog and position readouts." />
+              <Text style={styles.modalTitle}>Set Axis {axis.axisIndex} Position</Text>
+              <InfoTip text="Sets the stored position for this axis without moving the motor. Zero re-references the current physical position as the origin." />
             </View>
             <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
               <Text style={styles.modalCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          <FormRow label="Name">
-            <Input
-              value={name}
-              onChangeText={setName}
-              placeholder={`Axis ${axis.axisIndex}`}
-              returnKeyType="done"
-            />
-          </FormRow>
-
-          <FormRow label="Type" style={styles.fieldGap}>
-            <SegmentedControl options={typeOptions} value={axisType} onChange={setAxisType} />
-          </FormRow>
-
-          <FormRow label="Steps per revolution" style={styles.fieldGap}>
-            <ChipGroup style={styles.stepChipsRow}>
-              {([
-                { label: "Full",  steps: 200  },
-                { label: "1/2",   steps: 400  },
-                { label: "1/4",   steps: 800  },
-                { label: "1/8",   steps: 1600 },
-                { label: "1/16",  steps: 3200 },
-              ] as const).map(({ label, steps }) => (
-                <Chip
-                  key={steps}
-                  label={`${label} · ${steps}`}
-                  selected={stepsPerRev === String(steps)}
-                  onPress={() => setStepsPerRev(String(steps))}
-                  tint={[accents.purple, accents.purpleSoft]}
+          {isGripper && (
+            <>
+              <Text style={styles.reRefHint}>
+                Lost steps? Drive the jaws to a known end-stop, then re-reference the position:
+              </Text>
+              <View style={styles.setPosBtnRow}>
+                <Button
+                  label={`At full open (${g.open.toFixed(0)} mm)`}
+                  variant="secondary"
+                  onPress={() => apply(Math.round(g.open * g.spm))}
+                  style={styles.setPosBtn}
                 />
-              ))}
-            </ChipGroup>
-            <Input
-              value={stepsPerRev}
-              onChangeText={setStepsPerRev}
-              placeholder="Custom"
-              keyboardType="numeric"
-              returnKeyType="done"
-              style={styles.customStepsInput}
-            />
-          </FormRow>
-
-          <FormRow label="Gear ratio" style={styles.fieldGap}>
-            <Input
-              value={gearRatio}
-              onChangeText={setGearRatio}
-              placeholder="1"
-              keyboardType="decimal-pad"
-              returnKeyType="done"
-            />
-          </FormRow>
-
-          {axisType === "Linear" && (
-            <FormRow label="mm per output revolution" style={styles.fieldGap}>
-              <Input
-                value={mmPerRev}
-                onChangeText={setMmPerRev}
-                placeholder="0"
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-              />
-            </FormRow>
+                <Button
+                  label={`At full closed (${g.closed.toFixed(0)} mm)`}
+                  variant="secondary"
+                  onPress={() => apply(Math.round(g.closed * g.spm))}
+                  style={styles.setPosBtn}
+                />
+              </View>
+              <Divider style={styles.reRefDivider} />
+            </>
           )}
 
-          <FormRow label="Invert direction" inline style={styles.fieldGap}>
-            <Switch
-              value={invertDir}
-              onValueChange={setInvertDir}
-              trackColor={{ false: colors.border, true: AUX_TINT }}
+          <FormRow label={`Position (${axis.axisType ? unitLabel : "steps"})`}>
+            <Input
+              value={value}
+              onChangeText={setValue}
+              placeholder="0"
+              keyboardType="numeric"
+              returnKeyType="done"
             />
           </FormRow>
 
-          <Button
-            label={saving ? "Saving…" : "Save"}
-            loading={saving}
-            onPress={save}
-            style={[styles.saveBtn, { backgroundColor: AUX_TINT }]}
-          />
+          <View style={styles.setPosBtnRow}>
+            <Button
+              label="Zero"
+              variant="secondary"
+              onPress={() => apply(0)}
+              style={styles.setPosBtn}
+            />
+            <Button
+              label="Set"
+              onPress={() => apply(toSteps(value))}
+              style={[styles.setPosBtn, { backgroundColor: AUX_TINT }]}
+            />
+          </View>
         </View>
       </View>
     </Modal>
   );
 }
 
+
+// ── GripperControls ─────────────────────────────────────────────────────────
+// Open / Close drive the jaws to the configured gap limits; "grip to X" drives to
+// an absolute gap in between. All are absolute moves computed from the axis's
+// dead-reckoned position (controller MoveAux is relative, so we send the delta).
+
+function gripperGeom(axis: AuxAxisChannelState) {
+  const spm    = auxStepsPerUnit(axis);            // steps per mm of jaw gap
+  const open   = axis.gripperOpenMm   || 0;
+  const closed = axis.gripperClosedMm || 0;
+  const stroke = Math.abs(open - closed);
+  // Per-direction speed (mm/s) derived from the full-stroke time; fall back to
+  // actionVelocity, then a gentle default. Accel 0 = let the move use its default.
+  const fallbackVel = (axis.actionVelocity || 0) > 0 ? axis.actionVelocity : 20;
+  const openVel  = (axis.gripperOpenTimeSec  || 0) > 0 && stroke > 0 ? stroke / axis.gripperOpenTimeSec  : fallbackVel;
+  const closeVel = (axis.gripperCloseTimeSec || 0) > 0 && stroke > 0 ? stroke / axis.gripperCloseTimeSec : fallbackVel;
+  const accel     = axis.gripperAccel || 0;
+  const overTravel = axis.gripperOverTravelMm || 0;
+  return { spm, open, closed, stroke, openVel, closeVel, accel, overTravel, ok: spm > 0 && open !== closed };
+}
+
+function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAxisChannelState }) {
+  const [target, setTarget] = useState("");
+  const g = gripperGeom(axis);
+
+  if (!g.ok) {
+    return (
+      <Text style={styles.needsConfig} numberOfLines={2}>
+        Set the jaw gap limits in configuration (gear icon) to enable Open / Close.
+      </Text>
+    );
+  }
+
+  const lo = Math.min(g.open, g.closed);
+  const hi = Math.max(g.open, g.closed);
+
+  // toLimit = a full Open/Close that seats against a hard stop (vs a Grip to an in-between gap).
+  const gripTo = (mm: number, toLimit = false) => {
+    const clamped = Math.max(lo, Math.min(hi, mm));
+    const curMm   = axis.position / g.spm;
+    // Which way we head: toward the wider gap for Open, the narrower for Close; a Grip follows
+    // the target vs the current position. Direction picks the speed and the over-travel sign.
+    const opening = toLimit ? clamped >= hi : clamped > curMm;
+    let   delta   = Math.round((clamped - curMm) * g.spm);
+    // Over-travel a full Open/Close into the stop so the controller re-references there (it clamps
+    // the tracked position to the gap limits). A Grip stops exactly on its gap, so never over-travels.
+    if (toLimit && g.overTravel > 0) delta += (opening ? 1 : -1) * Math.round(g.overTravel * g.spm);
+    if (delta === 0) return;
+    const velSteps   = Math.max(1, Math.round((opening ? g.openVel : g.closeVel) * g.spm));
+    const accelSteps = g.accel > 0 ? Math.max(1, Math.round(g.accel * g.spm)) : undefined;
+    robotClient.moveAux(device.deviceId, axis.axisIndex, delta, velSteps, accelSteps, accelSteps);
+  };
+
+  return (
+    <View style={styles.gripperControls}>
+      <View style={styles.jogRow}>
+        <AuxActionButton label="Open"  onPress={() => gripTo(g.open, true)} />
+        <AuxActionButton label="Close" onPress={() => gripTo(g.closed, true)} />
+      </View>
+      <View style={styles.gripToRow}>
+        <Input
+          value={target}
+          onChangeText={setTarget}
+          placeholder={`${lo.toFixed(0)}–${hi.toFixed(0)}`}
+          keyboardType="decimal-pad"
+          returnKeyType="go"
+          onSubmitEditing={() => { const n = parseFloat(target); if (isFinite(n)) gripTo(n); }}
+          style={styles.gripToInput}
+        />
+        <Text style={styles.gripToUnit}>mm</Text>
+        <AuxActionButton
+          label="Grip"
+          onPress={() => { const n = parseFloat(target); if (isFinite(n)) gripTo(n); }}
+        />
+      </View>
+    </View>
+  );
+}
+
 // ── AuxDeviceDetail ───────────────────────────────────────────────────────────
 
 function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: boolean }) {
-  const [configAxis, setConfigAxis] = useState<AuxAxisChannelState | null>(null);
+  const router = useRouter();
+  const [setPosAxis, setSetPosAxis] = useState<AuxAxisChannelState | null>(null);
+
+  // Role-specific action controls that replace the default ± jog buttons.
+  const renderAxisControls = (axis: AuxAxisChannelState) => {
+    const axisIndex = axis.axisIndex;
+    const vel       = axis.actionVelocity || 800;
+    const steps     = actionSteps(axis);
+
+    switch (axis.role) {
+      case "Gripper":
+        return <GripperControls device={device} axis={axis} />;
+      case "Conveyor":
+        return (
+          <View style={styles.jogRow}>
+            <AuxActionButton
+              label="Run"
+              icon={<ChevronLeft size={20} color={AUX_TINT} />}
+              onPress={() => robotClient.jogAux({ deviceId: device.deviceId, axis: axisIndex, velocity: -vel })}
+            />
+            <AuxActionButton
+              label="Stop"
+              tone="danger"
+              icon={<Square size={16} color={colors.danger} />}
+              onPress={() => robotClient.stopAux(device.deviceId, axisIndex)}
+            />
+            <AuxActionButton
+              label="Run"
+              icon={<ChevronRight size={20} color={AUX_TINT} />}
+              onPress={() => robotClient.jogAux({ deviceId: device.deviceId, axis: axisIndex, velocity: vel })}
+            />
+          </View>
+        );
+      case "RotaryTable":
+        return (
+          <View style={styles.jogRow}>
+            <AuxActionButton
+              label="Index −"
+              onPress={() => robotClient.moveAux(device.deviceId, axisIndex, -steps, vel)}
+            />
+            <AuxActionButton
+              label="Index +"
+              onPress={() => robotClient.moveAux(device.deviceId, axisIndex, steps, vel)}
+            />
+          </View>
+        );
+      default: // Generic and unconfigured ("") — hold-to-jog.
+        return (
+          <View style={styles.jogRow}>
+            <AuxJogButton deviceId={device.deviceId} axisIndex={axisIndex} direction={-1} />
+            <AuxJogButton deviceId={device.deviceId} axisIndex={axisIndex} direction={1} />
+          </View>
+        );
+    }
+  };
+
+  // Position readout in the axis's configured unit (raw steps when untyped).
+  const posLabel = (axis: AuxAxisChannelState): string => {
+    const spu = auxStepsPerUnit(axis);
+    if (axis.axisType && spu > 0) {
+      return `${(axis.position / spu).toFixed(2)} ${auxUnitLabel(axis)}`;
+    }
+    return `${axis.position ?? 0} steps`;
+  };
 
   // Optimistic override for the enable toggle. The Switch is otherwise driven
   // entirely by server state, so a tap would snap back until the next poll —
@@ -262,11 +400,11 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
 
   return (
     <>
-      {configAxis && (
-        <AuxAxisConfigModal
+      {setPosAxis && (
+        <AuxSetPositionModal
           deviceId={device.deviceId}
-          axis={configAxis}
-          onClose={() => setConfigAxis(null)}
+          axis={setPosAxis}
+          onClose={() => setSetPosAxis(null)}
         />
       )}
 
@@ -295,29 +433,41 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
         />
         {(() => {
           const axisRows = device.axes.map((axis, i) => {
-            const unitLabel = auxUnitLabel(axis);
+            const meta      = auxRoleMeta(axis.role);
+            const RoleIcon  = meta.icon;
+            const hasRole   = !!axis.role && axis.role !== "Generic";
+            const roleLabel = hasRole ? meta.label : null;
             const row = (
               <View style={styles.axisRow}>
                 <View style={styles.axisIndexBadge}>
                   <Text style={styles.axisIndexText}>{axis.axisIndex}</Text>
                 </View>
+                <View style={[styles.roleIcon, hasRole && styles.roleIconOn]}>
+                  <RoleIcon size={18} color={hasRole ? AUX_TINT : colors.textFaint} />
+                </View>
                 <View style={ios.rowInfo}>
                   <Text style={ios.rowLabel} numberOfLines={1}>
                     {axis.name || `Axis ${axis.axisIndex}`}
                   </Text>
-                  <Text style={ios.rowSub}>{axis.axisType ? unitLabel : "Hold to jog"}</Text>
+                  <Text style={ios.rowSub} numberOfLines={1}>
+                    {roleLabel ? `${roleLabel}  ·  ${posLabel(axis)}` : posLabel(axis)}
+                  </Text>
                 </View>
                 <AnimatedPressable
                   style={styles.axisConfigBtn}
-                  onPress={() => setConfigAxis(axis)}
+                  onPress={() => setSetPosAxis(axis)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Crosshair size={16} color={colors.textFaint} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={styles.axisConfigBtn}
+                  onPress={() => router.push({ pathname: "/io/aux-axis", params: { deviceId: device.deviceId, axis: String(axis.axisIndex) } })}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Settings2 size={16} color={colors.textFaint} />
                 </AnimatedPressable>
-                <View style={styles.jogRow}>
-                  <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={-1} />
-                  <AuxJogButton deviceId={device.deviceId} axisIndex={axis.axisIndex} direction={1} />
-                </View>
+                {renderAxisControls(axis)}
               </View>
             );
             // Wide: each axis gets its own card in a 2-column grid instead of
@@ -363,9 +513,11 @@ export default function AuxPage() {
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
     const unsub = robotClient.onAuxAxis(devices => setAuxDevices(devices));
-    // Aux state isn't part of the 100ms status poll, so refresh it here while
-    // the screen is open — keeps connection/enable state current.
-    const poll = setInterval(() => robotClient.getAuxState().catch(() => {}), 1500);
+    // Aux state isn't part of the 100ms status poll, so refresh it here while the
+    // screen is open. Poll quickly (250ms) so the live position readout tracks a
+    // jog or move smoothly instead of jumping in coarse steps; the screen is only
+    // mounted while the user is actively working with the aux device.
+    const poll = setInterval(() => robotClient.getAuxState().catch(() => {}), 250);
     return () => { unsub(); clearInterval(poll); };
   }, []);
 
@@ -436,6 +588,40 @@ const styles = StyleSheet.create({
 
   jogRow:        { flexDirection: "row", gap: spacing.sm },
   axisConfigBtn: { padding: spacing.xs, marginRight: 2 },
+
+  // Role icon badge on each axis row (what the motor drives, at a glance).
+  roleIcon: {
+    width: 30, height: 30,
+    borderRadius: radii.sm - 2,
+    justifyContent: "center", alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+  },
+  roleIconOn: { backgroundColor: AUX_TINT_SOFT },
+
+  // Gripper controls: Open/Close row + grip-to-distance row.
+  gripperControls: { gap: spacing.sm },
+  gripToRow:   { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  gripToInput: { width: 70 },
+  gripToUnit:  { ...type.caption, color: colors.textFaint, marginLeft: -2 },
+  needsConfig: { ...type.caption, color: colors.textFaint, maxWidth: 150, lineHeight: 15 },
+
+  reRefHint:    { ...type.caption, color: colors.textMuted, lineHeight: 16 },
+  reRefDivider: { marginVertical: spacing.md },
+
+  // Tap action buttons (gripper / conveyor / rotary) — sized to match the 64px jog buttons.
+  actionBtn: {
+    minWidth: 64, height: 64,
+    borderWidth: 1.5,
+    borderRadius: radii.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+  },
+  actionBtnContent: { flexDirection: "row", alignItems: "center", gap: 4 },
+  actionBtnText:    { fontSize: 13, fontWeight: "700" },
+
+  setPosBtnRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
+  setPosBtn:    { flex: 1 },
 
   // Wide: axes grid — 2 columns of small cards instead of one long list.
   axisGrid:     { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },

@@ -17,57 +17,56 @@ import {
 } from "@/src/components/ui/kit";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
+import { RobotInfo } from "@/src/models/robotModels";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Redirect, router } from "expo-router";
-import { ArrowRight, Clock, Radar, Wifi, WifiOff } from "lucide-react-native";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-
-const LAST_IP_KEY = "lastManualIp";
+import { connKey, isSaved, manualRobot, recordConnection, removeRecent, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
+import { ChevronDown, ChevronUp, Clock, Radar, Star, Wifi, WifiOff, X } from "lucide-react-native";
+import { useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import ConnectedRobot from "./connected-robot";
 
 export default function Robot() {
   const robots        = useRobots();
   const selectedRobot = useSelectedRobot();
+  const { recents, saved } = useConnectionStore();
   const [manualIp, setManualIp] = useState("");
-  const [lastIp,   setLastIp]   = useState<string | null>(null);
-
-  useEffect(() => {
-    AsyncStorage.getItem(LAST_IP_KEY).then(v => { if (v) setLastIp(v); }).catch(() => {});
-  }, []);
+  const [showRecent, setShowRecent] = useState(false);
 
   // Hooks must run unconditionally every render, so this is read before the
   // early Redirect below even though only the non-redirect branch needs it.
   const isWide = useIsWide();
 
+  // Render the connected dashboard in place at the tab's root route rather than
+  // redirecting to a separate screen. Redirecting (a replace) used to push the
+  // `index` route then replace it with `connected-robot`, so re-tapping the
+  // already-focused Robot tab (which resets to the initial route `index`) stacked
+  // a duplicate `connected-robot` entry and made Back appear to re-open About.
+  // Keeping the dashboard on `index` keeps the initial route stable and never
+  // leaves the tab blank on disconnect.
   if (selectedRobot) {
-    return <Redirect href="/robot/connected-robot" />;
+    return <ConnectedRobot />;
   }
 
-  function connectTo(ip: string) {
-    // Connections always go out on port 9000 (below) — strip a typed
-    // trailing ":<port>" so e.g. "192.168.1.50:9000" still resolves.
-    const trimmed = ip.trim().replace(/:\d+$/, "");
-    if (!trimmed) return;
-    AsyncStorage.setItem(LAST_IP_KEY, trimmed).catch(() => {});
-    setLastIp(trimmed);
-    const robot = {
-      robotName:       "Manual",
-      robotType:       "",
-      ipAddress:       trimmed,
-      port:            9000,
-      serialNumber:    "",
-      controlEndpoint: "control",
-    };
+  function connectRobot(robot: RobotInfo) {
+    recordConnection(robot);
     setSelectedRobot(robot);
     robotClient.connectTo(robot);
-    router.replace(`/robot/connected-robot`);
+    // No navigation needed — selecting a robot flips this screen to the
+    // connected dashboard in place (see the selectedRobot branch above).
   }
 
   function connectManual() {
-    connectTo(manualIp);
+    // Connections always go out on port 9000 — strip a typed trailing ":<port>"
+    // so e.g. "192.168.1.50:9000" still resolves.
+    const trimmed = manualIp.trim().replace(/:\d+$/, "");
+    if (!trimmed) return;
+    connectRobot(manualRobot(trimmed));
   }
+
+  // Label for a recent/saved entry: a learned robot name, else the raw address.
+  const entryTitle = (r: RobotInfo) =>
+    r.robotName && r.robotName !== "Manual" ? r.robotName : r.ipAddress;
 
   const manualSection = (
     <>
@@ -94,14 +93,44 @@ export default function Robot() {
           <Button label="Connect" size="sm" onPress={connectManual} disabled={!manualIp.trim()} />
         </View>
 
-        {lastIp && (
+        {recents.length > 0 && (
           <>
             <Divider style={styles.lastIpDivider} />
-            <TouchableOpacity style={styles.lastIpRow} onPress={() => connectTo(lastIp)} activeOpacity={0.7}>
-              <Clock size={13} color={colors.textFaint} />
-              <Text style={styles.lastIpText} numberOfLines={1}>{lastIp}</Text>
-              <ArrowRight size={13} color={colors.accent} />
+            {/* Clickable "last connection" row that expands the full recent history. */}
+            <TouchableOpacity style={styles.recentHeader} onPress={() => setShowRecent(v => !v)} activeOpacity={0.7}>
+              <Clock size={14} color={colors.textFaint} />
+              <Text style={styles.recentHeaderText} numberOfLines={1}>
+                Recent connections ({recents.length})
+              </Text>
+              <Text style={styles.recentToggle}>{showRecent ? "Hide" : "Show recent"}</Text>
+              {showRecent
+                ? <ChevronUp   size={16} color={colors.textFaint} />
+                : <ChevronDown size={16} color={colors.textFaint} />}
             </TouchableOpacity>
+
+            {showRecent && (
+              <View style={styles.recentList}>
+                {recents.map(r => (
+                  <View key={connKey(r)} style={styles.recentRow}>
+                    <TouchableOpacity style={styles.recentConnect} onPress={() => connectRobot(r)} activeOpacity={0.7}>
+                      <Text style={styles.recentName} numberOfLines={1}>{entryTitle(r)}</Text>
+                      <Text style={styles.recentSub} numberOfLines={1}>
+                        {r.robotType ? `${r.robotType} · ` : ""}{r.ipAddress}:{r.port}
+                      </Text>
+                    </TouchableOpacity>
+                    <Pressable onPress={() => toggleSaved(r)} hitSlop={8} style={styles.recentIcon}>
+                      {/* key flips with saved-state so the SVG remounts — react-native-svg
+                          otherwise keeps the old fill on an in-place color-only prop change
+                          (lucide builds its paths keyless), leaving the star stale on native. */}
+                      <Star key={isSaved(r) ? "on" : "off"} size={16} color={isSaved(r) ? colors.warning : colors.textFaint} fill={isSaved(r) ? colors.warning : "transparent"} />
+                    </Pressable>
+                    <Pressable onPress={() => removeRecent(r)} hitSlop={8} style={styles.recentIcon}>
+                      <X size={16} color={colors.textFaint} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
           </>
         )}
       </Card>
@@ -114,15 +143,27 @@ export default function Robot() {
           style={styles.statTile}
         />
         <StatTile
-          label="Last Manual IP"
-          value={lastIp ?? "None"}
-          icon={Clock}
-          mono={!!lastIp}
+          label="Saved"
+          value={saved.length}
+          icon={Star}
           style={styles.statTile}
         />
       </View>
     </>
   );
+
+  const savedSection = saved.length > 0 ? (
+    <>
+      <SectionHeader
+        title="Saved Connections"
+        icon={Star}
+        right={<InfoTip text="Starred connections are kept here so you can reconnect to a robot even when it isn't being discovered on the network. Tap the star to remove one." />}
+      />
+      <View>
+        {saved.map(r => <RobotCard key={connKey(r)} robot={r} />)}
+      </View>
+    </>
+  ) : null;
 
   const discoveredSection = (
     <>
@@ -159,12 +200,13 @@ export default function Robot() {
       <Screen>
         {isWide ? (
           <View style={styles.wideRow}>
-            <View style={styles.wideLeftCol}>{manualSection}</View>
+            <View style={styles.wideLeftCol}>{manualSection}{savedSection}</View>
             <View style={styles.wideRightCol}>{discoveredSection}</View>
           </View>
         ) : (
           <>
             {manualSection}
+            {savedSection && <View style={styles.narrowGap}>{savedSection}</View>}
             <View style={styles.narrowGap}>{discoveredSection}</View>
           </>
         )}
@@ -178,18 +220,52 @@ const styles = StyleSheet.create({
   input:    { flex: 1 },
 
   lastIpDivider: { marginTop: spacing.sm, marginBottom: 2 },
-  lastIpRow: {
+  recentHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
     paddingVertical: spacing.sm,
     paddingHorizontal: 2,
   },
-  lastIpText: {
+  recentHeaderText: {
     flex: 1,
     ...type.body,
     color: colors.textSecondary,
     fontWeight: "500",
+  },
+  recentToggle: {
+    ...type.caption,
+    color: colors.accent,
+    fontWeight: "600",
+  },
+  recentList: {
+    marginTop: 2,
+    gap: 2,
+  },
+  recentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: 2,
+  },
+  recentConnect: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recentName: {
+    ...type.body,
+    color: colors.text,
+    fontWeight: "500",
+  },
+  recentSub: {
+    ...type.mono,
+    fontSize: 12,
+    color: colors.textFaint,
+    marginTop: 1,
+  },
+  recentIcon: {
+    padding: 2,
   },
 
   statRow:  { flexDirection: "row", gap: spacing.md },

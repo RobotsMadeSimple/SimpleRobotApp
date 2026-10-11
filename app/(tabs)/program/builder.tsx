@@ -692,6 +692,11 @@ export default function BuilderScreen() {
       cncDxfFile: undefined,
       cncSafeZ: undefined,
       cncProgramSteps: type === "CncProgram" ? [] : undefined,
+      auxAxisIndex: (type === "GripperAction" || type === "ConveyorAction" || type === "RotaryIndex") ? 0 : undefined,
+      gripperAction:  type === "GripperAction"  ? "Open" : undefined,
+      conveyorAction: type === "ConveyorAction" ? "RunForward" : undefined,
+      rotaryDirection: type === "RotaryIndex" ? 1 : undefined,
+      rotaryCount:     type === "RotaryIndex" ? 1 : undefined,
     };
   }
 

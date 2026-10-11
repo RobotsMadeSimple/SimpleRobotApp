@@ -68,7 +68,6 @@ export default function SpacePage() {
 
       <Screen>
         {/* ── Workspace summary ── */}
-        <SectionHeader title="Workspace" icon={LayoutGrid} style={styles.summaryHeader} />
         <View style={styles.tileRow}>
           {summaryTiles.map(({ label, value, icon, tint }) => (
             <StatTile key={label} label={label} value={value} icon={icon} tint={tint} style={styles.tile} />
@@ -76,7 +75,7 @@ export default function SpacePage() {
         </View>
 
         {/* ── Navigation ── */}
-        <SectionHeader title="Navigate to" style={styles.summaryHeader} />
+        <SectionHeader title="Navigate to" />
         <Card>
           {MENU_ITEMS.map((item, i) => {
             const Icon = item.icon;
@@ -107,17 +106,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
 
-  summaryHeader: { marginTop: spacing.sm },
-
   // ── Stat tile rows ────────────────────────────────────────────────────────
-  // flexWrap so 4 tiles wrap to 2×2 on narrow phones instead of overflowing.
+  // Single fixed row of 4 equal columns — NO flexWrap. Each tile is flex:1 so
+  // the cards always share the row evenly regardless of width or fold state.
+  // (flexWrap + percentage/measured flexBasis used to let the 4th tile reflow
+  //  to its own full-width line on some widths / after a foldable resize.)
   tileRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: spacing.sm + 2,
   },
   tile: {
-    flexGrow: 1,
-    flexBasis: 130,
+    flex: 1,
+    minWidth: 0,
+    // Trim the default horizontal padding so four tiles fit on small phones /
+    // fold cover screens; content shrinks/truncates rather than wrapping.
+    paddingHorizontal: spacing.sm,
   },
 });

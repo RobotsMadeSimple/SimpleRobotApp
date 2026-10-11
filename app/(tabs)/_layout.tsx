@@ -1,6 +1,3 @@
-// First import: registers a LogBox filter for nativewind's SafeAreaView deprecation
-// before nativewind/global.css loads and fires it. See the file for details.
-import "@/src/setup/silenceDeprecations";
 import { Tabs, router } from "expo-router";
 import {
   ArrowLeftRight,
@@ -14,8 +11,6 @@ import { BackHandler } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
-import "@/global.css";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { colors } from "@/src/components/ui/kit";
 import { NavRail } from "@/src/components/ui/NavRail";
@@ -30,16 +25,14 @@ export default function Layout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ActionSheetProvider>
-        <GluestackUIProvider mode="light">
-          <SafeAreaProvider>
-            <RobotProvider>
-              <StatusBar style="dark" />
-              <TabLayout />
-              <AppAlertHost />
-              <FaultRecoveryOverlay />
-            </RobotProvider>
-          </SafeAreaProvider>
-        </GluestackUIProvider>
+        <SafeAreaProvider>
+          <RobotProvider>
+            <StatusBar style="dark" />
+            <TabLayout />
+            <AppAlertHost />
+            <FaultRecoveryOverlay />
+          </RobotProvider>
+        </SafeAreaProvider>
       </ActionSheetProvider>
     </GestureHandlerRootView>
   );
