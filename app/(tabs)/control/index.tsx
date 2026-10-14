@@ -151,7 +151,8 @@ export default function Control() {
   const actionsSection = (
     <>
       <SectionHeader title="Actions" style={styles.actionsHeader} />
-      <Card padded={false}>
+      {/* Encapsulating (padded) card with flat ListRows + dividers — matches the Space tab. */}
+      <Card>
         {actions.map((item, i) => (
           <View key={item.label}>
             <ListRow

@@ -19,7 +19,8 @@ import {
 } from "@/src/components/ui/kit";
 import { useRobotStatus, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { Check, Edit2, Plus, Wrench, X } from "lucide-react-native";
+import { Check, Crosshair, Edit2, Plus, Wrench, X } from "lucide-react-native";
+import { router } from "expo-router";
 import { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -335,6 +336,17 @@ export default function ToolsPage() {
           onPress={() => { setDraft(EMPTY_DRAFT); setCreateOpen(true); }}
         />
 
+        {/* Teach a planar TCP by touching one point from several wrist angles (ASTRO only). */}
+        {status.robotType === "ASTRO" && (
+          <Button
+            variant="secondary"
+            label="Teach TCP with Wizard"
+            icon={<Crosshair size={16} color={colors.textMuted} />}
+            onPress={() => router.push("/(tabs)/space/teach-tcp")}
+            style={styles.teachBtn}
+          />
+        )}
+
       </Screen>
 
       {/* Create modal */}
@@ -406,6 +418,9 @@ const styles = StyleSheet.create({
 
   iconBtn: {
     padding: spacing.xs,
+  },
+  teachBtn: {
+    marginTop: spacing.sm,
   },
 
   // ── Modal ─────────────────────────────────────────────────────────────────

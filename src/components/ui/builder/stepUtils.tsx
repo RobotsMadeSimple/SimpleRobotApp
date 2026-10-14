@@ -7,10 +7,12 @@ import {
   CornerUpLeft,
   Clock,
   Cpu,
+  Brackets,
   Gauge,
   Globe,
   Grid3x3,
   Hash,
+  MoveHorizontal,
   HelpCircle,
   Hourglass,
   ImagePlus,
@@ -161,6 +163,20 @@ export function stepLabel(step: ProgramStep): string {
       return "Aux Stop";
     case "AuxEnable":
       return `Aux Motors ${step.auxEnable === false ? "OFF" : "ON"}`;
+    case "GripperAction": {
+      const ga = step.gripperAction ?? "Open";
+      const detail = ga === "GripTo" ? `Grip to ${step.gripTargetMm ?? "?"} mm` : ga;
+      return `Gripper  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${detail}`;
+    }
+    case "ConveyorAction": {
+      const a = step.conveyorAction ?? "RunForward";
+      const label = a === "RunForward" ? "Run ▶" : a === "RunReverse" ? "Run ◀" : "Stop";
+      return `Conveyor  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${label}`;
+    }
+    case "RotaryIndex": {
+      const dir = (step.rotaryDirection ?? 1) < 0 ? "−" : "+";
+      return `Rotary Index  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${dir}${step.rotaryCount ?? 1}`;
+    }
     case "StartBackground":
       return step.backgroundProgramName ? `Start Background  →  ${step.backgroundProgramName}` : "Start Background";
     case "StopBackground":
@@ -224,6 +240,9 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "AuxContinuous":      return <Play          size={size} color={color} />;
     case "AuxStop":            return <OctagonX      size={size} color={color} />;
     case "AuxEnable":          return <Zap           size={size} color={color} />;
+    case "GripperAction":      return <Brackets      size={size} color={color} />;
+    case "ConveyorAction":     return <MoveHorizontal size={size} color={color} />;
+    case "RotaryIndex":        return <RotateCw      size={size} color={color} />;
     case "StartBackground":    return <Layers        size={size} color={color} />;
     case "StopBackground":     return <Square        size={size} color={color} />;
     case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
@@ -267,6 +286,9 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
   AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
   AuxEnable:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Motor Enable"   },
+  GripperAction:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Gripper"            },
+  ConveyorAction: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor"           },
+  RotaryIndex:    { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Rotary Index"       },
   RunVision:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
   SaveImage:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Save Image"          },
   StartBackground:  { accent: "#16a34a", iconBg: "#dcfce7", iconColor: "#16a34a", label: "Start Background"   },
@@ -483,6 +505,19 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.auxImmediate ? "Immediate halt" : "Controlled stop";
     case "AuxEnable":
       return step.auxEnable === false ? "Disable motor drivers" : "Enable motor drivers";
+    case "GripperAction": {
+      const ga = step.gripperAction ?? "Open";
+      return ga === "GripTo" ? `Gripper · grip to ${step.gripTargetMm ?? "?"} mm` : `Gripper · ${ga}`;
+    }
+    case "ConveyorAction": {
+      const a = step.conveyorAction ?? "RunForward";
+      const label = a === "RunForward" ? "Run Forward" : a === "RunReverse" ? "Run Reverse" : "Stop";
+      return `Conveyor · ${label}`;
+    }
+    case "RotaryIndex": {
+      const dir = (step.rotaryDirection ?? 1) < 0 ? "−" : "+";
+      return `Index ${dir}  ·  ×${step.rotaryCount ?? 1}`;
+    }
     case "StartBackground":
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
     case "StopBackground":
@@ -656,6 +691,9 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
   { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
   { type: "AuxEnable",     label: "Aux Motor Enable",   desc: "Enable or disable the stepper motor drivers on an aux IO card" },
+  { type: "GripperAction", label: "Gripper",            desc: "Open, close, or grip to a set jaw gap — with optional per-step speed and accel overrides" },
+  { type: "ConveyorAction",label: "Conveyor",           desc: "Run a conveyor axis forward or reverse, or stop it — speed comes from the axis settings" },
+  { type: "RotaryIndex",   label: "Rotary Index",       desc: "Index a rotary table axis by a number of steps in a direction — distance and speed come from the axis settings" },
   { type: "RunVision",        label: "Run Vision",            desc: "Trigger a vision program, wait for one inspection result, then continue" },
   { type: "StartBackground",  label: "Start Background",      desc: "Start a background program running in parallel with this one" },
   { type: "StopBackground",   label: "Stop Background",       desc: "Stop a named background program" },
@@ -732,7 +770,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "io", label: "I/O & Aux Axes", icon: Zap,
     desc: "Drive digital outputs and auxiliary stepper axes.",
     color: accents.orange, soft: accents.orangeSoft,
-    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"],
+    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
   },
   {
     key: "vision", label: "Vision", icon: ScanSearch,

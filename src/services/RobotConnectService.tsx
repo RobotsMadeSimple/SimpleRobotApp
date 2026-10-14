@@ -1,5 +1,6 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { enrichByAddress } from "./connectionStore";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -155,6 +156,7 @@ export class RobotConnectService {
       this.getTools().catch(() => {});
       this.getLocals().catch(() => {});
       this.getBuiltPrograms().catch(() => {});
+      this.getPrograms().catch(() => {});
       this.getGrids().catch(() => {});
       this.getStacks().catch(() => {});
       this.getIO().catch(() => {});
@@ -168,6 +170,13 @@ export class RobotConnectService {
           robotType:    info.robotType    || selected.robotType,
           serialNumber: info.serialNumber || selected.serialNumber,
         });
+        // Backfill the stored recent/saved entry (recorded as a bare "Manual" placeholder
+        // for IP connects) with the real identity so a starred connection shows the robot.
+        enrichByAddress(selected.ipAddress, selected.port, {
+          robotName:    info.robotName,
+          robotType:    info.robotType,
+          serialNumber: info.serialNumber,
+        }).catch(() => {});
       }).catch(() => {});
     };
 
@@ -228,11 +237,20 @@ export class RobotConnectService {
 
     switch (data.command){
       case "GetStatus":
-        if (typeof data.programs === "string") {
-          try { data.programs = JSON.parse(data.programs); } catch { data.programs = []; }
-        }
-        if (!Array.isArray(data.programs)) {
-          data.programs = [];
+        // The full program list now rides behind lastProgramUpdate (fetched via GetPrograms,
+        // not re-sent every poll). The status carries only a compact `activePrograms` live
+        // block for running programs — overlay it on the cached summaries so status.programs
+        // stays the merged, up-to-date list consumers already read.
+        {
+          let active = data.activePrograms;
+          if (typeof active === "string") { try { active = JSON.parse(active); } catch { active = []; } }
+          if (!Array.isArray(active)) active = [];
+          this.lastActivePrograms = active;
+          data.programs = this.mergePrograms(active);
+          // Don't let the raw live block into the status object: it's a fresh array each poll
+          // and statusEq compares unknown fields by reference, which would force a re-render
+          // every tick and defeat the point of this change.
+          delete data.activePrograms;
         }
         if (typeof data.backgroundPrograms === "string") {
           try { data.backgroundPrograms = JSON.parse(data.backgroundPrograms); } catch { data.backgroundPrograms = []; }
@@ -261,6 +279,10 @@ export class RobotConnectService {
 
       case "GetBuiltPrograms":
         this.decodeBuiltPrograms(data);
+        break;
+
+      case "GetPrograms":
+        this.decodePrograms(data);
         break;
 
       case "GetGrids":
@@ -421,6 +443,7 @@ export class RobotConnectService {
     if (update.lastToolUpdate         !== undefined && update.lastToolUpdate         !== prev.lastToolUpdate)         this.getTools().catch(() => {});
     if (update.lastLocalUpdate        !== undefined && update.lastLocalUpdate        !== prev.lastLocalUpdate)        this.getLocals().catch(() => {});
     if (update.lastBuiltProgramUpdate !== undefined && update.lastBuiltProgramUpdate !== prev.lastBuiltProgramUpdate) this.getBuiltPrograms().catch(() => {});
+    if (update.lastProgramUpdate      !== undefined && update.lastProgramUpdate      !== prev.lastProgramUpdate)      this.getPrograms().catch(() => {});
     if (update.lastGridUpdate         !== undefined && update.lastGridUpdate         !== prev.lastGridUpdate)         this.getGrids().catch(() => {});
     if (update.lastStackUpdate        !== undefined && update.lastStackUpdate        !== prev.lastStackUpdate)        this.getStacks().catch(() => {});
 
@@ -914,6 +937,35 @@ export class RobotConnectService {
 
   public getBuiltPrograms() {
     return this.sendCommand("GetBuiltPrograms");
+  }
+
+  // ── Program cycle summaries (behind lastProgramUpdate) ──────────────────────
+  // The controller stopped sending the full program list every status poll; it's fetched
+  // on connect and whenever lastProgramUpdate changes, then merged with the per-poll
+  // `activePrograms` live block so status.programs stays current for running programs.
+  private cachedProgramSummaries: ProgramSummary[] = [];
+  private lastActivePrograms: any[] = [];
+
+  private mergePrograms(active: any[]): ProgramSummary[] {
+    if (!active || active.length === 0) return this.cachedProgramSummaries;
+    const byName = new Map<string, any>(active.map((a: any) => [a.name, a]));
+    return this.cachedProgramSummaries.map((p: any) => {
+      const live = byName.get(p.name);
+      return live ? { ...p, ...live } : p;
+    });
+  }
+
+  private decodePrograms(data: any) {
+    let parsed = data.programs;
+    if (typeof parsed === "string") { try { parsed = JSON.parse(parsed); } catch { parsed = []; } }
+    this.cachedProgramSummaries = Array.isArray(parsed) ? (parsed as ProgramSummary[]) : [];
+    // Reflect the refreshed list immediately (overlaying the latest live block) instead of
+    // waiting for the next status poll.
+    this.emitStatus({ programs: this.mergePrograms(this.lastActivePrograms) });
+  }
+
+  public getPrograms() {
+    return this.sendCommand("GetPrograms");
   }
 
   /** The wire shape of a program, shared by SaveBuiltProgram and ValidateBuiltProgram. */
@@ -1447,11 +1499,35 @@ export class RobotConnectService {
     });
   }
 
-  public stopAux(params?: { decel?: number; immediate?: boolean }) {
+  public stopAux(deviceId?: string, axis?: number, params?: { decel?: number; immediate?: boolean }) {
     return this.sendCommand("StopAux", {
+      deviceId:  deviceId ?? "AUX_STEPPER_001",
+      axis,
       decel:     params?.decel     ?? 5000,
       immediate: params?.immediate ?? false,
     });
+  }
+
+  public moveAux(
+    deviceId: string,
+    axis: number,
+    steps: number,
+    velocity?: number,
+    accel?: number,
+    decel?: number,
+  ) {
+    return this.sendCommand("MoveAux", {
+      deviceId,
+      axis,
+      steps,
+      velocity: velocity ?? 800,
+      accel:    accel    ?? 3200,
+      decel:    decel    ?? 5000,
+    });
+  }
+
+  public setAuxPosition(deviceId: string, axis: number, steps: number) {
+    return this.sendCommand("SetAuxPosition", { deviceId, axis, steps });
   }
 
   public setAuxAxisConfig(params: {
@@ -1463,6 +1539,15 @@ export class RobotConnectService {
     axisType: string;
     gearRatio: number;
     mmPerRev: number;
+    role?: string;
+    actionDistance?: number;
+    actionVelocity?: number;
+    gripperOpenMm?: number;
+    gripperClosedMm?: number;
+    gripperOpenTimeSec?: number;
+    gripperCloseTimeSec?: number;
+    gripperAccel?: number;
+    gripperOverTravelMm?: number;
   }) {
     return this.sendCommand("SetAuxAxisConfig", params);
   }

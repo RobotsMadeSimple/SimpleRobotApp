@@ -27,12 +27,33 @@ export type AuxAxisChannelState = {
   axisIndex: number;
   name: string;
   active: boolean;
+  /** Current position in steps. 0 = zeroed. */
+  position: number;
   stepsPerRev: number;
   invertDirection: boolean;
   // "Rotary" | "Linear" | "" (empty = unconfigured, raw steps)
   axisType: string;
   gearRatio: number;
   mmPerRev: number;
+  // "Generic" | "Gripper" | "Conveyor" | "RotaryTable" — drives the role-specific
+  // manual controls and the action-step behavior on the controller.
+  role: string;
+  /** Distance a role action moves (axis unit when typed, else raw steps). */
+  actionDistance: number;
+  /** Velocity a role action moves at (axis unit/s — mm/s for a Linear gripper/conveyor). */
+  actionVelocity: number;
+  /** Gripper (Role === "Gripper"): jaw-gap width (mm) at the two mechanical extremes.
+   *  Open/Close drive to these; "grip to X" drives to an absolute gap in between. */
+  gripperOpenMm: number;
+  gripperClosedMm: number;
+  /** Gripper motion: time for a full open / close stroke (s). The per-direction speed is
+   *  derived as stroke/time; 0 falls back to actionVelocity. gripperAccel is the ramp (mm/s²). */
+  gripperOpenTimeSec: number;
+  gripperCloseTimeSec: number;
+  gripperAccel: number;
+  /** Extra travel (mm) driven past a hard stop on a full Open/Close so the jaws seat firmly
+   *  and the tracked position re-references at the clamped limit. 0 = don't over-travel. */
+  gripperOverTravelMm: number;
 };
 
 export type AuxDeviceState = {
@@ -54,7 +75,7 @@ export function auxStepsPerUnit(axis: AuxAxisChannelState): number {
 
 export function auxUnitLabel(axis: AuxAxisChannelState): string {
   if (axis.axisType === 'Linear') return 'mm';
-  if (axis.axisType === 'Rotary') return 'Â°';
+  if (axis.axisType === 'Rotary') return '°'; // degree sign (escaped so it can't re-mojibake)
   return 'steps';
 }
 
@@ -390,7 +411,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -1086,12 +1107,20 @@ export type ProgramStep = {
   auxDistance?: number;     // physical distance: mm (Linear) or degrees (Rotary)
   auxUnit?: string;         // "mm" | "deg" — when set, auxDistance + physical velocity used
   auxVelocity?: number;     // steps/sec OR physical unit/sec when auxUnit set
-  auxAccel?: number;        // steps/secÂ² OR physical unit/secÂ² when auxUnit set
-  auxDecel?: number;        // steps/secÂ² (AuxMove + AuxStop ramp-down)
+  auxAccel?: number;        // steps/sec² OR physical unit/sec² when auxUnit set
+  auxDecel?: number;        // steps/sec² (AuxMove + AuxStop ramp-down)
   auxWaitForDone?: boolean; // AuxMove: block until complete (default true)
   auxImmediate?: boolean;   // AuxStop: hard stop when true
   auxAbsolute?: boolean;    // AuxMove: true = move to absolute position, false/undefined = relative offset
   auxEnable?: boolean;      // AuxEnable: true = enable motors, false = disable
+  // Role action steps. Conveyor/rotary use the axis's configured actionDistance/actionVelocity.
+  // Gripper derives speed from the open/close time but may override via auxVelocity (mm/s) and
+  // auxAccel (mm/s²); GripTo also uses gripTargetMm.
+  gripperAction?: string;   // GripperAction: "Open" | "Close" | "GripTo"
+  gripTargetMm?: number;    // GripperAction "GripTo": absolute jaw-gap target (mm)
+  conveyorAction?: string;  // ConveyorAction: "RunForward" | "RunReverse" | "Stop"
+  rotaryDirection?: number; // RotaryIndex: 1 | -1
+  rotaryCount?: number;     // RotaryIndex: number of indexes
   // ThreadMove
   threadDistance?: number;
   threadPitch?: number;
@@ -1421,7 +1450,7 @@ export type RobotStatus = {
   targetRy: number,
   targetRz: number,
 
-  // Joint-space values (ASTRO: J1=base rotation Â°, J2=radial arm reach mm, J3=vertical mm, J4=EOAT rotation Â°)
+  // Joint-space values (ASTRO: J1=base rotation °, J2=radial arm reach mm, J3=vertical mm, J4=EOAT rotation °)
   joint1Angle: number,
   joint2X:     number,   // radial reach (CoreXY stage cartesian.x)
   joint2Z:     number,   // vertical height (CoreXY stage cartesian.z)
@@ -1456,7 +1485,10 @@ export type RobotStatus = {
   driverConnected: boolean,
   driverOk: boolean,
 
+  // Merged in RobotConnectService from the cached GetPrograms summary + the per-poll
+  // activePrograms live block; the controller no longer sends the full list every poll.
   programs: ProgramSummary[],
+  lastProgramUpdate: number,
 
   lastToolUpdate: number,
   activeTool: string,
@@ -1536,6 +1568,7 @@ export function createDefaultStatus(): RobotStatus {
     driverOk: false,
 
     programs: [],
+    lastProgramUpdate: 0,
 
     lastToolUpdate: 0,
     activeTool: "",

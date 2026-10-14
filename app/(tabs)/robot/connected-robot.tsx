@@ -124,7 +124,9 @@ export default function ConnectedRobot() {
     );
   }
 
-  const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
+  // Prefer the live controller type (status) over the possibly-empty/stale connection record
+  // so the image matches the real robot immediately (manual connect, or a just-changed type).
+  const imageSource = robotImages[status.robotType || robot.robotType] ?? defaultRobotImage;
 
   const infoSection = (
     <>
