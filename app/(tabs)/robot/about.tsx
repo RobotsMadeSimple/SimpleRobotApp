@@ -361,7 +361,11 @@ export default function AboutRobot() {
       </View>
     );
   }
-  const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
+  // The connection record's robotType can be empty (manual connect) or stale right after a
+  // type change; the live controller type (status.robotType) is authoritative, so prefer it
+  // so the image reflects the real robot right away.
+  const resolvedType = status.robotType || robot.robotType;
+  const imageSource = robotImages[resolvedType] ?? defaultRobotImage;
   const isHoming = status.homingState !== "WaitingForStart";
   const controllerVersion = status.version && status.version !== "0.0.0" ? `v${status.version}` : "—";
   const isLinux = status.isLinux;

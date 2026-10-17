@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -136,6 +136,28 @@ function EditorCard({
   /** Set only right after a programmatic insert, so the caret lands after the token. */
   const [forcedSel, setForcedSel] = useState<{ start: number; end: number } | null>(null);
   const [search, setSearch] = useState("");
+
+  // The reference lists below the input (every variable, property, IO row and
+  // function) are the bulk of this card's render cost. Mounting them in the same
+  // commit that opens the modal delays the slide-in and, worse, the input's
+  // autoFocus — so the field looks slow to "pop up" and slow to accept typing.
+  // Hold them back one interaction cycle: the header, input and operator strip
+  // paint (and the input focuses) immediately, then the reference fills in once
+  // the open animation has run.
+  const [showReference, setShowReference] = useState(false);
+  useEffect(() => {
+    // Defer the heavy reference list past the first paint so the modal + its input appear and
+    // focus instantly; the reference fills in a frame later. Two rAFs: let the input paint, then
+    // mount the reference. (InteractionManager is deprecated in RN 0.86.)
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setShowReference(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
+  }, []);
 
   const live = useLiveValue(env, text, worthEvaluating(text));
   const completion = useMemo(
@@ -292,65 +314,71 @@ function EditorCard({
         ))}
       </View>
 
-      {hasReference && (
-        <View style={s.searchBox}>
-          <TextInput
-            style={s.searchInput}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search variables and functions…"
-            placeholderTextColor={colors.textFaint}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
-              <X size={13} color={colors.textFaint} />
-            </TouchableOpacity>
+      {/* Deferred one interaction cycle so opening the modal and focusing the
+          input are not blocked by building every reference row up front. */}
+      {showReference && (
+        <>
+          {hasReference && (
+            <View style={s.searchBox}>
+              <TextInput
+                style={s.searchInput}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search variables and functions…"
+                placeholderTextColor={colors.textFaint}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
+                  <X size={13} color={colors.textFaint} />
+                </TouchableOpacity>
+              )}
+            </View>
           )}
-        </View>
-      )}
 
-      {/* (c) Variables — one tap inserts `$name`. */}
-      {shownVars.length > 0 && (
-        <>
-          <SectionHeader title="Variables" />
-          <View style={s.chipRow}>
-            {shownVars.map(v => (
-              <VarButton key={v.id} name={v.name} onPress={() => insertToken(variableToken(v))} />
-            ))}
-          </View>
-        </>
-      )}
-      {shownContext.length > 0 && (
-        <>
-          <SectionHeader title={contextLabel ?? "Caller variables"} />
-          <View style={s.chipRow}>
-            {shownContext.map(v => (
-              <VarButton key={`ctx:${v.id}`} name={v.name} onPress={() => insertToken(variableToken(v))} />
-            ))}
-          </View>
-        </>
-      )}
-      {shownGlobals.length > 0 && (
-        <>
-          <SectionHeader title="Globals" />
-          <View style={s.chipRow}>
-            {shownGlobals.map(v => (
-              <VarButton key={`g:${v.name}`} name={v.name} onPress={() => insertToken(`$${v.name}`)} />
-            ))}
-          </View>
-        </>
-      )}
+          {/* (c) Variables — one tap inserts `$name`. */}
+          {shownVars.length > 0 && (
+            <>
+              <SectionHeader title="Variables" />
+              <View style={s.chipRow}>
+                {shownVars.map(v => (
+                  <VarButton key={v.id} name={v.name} onPress={() => insertToken(variableToken(v))} />
+                ))}
+              </View>
+            </>
+          )}
+          {shownContext.length > 0 && (
+            <>
+              <SectionHeader title={contextLabel ?? "Caller variables"} />
+              <View style={s.chipRow}>
+                {shownContext.map(v => (
+                  <VarButton key={`ctx:${v.id}`} name={v.name} onPress={() => insertToken(variableToken(v))} />
+                ))}
+              </View>
+            </>
+          )}
+          {shownGlobals.length > 0 && (
+            <>
+              <SectionHeader title="Globals" />
+              <View style={s.chipRow}>
+                {shownGlobals.map(v => (
+                  <VarButton key={`g:${v.name}`} name={v.name} onPress={() => insertToken(`$${v.name}`)} />
+                ))}
+              </View>
+            </>
+          )}
 
-      {/* Properties and IO, the same rows the variable picker shows. */}
-      <SymbolSections search={search} onPick={name => insertToken(`$${name}`)} />
+          {/* Properties and IO, the same rows the variable picker shows. */}
+          <SymbolSections search={search} onPick={name => insertToken(`$${name}`)} />
 
-      {/* (d) Functions — inline, so the reference and the input stay on one screen. */}
-      {functions.length > 0 && (
-        <>
-          <SectionHeader title="Functions" />
-          <FunctionsList functions={functions} search={search} onInsert={name => insertToken(`${name}(`)} />
+          {/* (d) Functions — inline, so the reference and the input stay on one screen. */}
+          {functions.length > 0 && (
+            <>
+              <SectionHeader title="Functions" />
+              <FunctionsList functions={functions} search={search} onInsert={name => insertToken(`${name}(`)} />
+            </>
+          )}
         </>
       )}
       {pluginFns.map(({ g, fns }) => (

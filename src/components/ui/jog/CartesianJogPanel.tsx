@@ -8,65 +8,82 @@ import {
   RedoDot,
   UndoDot,
 } from "lucide-react-native";
-import { useWindowDimensions, View } from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 
 export type CartesianAxis = "x" | "y" | "z" | "rz";
 
 type Props = {
-  onStart: (axis: CartesianAxis, direction: 1 | -1) => void;
-  onStop:  () => void;
+  onStart:     (axis: CartesianAxis, direction: 1 | -1) => void;
+  onStopAxis:  (axis: CartesianAxis, direction: 1 | -1) => void;
+  /** When set, buttons shrink so the 3-row pad fits within this height (short screens). */
+  maxHeight?:  number;
 };
 
+const GAP = 8;
+
 /**
- * XYZ / Tool jog grid — the standard cross + Z column layout.
- * Used for both "XYZ" and "Tool" jog modes; the parent decides
- * which command to send.
+ * XYZ / Tool jog layout: an explicit 3×3 X/Y cross (with RZ on the top corners) and a Z column
+ * on the right. Laid out with plain rows rather than a wrapping grid so the buttons land in the
+ * same places on every platform. Buttons size to both the width (4 columns) and, when given,
+ * the available height (3 rows).
  */
-export function CartesianJogPanel({ onStart, onStop }: Props) {
+export function CartesianJogPanel({ onStart, onStopAxis, maxHeight }: Props) {
   const { width } = useWindowDimensions();
 
-  // Grid is 4.5 columns wide; cap at 90 px so tablets don't get huge buttons
-  const cellSize   = Math.min((width - 24) / 4.5, 90);
-  const buttonSize = Math.round(cellSize * 0.875);
-  const iconSize   = Math.round(buttonSize * 0.43);
+  // 4 columns (3 cross + 1 Z) with gaps; cap by height (3 rows) on short screens.
+  const byWidth  = (width - 40 - 4 * GAP) / 4;
+  const byHeight = maxHeight ? (maxHeight - 2 * GAP) / 3 : Infinity;
+  const size = Math.max(40, Math.min(byWidth, byHeight, 86));
+  const icon = Math.round(size * 0.42);
 
-  const cell   = { width: cellSize,     height: cellSize,   alignItems: "center" as const, justifyContent: "center" as const };
-  const narrow = { width: cellSize / 2, height: cellSize,   alignItems: "center" as const, justifyContent: "center" as const };
-  const grid   = { width: cellSize * 4.5, flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, alignContent: "space-between" as const };
-
-  const btn = (label: string, icon: React.ReactNode, pos: "above" | "below" | "left" | "right", axis: CartesianAxis, dir: 1 | -1) => (
+  const btn = (
+    label: string, ic: React.ReactNode, pos: "above" | "below" | "left" | "right",
+    axis: CartesianAxis, dir: 1 | -1,
+  ) => (
     <JogButton
       label={label}
-      icon={icon}
+      icon={ic}
       iconPosition={pos}
       onStart={() => onStart(axis, dir)}
-      onStop={onStop}
-      size={buttonSize}
+      onStop={() => onStopAxis(axis, dir)}
+      size={size}
     />
   );
+  const spacer = <View style={{ width: size, height: size }} />;
 
   return (
-    <View style={grid}>
-      {/* Row 1 */}
-      <View style={cell}>{btn("+RZ", <UndoDot    size={iconSize} color={colors.textMuted} />, "above", "rz",  1)}</View>
-      <View style={cell}>{btn("-X",  <ChevronUp  size={iconSize} color={colors.textMuted} />, "above", "x",  -1)}</View>
-      <View style={cell}>{btn("-RZ", <RedoDot    size={iconSize} color={colors.textMuted} />, "above", "rz", -1)}</View>
-      <View style={narrow} />
-      <View style={cell}>{btn("+Z",  <ChevronUp  size={iconSize} color={colors.textMuted} />, "above", "z",   1)}</View>
+    <View style={styles.wrap}>
+      {/* X/Y cross, RZ on the top corners */}
+      <View style={styles.cross}>
+        <View style={styles.row}>
+          {btn("+RZ", <UndoDot      size={icon} color={colors.textMuted} />, "above", "rz",  1)}
+          {btn("-X",  <ChevronUp    size={icon} color={colors.textMuted} />, "above", "x",  -1)}
+          {btn("-RZ", <RedoDot      size={icon} color={colors.textMuted} />, "above", "rz", -1)}
+        </View>
+        <View style={styles.row}>
+          {btn("-Y",  <ChevronLeft  size={icon} color={colors.textMuted} />, "left",  "y", -1)}
+          {spacer}
+          {btn("+Y",  <ChevronRight size={icon} color={colors.textMuted} />, "right", "y",  1)}
+        </View>
+        <View style={styles.row}>
+          {spacer}
+          {btn("+X",  <ChevronDown  size={icon} color={colors.textMuted} />, "below", "x",  1)}
+          {spacer}
+        </View>
+      </View>
 
-      {/* Row 2 */}
-      <View style={cell}>{btn("-Y",  <ChevronLeft  size={iconSize} color={colors.textMuted} />, "left",  "y", -1)}</View>
-      <View style={cell} />
-      <View style={cell}>{btn("+Y",  <ChevronRight size={iconSize} color={colors.textMuted} />, "right", "y",  1)}</View>
-      <View style={narrow} />
-      <View style={cell} />
-
-      {/* Row 3 */}
-      <View style={cell} />
-      <View style={cell}>{btn("+X",  <ChevronDown size={iconSize} color={colors.textMuted} />, "below", "x",  1)}</View>
-      <View style={cell} />
-      <View style={narrow} />
-      <View style={cell}>{btn("-Z",  <ChevronDown size={iconSize} color={colors.textMuted} />, "below", "z", -1)}</View>
+      {/* Z column (aligned to the cross's top and bottom rows) */}
+      <View style={[styles.zcol, { height: size * 3 + GAP * 2 }]}>
+        {btn("+Z", <ChevronUp   size={icon} color={colors.textMuted} />, "above", "z",  1)}
+        {btn("-Z", <ChevronDown size={icon} color={colors.textMuted} />, "below", "z", -1)}
+      </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  wrap:  { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: GAP * 2 },
+  cross: { gap: GAP },
+  row:   { flexDirection: "row", gap: GAP },
+  zcol:  { justifyContent: "space-between" },
+});

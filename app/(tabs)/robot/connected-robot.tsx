@@ -1,4 +1,4 @@
-import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { useRobots, useRobotStatus, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -106,7 +106,10 @@ export default function ConnectedRobot() {
   // Two-pane (wide) layout below — Screen only handles the single-column
   // gutter, so this screen keeps its own useWideContent/useIsWide per the kit README.
   const wideContent = useWideContent();
-  const isWide = useIsWide();
+  // Two columns only at the desktop tier (≥1100). Between 660–1100 the NavRail
+  // sidebar is already present, so a fixed 360px left column leaves the nav list
+  // too narrow and its titles truncate — stay single-column there instead.
+  const twoCol = usePaneLayout() === "desktop";
 
   const robot =
     robots.find((r) => r.serialNumber === selectedRobot?.serialNumber) ??
@@ -124,17 +127,19 @@ export default function ConnectedRobot() {
     );
   }
 
-  const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
+  // Prefer the live controller type (status) over the possibly-empty/stale connection record
+  // so the image matches the real robot immediately (manual connect, or a just-changed type).
+  const imageSource = robotImages[status.robotType || robot.robotType] ?? defaultRobotImage;
 
   const infoSection = (
     <>
       <SectionHeader title="Connected Robot" />
       <Card padded={false}>
-        <View style={[styles.robotRow, isWide && styles.robotRowWide]}>
-          <View style={[styles.imageWrapper, isWide && styles.imageWrapperWide]}>
+        <View style={[styles.robotRow, twoCol && styles.robotRowWide]}>
+          <View style={[styles.imageWrapper, twoCol && styles.imageWrapperWide]}>
             <Image
               source={imageSource}
-              style={[styles.robotImage, isWide && styles.robotImageWide]}
+              style={[styles.robotImage, twoCol && styles.robotImageWide]}
               resizeMode="contain"
             />
           </View>
@@ -230,8 +235,8 @@ export default function ConnectedRobot() {
         contentContainerStyle={[styles.content, wideContent]}
         showsVerticalScrollIndicator={false}
       >
-      {isWide ? (
-        // Wide: robot info + Change Robot in a narrow left column, the navigation
+      {twoCol ? (
+        // Desktop: robot info + Change Robot in a narrow left column, the navigation
         // targets in the wider right one.
         <View style={styles.wideRow}>
           <View style={styles.wideLeftCol}>{infoSection}</View>

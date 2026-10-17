@@ -7,10 +7,12 @@ import {
   CornerUpLeft,
   Clock,
   Cpu,
+  Brackets,
   Gauge,
   Globe,
   Grid3x3,
   Hash,
+  MoveHorizontal,
   HelpCircle,
   Hourglass,
   ImagePlus,
@@ -33,10 +35,11 @@ import {
   Square,
   Wrench,
   Home,
+  LocateFixed,
   Zap,
 } from "lucide-react-native";
 import React from "react";
-import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
+import { ConditionGroup, ElseIfBranch, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
 import { accents, colors } from "@/src/components/ui/kit";
 import { findPluginStep, pluginDisplayName } from "./usePluginContributions";
 import { outputsSummary, paramsSummary } from "./pluginSteps";
@@ -49,9 +52,64 @@ export function newId() {
     : Math.random().toString(36).slice(2);
 }
 
+// ── Point target resolution ─────────────────────────────────────────────────────
+
+/**
+ * The display name for a move step's saved-point target. Prefers the live point
+ * looked up by stable id (so a rename shows the new name immediately), falls back
+ * to the cached pointName, and flags an orphaned reference as "⚠ missing point"
+ * rather than letting a move step render blank.
+ *
+ * `points` is optional: when it is omitted (callers without the list) the cached
+ * pointName is shown as-is and nothing is flagged missing.
+ */
+export function movePointName(step: ProgramStep, points: Point[] | undefined, emptyLabel: string): string {
+  if (step.pointId) {
+    const live = points?.find(p => p.id === step.pointId);
+    if (live) return live.name;
+    // Id no longer resolves: fall back to the cached name only if it still names a
+    // real point; otherwise the reference is orphaned.
+    if (step.pointName && (!points || points.some(p => p.name === step.pointName))) return step.pointName;
+    return "⚠ missing point";
+  }
+  if (step.pointName) {
+    if (points && points.length > 0 && !points.some(p => p.name === step.pointName)) {
+      return `⚠ ${step.pointName} (missing)`;
+    }
+    return step.pointName;
+  }
+  return emptyLabel;
+}
+
+/**
+ * One-time self-migration: give move steps that reference a point only by name a
+ * stable pointId (looked up from the live points), so future renames can't break
+ * the link. Steps that already have a pointId, or that target a grid/stack/variable,
+ * are left untouched. Pure — returns new objects only where something changed.
+ */
+export function backfillPointIds(steps: ProgramStep[], points: Point[] | undefined): ProgramStep[] {
+  if (!points || points.length === 0) return steps;
+  const idByName = new Map(points.map(p => [p.name, p.id] as const));
+  const isMove = (t: StepType) => t === "MoveL" || t === "MoveJ" || t === "JumpL" || t === "JumpJ";
+  const walk = (list: ProgramStep[]): ProgramStep[] => list.map(s => {
+    let next = s;
+    if (isMove(s.type) && s.pointName && !s.pointId
+        && !s.gridPoint && !s.stackPoint && !s.varPointName && !s.pointNameExpr) {
+      const id = idByName.get(s.pointName);
+      if (id) next = { ...next, pointId: id };
+    }
+    if (next.loopSteps)      next = { ...next, loopSteps:      walk(next.loopSteps) };
+    if (next.ifSteps)        next = { ...next, ifSteps:        walk(next.ifSteps) };
+    if (next.elseSteps)      next = { ...next, elseSteps:      walk(next.elseSteps) };
+    if (next.elseIfBranches) next = { ...next, elseIfBranches: next.elseIfBranches.map(b => ({ ...b, steps: walk(b.steps) })) };
+    return next;
+  });
+  return walk(steps);
+}
+
 // ── Step label ─────────────────────────────────────────────────────────────────
 
-export function stepLabel(step: ProgramStep): string {
+export function stepLabel(step: ProgramStep, points?: Point[]): string {
   switch (step.type) {
     case "MoveL":
     case "MoveJ":
@@ -76,7 +134,7 @@ export function stepLabel(step: ProgramStep): string {
         ? `${step.type}  →  $${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : step.pointNameExpr
         ? `${step.type}  →  ${step.pointNameExpr}`
-        : `${step.type}  →  ${step.pointName ?? "Current Position"}`;
+        : `${step.type}  →  ${movePointName(step, points, "Current Position")}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
     case "SetOutput": {
@@ -138,6 +196,12 @@ export function stepLabel(step: ProgramStep): string {
     case "SetLocal":   return step.localName ? `Set Local  →  ${step.localName}` : "Set Local  →  None";
     case "ClearLocal": return "Clear Local";
     case "RunHoming":  return "Run Homing";
+    case "SetJointPosition": {
+      const names = ["J1/X", "Horizontal/Y", "Vertical/Z", "J4/RZ"];
+      const jn = names[step.jointIndex ?? 0] ?? `#${step.jointIndex ?? 0}`;
+      const v  = step.expressions?.jointValue ?? `${step.jointValue ?? 0}`;
+      return `Set Joint  →  ${jn}  =  ${v}`;
+    }
     case "AuxMove": {
       const axis = step.auxAxisIndex ?? 0;
       const isAbs = step.auxAbsolute;
@@ -157,6 +221,20 @@ export function stepLabel(step: ProgramStep): string {
       return "Aux Stop";
     case "AuxEnable":
       return `Aux Motors ${step.auxEnable === false ? "OFF" : "ON"}`;
+    case "GripperAction": {
+      const ga = step.gripperAction ?? "Open";
+      const detail = ga === "GripTo" ? `Grip to ${step.gripTargetMm ?? "?"} mm` : ga;
+      return `Gripper  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${detail}`;
+    }
+    case "ConveyorAction": {
+      const a = step.conveyorAction ?? "RunForward";
+      const label = a === "RunForward" ? "Run ▶" : a === "RunReverse" ? "Run ◀" : "Stop";
+      return `Conveyor  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${label}`;
+    }
+    case "RotaryIndex": {
+      const dir = (step.rotaryDirection ?? 1) < 0 ? "−" : "+";
+      return `Rotary Index  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${dir}${step.rotaryCount ?? 1}`;
+    }
     case "StartBackground":
       return step.backgroundProgramName ? `Start Background  →  ${step.backgroundProgramName}` : "Start Background";
     case "StopBackground":
@@ -217,10 +295,14 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "SetLocal":
     case "ClearLocal":     return <Grid3x3       size={size} color={color} />;
     case "RunHoming":      return <Home          size={size} color={color} />;
+    case "SetJointPosition": return <LocateFixed size={size} color={color} />;
     case "AuxMove":            return <ChevronsRight size={size} color={color} />;
     case "AuxContinuous":      return <Play          size={size} color={color} />;
     case "AuxStop":            return <OctagonX      size={size} color={color} />;
     case "AuxEnable":          return <Zap           size={size} color={color} />;
+    case "GripperAction":      return <Brackets      size={size} color={color} />;
+    case "ConveyorAction":     return <MoveHorizontal size={size} color={color} />;
+    case "RotaryIndex":        return <RotateCw      size={size} color={color} />;
     case "StartBackground":    return <Layers        size={size} color={color} />;
     case "StopBackground":     return <Square        size={size} color={color} />;
     case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
@@ -260,10 +342,14 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   SetLocal:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Set Local"   },
   ClearLocal:   { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Clear Local" },
   RunHoming:     { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Run Homing"         },
+  SetJointPosition: { accent: "#d97706", iconBg: "#fef3c7", iconColor: "#d97706", label: "Set Joint"       },
   AuxMove:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Move"           },
   AuxContinuous: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Continuous Run" },
   AuxStop:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Aux Stop"           },
   AuxEnable:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Aux Motor Enable"   },
+  GripperAction:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Gripper"            },
+  ConveyorAction: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor"           },
+  RotaryIndex:    { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Rotary Index"       },
   RunVision:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
   SaveImage:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Save Image"          },
   StartBackground:  { accent: "#16a34a", iconBg: "#dcfce7", iconColor: "#16a34a", label: "Start Background"   },
@@ -326,7 +412,7 @@ export function fmtConditionFull(group: ConditionGroup | undefined): string {
 
 // ── Step detail ───────────────────────────────────────────────────────────────
 
-export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
+export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[], points?: Point[]): string | null {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
@@ -334,7 +420,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : step.pointNameExpr ? step.pointNameExpr
-        : (step.pointName ?? "current pos");
+        : movePointName(step, points, "current pos");
       const lines = [`→ ${target}`];
       const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
       if (spd) lines.push(spd);
@@ -354,7 +440,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : step.pointNameExpr ? step.pointNameExpr
-        : (step.pointName ?? "current pos");
+        : movePointName(step, points, "current pos");
       const lines = [`→ ${target}`];
       if (step.jumpZStart != null || step.jumpZEnd != null) {
         const s = step.jumpZStart != null ? `start ${step.jumpZStart}` : null;
@@ -458,6 +544,12 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return null;
     case "RunHoming":
       return "Runs the full homing sequence";
+    case "SetJointPosition": {
+      const names = ["J1/X", "Horizontal/Y", "Vertical/Z", "J4/RZ"];
+      const jn = names[step.jointIndex ?? 0] ?? `#${step.jointIndex ?? 0}`;
+      const v  = step.expressions?.jointValue ?? `${step.jointValue ?? 0}`;
+      return `${jn} = ${v}`;
+    }
     case "AuxMove": {
       const unit   = step.auxUnit ?? "steps";
       const amount = step.auxUnit && step.auxDistance != null ? `${step.auxDistance} ${unit}`
@@ -476,6 +568,19 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.auxImmediate ? "Immediate halt" : "Controlled stop";
     case "AuxEnable":
       return step.auxEnable === false ? "Disable motor drivers" : "Enable motor drivers";
+    case "GripperAction": {
+      const ga = step.gripperAction ?? "Open";
+      return ga === "GripTo" ? `Gripper · grip to ${step.gripTargetMm ?? "?"} mm` : `Gripper · ${ga}`;
+    }
+    case "ConveyorAction": {
+      const a = step.conveyorAction ?? "RunForward";
+      const label = a === "RunForward" ? "Run Forward" : a === "RunReverse" ? "Run Reverse" : "Stop";
+      return `Conveyor · ${label}`;
+    }
+    case "RotaryIndex": {
+      const dir = (step.rotaryDirection ?? 1) < 0 ? "−" : "+";
+      return `Index ${dir}  ·  ×${step.rotaryCount ?? 1}`;
+    }
     case "StartBackground":
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
     case "StopBackground":
@@ -666,10 +771,14 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SetLocal",     label: "Set Local",     desc: "Activate a local coordinate frame — all subsequent moves are offset by this local" },
   { type: "ClearLocal",   label: "Clear Local",   desc: "Deactivate the current local coordinate frame and return to world origin" },
   { type: "RunHoming",    label: "Run Homing",    desc: "Run the full homing sequence and wait for it to complete before continuing" },
+  { type: "SetJointPosition", label: "Set Joint Position", desc: "Manually home one joint — declare its value (deg/mm) with no motion; use 0 to zero it. Value can be an expression" },
   { type: "AuxMove",       label: "Aux Move",           desc: "Move an aux stepper axis a fixed number of steps with trapezoidal acceleration" },
   { type: "AuxContinuous", label: "Aux Continuous Run", desc: "Start an aux axis running continuously (e.g. conveyor belt) until an AuxStop step" },
   { type: "AuxStop",       label: "Aux Stop",           desc: "Stop all aux axis motion — controlled ramp-down or immediate hard stop" },
   { type: "AuxEnable",     label: "Aux Motor Enable",   desc: "Enable or disable the stepper motor drivers on an aux IO card" },
+  { type: "GripperAction", label: "Gripper",            desc: "Open, close, or grip to a set jaw gap — with optional per-step speed and accel overrides" },
+  { type: "ConveyorAction",label: "Conveyor",           desc: "Run a conveyor axis forward or reverse, or stop it — speed comes from the axis settings" },
+  { type: "RotaryIndex",   label: "Rotary Index",       desc: "Index a rotary table axis by a number of steps in a direction — distance and speed come from the axis settings" },
   { type: "RunVision",        label: "Run Vision",            desc: "Trigger a vision program, wait for one inspection result, then continue" },
   { type: "StartBackground",  label: "Start Background",      desc: "Start a background program running in parallel with this one" },
   { type: "StopBackground",   label: "Stop Background",       desc: "Stop a named background program" },
@@ -686,7 +795,7 @@ export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])
 
 export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
   "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram",
-  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming",
+  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
 ]);
 
 /**
@@ -722,7 +831,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,
@@ -746,7 +855,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "io", label: "I/O & Aux Axes", icon: Zap,
     desc: "Drive digital outputs and auxiliary stepper axes.",
     color: accents.orange, soft: accents.orangeSoft,
-    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable"],
+    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
   },
   {
     key: "vision", label: "Vision", icon: ScanSearch,

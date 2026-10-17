@@ -1,3 +1,4 @@
+import { ManualJointHoming, MANUAL_HOMING_INFO } from "@/src/components/ui/jog/ManualJointHoming";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import {
   Button,
@@ -16,7 +17,7 @@ import {
   StatusPill,
   type,
 } from "@/src/components/ui/kit";
-import { useIsWide } from "@/src/components/ui/responsive";
+import { usePaneLayout } from "@/src/components/ui/responsive";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -26,10 +27,11 @@ import {
   Cpu,
   Gamepad2,
   HomeIcon,
+  LocateFixed,
   OctagonX,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 // ── Homing state → human-readable label ───────────────────────────────────────
 const HOMING_LABELS: Record<string, string> = {
@@ -59,13 +61,17 @@ const HOMING_LABELS: Record<string, string> = {
 
 export default function Control() {
   const s = useRobotStatus();
-  const isWide = useIsWide();
+  // Two columns only at desktop (≥1100); below that the NavRail sidebar is already
+  // present, so the fixed 360px left column would strand the actions list in a
+  // too-narrow right column and truncate its labels — stay single-column.
+  const twoCol = usePaneLayout() === "desktop";
 
   const isHoming = !!s?.homingState && s.homingState !== "WaitingForStart";
   const homingLabel = s?.homingState ? (HOMING_LABELS[s.homingState] ?? s.homingState) : "";
 
   type PendingAction = { label: string; sub: string; icon: React.ReactNode; run: () => void } | null;
   const [confirm, setConfirm] = useState<PendingAction>(null);
+  const [homingOpen, setHomingOpen] = useState(false);
 
   const actions = [
     {
@@ -86,6 +92,13 @@ export default function Control() {
         icon: <HomeIcon size={28} color={colors.accent} />,
         run: () => robotClient.sendCommand("Home"),
       }),
+    },
+    {
+      label: "Manual Joint Homing",
+      sub: "Set or zero a joint to a known value — no motion",
+      icon: <LocateFixed size={20} color={colors.warning} />,
+      iconBg: colors.warningSoft,
+      onPress: () => setHomingOpen(true),
     },
   ];
 
@@ -141,7 +154,8 @@ export default function Control() {
   const actionsSection = (
     <>
       <SectionHeader title="Actions" style={styles.actionsHeader} />
-      <Card padded={false}>
+      {/* Encapsulating (padded) card with flat ListRows + dividers — matches the Space tab. */}
+      <Card>
         {actions.map((item, i) => (
           <View key={item.label}>
             <ListRow
@@ -165,8 +179,8 @@ export default function Control() {
       <PageHeader title="Control" subtitle="Move the robot and run manual actions" />
 
       <Screen>
-        {isWide ? (
-          // Wide: live position/status on the left, the action selectors on the right.
+        {twoCol ? (
+          // Desktop: live position/status on the left, the action selectors on the right.
           <View style={styles.wideRow}>
             <View style={styles.wideLeftCol}>{posSection}</View>
             <View style={styles.wideRightCol}>{actionsSection}</View>
@@ -204,6 +218,27 @@ export default function Control() {
             </Card>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* ── Manual joint homing modal ────────────────────────────────── */}
+      <Modal visible={homingOpen} transparent animationType="slide" onRequestClose={() => setHomingOpen(false)}>
+        <View style={styles.sheetBackdrop}>
+          <TouchableOpacity style={styles.sheetDismiss} activeOpacity={1} onPress={() => setHomingOpen(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetTitleRow}>
+                <Text style={styles.sheetTitle}>Manual Joint Homing</Text>
+                <InfoTip text={MANUAL_HOMING_INFO} />
+              </View>
+              <TouchableOpacity onPress={() => setHomingOpen(false)} style={styles.sheetCloseBtn}>
+                <Text style={styles.sheetCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <ManualJointHoming embedded />
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
 
       {/* ── Homing modal ─────────────────────────────────────────────── */}
@@ -301,6 +336,25 @@ const styles = StyleSheet.create({
   confirmBtnFlex: {
     flex: 1,
   },
+
+  // ── Manual joint homing sheet ────────────────────────────────────────────
+  sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  sheetDismiss:  { flex: 1 },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl,
+    padding: spacing.xl - 4, paddingBottom: spacing.xxl + 4,
+    maxHeight: "85%",
+    ...shadows.raised,
+  },
+  sheetHeader: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: spacing.lg,
+  },
+  sheetTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 },
+  sheetTitle:     type.title,
+  sheetCloseBtn:  { padding: spacing.xs },
+  sheetCloseText: { fontSize: 18, color: colors.textMuted },
 
   // ── Homing modal ─────────────────────────────────────────────────────────
   homingCard: {

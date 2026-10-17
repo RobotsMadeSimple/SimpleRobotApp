@@ -1,5 +1,6 @@
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import JogPad from "@/src/components/ui/JogPad";
+import { SpeedSlider } from "@/src/components/ui/jog/SpeedSlider";
 import {
   Button,
   buttonTextColor,
@@ -31,6 +32,8 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  Gamepad2,
+  Gauge,
   Grid2X2,
   MapPin,
   MousePointerClick,
@@ -45,6 +48,11 @@ import {
   X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Shared key: the last jog speed the user picked (continuous only), so Move-to-point / DRO moves
+// here and on the Points page default to it. Step modes (0.1/1/10 mm) aren't move speeds → Slow.
+export const LAST_MOVE_SPEED_KEY = "lastMoveSpeed";
 import {
   LayoutChangeEvent,
   Modal,
@@ -211,6 +219,7 @@ function Selector({
 // the same PickerModal machinery as the LOCAL/TOOL Selector above.
 function GridSelectorTile({
   label,
+  icon,
   value,
   options,
   onSelect,
@@ -219,8 +228,10 @@ function GridSelectorTile({
   viewLabel,
   viewRoute,
   mutedValue,
+  disabled,
 }: {
   label: string;
+  icon?: React.ReactNode;
   value: string;
   options: (string | PickerOption)[];
   onSelect: (v: string) => void;
@@ -230,16 +241,21 @@ function GridSelectorTile({
   viewRoute?: string;
   /** Dim the value text — set by call sites for an unset "None" value. */
   mutedValue?: boolean;
+  /** Non-interactive (e.g. CONTROL in Joint mode, where it doesn't apply). */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <Card onPress={() => setOpen(true)} style={styles.gridTile}>
-        <Text style={styles.selectorLabel}>{label}</Text>
-        <View style={styles.gridTileValueRow}>
-          <Text style={[styles.gridTileValue, mutedValue && styles.gridTileValueMuted]} numberOfLines={1}>{value}</Text>
-          <ChevronDown size={14} color={colors.textFaint} />
+      <Card onPress={disabled ? undefined : () => setOpen(true)} style={[styles.gridTile, disabled && styles.gridTileDisabled]}>
+        {icon && <View style={styles.gridTileIcon}>{icon}</View>}
+        <View style={styles.gridTileText}>
+          <Text style={styles.selectorLabel}>{label}</Text>
+          <View style={styles.gridTileValueRow}>
+            <Text style={[styles.gridTileValue, mutedValue && styles.gridTileValueMuted]} numberOfLines={1}>{value}</Text>
+            <ChevronDown size={14} color={colors.textFaint} />
+          </View>
         </View>
       </Card>
 
@@ -259,11 +275,26 @@ function GridSelectorTile({
   );
 }
 
+// Straight-line (translational) distance in mm from the robot's current position to a point.
+function distanceMm(p: { x: number; y: number; z: number }, s: { x: number; y: number; z: number }): number {
+  return Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z);
+}
+
 // ── Teach modal ───────────────────────────────────────────────────────────────
+/** First unused "Point N" name, so a new teach is one tap away. */
+function suggestPointName(points: Point[]): string {
+  const taken = new Set(points.map((p) => p.name));
+  let i = points.length + 1;
+  while (taken.has(`Point ${i}`)) i++;
+  return `Point ${i}`;
+}
+
 function TeachModal({ onClose }: { onClose: () => void }) {
   const points = usePoints();
-  const [mode, setMode] = useState<"list" | "new">("list");
-  const [newName, setNewName] = useState("");
+  const status = useRobotStatus();
+  // Default to teaching a NEW point (name pre-filled); "Select Existing" switches to the list.
+  const [mode, setMode] = useState<"list" | "new">("new");
+  const [newName, setNewName] = useState(() => suggestPointName(points));
   const [search, setSearch] = useState("");
 
   const filtered = points.filter((p) =>
@@ -288,7 +319,7 @@ function TeachModal({ onClose }: { onClose: () => void }) {
         <View style={styles.dialogHeader}>
           <View style={styles.dialogTitleRow}>
             <Text style={styles.dialogTitle}>
-              {mode === "list" ? "Teach Point" : "New Point"}
+              {mode === "list" ? "Overwrite Point" : "New Point"}
             </Text>
             {mode === "list" && (
               <InfoTip text="Tap a saved point to overwrite it with the robot's current position — the point's stored coordinates are replaced and this cannot be undone. Use New Point to save the current position under a new name instead." />
@@ -324,16 +355,23 @@ function TeachModal({ onClose }: { onClose: () => void }) {
                 <View key={p.name}>
                   <TouchableOpacity style={styles.pointRow} onPress={() => teachPoint(p.name)} activeOpacity={0.7}>
                     <Text style={styles.pointName}>{p.name}</Text>
-                    <Text style={styles.pointCoords}>
-                      {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
-                    </Text>
+                    <View style={styles.pointMeta}>
+                      <Text style={styles.pointCoords}>
+                        {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}
+                      </Text>
+                      <Text style={styles.pointDistance}>{distanceMm(p, status).toFixed(1)} mm away</Text>
+                    </View>
                   </TouchableOpacity>
                   {i < filtered.length - 1 && <Divider />}
                 </View>
               ))}
             </ScrollView>
 
-            <TouchableOpacity style={styles.newPointButton} onPress={() => setMode("new")} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.newPointButton}
+              onPress={() => { setNewName(suggestPointName(points)); setMode("new"); }}
+              activeOpacity={0.7}
+            >
               <Plus size={16} color={colors.accent} />
               <Text style={styles.newPointText}>New Point</Text>
             </TouchableOpacity>
@@ -351,13 +389,13 @@ function TeachModal({ onClose }: { onClose: () => void }) {
               />
             </FormRow>
             <View style={styles.modalActions}>
-              <Button label="Back" variant="secondary" style={styles.modalCancelFlex} onPress={() => setMode("list")} />
+              <Button label="Select Existing" variant="secondary" style={{ flex: 1 }} onPress={() => setMode("list")} />
               <Button
                 label="Teach Here"
                 variant="primary"
                 icon={<MousePointerClick size={15} color={buttonTextColor("primary")} />}
                 disabled={!newName.trim()}
-                style={styles.modalConfirmFlex}
+                style={{ flex: 1 }}
                 onPress={teachNew}
               />
             </View>
@@ -403,6 +441,7 @@ const speedTileOptions: PickerOption[] = [
 export default function JogScreen() {
   const [selectedSpeed, setSelectedSpeed] = useState("Slow");
   const [mode, setMode]                 = useState("XYZ");
+  const [padStyle, setPadStyle]         = useState<"buttons" | "joystick">("buttons");
   const [teachOpen, setTeachOpen]       = useState(false);
   const [jogSpeeds, setJogSpeeds]       = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
 
@@ -412,7 +451,7 @@ export default function JogScreen() {
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
   const wideContent = useWideContent();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isWide = useIsWide();
 
   // Lay out against the real content width (the NavRail eats ~216px of the
@@ -422,6 +461,18 @@ export default function JogScreen() {
   const threeColumn = paneWidth >= THREE_COL_MIN;
   const twoColumn   = !threeColumn && paneWidth >= TWO_COL_MIN;
   const wideLayout  = threeColumn || twoColumn;
+
+  // Narrow pad sizing: the pad's height budget is the window minus the (fixed) header, config
+  // block, footer and the bottom tab bar — all measured/known independently, so the pad never
+  // feeds back into its own size. Window height is used (reliable) rather than the container,
+  // whose flex height can mirror the pad on web.
+  const TAB_BAR_RESERVE = 70;
+  const [headerH, setHeaderH] = useState(0);
+  const [topH,    setTopH]    = useState(0);
+  const [footH,   setFootH]   = useState(0);
+  const padMaxH = headerH && topH && footH
+    ? Math.max(120, windowHeight - headerH - topH - footH - TAB_BAR_RESERVE)
+    : undefined;
 
   const onContentLayout = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -452,6 +503,16 @@ export default function JogScreen() {
     { label: "Tool",  value: "Tool",  icon: (c: string, s: number) => <Wrench size={s} color={c} /> },
     { label: "Joint", value: "Joint", icon: (c: string, s: number) => <RotateCw size={s} color={c} /> },
   ];
+
+  // Speed slider stops: fine step → fast continuous for the button pad; only the continuous
+  // speeds for the analog joystick (discrete steps don't apply to it).
+  const speedSliderOptions = (padStyle === "joystick" ? ["Slow", "Normal", "Fast"] : speedOptions)
+    .map(s => ({ key: s, label: s }));
+
+  // A step speed left selected when switching to the joystick would be meaningless.
+  useEffect(() => {
+    if (padStyle === "joystick" && selectedSpeed.includes("mm")) setSelectedSpeed("Normal");
+  }, [padStyle, selectedSpeed]);
 
   // Reload jog speeds whenever this screen comes into focus (picks up config changes immediately)
   useFocusEffect(useCallback(() => {
@@ -485,6 +546,17 @@ export default function JogScreen() {
   const [pointsOpen, setPointsOpen]       = useState(false);
   const [moveTarget, setMoveTarget]       = useState<Point | null>(null);
   const [moveSpeed, setMoveSpeed]         = useState<"Slow" | "Normal" | "Fast">("Normal");
+
+  // Move-to-point / DRO-to-position speed tracks the current jog speed selection: the same
+  // Slow/Normal/Fast when a continuous speed is picked, or Slow when an incremental step
+  // (0.1/1/10 mm) is selected. Persisted so the Points page can default to it too.
+  useEffect(() => {
+    const effective: "Slow" | "Normal" | "Fast" = selectedSpeed.includes("mm")
+      ? "Slow"
+      : (selectedSpeed as "Slow" | "Normal" | "Fast");
+    setMoveSpeed(effective);
+    AsyncStorage.setItem(LAST_MOVE_SPEED_KEY, effective).catch(() => {});
+  }, [selectedSpeed]);
   const [movingFromPage, setMovingFromPage] = useState(false);
   const [movingToName, setMovingToName]   = useState<string | null>(null);
   const [alreadyHere, setAlreadyHere]     = useState<string | null>(null);
@@ -633,6 +705,98 @@ export default function JogScreen() {
 
   // The pieces the layout arranges. Defined once so every layout places the same
   // controls without duplicating them.
+  // Buttons / Joystick toggle — only meaningful for the cartesian modes. Lives in the fixed
+  // config area (not above the pad) so it doesn't eat jog space or scroll away on mobile.
+  const padStyleToggle = mode !== "Joint" ? (
+    <SegmentedControl
+      style={styles.padStyleToggle}
+      options={[{ label: "Buttons", value: "buttons" }, { label: "Joystick", value: "joystick" }]}
+      value={padStyle}
+      onChange={(v) => setPadStyle(v as "buttons" | "joystick")}
+      size="sm"
+    />
+  ) : null;
+
+  // Mobile config: a 2×3 grid of tiles (label + value, tap to change) — motion, control, local,
+  // tool, points, speed — with the DRO in its own section beneath (see narrow render). Built as
+  // three fixed rows of two flex:1 tiles (NOT flex-wrap) so a fold/unfold resize can never reflow
+  // the column count — wrap + percentage/measured widths were reflowing to 3 or 1 columns.
+  const configMobile = (
+    <View style={styles.configGrid}>
+      <View style={styles.gridRow}>
+        <GridSelectorTile
+          label="MOTION"
+          icon={<Move3d size={22} color={colors.textMuted} />}
+          value={mode}
+          options={jogModeTileOptions}
+          onSelect={setMode}
+          titleInfo={JOG_MODE_INFO}
+        />
+        <GridSelectorTile
+          label="CONTROL"
+          icon={<Gamepad2 size={22} color={colors.textMuted} />}
+          value={mode === "Joint" ? "—" : padStyle === "joystick" ? "Joystick" : "Buttons"}
+          options={["Buttons", "Joystick"]}
+          onSelect={(v) => setPadStyle(v === "Joystick" ? "joystick" : "buttons")}
+          disabled={mode === "Joint"}
+          mutedValue={mode === "Joint"}
+          titleInfo="Buttons gives directional jog buttons. Joystick gives analog thumbsticks for X/Y, Z and rotation. (Joint mode always uses buttons.)"
+        />
+      </View>
+      <View style={styles.gridRow}>
+        <GridSelectorTile
+          label="LOCAL"
+          icon={<Grid2X2 size={22} color={colors.textMuted} />}
+          value={local}
+          options={localOptions}
+          onSelect={setLocal}
+          viewLabel="View Locals"
+          viewRoute="/space/locals"
+          mutedValue={local === "None"}
+        />
+        <GridSelectorTile
+          label="TOOL"
+          icon={<Wrench size={22} color={colors.textMuted} />}
+          value={tool || "None"}
+          options={["None", ...tools.map(t => t.name)]}
+          onSelect={setTool}
+          viewLabel="View Tools"
+          viewRoute="/space/tools"
+          mutedValue={(tool || "None") === "None"}
+        />
+      </View>
+      <View style={styles.gridRow}>
+        <Card onPress={() => setPointsOpen(true)} style={styles.gridTile}>
+          <View style={styles.gridTileIcon}><MapPin size={22} color={colors.textMuted} /></View>
+          <View style={styles.gridTileText}>
+            <Text style={styles.selectorLabel}>POINTS</Text>
+            <View style={styles.gridTileValueRow}>
+              <Text style={styles.gridTileValue} numberOfLines={1}>{points.length} saved</Text>
+              <ChevronRight size={14} color={colors.textFaint} />
+            </View>
+          </View>
+        </Card>
+        <GridSelectorTile
+          label="SPEED"
+          icon={<Gauge size={22} color={colors.textMuted} />}
+          value={selectedSpeed}
+          options={speedTileOptions}
+          onSelect={setSelectedSpeed}
+          titleInfo={SPEED_INFO}
+          footnote={SPEED_FOOTNOTE}
+        />
+      </View>
+    </View>
+  );
+
+  // DRO as its own compact section beneath the config grid (narrow layout). PositionReadout
+  // renders its own Card, so pass card={false} and wrap once to keep it a single card.
+  const droSection = (
+    <Card padded={false} style={styles.droCard}>
+      <PositionReadout axes={coords} inline size="lg" card={false} onAxisPress={openAxisTarget} />
+    </Card>
+  );
+
   const configCard = (
     <Card>
       {/* Jog mode */}
@@ -641,27 +805,12 @@ export default function JogScreen() {
         <InfoTip text="XYZ jogs along the room/local axes. Tool jogs along the tool tip's own axes (e.g. it always plunges straight into the tip). Joint moves a single robot joint at a time." />
       </View>
       <SegmentedControl options={jogModes} value={mode} onChange={setMode} />
+      {padStyleToggle && <View style={{ marginTop: spacing.sm }}>{padStyleToggle}</View>}
 
       <Divider style={styles.cardSeparator} />
 
-      {/* Speed */}
-      <View style={styles.fieldLabelRow}>
-        <Text style={styles.selectorLabel}>SPEED</Text>
-        <InfoTip text="Slow/Normal/Fast jog continuously while held, at the speeds set on Robot › Configure. The 0.1/1/10 mm chips take one precise step per tap in XYZ and Joint mode — in Tool mode they instead jog continuously at a very slow speed." />
-      </View>
-      {/* Config card only renders on wide layouts, so keep all six speeds on one row
-          (equal-width, no wrap) rather than letting them spill onto a second line. */}
-      <ChipGroup style={styles.speedGroup}>
-        {speedOptions.map((spd) => (
-          <Chip
-            key={spd}
-            label={spd}
-            selected={selectedSpeed === spd}
-            onPress={() => setSelectedSpeed(spd)}
-            style={styles.speedChip}
-          />
-        ))}
-      </ChipGroup>
+      {/* Speed — same slider as mobile (fine step → fast continuous; continuous-only for joystick) */}
+      <SpeedSlider options={speedSliderOptions} value={selectedSpeed} onChange={setSelectedSpeed} />
 
       <Divider style={styles.cardSeparator} />
 
@@ -750,7 +899,7 @@ export default function JogScreen() {
 
   const jogPad = (
     <View style={styles.jogWrapper}>
-      <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} />
+      <JogPad jogMode={mode} selectedSpeed={selectedSpeed} speedOverrides={jogSpeeds} padStyle={padStyle} />
     </View>
   );
 
@@ -915,11 +1064,13 @@ export default function JogScreen() {
   return (
     <View style={styles.container} onLayout={onContentLayout}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
-      <PageHeader
-        title="Jog & Teach"
-        subtitle="Manually move the robot, then save a point at its current position"
-        backTo="/control"
-      />
+      <View onLayout={e => setHeaderH(e.nativeEvent.layout.height)}>
+        <PageHeader
+          title="Jog & Teach"
+          subtitle="Manually move the robot, then save a point at its current position"
+          backTo="/control"
+        />
+      </View>
 
       {wideLayout ? (
         // Wide: jog config + DRO on the left, the pad with STOP/Teach directly
@@ -956,18 +1107,25 @@ export default function JogScreen() {
         // STOP/Teach footer so the jog buttons are always on screen (the DRO
         // was pushing the pad below the fold when everything scrolled).
         <>
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={[styles.scrollContent, wideContent]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
+          {/* Fixed top — config, toggle, DRO and points all stay put (no tiny scroll) while
+              jogging; the pad gets the rest of the screen. */}
+          <View
+            style={[styles.narrowTop, wideContent]}
+            onLayout={e => setTopH(e.nativeEvent.layout.height)}
           >
-            {configGrid}
-            {pointsTrigger}
-            {droInline}
-          </ScrollView>
-          <View style={styles.pinnedPad}>{jogPad}</View>
-          {stopTeach(false)}
+            {configMobile}
+            {droSection}
+          </View>
+          <View style={styles.narrowPadArea}>
+            <JogPad
+              jogMode={mode}
+              selectedSpeed={selectedSpeed}
+              speedOverrides={jogSpeeds}
+              padStyle={padStyle}
+              maxHeight={padMaxH}
+            />
+          </View>
+          <View onLayout={e => setFootH(e.nativeEvent.layout.height)}>{stopTeach(false)}</View>
           {pointsModal}
         </>
       )}
@@ -1479,17 +1637,38 @@ const styles = StyleSheet.create({
 
   // ── Grid selector tile (narrow config grid) ───────────────────────────────
   configGrid: {
+    gap: spacing.sm,
+  },
+
+  // Fixed 2-up rows (not flex-wrap) — the column count can't change on a fold resize.
+  gridRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: spacing.sm,
   },
 
   gridTile: {
-    flexBasis: "48%",
-    flexGrow: 1,
-    minHeight: 44,
-    gap: 4,
-    justifyContent: "center",
+    flex: 1,
+    minWidth: 0,
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  gridTileDisabled: {
+    opacity: 0.5,
+  },
+
+  // Bigger icon on the left, label + value stacked on the right.
+  gridTileIcon: {
+    width: 24,
+    alignItems: "center",
+  },
+
+  gridTileText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
   },
 
   gridTileValueRow: {
@@ -1565,6 +1744,46 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: spacing.xs + 2,
   },
+  padStyleToggle: {
+    alignSelf: "stretch",
+  },
+  // Compact mobile config card — tight vertical rhythm between the distinct controls.
+  mobileConfig: {
+    gap: 6,
+    paddingVertical: spacing.sm,
+  },
+  pointsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  pointsRowValue: {
+    marginLeft: "auto",
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  // Narrow: fixed config/DRO/points block so nothing in the top section scrolls.
+  narrowTop: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingTop: spacing.sm + 2,
+    gap: spacing.sm,
+  },
+  // Narrow: the jog pad takes the remaining space between the fixed top and the footer.
+  // minHeight:0 lets this flex child actually shrink below its content (defeating the CSS
+  // flexbox min-height:auto rule), so its measured height is the real available space and the
+  // pad scales to fit it instead of overflowing onto the DRO/points above.
+  narrowPadArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // DRO section beneath the mobile config grid.
+  droCard: {
+    marginTop: spacing.sm,
+  },
   // Narrow: keeps the pad on screen above the STOP/Teach footer while the
   // config/DRO/points scroll behind it.
   pinnedPad: {
@@ -1581,7 +1800,8 @@ const styles = StyleSheet.create({
   bottomRow: {
     flexDirection: "row",
     gap: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
+    // Match the narrow config gutter so STOP/Teach line up with the cards above.
+    paddingHorizontal: spacing.sm + 2,
     paddingTop: spacing.sm + 2,
     paddingBottom: spacing.md + 2,
     backgroundColor: colors.background,
@@ -1718,7 +1938,8 @@ const styles = StyleSheet.create({
   },
 
   dialog: {
-    width: 300,
+    width: "90%",
+    maxWidth: 440,
     maxHeight: 600,
     backgroundColor: colors.surface,
     borderRadius: radii.xl,
@@ -1779,11 +2000,26 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
 
+  pointMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    gap: spacing.sm,
+    marginTop: 2,
+  },
+
   pointCoords: {
     ...type.mono,
     fontSize: 12,
     color: colors.textFaint,
-    marginTop: 2,
+    flexShrink: 1,
+  },
+
+  pointDistance: {
+    ...type.mono,
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.accent,
   },
 
   emptyText: {

@@ -8,6 +8,7 @@ export default function IOLayout() {
       <Stack.Screen name="nanos" />
       <Stack.Screen name="relay" />
       <Stack.Screen name="auxiliary" />
+      <Stack.Screen name="aux-axis" />
       <Stack.Screen name="cameras" />
       <Stack.Screen name="camera-calibrate" />
       <Stack.Screen name="configure" />

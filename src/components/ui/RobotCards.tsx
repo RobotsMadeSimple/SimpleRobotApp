@@ -2,9 +2,10 @@ import { Card, colors, radii, spacing, StatusPill, type } from "@/src/components
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router } from "expo-router";
+import { isSaved, recordConnection, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
+import { Star } from "lucide-react-native";
 import React from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 const robotImages: Record<string, any> = {
   ASTRO: require("@/assets/images/ASTRO.png"),
@@ -13,10 +14,15 @@ const robotImages: Record<string, any> = {
 const defaultRobotImage = require("@/assets/images/no-robot.png");
 
 export function RobotCard({ robot }: { robot: RobotInfo }) {
+  useConnectionStore(); // re-render when the saved/star state changes
+  const saved = isSaved(robot);
+
   function setRobot() {
+    recordConnection(robot);
     setSelectedRobot(robot);
     robotClient.connectTo(robot);
-    router.replace(`/robot/connected-robot`);
+    // Selecting a robot flips the Robot tab's root screen to the connected
+    // dashboard in place — no navigation (which would stack a duplicate route).
   }
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
@@ -38,8 +44,21 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
           </Text>
         </View>
 
-        {/* Connect badge */}
-        <StatusPill label="Connect" tone="accent" style={styles.connectBadge} />
+        <View style={styles.rightCol}>
+          {/* Star — save/unsave this connection (own press, doesn't trigger connect) */}
+          <Pressable
+            onPress={(e) => { e.stopPropagation?.(); toggleSaved(robot); }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.star}
+            accessibilityLabel={saved ? "Unsave connection" : "Save connection"}
+          >
+            {/* key flips with saved-state so the SVG remounts — react-native-svg keeps the old
+                fill on an in-place color-only change (lucide paths are keyless) on native. */}
+            <Star key={saved ? "on" : "off"} size={18} color={saved ? colors.warning : colors.textFaint} fill={saved ? colors.warning : "transparent"} />
+          </Pressable>
+          {/* Connect badge */}
+          <StatusPill label="Connect" tone="accent" style={styles.connectBadge} />
+        </View>
       </View>
     </Card>
   );
@@ -76,8 +95,14 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
   subtext: { color: colors.textFaint },
+  rightCol: {
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  star: {
+    padding: 2,
+  },
   connectBadge: {
-    alignSelf: "center",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
