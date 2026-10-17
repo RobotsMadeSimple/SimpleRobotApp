@@ -14,6 +14,7 @@ export const goldenProgramStep = {
   comment: "Golden comment",
   outputFrame: "robot",
   pointName: "P1",
+  pointId: "point-guid-1",
   speed: 200,
   accel: 500,
   decel: 500,

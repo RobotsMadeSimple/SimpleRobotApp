@@ -982,6 +982,12 @@ export type ProgramStep = {
   /** Free text shown under the step in the editor. Never executed. */
   comment?: string;
   pointName?: string;
+  /**
+   * Stable id of the referenced saved point (preferred over pointName). Lets a move
+   * step keep its link when the point is renamed; pointName is kept as a display
+   * cache and a fallback for controllers/programs saved before ids existed.
+   */
+  pointId?: string;
   speed?: number;
   accel?: number;
   decel?: number;
@@ -1351,6 +1357,12 @@ export type RobotInfo = {
 };
 
 export type Point = {
+  /**
+   * Stable id assigned by the controller, preserved across renames and re-teaches.
+   * Program steps reference a point by this id so a rename never breaks the link.
+   * Absent on points from a controller too old to send ids.
+   */
+  id: string
   name: string
   lastUpdatedUnixMs: number
   x: number

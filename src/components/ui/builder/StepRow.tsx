@@ -16,7 +16,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
-import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { Point, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
 import { colors, accents } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -128,6 +128,7 @@ export function StepRow({
   onLongPress,
   onToggleSelect,
   problems,
+  points,
 }: {
   step: ProgramStep;
   index: number;
@@ -157,6 +158,9 @@ export function StepRow({
   onToggleSelect?: () => void;
   /** Validation problems on this step or nested inside it. */
   problems?: StepProblems;
+  /** Live saved points, used to resolve a move step's point name by stable id
+   *  (so a rename shows the new name) and to flag an orphaned reference. */
+  points?: Point[];
 }) {
   // Pulsing red wash over cards with validation ERRORS (warnings stay static).
   // A translucent danger overlay breathes 4%→14% opacity under the content.
@@ -188,7 +192,7 @@ export function StepRow({
   // bands of Motion / Logic / I-O at a glance; the icon tile and type label keep
   // the step's own theme so individual steps stay distinguishable within a band.
   const category      = categoryForStep(step.type);
-  const detail        = stepDetail(step);
+  const detail        = stepDetail(step, undefined, undefined, points);
   const detailLines   = detail ? detail.split("\n") : [];
   // Disabled steps stay fully editable and draggable; they only read as switched off.
   const disabled      = step.enabled === false;
@@ -309,7 +313,7 @@ export function StepRow({
           <View style={[sharedStyles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
             <TouchableOpacity
               style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}
-              onPress={() => selectMode ? onToggleSelect?.() : onEnterScope({ kind: "loop", stepId: step.id, label: stepLabel(step) })}
+              onPress={() => selectMode ? onToggleSelect?.() : onEnterScope({ kind: "loop", stepId: step.id, label: stepLabel(step, points) })}
               activeOpacity={0.7}
             >
               <Text style={{ fontSize: 12, color: colors.textMuted }}>

@@ -389,6 +389,7 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.points = []; this.emitPoints(); return; }
 
     this.points = parsed.map((p: any): Point => ({
+      id: p.id ?? p.Id ?? "",
       name: p.Name,
       lastUpdatedUnixMs: p.LastUpdatedUnixMs,
       x: p.X,

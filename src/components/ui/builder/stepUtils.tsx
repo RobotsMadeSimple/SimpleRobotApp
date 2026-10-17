@@ -38,7 +38,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import React from "react";
-import { ConditionGroup, ElseIfBranch, Grid, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
+import { ConditionGroup, ElseIfBranch, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
 import { accents, colors } from "@/src/components/ui/kit";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
@@ -49,9 +49,64 @@ export function newId() {
     : Math.random().toString(36).slice(2);
 }
 
+// ── Point target resolution ─────────────────────────────────────────────────────
+
+/**
+ * The display name for a move step's saved-point target. Prefers the live point
+ * looked up by stable id (so a rename shows the new name immediately), falls back
+ * to the cached pointName, and flags an orphaned reference as "⚠ missing point"
+ * rather than letting a move step render blank.
+ *
+ * `points` is optional: when it is omitted (callers without the list) the cached
+ * pointName is shown as-is and nothing is flagged missing.
+ */
+export function movePointName(step: ProgramStep, points: Point[] | undefined, emptyLabel: string): string {
+  if (step.pointId) {
+    const live = points?.find(p => p.id === step.pointId);
+    if (live) return live.name;
+    // Id no longer resolves: fall back to the cached name only if it still names a
+    // real point; otherwise the reference is orphaned.
+    if (step.pointName && (!points || points.some(p => p.name === step.pointName))) return step.pointName;
+    return "⚠ missing point";
+  }
+  if (step.pointName) {
+    if (points && points.length > 0 && !points.some(p => p.name === step.pointName)) {
+      return `⚠ ${step.pointName} (missing)`;
+    }
+    return step.pointName;
+  }
+  return emptyLabel;
+}
+
+/**
+ * One-time self-migration: give move steps that reference a point only by name a
+ * stable pointId (looked up from the live points), so future renames can't break
+ * the link. Steps that already have a pointId, or that target a grid/stack/variable,
+ * are left untouched. Pure — returns new objects only where something changed.
+ */
+export function backfillPointIds(steps: ProgramStep[], points: Point[] | undefined): ProgramStep[] {
+  if (!points || points.length === 0) return steps;
+  const idByName = new Map(points.map(p => [p.name, p.id] as const));
+  const isMove = (t: StepType) => t === "MoveL" || t === "MoveJ" || t === "JumpL" || t === "JumpJ";
+  const walk = (list: ProgramStep[]): ProgramStep[] => list.map(s => {
+    let next = s;
+    if (isMove(s.type) && s.pointName && !s.pointId
+        && !s.gridPoint && !s.stackPoint && !s.varPointName && !s.pointNameExpr) {
+      const id = idByName.get(s.pointName);
+      if (id) next = { ...next, pointId: id };
+    }
+    if (next.loopSteps)      next = { ...next, loopSteps:      walk(next.loopSteps) };
+    if (next.ifSteps)        next = { ...next, ifSteps:        walk(next.ifSteps) };
+    if (next.elseSteps)      next = { ...next, elseSteps:      walk(next.elseSteps) };
+    if (next.elseIfBranches) next = { ...next, elseIfBranches: next.elseIfBranches.map(b => ({ ...b, steps: walk(b.steps) })) };
+    return next;
+  });
+  return walk(steps);
+}
+
 // ── Step label ─────────────────────────────────────────────────────────────────
 
-export function stepLabel(step: ProgramStep): string {
+export function stepLabel(step: ProgramStep, points?: Point[]): string {
   switch (step.type) {
     case "MoveL":
     case "MoveJ":
@@ -76,7 +131,7 @@ export function stepLabel(step: ProgramStep): string {
         ? `${step.type}  →  $${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : step.pointNameExpr
         ? `${step.type}  →  ${step.pointNameExpr}`
-        : `${step.type}  →  ${step.pointName ?? "Current Position"}`;
+        : `${step.type}  →  ${movePointName(step, points, "Current Position")}`;
       return suffix ? `${base}  (${suffix})` : base;
     }
     case "SetOutput": {
@@ -349,7 +404,7 @@ export function fmtConditionFull(group: ConditionGroup | undefined): string {
 
 // ── Step detail ───────────────────────────────────────────────────────────────
 
-export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[]): string | null {
+export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStack[], points?: Point[]): string | null {
   switch (step.type) {
     case "MoveL":
     case "MoveJ": {
@@ -357,7 +412,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : step.pointNameExpr ? step.pointNameExpr
-        : (step.pointName ?? "current pos");
+        : movePointName(step, points, "current pos");
       const lines = [`→ ${target}`];
       const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
       if (spd) lines.push(spd);
@@ -377,7 +432,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
         : step.stackPoint ? "stack point"
         : step.varPointName ? `$${step.varPointName}[${step.varPointIndex ?? "0"}]`
         : step.pointNameExpr ? step.pointNameExpr
-        : (step.pointName ?? "current pos");
+        : movePointName(step, points, "current pos");
       const lines = [`→ ${target}`];
       if (step.jumpZStart != null || step.jumpZEnd != null) {
         const s = step.jumpZStart != null ? `start ${step.jumpZStart}` : null;

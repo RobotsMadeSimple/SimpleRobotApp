@@ -1,4 +1,5 @@
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import {
   accents,
   Button,
@@ -21,7 +22,7 @@ import { AuxAxisChannelState, AuxDeviceState } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AUX_ROLES, auxRoleMeta } from "@/src/components/ui/io/auxRoles";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Cog } from "lucide-react-native";
+import { Cog, Sparkles } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
 
@@ -87,6 +88,35 @@ const CONVEYOR_PRESETS: ConveyorPreset[] = [
   },
 ];
 
+// ── Preset wizard ─────────────────────────────────────────────────────────────
+// Sparkle trigger on each role card opens this chooser; picking a preset fills the
+// motion + role fields. Everything stays editable afterwards.
+function PresetSheet({ visible, onClose, title, presets, onPick }: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  presets: { label: string; note?: string }[];
+  onPick: (index: number) => void;
+}) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title={title}>
+      {presets.map((p, i) => (
+        <AnimatedPressable
+          key={p.label}
+          style={styles.presetOption}
+          onPress={() => { onPick(i); onClose(); }}
+        >
+          <Sparkles size={18} color={AUX_TINT} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.presetOptLabel}>{p.label}</Text>
+            {p.note ? <Text style={styles.presetOptNote}>{p.note}</Text> : null}
+          </View>
+        </AnimatedPressable>
+      ))}
+    </BottomSheet>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AuxAxisConfigPage() {
@@ -97,6 +127,7 @@ export default function AuxAxisConfigPage() {
   const [device, setDevice] = useState<AuxDeviceState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [presetOpen, setPresetOpen] = useState(false);
 
   // Form state (initialised once from the loaded axis).
   const [name,        setName]        = useState("");
@@ -266,23 +297,13 @@ export default function AuxAxisConfigPage() {
               style={styles.sectionGap}
               right={<InfoTip text="Open and Close drive the jaws to these gap widths; a program (or the Grip control) can drive to any gap in between. If the gripper loses steps, re-reference it from the Auxiliary screen's Set-Open / Set-Closed buttons." />}
             />
-            {GRIPPER_PRESETS.length > 0 && (
-              <Card style={styles.presetCard}>
-                <Text style={styles.presetLabel}>Preset</Text>
-                <ChipGroup>
-                  {GRIPPER_PRESETS.map(p => (
-                    <Chip
-                      key={p.label}
-                      label={p.label}
-                      onPress={() => applyGripperPreset(p)}
-                      tint={[AUX_TINT, AUX_TINT_SOFT]}
-                    />
-                  ))}
-                </ChipGroup>
-                <Text style={styles.presetNote}>{GRIPPER_PRESETS[0].note}</Text>
-              </Card>
-            )}
             <Card>
+              {GRIPPER_PRESETS.length > 0 && (
+                <AnimatedPressable style={styles.presetTrigger} onPress={() => setPresetOpen(true)}>
+                  <Sparkles size={16} color={AUX_TINT} />
+                  <Text style={styles.presetTriggerText}>Presets</Text>
+                </AnimatedPressable>
+              )}
               <FormRow label="Jaw gap — fully open (mm)">
                 <Input value={openMm} onChangeText={setOpenMm} placeholder="62.6" keyboardType="decimal-pad" returnKeyType="done" />
               </FormRow>
@@ -326,23 +347,13 @@ export default function AuxAxisConfigPage() {
               style={styles.sectionGap}
               right={<InfoTip text="Belt travel per motor revolution converts motor speed into real belt speed. Run speed is how fast the belt moves when you tap Run." />}
             />
-            {CONVEYOR_PRESETS.length > 0 && (
-              <Card style={styles.presetCard}>
-                <Text style={styles.presetLabel}>Preset</Text>
-                <ChipGroup>
-                  {CONVEYOR_PRESETS.map(p => (
-                    <Chip
-                      key={p.label}
-                      label={p.label}
-                      onPress={() => applyConveyorPreset(p)}
-                      tint={[AUX_TINT, AUX_TINT_SOFT]}
-                    />
-                  ))}
-                </ChipGroup>
-                <Text style={styles.presetNote}>{CONVEYOR_PRESETS[0].note}</Text>
-              </Card>
-            )}
             <Card>
+              {CONVEYOR_PRESETS.length > 0 && (
+                <AnimatedPressable style={styles.presetTrigger} onPress={() => setPresetOpen(true)}>
+                  <Sparkles size={16} color={AUX_TINT} />
+                  <Text style={styles.presetTriggerText}>Presets</Text>
+                </AnimatedPressable>
+              )}
               <FormRow label="Belt travel per motor rev (mm)">
                 <Input value={mmPerRev} onChangeText={setMmPerRev} placeholder="113" keyboardType="decimal-pad" returnKeyType="done" />
               </FormRow>
@@ -427,6 +438,17 @@ export default function AuxAxisConfigPage() {
           disabled={!deviceId}
           style={[styles.saveBtn, { backgroundColor: AUX_TINT }]}
         />
+
+        <PresetSheet
+          visible={presetOpen}
+          onClose={() => setPresetOpen(false)}
+          title={role === "Conveyor" ? "Conveyor presets" : "Gripper presets"}
+          presets={role === "Conveyor" ? CONVEYOR_PRESETS : GRIPPER_PRESETS}
+          onPick={(i) => {
+            if (role === "Conveyor") applyConveyorPreset(CONVEYOR_PRESETS[i]);
+            else applyGripperPreset(GRIPPER_PRESETS[i]);
+          }}
+        />
       </Screen>
     </View>
   );
@@ -449,8 +471,19 @@ const styles = StyleSheet.create({
   roleTileOn: { borderColor: AUX_TINT, backgroundColor: AUX_TINT_SOFT },
   roleTileText: { ...type.caption, fontWeight: "700", color: colors.textMuted },
 
-  presetCard:  { marginBottom: spacing.md },
-  presetLabel: { ...type.caption, fontWeight: "700", color: colors.textMuted, marginBottom: spacing.sm },
+  presetTrigger: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs, alignSelf: "flex-start",
+    paddingVertical: spacing.xs, paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill, backgroundColor: AUX_TINT_SOFT, marginBottom: spacing.md,
+  },
+  presetTriggerText: { ...type.caption, fontWeight: "700", color: AUX_TINT },
+  presetOption: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.xs,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  presetOptLabel: { ...type.body, fontWeight: "600", color: colors.text },
+  presetOptNote:  { ...type.caption, color: colors.textFaint, marginTop: 2, lineHeight: 16 },
   presetNote:  { ...type.caption, color: colors.textFaint, marginTop: spacing.sm, lineHeight: 16 },
 
   stepChipsRow:     { marginBottom: spacing.sm },
