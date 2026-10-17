@@ -19,6 +19,7 @@ import {
   spacing,
   type,
 } from "@/src/components/ui/kit";
+import { router } from "expo-router";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -304,7 +305,7 @@ export default function ConfigureRobot() {
           icon={Zap}
           right={<InfoTip text="Flips a motor's electrical direction in software. Use it if commanding '+' moves that axis the wrong way — it only changes which sign counts as forward, not how far or which axis moves. Changes here take effect on the connected controller as soon as you save, so double-check values before saving." />}
         />
-        <Card padded={false}>
+        <Card>
           {motorRows.map(({ key, label }, idx) => (
             <ConfigRow
               key={key}
@@ -332,7 +333,7 @@ export default function ConfigureRobot() {
               icon={Home}
               right={<InfoTip text="Used only during the homing cycle: how fast each axis drives toward its home switch, which direction it drives to find that switch, and the position or angle assigned once it gets there." />}
             />
-            <Card padded={false}>
+            <Card>
               <ConfigRow
                 icon={<Home size={16} color={accents.purple} />}
                 tileBg={accents.purpleSoft}
@@ -400,7 +401,7 @@ export default function ConfigureRobot() {
               icon={Gauge}
               right={<InfoTip text="Microstep resolution (steps per motor revolution) and gear ratio (motor turns per output turn) for each motor — used to convert motion into step pulses. Match them to your driver's microstepping and any joint gearing. Defaults: M1–M3 1600 spr, M4 400 spr, all 1:1." />}
             />
-            <Card padded={false}>
+            <Card>
               {astroMotorRows.map(({ label, stepsKey, gearKey, defSteps, defGear }) => (
                 <ConfigRow
                   key={stepsKey}
@@ -432,7 +433,7 @@ export default function ConfigureRobot() {
               icon={RotateCcw}
               right={<InfoTip text="Drivetrain reduction the kinematics uses to turn joint motion into motor motion — separate from the per-motor gear above. J1/J4 are gear ratios (motor turns per joint turn); CoreXY is the belt pulley pitch diameter (linear travel per motor rev = π · PCD). Defaults: J1 4:1, J4 10:1, CoreXY 19.099 mm." />}
             />
-            <Card padded={false}>
+            <Card>
               <ConfigRow
                 icon={<RotateCcw size={16} color={accents.cyan} />}
                 tileBg={accents.cyanSoft}
@@ -479,7 +480,7 @@ export default function ConfigureRobot() {
               icon={Home}
               right={<InfoTip text="Used only during the homing cycle: how fast each axis drives toward its home switch, which direction it drives to find that switch, and the position or angle assigned once it gets there." />}
             />
-            <Card padded={false}>
+            <Card>
               <ConfigRow
                 icon={<Home size={16} color={accents.purple} />}
                 tileBg={accents.purpleSoft}
@@ -547,7 +548,7 @@ export default function ConfigureRobot() {
               icon={Gauge}
               right={<InfoTip text="Steps per motor revolution and how far one revolution moves the axis (mm) or spindle (degrees) — used to convert motion commands into step pulses. Match these to your driver's microstepping and leadscrew or pulley." />}
             />
-            <Card padded={false}>
+            <Card>
               {([
                 { label: "X Axis",    stepsKey: "cncStepsPerRevX"  as const, measureKey: "cncMmPerRevX"   as const, isRotary: false },
                 { label: "Y Axis",    stepsKey: "cncStepsPerRevY"  as const, measureKey: "cncMmPerRevY"   as const, isRotary: false },
@@ -593,7 +594,7 @@ export default function ConfigureRobot() {
           icon={Gauge}
           right={<InfoTip text="Speeds used by the Slow / Normal / Fast toggle on the Jog & Teach screen." />}
         />
-        <Card padded={false}>
+        <Card>
           {([
             { key: "jogSlowSpeed"   as const, label: "Slow Speed"   },
             { key: "jogNormalSpeed" as const, label: "Normal Speed" },
@@ -621,7 +622,7 @@ export default function ConfigureRobot() {
           icon={ShieldAlert}
           right={<InfoTip text="When Soft Limits is on, the controller faults and stops motion if a joint would move past its Min or Max below. Leave a bound blank to leave that side unenforced." />}
         />
-        <Card padded={false}>
+        <Card>
           <ConfigRow
             icon={<ShieldAlert size={16} color={config?.jointLimitsEnabled ? colors.success : colors.textFaint} />}
             tileBg={config?.jointLimitsEnabled ? colors.successSoft : colors.background}
@@ -670,6 +671,14 @@ export default function ConfigureRobot() {
               />
             ))}
         </Card>
+        <Button
+          label="Set Limits with Wizard"
+          variant="secondary"
+          icon={<ShieldAlert size={16} color={buttonTextColor("secondary")} />}
+          onPress={() => router.push("/(tabs)/robot/joint-limits")}
+          disabled={!config}
+          style={styles.wizardBtn}
+        />
     </>
   );
 
@@ -923,6 +932,11 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   wideCol: { flex: 1, gap: spacing.md },
+
+  // ── Joint-limits wizard launch ────────────────────────────────────────────────
+  wizardBtn: {
+    marginTop: spacing.sm,
+  },
 
   // ── Reset-all footer ─────────────────────────────────────────────────────────
   resetAllWrap: {

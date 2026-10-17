@@ -3,30 +3,52 @@ import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { Point } from "@/src/models/robotModels";
 import { useConnected, usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { Button, colors, Divider, EmptyState, FormRow, InfoTip, Input, PageHeader, radii, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
+
+// Matches control/jog.tsx — the last continuous jog speed, so moves default to the jog selection.
+const LAST_MOVE_SPEED_KEY = "lastMoveSpeed";
+import { Button, Card, colors, Divider, EmptyState, FormRow, InfoTip, Input, PageHeader, radii, SectionHeader, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
 import { useFocusEffect } from "expo-router";
 import {
+  ChevronRight,
   MapPin,
   Navigation,
   OctagonX,
   Pencil,
   RotateCw,
+  Search,
   Trash2,
   X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  FlatList,
   KeyboardAvoidingView,
   LayoutRectangle,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
+
+// Straight-line (translational) distance in mm from the robot to a point.
+function distanceMm(p: { x: number; y: number; z: number }, s: { x: number; y: number; z: number }): number {
+  return Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z);
+}
+
+// The robot counts as "at" a point when every translational axis is within this many mm.
+const AT_THRESHOLD = 0.5;
+function isSamePoint(p: { x: number; y: number; z: number }, s: { x: number; y: number; z: number }): boolean {
+  return (
+    Math.abs(p.x - s.x) < AT_THRESHOLD &&
+    Math.abs(p.y - s.y) < AT_THRESHOLD &&
+    Math.abs(p.z - s.z) < AT_THRESHOLD
+  );
+}
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -305,6 +327,14 @@ function PointsMap({
             {"  "}Z <Text style={styles.posVal}>{(robot.status.z ?? 0).toFixed(1)}</Text>
             {"  "}RZ <Text style={styles.posVal}>{(robot.status.rz ?? 0).toFixed(1)}</Text>
           </Text>
+          {(() => {
+            const atPoint = points.find((p) => isSamePoint(p, robot.status));
+            return atPoint ? (
+              <Text style={styles.posPointName} numberOfLines={1}>
+                ◎ At {atPoint.name}
+              </Text>
+            ) : null;
+          })()}
         </View>
       )}
 
@@ -323,6 +353,7 @@ export default function PointsPage() {
   const isWide = useIsWide();
   const wideContent = useWideContent();
   const [selectedPoint, setSelectedPoint] = useState<Point | null>(null);
+  const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movingFromPage, setMovingFromPage] = useState(false);
   const [movingToName, setMovingToName] = useState<string | null>(null);
@@ -346,16 +377,17 @@ export default function PointsPage() {
   useFocusEffect(loadMoveSpeeds);
   useEffect(() => { loadMoveSpeeds(); }, [loadMoveSpeeds]);
 
-  const AT_THRESHOLD = 0.5;
+  // Default the move speed to the user's current jog speed selection (persisted from Jog & Teach).
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem(LAST_MOVE_SPEED_KEY)
+        .then((v) => { if (v === "Slow" || v === "Normal" || v === "Fast") setSelectedSpeed(v); })
+        .catch(() => {});
+    }, [])
+  );
 
   function isAtPoint(p: Point) {
-    if (!robot) return false;
-    const s = robot.status;
-    return (
-      Math.abs(s.x - p.x) < AT_THRESHOLD &&
-      Math.abs(s.y - p.y) < AT_THRESHOLD &&
-      Math.abs(s.z - p.z) < AT_THRESHOLD
-    );
+    return !!robot && isSamePoint(p, robot.status);
   }
 
   useEffect(() => {
@@ -426,29 +458,7 @@ export default function PointsPage() {
     closeMenu();
   }
 
-  const renderItem = ({ item }: { item: Point }) => (
-    <Pressable onPress={() => setSelectedPoint(item)}>
-      <View style={styles.row}>
-        <Text style={[styles.cell, styles.name]}>{item.name}</Text>
-        <Text style={styles.cell}>{item.x.toFixed(1)}</Text>
-        <Text style={styles.cell}>{item.y.toFixed(1)}</Text>
-        <Text style={styles.cell}>{item.z.toFixed(1)}</Text>
-        <Text style={styles.cell}>{item.rz.toFixed(1)}</Text>
-      </View>
-    </Pressable>
-  );
-
-  const Header = () => (
-    <View style={styles.headerRow}>
-      <Text style={[styles.headerCell, styles.name]}>Name</Text>
-      <Text style={styles.headerCell}>X</Text>
-      <Text style={styles.headerCell}>Y</Text>
-      <Text style={styles.headerCell}>Z</Text>
-      <Text style={styles.headerCell}>RZ</Text>
-    </View>
-  );
-
-  // Speed selector + table — right pane in wide mode, stacked below the map on phones.
+  // Speed selector + list — right pane in wide mode, stacked below the map on phones.
   const speedBarEl = (
     <View style={[styles.speedBar, wideContent]}>
       <Text style={styles.speedBarLabel}>SPEED</Text>
@@ -462,22 +472,85 @@ export default function PointsPage() {
     </View>
   );
 
+  // Card-based list matching the other Space pages (Tools/Locals): a row per point with its
+  // name, coordinates and straight-line distance from the robot's current position.
+  const filteredPoints = points.filter((p) =>
+    p.name.toLowerCase().includes(search.trim().toLowerCase())
+  );
+
   const pointsList = (
-    <FlatList
-      data={points}
-      keyExtractor={(item) => item.name}
-      renderItem={renderItem}
-      ListHeaderComponent={Header}
-      stickyHeaderIndices={[0]}
+    <ScrollView
+      style={styles.listScroll}
       contentContainerStyle={[styles.list, wideContent]}
-      ListEmptyComponent={
+      keyboardShouldPersistTaps="handled"
+    >
+      <SectionHeader title="Saved points" icon={MapPin} />
+
+      {points.length > 0 && (
+        <View style={styles.searchRow}>
+          <Search size={16} color={colors.textFaint} />
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search points…"
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <Pressable onPress={() => setSearch("")} hitSlop={10} style={styles.searchClear}>
+              <X size={16} color={colors.textMuted} />
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {points.length === 0 ? (
         <EmptyState
           icon={<MapPin size={28} color={colors.textFaint} />}
           title="No points saved yet"
           subtitle="Jog the robot to a position, then save it as a point from Jog & Teach."
         />
-      }
-    />
+      ) : filteredPoints.length === 0 ? (
+        <Text style={styles.noMatch}>No points match “{search.trim()}”</Text>
+      ) : (
+        <Card padded={false}>
+          {filteredPoints.map((p, i) => {
+            const here = isAtPoint(p);
+            return (
+              <View key={p.name}>
+                <Pressable style={[styles.pointRow, here && styles.pointRowActive]} onPress={() => setSelectedPoint(p)}>
+                  <View style={styles.pointInfo}>
+                    <View style={styles.pointNameRow}>
+                      <Text style={[styles.pointName, here && styles.pointNameActive]}>{p.name}</Text>
+                      {here && (
+                        <View style={styles.herePill}>
+                          <Text style={styles.herePillText}>HERE</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.pointCoords} numberOfLines={1}>
+                      X {p.x.toFixed(1)}   Y {p.y.toFixed(1)}   Z {p.z.toFixed(1)}   RZ {p.rz.toFixed(1)}
+                    </Text>
+                  </View>
+                  <View style={styles.pointRight}>
+                    {robot && (
+                      <Text style={[styles.pointDist, here && styles.pointDistActive]}>
+                        {here ? "At point" : `${distanceMm(p, robot.status).toFixed(1)} mm`}
+                      </Text>
+                    )}
+                    <ChevronRight size={16} color={colors.textFaint} />
+                  </View>
+                </Pressable>
+                {i < filteredPoints.length - 1 && <Divider />}
+              </View>
+            );
+          })}
+        </Card>
+      )}
+    </ScrollView>
   );
 
   return (
@@ -747,6 +820,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(147, 197, 253, 0.45)",
   },
+  posPointName: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#fde68a",
+    marginTop: 3,
+  },
   posText: {
     fontSize: 11,
     color: "#7dd3fc",
@@ -782,44 +861,99 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Points table ──────────────────────────────────────────────────────────
-  list: {
-    paddingHorizontal: spacing.sm,
-    paddingBottom: spacing.sm,
+  // ── Points list (card rows, matching Tools/Locals) ─────────────────────────
+  listScroll: {
+    flex: 1,
   },
-  headerRow: {
+  list: {
+    padding: spacing.md,
+    paddingTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  searchRow: {
     flexDirection: "row",
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderStrong,
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    height: 42,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     backgroundColor: colors.surface,
   },
-  headerCell: {
+  searchInput: {
     flex: 1,
-    fontWeight: "600",
-    fontSize: 13,
+    ...type.body,
     color: colors.text,
-    textAlign: "center",
+    padding: 0,
   },
-  row: {
+  searchClear: {
+    padding: 2,
+  },
+  noMatch: {
+    ...type.body,
+    color: colors.textFaint,
+    textAlign: "center",
+    paddingVertical: spacing.xl,
+  },
+  pointRow: {
     flexDirection: "row",
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
   },
-  cell: {
-    ...type.mono,
+  pointRowActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  pointInfo: {
     flex: 1,
-    textAlign: "center",
-    color: colors.text,
-    fontSize: 13,
+    minWidth: 0,
+    gap: 2,
   },
-  name: {
-    flex: 2,
-    textAlign: "left",
-    paddingLeft: spacing.xs + 2,
+  pointNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  pointName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.text,
+  },
+  pointNameActive: {
+    color: colors.accent,
+  },
+  herePill: {
+    backgroundColor: colors.accent,
+    borderRadius: radii.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  herePillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    color: colors.onAccent,
+  },
+  pointDistActive: {
+    color: colors.accent,
+  },
+  pointCoords: {
+    ...type.mono,
+    fontSize: 12,
+    color: colors.textFaint,
+  },
+  pointRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+  },
+  pointDist: {
+    ...type.mono,
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.accent,
   },
   // ── Point options dialog ─────────────────────────────────────────────────
   overlay: {

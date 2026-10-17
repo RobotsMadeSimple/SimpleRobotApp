@@ -18,6 +18,8 @@ import {
 import {
   Button,
   ButtonVariant,
+  Card,
+  Divider,
   EmptyState,
   InfoTip,
   ListRow,
@@ -351,41 +353,59 @@ export default function ProgramScreen() {
         }
       />
 
-      <ListRow
-        title="Programs"
-        subtitle={`${robotProgramCount} ${robotProgramCount === 1 ? "program" : "programs"}`}
-        icon={<Cpu size={20} color={colors.accent} />}
-        iconColor={colors.accentSoft}
-        onPress={() => router.navigate("/(tabs)/program/robot-programs")}
-      />
-
-      <ListRow
-        title="Routines"
-        subtitle={`${routineCount} ${routineCount === 1 ? "routine" : "routines"}`}
-        icon={<Repeat2 size={20} color={ROUTINE_TINT.color} />}
-        iconColor={ROUTINE_TINT.bg}
-        onPress={() => router.navigate("/program/routines")}
-      />
-
-      {localCount > 0 && (
-        <ListRow
-          title="Local Programs"
-          subtitle={`${localCount} ${localCount === 1 ? "draft on this device" : "drafts on this device"}`}
-          icon={<Smartphone size={20} color={LOCAL_TINT.color} />}
-          iconColor={LOCAL_TINT.bg}
-          onPress={() => router.navigate("/(tabs)/program/phone-programs")}
-        />
-      )}
-
-      {showVision && (
-        <ListRow
-          title="Vision Programs"
-          subtitle={`${visionCount} ${visionCount === 1 ? "program" : "programs"}`}
-          icon={<ScanSearch size={20} color={VISION_TINT.color} />}
-          iconColor={VISION_TINT.bg}
-          onPress={() => router.navigate("/(tabs)/program/vision")}
-        />
-      )}
+      {/* Encapsulating (padded) card with flat ListRows + dividers — matches the Space tab. */}
+      <Card>
+        {[
+          {
+            key: "programs",
+            title: "Programs",
+            subtitle: `${robotProgramCount} ${robotProgramCount === 1 ? "program" : "programs"}`,
+            icon: <Cpu size={20} color={colors.accent} />,
+            iconColor: colors.accentSoft,
+            onPress: () => router.navigate("/(tabs)/program/robot-programs"),
+          },
+          {
+            key: "routines",
+            title: "Routines",
+            subtitle: `${routineCount} ${routineCount === 1 ? "routine" : "routines"}`,
+            icon: <Repeat2 size={20} color={ROUTINE_TINT.color} />,
+            iconColor: ROUTINE_TINT.bg,
+            onPress: () => router.navigate("/program/routines"),
+          },
+          ...(localCount > 0
+            ? [{
+                key: "local",
+                title: "Local Programs",
+                subtitle: `${localCount} ${localCount === 1 ? "draft on this device" : "drafts on this device"}`,
+                icon: <Smartphone size={20} color={LOCAL_TINT.color} />,
+                iconColor: LOCAL_TINT.bg,
+                onPress: () => router.navigate("/(tabs)/program/phone-programs"),
+              }]
+            : []),
+          ...(showVision
+            ? [{
+                key: "vision",
+                title: "Vision Programs",
+                subtitle: `${visionCount} ${visionCount === 1 ? "program" : "programs"}`,
+                icon: <ScanSearch size={20} color={VISION_TINT.color} />,
+                iconColor: VISION_TINT.bg,
+                onPress: () => router.navigate("/(tabs)/program/vision"),
+              }]
+            : []),
+        ].map((item, i, arr) => (
+          <View key={item.key}>
+            <ListRow
+              card={false}
+              title={item.title}
+              subtitle={item.subtitle}
+              icon={item.icon}
+              iconColor={item.iconColor}
+              onPress={item.onPress}
+            />
+            {i < arr.length - 1 && <Divider inset />}
+          </View>
+        ))}
+      </Card>
     </>
   );
 

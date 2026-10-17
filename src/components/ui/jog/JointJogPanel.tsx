@@ -13,20 +13,23 @@ const JOINTS: { key: JointAxis; label: string }[] = [
 ];
 
 type Props = {
-  onStart: (joint: JointAxis, direction: 1 | -1) => void;
-  onStop:  () => void;
+  onStart:    (joint: JointAxis, direction: 1 | -1) => void;
+  onStopAxis: (joint: JointAxis, direction: 1 | -1) => void;
+  /** When set, buttons shrink so a column (two buttons + label) fits this height. */
+  maxHeight?: number;
 };
 
 /**
  * Joint jog panel — 4 columns of up/down buttons, one per joint.
  * J1 = base rotation, J2 = shoulder, J3 = elbow, J4 = EOAT.
  */
-export function JointJogPanel({ onStart, onStop }: Props) {
+export function JointJogPanel({ onStart, onStopAxis, maxHeight }: Props) {
   const { width } = useWindowDimensions();
 
-  // 4 equal columns with 8 px gaps between them (3 gaps = 24 px)
+  // 4 equal columns with 8 px gaps between them (3 gaps = 24 px). On short screens also cap
+  // by height — a column is two buttons plus the axis label.
   const colWidth   = (width - 24 - 24) / 4;
-  const buttonSize = Math.min(Math.round(colWidth * 0.9), 80);
+  const buttonSize = Math.min(Math.round(colWidth * 0.9), 80, maxHeight ? (maxHeight - 50) / 2.2 : Infinity);
   const iconSize   = Math.round(buttonSize * 0.45);
 
   return (
@@ -39,7 +42,7 @@ export function JointJogPanel({ onStart, onStop }: Props) {
             icon={<ChevronUp size={iconSize} color={colors.textMuted} />}
             iconPosition="above"
             onStart={() => onStart(key,  1)}
-            onStop={onStop}
+            onStop={() => onStopAxis(key, 1)}
             size={buttonSize}
           />
 
@@ -54,7 +57,7 @@ export function JointJogPanel({ onStart, onStop }: Props) {
             icon={<ChevronDown size={iconSize} color={colors.textMuted} />}
             iconPosition="below"
             onStart={() => onStart(key, -1)}
-            onStop={onStop}
+            onStop={() => onStopAxis(key, -1)}
             size={buttonSize}
           />
         </View>
