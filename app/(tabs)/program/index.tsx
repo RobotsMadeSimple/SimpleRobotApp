@@ -1,4 +1,4 @@
-import { useIsWide } from "@/src/components/ui/responsive";
+import { usePaneLayout } from "@/src/components/ui/responsive";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { useBuiltPrograms, useConnected, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
@@ -230,7 +230,10 @@ export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
   const robotStatus      = useRobotStatus();
-  const isWide           = useIsWide();
+  // Two columns only at desktop (≥1100); below that the NavRail sidebar is already
+  // up, so the fixed 360px left column would squeeze the programs list into a
+  // too-narrow right column and truncate its labels — keep single-column there.
+  const twoCol           = usePaneLayout() === "desktop";
   const [visionCount,    setVisionCount]    = useState(0);
   const [localCount,     setLocalCount]     = useState(0);
   const [speedModalOpen, setSpeedModalOpen] = useState(false);
@@ -414,8 +417,8 @@ export default function ProgramScreen() {
       <PageHeader title="Program" subtitle="Build, run, and monitor robot programs" />
       <Screen>
         {statRow}
-        {isWide ? (
-          // Wide: the running program on the left, the page selectors on the right.
+        {twoCol ? (
+          // Desktop: the running program on the left, the page selectors on the right.
           <View style={styles.wideRow}>
             <View style={styles.wideLeftCol}>{runningSection}</View>
             <View style={styles.wideRightCol}>{navSection}</View>

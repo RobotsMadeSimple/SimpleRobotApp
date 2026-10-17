@@ -17,7 +17,7 @@ import {
   StatusPill,
   type,
 } from "@/src/components/ui/kit";
-import { useIsWide } from "@/src/components/ui/responsive";
+import { usePaneLayout } from "@/src/components/ui/responsive";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
@@ -61,7 +61,10 @@ const HOMING_LABELS: Record<string, string> = {
 
 export default function Control() {
   const s = useRobotStatus();
-  const isWide = useIsWide();
+  // Two columns only at desktop (≥1100); below that the NavRail sidebar is already
+  // present, so the fixed 360px left column would strand the actions list in a
+  // too-narrow right column and truncate its labels — stay single-column.
+  const twoCol = usePaneLayout() === "desktop";
 
   const isHoming = !!s?.homingState && s.homingState !== "WaitingForStart";
   const homingLabel = s?.homingState ? (HOMING_LABELS[s.homingState] ?? s.homingState) : "";
@@ -176,8 +179,8 @@ export default function Control() {
       <PageHeader title="Control" subtitle="Move the robot and run manual actions" />
 
       <Screen>
-        {isWide ? (
-          // Wide: live position/status on the left, the action selectors on the right.
+        {twoCol ? (
+          // Desktop: live position/status on the left, the action selectors on the right.
           <View style={styles.wideRow}>
             <View style={styles.wideLeftCol}>{posSection}</View>
             <View style={styles.wideRightCol}>{actionsSection}</View>

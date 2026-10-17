@@ -2,7 +2,7 @@ import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { useBuiltPrograms, useConnected } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, usePoints } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
@@ -52,7 +52,7 @@ import { StepConfigModal } from "@/src/components/ui/builder/StepConfigModal";
 import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
-import { newId, getStepsAtScope, setStepsAtScope, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
+import { newId, getStepsAtScope, setStepsAtScope, backfillPointIds, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
 import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
@@ -128,6 +128,7 @@ export default function BuilderScreen() {
   const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected     = useConnected();
+  const points        = usePoints();
   const paneLayout    = usePaneLayout();
   const isWide        = paneLayout !== "single";
   const isSplit       = paneLayout === "split";
@@ -755,7 +756,10 @@ export default function BuilderScreen() {
   // ── Save / Run ────────────────────────────────────────────────────────────
 
   function buildProg(): BuiltProgram {
-    return programFromDoc(doc, programId, Date.now());
+    const prog = programFromDoc(doc, programId, Date.now());
+    // Self-migration: stamp a stable pointId onto any move step that still
+    // references a point only by name, so renaming that point won't break it.
+    return { ...prog, steps: backfillPointIds(prog.steps, points) };
   }
 
   async function save(): Promise<boolean> {
@@ -1382,6 +1386,7 @@ export default function BuilderScreen() {
               } : undefined}
               onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
               problems={problemIndex.get(step.id)}
+              points={points}
             />
           ))}
         </View>

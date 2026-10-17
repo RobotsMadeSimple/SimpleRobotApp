@@ -15,7 +15,7 @@ import {
   StatTile,
   type,
 } from "@/src/components/ui/kit";
-import { useIsWide } from "@/src/components/ui/responsive";
+import { usePaneLayout } from "@/src/components/ui/responsive";
 import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
@@ -35,7 +35,10 @@ export default function Robot() {
 
   // Hooks must run unconditionally every render, so this is read before the
   // early Redirect below even though only the non-redirect branch needs it.
-  const isWide = useIsWide();
+  // Two columns only at desktop (≥1100); below that the NavRail sidebar is
+  // already up, so a fixed 360px left column would squeeze the discovered-robots
+  // list and truncate its cards — keep it single-column instead.
+  const twoCol = usePaneLayout() === "desktop";
 
   // Render the connected dashboard in place at the tab's root route rather than
   // redirecting to a separate screen. Redirecting (a replace) used to push the
@@ -198,7 +201,7 @@ export default function Robot() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <PageHeader title="Robot" subtitle="Discover and connect to robots on your network" />
       <Screen>
-        {isWide ? (
+        {twoCol ? (
           <View style={styles.wideRow}>
             <View style={styles.wideLeftCol}>{manualSection}{savedSection}</View>
             <View style={styles.wideRightCol}>{discoveredSection}</View>

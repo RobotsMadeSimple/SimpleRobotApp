@@ -14,7 +14,7 @@ import {
 } from "lucide-react-native";
 import { auxRoleMeta } from "@/src/components/ui/io/auxRoles";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { ReactNode, useEffect, useState } from "react";
+import React, { ReactNode, useEffect, useRef, useState } from "react";
 import {
   Modal,
   StyleSheet,
@@ -253,6 +253,9 @@ function gripperGeom(axis: AuxAxisChannelState) {
 
 function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAxisChannelState }) {
   const [target, setTarget] = useState("");
+  // Debounce guard: a quick double-tap on the same button (or a repeated submit) must not
+  // fire the move twice. A fresh identical request inside this window is ignored.
+  const lastFire = useRef<{ key: string; t: number }>({ key: "", t: 0 });
   const g = gripperGeom(axis);
 
   if (!g.ok) {
@@ -269,15 +272,33 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
   // toLimit = a full Open/Close that seats against a hard stop (vs a Grip to an in-between gap).
   const gripTo = (mm: number, toLimit = false) => {
     const clamped = Math.max(lo, Math.min(hi, mm));
+
+    // Drop an identical request that lands within the debounce window (double-tap protection).
+    const key = `${toLimit ? "L" : "G"}:${clamped}`;
+    const now = Date.now();
+    if (key === lastFire.current.key && now - lastFire.current.t < 500) return;
+
     const curMm   = axis.position / g.spm;
     // Which way we head: toward the wider gap for Open, the narrower for Close; a Grip follows
     // the target vs the current position. Direction picks the speed and the over-travel sign.
     const opening = toLimit ? clamped >= hi : clamped > curMm;
-    let   delta   = Math.round((clamped - curMm) * g.spm);
-    // Over-travel a full Open/Close into the stop so the controller re-references there (it clamps
-    // the tracked position to the gap limits). A Grip stops exactly on its gap, so never over-travels.
-    if (toLimit && g.overTravel > 0) delta += (opening ? 1 : -1) * Math.round(g.overTravel * g.spm);
+
+    let delta: number;
+    if (toLimit) {
+      // Full Open/Close seats against a hard stop. Drive a guaranteed full-stroke (+ over-travel)
+      // move in the open/close direction regardless of the tracked position: over-driving the stop
+      // is harmless (the controller clamps the tracked position to the gap limits), and not relying
+      // on a possibly-stale position is what makes Open/Close reach the limit every time.
+      const strokeSteps = Math.round(g.stroke * g.spm);
+      const overSteps   = g.overTravel > 0 ? Math.round(g.overTravel * g.spm) : 0;
+      delta = (opening ? 1 : -1) * (strokeSteps + overSteps);
+    } else {
+      // Grip to an in-between gap has no hard stop, so it is relative to the current position.
+      delta = Math.round((clamped - curMm) * g.spm);
+    }
     if (delta === 0) return;
+
+    lastFire.current = { key, t: now };
     const velSteps   = Math.max(1, Math.round((opening ? g.openVel : g.closeVel) * g.spm));
     const accelSteps = g.accel > 0 ? Math.max(1, Math.round(g.accel * g.spm)) : undefined;
     robotClient.moveAux(device.deviceId, axis.axisIndex, delta, velSteps, accelSteps, accelSteps);

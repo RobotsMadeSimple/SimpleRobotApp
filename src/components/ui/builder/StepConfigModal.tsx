@@ -295,14 +295,14 @@ export function StepConfigModal({
                       set({ gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined });
                     } else if (mode === 'gridPoint') {
                       if (!draft!.gridPoint) {
-                        set({ pointName: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
+                        set({ pointName: undefined, pointId: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined, gridPoint: { gridId: '', rowIndex: 0, colIndex: 0, useGridIndex: false } });
                       }
                     } else if (mode === 'stackPoint') {
                       if (!draft!.stackPoint) {
-                        set({ pointName: undefined, gridPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined, stackPoint: { stackId: '', index: 0 } });
+                        set({ pointName: undefined, pointId: undefined, gridPoint: undefined, varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined, stackPoint: { stackId: '', index: 0 } });
                       }
                     } else {
-                      set({ pointName: undefined, gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined });
+                      set({ pointName: undefined, pointId: undefined, gridPoint: undefined, stackPoint: undefined, varPointName: undefined, varPointIndex: undefined });
                     }
                   }}
                   activeOpacity={0.7}
@@ -319,7 +319,7 @@ export function StepConfigModal({
                 {/* "Current Position" option */}
                 <TouchableOpacity
                   style={[ms.row, ms.rowBorder, !draft!.pointName && ms.rowActive]}
-                  onPress={() => { set({ pointName: undefined }); setSubPage(null); }}
+                  onPress={() => { set({ pointName: undefined, pointId: undefined }); setSubPage(null); }}
                   activeOpacity={0.7}
                 >
                   <View style={[ms.radioRing, !draft!.pointName && ms.radioRingActive]}>
@@ -332,12 +332,12 @@ export function StepConfigModal({
                 </TouchableOpacity>
                 {points.length === 0 && <Text style={ms.emptyHint}>No points saved yet.</Text>}
                 {points.map((p, i) => {
-                  const active = draft!.pointName === p.name;
+                  const active = draft!.pointId ? draft!.pointId === p.id : draft!.pointName === p.name;
                   return (
                     <TouchableOpacity
-                      key={p.name}
+                      key={p.id || p.name}
                       style={[ms.row, i < points.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                      onPress={() => { set({ pointName: p.name }); setSubPage(null); }}
+                      onPress={() => { set({ pointName: p.name, pointId: p.id || undefined }); setSubPage(null); }}
                       activeOpacity={0.7}
                     >
                       <View style={[ms.radioRing, active && ms.radioRingActive]}>
