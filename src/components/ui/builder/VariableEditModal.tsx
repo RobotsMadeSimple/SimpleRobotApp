@@ -117,6 +117,7 @@ export function VariableEditModal({
   const [listValues, setListValues] = useState<string[]>([]);
   const [isGlobal,          setIsGlobal]          = useState(false);
   const [displayOnMonitor,  setDisplayOnMonitor]  = useState(false);
+  const [isInput,           setIsInput]           = useState(false);
   const [isPersistent,      setIsPersistent]      = useState(false);
   /**
    * The Computed kind's formula and its "Is boolean" toggle. Kept apart from valueExpr /
@@ -137,6 +138,7 @@ export function VariableEditModal({
       setComputedBool(variable.isBoolean ?? false);
       setIsGlobal(variable.isGlobal ?? false);
       setDisplayOnMonitor(variable.displayOnMonitor ?? false);
+      setIsInput(false); // computed variables cannot be seeded as inputs
       setIsPersistent(false);
       setValueExpr(undefined); setValue("0"); setStringVal(""); setListValues([]); setElemType("Number");
       return;
@@ -147,6 +149,7 @@ export function VariableEditModal({
       setDesc(variable.description ?? "");
       setIsGlobal(variable.isGlobal ?? false);
       setDisplayOnMonitor(variable.displayOnMonitor ?? false);
+      setIsInput(variable.isInput ?? false);
       setIsPersistent(variable.isPersistent ?? false);
       // Only the scalar branches below can reach the expression field, but it is restored
       // here for all of them — a variable switched to a list and back keeps what was typed.
@@ -616,6 +619,21 @@ export function VariableEditModal({
                   trackColor={{ false: colors.border, true: colors.accent }}
                 />
               </View>
+              {(varType === "number" || varType === "boolean" || varType === "string") && (
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Input (display page)</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+                      Let a custom display page set this value when it starts the program.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isInput}
+                    onValueChange={setIsInput}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                  />
+                </View>
+              )}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
                   <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Global Variable</Text>
@@ -707,6 +725,7 @@ export function VariableEditModal({
                   isImage:     varType === "image"     ? true : undefined,
                   isGlobal:        (varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") ? (isGlobal        || undefined) : undefined,
                   displayOnMonitor:(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") ? (displayOnMonitor || undefined) : undefined,
+                  isInput:         (varType === "number" || varType === "boolean" || varType === "string") ? (isInput || undefined) : undefined,
                   isPersistent:    (varType === "number" || varType === "boolean" || varType === "string"    || varType === "image") ? (isPersistent || undefined) : undefined,
                   description: desc.trim() || undefined,
                 });

@@ -847,9 +847,14 @@ export class RobotConnectService {
     };
   }
 
-  public startProgram(programName: string, programId?: string) {
+  public startProgram(
+    programName: string,
+    programId?: string,
+    variables?: Record<string, number | string | boolean>,
+  ) {
     // id resolved first (rename-proof), programName as fallback / for external programs.
-    return this.sendCommand('StartProgram', { programName, programId });
+    // `variables` seeds the program's declared input variables before the run (display pages).
+    return this.sendCommand('StartProgram', { programName, programId, variables });
   }
 
   public stopProgram(programName: string) {
@@ -988,6 +993,9 @@ export class RobotConnectService {
       description:         program.description,
       steps:               program.steps,
       variables:           program.variables,
+      displayPageHtml:     program.displayPageHtml,
+      displayPageMode:     program.displayPageMode,
+      displayPageLayout:   program.displayPageLayout,
       isRoutine:           program.isRoutine           ?? false,
       isBackground:        program.isBackground        ?? false,
       killBackgroundOnStop: program.killBackgroundOnStop ?? true,

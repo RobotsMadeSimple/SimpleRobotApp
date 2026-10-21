@@ -14,6 +14,8 @@ export default function ProgramLayout() {
       <Stack.Screen name="cnc-builder"     options={{ headerShown: false }} />
       <Stack.Screen name="plugins"         options={{ headerShown: false }} />
       <Stack.Screen name="plugin-detail"   options={{ headerShown: false }} />
+      <Stack.Screen name="display-page"      options={{ headerShown: false }} />
+      <Stack.Screen name="display-page-edit" options={{ headerShown: false }} />
     </Stack>
   );
 }

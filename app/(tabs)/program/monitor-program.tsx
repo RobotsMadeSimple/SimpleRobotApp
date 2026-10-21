@@ -27,6 +27,7 @@ import { AlertTriangle,
   Edit2,
   Gauge,
   Layers,
+  LayoutDashboard,
   Play,
   Square,
   Trash2,
@@ -786,6 +787,14 @@ export default function MonitorProgramScreen() {
           {/* Edit / Delete now sit inside the progress card, under the run controls. */}
           {isBuilt && (
             <View style={[styles.managementRow, { marginTop: 10 }]}>
+              <ActionButton
+                label={(builtProgram?.displayPageHtml || (builtProgram?.displayPageLayout?.widgets?.length ?? 0) > 0) ? "Display" : "Display Page"}
+                icon={<LayoutDashboard size={15} color={colors.accent} />}
+                style={styles.editBtn}
+                textStyle={styles.editBtnText}
+                spinnerColor={colors.accent}
+                onPress={() => router.push(`/program/display-page?name=${encodeURIComponent(programName)}`)}
+              />
               <ActionButton
                 label="Edit"
                 icon={<Edit2 size={15} color={colors.accent} />}

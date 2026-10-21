@@ -912,6 +912,12 @@ export type ProgramVariable = {
   isGlobal?: boolean;
   /** When true, the current runtime value is shown on the monitor page while the program runs. */
   displayOnMonitor?: boolean;
+  /**
+   * When true, a program display page may seed this variable's value at launch — startProgram
+   * carries a `variables` map that overrides the declared initial value before the run. Only
+   * scalars/booleans/strings are seedable (not lists, images or computed variables).
+   */
+  isInput?: boolean;
   /** When true, this variable is a stopwatch — its value holds elapsed milliseconds, updated every tick at runtime. */
   isStopwatch?: boolean;
   /** When true, the runtime value is saved to disk when the program finishes and restored on the next run. */
@@ -1322,12 +1328,61 @@ export type CncSpec = {
   expressions?: Record<string, string>;
 };
 
+// ── Custom display pages ─────────────────────────────────────────────────────
+
+/** The kinds of widget the visual display-page builder can place. */
+export type DisplayWidgetType =
+  | "value"    // a variable's live value
+  | "gauge"    // a variable on a dial with min/max
+  | "boolean"  // a true/false lamp
+  | "graph"    // a live line chart (load cell, or a variable sampled over time)
+  | "image"    // a display-image variable
+  | "button"   // run / stop / seed-inputs action
+  | "text"     // static heading / caption
+  | "plugin";  // an embedded live plugin UI (e.g. the checkers board)
+
+/**
+ * One widget on a display page. `x`/`y`/`w`/`h` are in grid cells (columns × auto rows); the
+ * compiler (displayCompiler) turns it into positioned bridge HTML. `config` is type-specific —
+ * see DISPLAY_WIDGET_DEFS for each type's fields.
+ */
+export type DisplayWidget = {
+  id: string;
+  type: DisplayWidgetType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  config: Record<string, any>;
+};
+
+/** A visual display-page layout: a grid of configured widgets. */
+export type DisplayPageLayout = {
+  /** Number of grid columns (cells across). */
+  cols: number;
+  /** Pixel height of one grid row. */
+  rowHeight: number;
+  widgets: DisplayWidget[];
+};
+
+/** Which editor authored the page — widgets compile to HTML; html is raw/uploaded. */
+export type DisplayPageMode = "widgets" | "html";
+
 export type BuiltProgram = {
   id?: string;
   name: string;
   description: string;
   steps: ProgramStep[];
   variables?: ProgramVariable[];
+  /**
+   * Custom display page — a dashboard that shows this program's variables/state/images/graphs
+   * and offers inputs + a run button, rendered in a sandboxed WebView via the host bridge.
+   * `displayPageMode` picks what renders: "widgets" compiles `displayPageLayout`, "html" (or
+   * absent, for older pages) renders `displayPageHtml` directly.
+   */
+  displayPageHtml?: string;
+  displayPageMode?: DisplayPageMode;
+  displayPageLayout?: DisplayPageLayout;
   lastUpdatedUnixMs: number;
   isRoutine?: boolean;
   isBackground?: boolean;
