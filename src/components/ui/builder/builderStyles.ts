@@ -254,7 +254,10 @@ export const sharedStyles = StyleSheet.create({
     borderRadius: radii.lg,
     borderLeftWidth: 4,
     ...shadows.soft,
-    overflow: "hidden",
+    // NOTE: no `overflow: "hidden"` here. Combined with `elevation` (shadows.soft) on the same
+    // Android view it intermittently drops the card's content on a re-render (the step renders
+    // blank until the view is recreated — i.e. leaving/re-entering the block, not scrolling).
+    // The body sections round their own corners (loopCardBody) so clipping isn't needed.
   },
 
   stepCardHeader: {

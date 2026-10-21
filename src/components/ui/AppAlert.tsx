@@ -39,35 +39,38 @@ export function AppAlertHost() {
   const [queue, setQueue] = useState<AlertRequest[]>([]);
   const current = queue[0] ?? null;
 
-  // The Modal keeps rendering its children during the fade-out animation after
-  // the queue empties. Without retaining the last request, that closing frame
-  // renders a blank alert with the default lone "OK" button — a phantom modal
-  // that flashes and self-dismisses. Render from the retained copy instead.
-  const lastShown = React.useRef<AlertRequest | null>(null);
-  if (current) lastShown.current = current;
-  const shown = current ?? lastShown.current;
+  // With no exit animation (animationType="none") the Modal stops rendering its children the
+  // instant the queue empties, so there is no fade-out "closing frame" to guard against — we
+  // can render straight from `current`.
 
   useEffect(() => {
     enqueue = req => setQueue(q => [...q, req]);
     return () => { enqueue = null; };
   }, []);
 
-  // One cue when a dialog appears — a warning buzz if it guards a destructive action, else a soft tap.
-  const alertBuzzed = React.useRef(false);
+  // The Android modal window reflows vertically for a frame or two after it opens (it lays out
+  // inside the system bars, then extends edge-to-edge). Rather than animate over that — which
+  // still shows the growth — we keep the overlay unrendered until a couple of frames have passed,
+  // then show it fully. The window has settled by then, so it appears at full size with no jump,
+  // and the ~2-frame wait is imperceptible.
+  const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (!current) { alertBuzzed.current = false; return; }
-    if (alertBuzzed.current) return;
-    alertBuzzed.current = true;
-    haptic(current.buttons?.some(b => b.style === "destructive") ? "warning" : "light");
+    if (!current) return;
+    // setTimeout, not requestAnimationFrame — rAF callbacks don't fire reliably while the UI is
+    // idle (the modal sits with no content), which left the dialog never showing.
+    const t = setTimeout(() => setReady(true), 32);
+    return () => { clearTimeout(t); setReady(false); };
   }, [current]);
+
+  // No haptic when a dialog appears — opening a modal should be silent.
 
   function dismiss(btn?: AlertButton) {
     setQueue(q => q.slice(1));
     btn?.onPress?.();
   }
 
-  const buttons: AlertButton[] = shown?.buttons && shown.buttons.length > 0
-    ? shown.buttons
+  const buttons: AlertButton[] = current?.buttons && current.buttons.length > 0
+    ? current.buttons
     : [{ text: "OK", style: "default" }];
 
   const hasDestructive = buttons.some(b => b.style === "destructive");
@@ -78,11 +81,19 @@ export function AppAlertHost() {
     <Modal
       visible={current !== null}
       transparent
-      animationType="fade"
+      // Present instantly — the native fade animation reads as a lag before the dialog appears
+      // (most noticeable on the delete-step confirm). The overlay/card still render immediately.
+      animationType="none"
+      // Draw edge-to-edge from the first frame. Without navigationBarTranslucent the Android modal
+      // window first lays out above the nav bar, then extends under it a frame later — the overlay
+      // visibly grows to cover the bottom on open.
       statusBarTranslucent
+      navigationBarTranslucent
       onRequestClose={() => dismiss(cancelBtn)}
     >
-      <Pressable style={styles.overlay} onPress={() => dismiss(cancelBtn)}>
+      {ready && (
+      <View style={styles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => dismiss(cancelBtn)} />
         <Pressable style={styles.card} onPress={() => {}}>
           <View style={[styles.iconCircle, { backgroundColor: hasDestructive ? "#fee2e2" : "#dbeafe" }]}>
             {hasDestructive
@@ -90,8 +101,8 @@ export function AppAlertHost() {
               : <Info size={22} color={colors.accent} />}
           </View>
 
-          <Text style={styles.title}>{shown?.title}</Text>
-          {!!shown?.message && <Text style={styles.message}>{shown.message}</Text>}
+          <Text style={styles.title}>{current?.title}</Text>
+          {!!current?.message && <Text style={styles.message}>{current.message}</Text>}
 
           <View style={[styles.actions, stacked && styles.actionsStacked]}>
             {buttons.map((btn, i) => {
@@ -125,7 +136,8 @@ export function AppAlertHost() {
             })}
           </View>
         </Pressable>
-      </Pressable>
+      </View>
+      )}
     </Modal>
   );
 }

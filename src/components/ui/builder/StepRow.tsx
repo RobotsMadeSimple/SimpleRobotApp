@@ -18,7 +18,7 @@ import Animated, {
 import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
 import { Point, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
-import { colors, accents } from "@/src/components/ui/kit";
+import { colors, accents, radii } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
@@ -223,7 +223,7 @@ export function StepRow({
         {isError && (
           <Animated.View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger }, pulseStyle]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger, borderRadius: radii.lg }, pulseStyle]}
           />
         )}
 

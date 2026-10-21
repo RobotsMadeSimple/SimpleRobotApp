@@ -108,6 +108,16 @@ export function StepConfigModal({
   const robot         = useSelectedRobot();
   // ASTRO and CNC 4-axis robots only have Z rotation — hide RX/RY offset fields.
   const rzOnly        = robot?.robotType === 'ASTRO' || robot?.robotType === 'CNC4Axis';
+  // Keep the overlay unrendered until the modal window settles (a couple of frames). The card is
+  // top-anchored with a maxHeight %, so it otherwise grows as the window height resolves a frame
+  // late; showing it only after the settle avoids the visible jump. Same approach as AppAlert.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!visible) return;
+    // setTimeout, not requestAnimationFrame — rAF doesn't fire reliably while the UI is idle.
+    const t = setTimeout(() => setReady(true), 32);
+    return () => { clearTimeout(t); setReady(false); };
+  }, [visible]);
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
@@ -3678,7 +3688,8 @@ export function StepConfigModal({
 
   return (
     <>
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
+        {ready && (
         <View style={ms.overlay}>
           {/* Backdrop sits BEHIND the card (not wrapping it) so the card's
               ScrollView owns its gestures cleanly — a Pressable wrapping the
@@ -3771,6 +3782,7 @@ export function StepConfigModal({
             )}
           </View>
         </View>
+        )}
     </Modal>
     {/* Vision program picker */}
     <BottomSheet visible={visionProgPickerOpen} onClose={() => setVisionProgPickerOpen(false)} title="Select Vision Program">
