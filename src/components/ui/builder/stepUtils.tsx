@@ -2,6 +2,8 @@ import {
   ArrowRight,
   Bookmark,
   Camera,
+  Circle,
+  FileDown,
   ChevronsRight,
   GitBranch,
   CornerUpLeft,
@@ -154,6 +156,12 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `  (${step.loadCellUnit})` : ""}`;
     case "MoveWithForce":
       return `Move with Force  ${step.forceAxis ?? "Z"}${(step.forceDirection ?? -1) < 0 ? "−" : "+"}  →  ${step.forceTargetGrams ?? 0} g`;
+    case "StartRecording":
+      return `Start Recording${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}  →  $${step.recordVariableName ?? "?"}`;
+    case "StopRecording":
+      return `Stop Recording${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}`;
+    case "ExportData":
+      return `Export ${(step.exportFormat ?? "csv").toUpperCase()}  →  ${step.exportPath ?? "?"}`;
     case "Wait": {
       if (step.waitMode === 'condition') {
         const g = step.waitCondition;
@@ -288,6 +296,9 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "Tare":         return <Scale         size={size} color={color} />;
     case "ReadLoadCell": return <Gauge         size={size} color={color} />;
     case "MoveWithForce":return <ArrowDownToLine size={size} color={color} />;
+    case "StartRecording": return <Circle      size={size} color={color} />;
+    case "StopRecording":  return <Square      size={size} color={color} />;
+    case "ExportData":     return <FileDown    size={size} color={color} />;
     case "Wait":         return <Clock         size={size} color={color} />;
     case "Loop":         return <RefreshCw     size={size} color={color} />;
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
@@ -340,6 +351,9 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   Tare:         { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Tare Load Cell" },
   ReadLoadCell: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Read Load Cell" },
   MoveWithForce:{ accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Move with Force" },
+  StartRecording:{ accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Start Recording" },
+  StopRecording: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Stop Recording" },
+  ExportData:    { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Export Data" },
   Wait:         { accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait"         },
   Loop:         { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Loop"         },
   StatusUpdate: { accent: "#475569", iconBg: "#e2e8f0", iconColor: "#475569", label: "Status Update"},
@@ -491,6 +505,16 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const lines = [`Press ${step.forceAxis ?? "Z"}${(step.forceDirection ?? -1) < 0 ? "−" : "+"}  →  ${step.forceTargetGrams ?? 0} g`];
       if (step.forceHoldMs) lines.push(`hold ${step.forceHoldMs} ms`);
       if (step.forceMaxTravelMm) lines.push(`max travel ${step.forceMaxTravelMm} mm`);
+      return lines.join('\n');
+    }
+    case "StartRecording":
+      return `Start Recording  →  $${step.recordVariableName ?? "?"}${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
+    case "StopRecording":
+      return `Stop Recording${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
+    case "ExportData": {
+      const lines = [`Export ${(step.exportFormat ?? "csv").toUpperCase()}  →  ${step.exportPath ?? "?"}`];
+      const n = (step.exportColumns ?? []).length;
+      if (n) lines.push(`${n} column${n === 1 ? "" : "s"}`);
       return lines.join('\n');
     }
     case "Wait": {
@@ -782,6 +806,9 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "Tare",         label: "Tare Load Cell", desc: "Zero a load cell (set its current reading to 0)" },
   { type: "ReadLoadCell", label: "Read Load Cell", desc: "Read a load cell's weight into a variable" },
   { type: "MoveWithForce", label: "Move with Force", desc: "Press in a direction and hold a target contact force (load cell)" },
+  { type: "StartRecording", label: "Start Recording", desc: "Record a load cell into a list variable" },
+  { type: "StopRecording", label: "Stop Recording", desc: "Stop recording and store the captured samples into its list variable" },
+  { type: "ExportData", label: "Export Data", desc: "Write variables to a CSV or JSON file (configurable columns; $variable / $time_ms in the path)" },
   { type: "Wait",         label: "Wait",          desc: "Pause execution for a set duration" },
   { type: "Loop",         label: "Loop",          desc: "Repeat a block of steps N times" },
   { type: "StatusUpdate", label: "Status Update", desc: "Publish a message, warning, or error to the monitor" },
@@ -882,7 +909,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "io", label: "I/O & Aux Axes", icon: Zap,
     desc: "Drive digital outputs and auxiliary stepper axes.",
     color: accents.orange, soft: accents.orangeSoft,
-    types: ["SetOutput", "Tare", "ReadLoadCell", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
+    types: ["SetOutput", "Tare", "ReadLoadCell", "StartRecording", "StopRecording", "ExportData", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
   },
   {
     key: "vision", label: "Vision", icon: ScanSearch,

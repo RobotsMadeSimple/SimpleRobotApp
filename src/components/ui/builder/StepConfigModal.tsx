@@ -134,6 +134,7 @@ export function StepConfigModal({
   const [forEachValuePicker,    setForEachValuePicker]    = useState(false);
   const [jsonInboundPicker,  setJsonInboundPicker]  = useState<number | null>(null);
   const [jsonOutboundPicker, setJsonOutboundPicker] = useState<number | null>(null);
+  const [exportColumnPicker, setExportColumnPicker] = useState<number | null>(null);
   const [captureVarCreateOpen, setCaptureVarCreateOpen] = useState(false);
   const [httpReceiveInboundPicker, setHttpReceiveInboundPicker] = useState<number | null>(null);
 
@@ -1039,6 +1040,199 @@ export function StepConfigModal({
                 </Text>
               </>
             )}
+          </>
+        );
+      }
+      case "StartRecording":
+      case "StopRecording": {
+        const lcNanos = nanos ?? [];
+        const nid = draft!.loadCellNanoId
+          ?? lcNanos.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
+          ?? lcNanos[0]?.id;
+        const lcPins = (lcNanos.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
+        const isStart = draft!.type === "StartRecording";
+        const recVars = (variables ?? []).filter(v => !v.isImage);
+        return (
+          <>
+            {lcNanos.length > 1 && (
+              <>
+                <Text style={ms.fieldLabel}>NANO DEVICE</Text>
+                <View style={ms.segRow}>
+                  {lcNanos.map(n => {
+                    const active = nid === n.id;
+                    return (
+                      <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                        onPress={() => set({ loadCellNanoId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>LOAD CELL</Text>
+            {lcPins.length === 0 ? (
+              <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No load cells configured on this Nano — add one on the I/O page.</Text>
+            ) : (
+              <View style={ms.segRow}>
+                {lcPins.map(p => {
+                  const active = draft!.loadCellPin === p.pin;
+                  return (
+                    <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ loadCellNanoId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            {isStart ? (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STORE INTO LIST VARIABLE</Text>
+                {recVars.length === 0 ? (
+                  <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>Create a variable first (Set Variable step).</Text>
+                ) : (
+                  <View style={[ms.segRow, { flexWrap: "wrap" }]}>
+                    {recVars.map(v => {
+                      const active = draft!.recordVariableName === v.name;
+                      return (
+                        <TouchableOpacity key={v.name} style={[ms.seg, active && ms.segActive]}
+                          onPress={() => set({ recordVariableName: v.name })} activeOpacity={0.8}>
+                          <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{`$${v.name}`}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+                <Text style={[ms.hintText, { marginTop: 8 }]}>
+                  {`Captures every sample while recording; Stop Recording fills $${draft!.recordVariableName ?? "the variable"} with a list of {t, v, r} records.`}
+                </Text>
+              </>
+            ) : (
+              <Text style={[ms.hintText, { marginTop: 8 }]}>
+                Stops the recording for this load cell and stores the captured samples into its list variable.
+              </Text>
+            )}
+          </>
+        );
+      }
+      case "ExportData": {
+        const cols = draft!.exportColumns ?? [];
+        const setCols = (rows: JsonKeyValue[]) => set({ exportColumns: rows.length ? rows : undefined });
+        const fmt = (draft!.exportFormat ?? "csv").toLowerCase();
+        const accentEx = "#0f766e";
+        const exNumericVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage);
+        const exListVars    = (variables ?? []).filter(v => isListVariable(v));
+        const exStringVars  = (variables ?? []).filter(v => v.isString === true);
+        const exAllVars     = [...exListVars, ...exNumericVars, ...exStringVars];
+        return (
+          <>
+            <Text style={ms.hintText}>
+              Write one or more variables to a file on the controller. A list variable becomes rows (CSV) or a JSON array.
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>FORMAT</Text>
+            <View style={ms.segRow}>
+              {(["csv", "json"] as const).map(f => {
+                const active = fmt === f;
+                return (
+                  <TouchableOpacity key={f} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ exportFormat: f })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{f.toUpperCase()}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>FILE PATH</Text>
+            <TemplateInput
+              value={draft!.exportPath ?? ""}
+              onChange={v => set({ exportPath: v })}
+              placeholder={fmt === "json" ? "exports/$time_ms.json" : "exports/$time_ms.csv"}
+              style={ms.input}
+              accent={accentEx}
+              variables={variables}
+              quickTokens={["$time_ms"]}
+            />
+            <Text style={[ms.hintText, { marginTop: 6 }]}>
+              Saved on the controller. $variable and $time_ms are filled in; relative paths are under the controller app folder (folders auto-created).
+            </Text>
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>{fmt === "json" ? "FIELDS" : "COLUMNS"}</Text>
+            <View style={{ borderLeftWidth: 3, borderLeftColor: accentEx, backgroundColor: "#f8fafc", marginTop: 4, marginBottom: 4 }}>
+              {cols.length === 0 && (
+                <Text style={{ paddingLeft: 28, paddingVertical: 8, fontSize: 13, color: colors.textFaint, fontStyle: "italic" }}>
+                  (no columns yet — add a variable)
+                </Text>
+              )}
+              {cols.map((row, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", paddingLeft: 12, paddingRight: 6, paddingVertical: 5 }}>
+                  <TextInput
+                    style={{ flex: 1, fontSize: 14, color: "#0f172a", paddingHorizontal: 4, paddingVertical: 2, minWidth: 20 }}
+                    value={row.key}
+                    onChangeText={v => { const next = [...cols]; next[i] = { ...row, key: v }; setCols(next); }}
+                    placeholder="column"
+                    placeholderTextColor={colors.textFaint}
+                    autoCapitalize="none"
+                  />
+                  <Text style={{ fontSize: 14, color: "#64748b", marginHorizontal: 5 }}>←</Text>
+                  {row.listVar || row.imageVar ? (
+                    <TouchableOpacity
+                      style={{ flex: 2, flexDirection: "row", alignItems: "center", gap: 4, minWidth: 30 }}
+                      onPress={() => setExportColumnPicker(i)} activeOpacity={0.75}>
+                      {row.listVar ? <List size={12} color={accentEx} /> : <Camera size={12} color={accentEx} />}
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: accents.purple }} numberOfLines={1}>${row.listVar ?? row.imageVar}</Text>
+                      {row.listVar && <Text style={{ fontSize: 11, color: "#94a3b8" }}>[ ]</Text>}
+                    </TouchableOpacity>
+                  ) : (
+                    <>
+                      <TextInput
+                        style={{ flex: 2, fontSize: 14, color: accents.purple, paddingHorizontal: 1, paddingVertical: 2, minWidth: 30 }}
+                        value={row.expr}
+                        onChangeText={v => { const next = [...cols]; next[i] = { ...row, expr: v }; setCols(next); }}
+                        placeholder="$var or expr"
+                        placeholderTextColor={colors.textFaint}
+                        autoCapitalize="none"
+                      />
+                      <TouchableOpacity onPress={() => setExportColumnPicker(i)} hitSlop={8} style={{ padding: 5 }} activeOpacity={0.7}>
+                        <Search size={13} color="#94a3b8" />
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <TouchableOpacity onPress={() => setCols(cols.filter((_, j) => j !== i))} hitSlop={8} style={{ padding: 5 }}>
+                    <Minus size={13} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: 12, paddingTop: 4, paddingBottom: 8 }}
+                onPress={() => setCols([...cols, { key: "", expr: "" }])} activeOpacity={0.7}>
+                <Plus size={12} color={colors.textFaint} />
+                <Text style={{ fontSize: 12, color: colors.textFaint }}>add column</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[ms.hintText, { marginTop: 6 }]}>
+              Each column maps a name to a variable or expression. A record list (like a recording) expands to its fields; multiple lists line up row-by-row.
+            </Text>
+
+            <VarPickerModal
+              visible={exportColumnPicker !== null}
+              title="Select Variable"
+              variables={exAllVars}
+              selected={exportColumnPicker !== null
+                ? (cols[exportColumnPicker]?.listVar ?? cols[exportColumnPicker]?.imageVar ?? undefined)
+                : undefined}
+              onSelect={v => {
+                if (exportColumnPicker === null || !v) return;
+                const next = [...cols];
+                const row = next[exportColumnPicker];
+                const key = row.key || v.name;
+                if (isListVariable(v)) next[exportColumnPicker] = { ...row, key, listVar: v.name, imageVar: undefined, expr: "" };
+                else if (v.isImage) next[exportColumnPicker] = { ...row, key, imageVar: v.name, listVar: undefined, expr: "" };
+                else next[exportColumnPicker] = { ...row, key, listVar: undefined, imageVar: undefined, expr: `$${v.name}` };
+                setCols(next);
+                setExportColumnPicker(null);
+              }}
+              onClose={() => setExportColumnPicker(null)}
+            />
           </>
         );
       }
