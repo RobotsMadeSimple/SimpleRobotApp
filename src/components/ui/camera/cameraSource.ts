@@ -18,6 +18,15 @@ export function isNetworkCamera(cam: Pick<CameraState, "sourceType"> | undefined
   return cam?.sourceType === "network";
 }
 
+/**
+ * A phone-pushed camera (part of the "This phone" IO device, not a controller-managed
+ * USB/network camera). It has no device index, URL or editable source — frames are pushed
+ * in over the ingest socket — so it's surfaced through the phone device, never the Cameras list.
+ */
+export function isPhoneCamera(cam: Pick<CameraState, "sourceType"> | undefined | null): boolean {
+  return cam?.sourceType === "phone";
+}
+
 /** Form state for an existing camera's network fields (blank for USB cameras). */
 export function networkSourceOf(cam: CameraState | undefined): NetworkSource {
   if (!cam) return EMPTY_NETWORK_SOURCE;
@@ -105,8 +114,9 @@ export function hostPortOf(url: string | undefined): string {
   return authority.slice(authority.lastIndexOf("@") + 1);
 }
 
-/** "RTSP" / "HTTP" / "Sofia" tag for a network or Sofia camera, null for USB. */
-export function cameraSourceTag(cam: CameraState): "RTSP" | "HTTP" | "Sofia" | null {
+/** "Phone" / "RTSP" / "HTTP" / "Sofia" tag for a non-USB camera, null for USB. */
+export function cameraSourceTag(cam: CameraState): "Phone" | "RTSP" | "HTTP" | "Sofia" | null {
+  if (isPhoneCamera(cam)) return "Phone";
   if (isSofiaCamera(cam)) return "Sofia";
   if (!isNetworkCamera(cam)) return null;
   return isRtspUrl(cam.url ?? "") ? "RTSP" : "HTTP";
@@ -125,6 +135,10 @@ export function streamSizeOf(cam: CameraState): string | null {
  * cameras (stream size once connected). Never includes credentials.
  */
 export function cameraSourceSummary(cam: CameraState): string {
+  if (isPhoneCamera(cam)) {
+    const size = streamSizeOf(cam);
+    return size ? `Phone camera · ${size}` : "Phone camera";
+  }
   if (isSofiaCamera(cam)) {
     const host = sofiaHostPortOf(cam) || "No host";
     const size = streamSizeOf(cam);

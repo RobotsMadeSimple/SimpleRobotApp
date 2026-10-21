@@ -463,3 +463,7 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Local Expo native module build output
+modules/**/android/build/
+modules/**/android/.cxx/

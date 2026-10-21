@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "reactrobot",
+    "scheme": "simplerobotapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -17,7 +17,16 @@
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_MULTICAST_STATE",
-        "REQUEST_INSTALL_PACKAGES"
+        "REQUEST_INSTALL_PACKAGES",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "NFC",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_CAMERA",
+        "FOREGROUND_SERVICE_DATA_SYNC",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -53,7 +62,8 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "enableMultidex": true
+            "enableMultidex": true,
+            "minSdkVersion": 24
           }
         }
       ],
@@ -61,7 +71,38 @@
       "expo-image",
       "expo-sharing",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Simple Robot uses the camera to stream this phone as a robot camera."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Simple Robot streams this phone's location to the controller as a data channel."
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Simple Robot streams this phone's motion sensors to the controller as data channels."
+        }
+      ],
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermission": "Simple Robot reads station NFC tags to connect to a controller and start a cycle."
+        }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Simple Robot streams this phone's camera to the controller over WebRTC.",
+          "microphonePermission": "Simple Robot requests microphone access for WebRTC streaming (audio is not sent)."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
