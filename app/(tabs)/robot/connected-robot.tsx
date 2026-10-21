@@ -10,6 +10,7 @@ import {
   Gamepad2,
   Info,
   Move3d,
+  QrCode,
   Settings2,
   Wifi,
   WifiOff,
@@ -88,6 +89,14 @@ const MENU_ITEMS = [
     tileColor: "#fdf4ff",
     iconColor: "#9333ea",
     onPress: () => router.navigate("/robot/config"),
+  },
+  {
+    label: "Station Tag",
+    description: "Make an NFC tag / QR code for this controller",
+    icon: QrCode,
+    tileColor: "#eef2ff",
+    iconColor: "#4f46e5",
+    onPress: () => router.navigate("/robot/create-station"),
   },
   {
     label: "About Robot",

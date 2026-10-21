@@ -1,6 +1,7 @@
 import { RobotCard } from "@/src/components/ui/RobotCards";
 import {
   Button,
+  buttonTextColor,
   Card,
   colors,
   Divider,
@@ -21,7 +22,8 @@ import { RobotInfo } from "@/src/models/robotModels";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { connKey, isSaved, manualRobot, recordConnection, removeRecent, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
-import { ChevronDown, ChevronUp, Clock, Radar, Star, Wifi, WifiOff, X } from "lucide-react-native";
+import { ChevronDown, ChevronUp, Clock, QrCode, Radar, Star, Wifi, WifiOff, X } from "lucide-react-native";
+import { router } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import ConnectedRobot from "./connected-robot";
@@ -96,6 +98,15 @@ export default function Robot() {
           <Button label="Connect" size="sm" onPress={connectManual} disabled={!manualIp.trim()} />
         </View>
 
+        <Button
+          label="Scan station tag"
+          variant="secondary"
+          size="sm"
+          icon={<QrCode size={16} color={buttonTextColor("secondary")} />}
+          onPress={() => router.navigate("/robot/scan-station")}
+          style={styles.scanBtn}
+        />
+
         {recents.length > 0 && (
           <>
             <Divider style={styles.lastIpDivider} />
@@ -155,15 +166,20 @@ export default function Robot() {
     </>
   );
 
-  const savedSection = saved.length > 0 ? (
+  // Dedupe: a saved robot that's also being discovered shows under "Discovered" (where its star is
+  // filled), so here we only list saved robots that aren't currently on the network — the reason the
+  // Saved list exists (reconnect to something you can't see right now).
+  const savedOffline = saved.filter(s => !robots.some(d => connKey(d) === connKey(s)));
+
+  const savedSection = savedOffline.length > 0 ? (
     <>
       <SectionHeader
-        title="Saved Connections"
+        title="Saved (offline)"
         icon={Star}
-        right={<InfoTip text="Starred connections are kept here so you can reconnect to a robot even when it isn't being discovered on the network. Tap the star to remove one." />}
+        right={<InfoTip text="Starred robots that aren't on the network right now — reconnect by their saved address. Saved robots that are currently discovered appear under Discovered (with a filled star). Tap a star to remove one." />}
       />
       <View>
-        {saved.map(r => <RobotCard key={connKey(r)} robot={r} />)}
+        {savedOffline.map(r => <RobotCard key={connKey(r)} robot={r} />)}
       </View>
     </>
   ) : null;
@@ -221,6 +237,8 @@ export default function Robot() {
 const styles = StyleSheet.create({
   inputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm + 2 },
   input:    { flex: 1 },
+
+  scanBtn: { marginTop: spacing.sm },
 
   lastIpDivider: { marginTop: spacing.sm, marginBottom: 2 },
   recentHeader: {

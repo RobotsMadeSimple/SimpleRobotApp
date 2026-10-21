@@ -1,6 +1,6 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { enrichByAddress } from "./connectionStore";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -847,8 +847,9 @@ export class RobotConnectService {
     };
   }
 
-  public startProgram(programName: string) {
-    return this.sendCommand('StartProgram', { programName });
+  public startProgram(programName: string, programId?: string) {
+    // id resolved first (rename-proof), programName as fallback / for external programs.
+    return this.sendCommand('StartProgram', { programName, programId });
   }
 
   public stopProgram(programName: string) {
@@ -1263,8 +1264,9 @@ export class RobotConnectService {
     return this.sendCommand("StopBuiltProgram", { name });
   }
 
-  public startBackgroundProgram(name: string) {
-    return this.sendCommand("StartBackgroundProgram", { name });
+  public startBackgroundProgram(name: string, programId?: string) {
+    // Controller reads ProgramActionParams (programName/programId); id is resolved first (rename-proof).
+    return this.sendCommand("StartBackgroundProgram", { programName: name, programId });
   }
 
   public stopBackgroundProgram(name: string) {
@@ -1324,6 +1326,31 @@ export class RobotConnectService {
 
   public configureNanoPin(nanoId: string, pin: number, type: string, pixelCount = 8) {
     return this.sendCommand("ConfigureNanoPin", { nanoId, pin, type, pixelCount })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  // ── Load cell (HX711) ──────────────────────────────────────────────────────
+
+  /** Configure a Nano pin pair as an HX711 load cell (dtPin = data, sckPin = clock). */
+  public configureLoadCell(nanoId: string, dtPin: number, sckPin: number, unit = "g") {
+    return this.sendCommand("ConfigureLoadCell", { nanoId, dtPin, sckPin, unit })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  /** Zero the load cell — capture its current raw reading as the tare offset. */
+  public tareLoadCell(nanoId: string, pin: number) {
+    return this.sendCommand("TareLoadCell", { nanoId, pin })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  /** Second calibration point: with a known weight on the cell, derive counts-per-gram. */
+  public calibrateLoadCell(nanoId: string, pin: number, knownGrams: number) {
+    return this.sendCommand("CalibrateLoadCell", { nanoId, pin, knownGrams })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  public setLoadCellUnit(nanoId: string, pin: number, unit: string) {
+    return this.sendCommand("SetLoadCellUnit", { nanoId, pin, unit })
       .then(() => this.getIO().catch(() => {}));
   }
 
@@ -1625,6 +1652,45 @@ export class RobotConnectService {
     });
   }
 
+  /** Add a "phone" camera the phone then pushes frames into over {@link cameraIngestUrl}. Returns its id. */
+  /** Reuse (or create) a "phone" camera with this name and return its id — idempotent across toggles. */
+  public async addPhoneCamera(name: string): Promise<string> {
+    const existing = (await this.listCameraStates()).find(c => c.name === name && c.sourceType === "phone");
+    if (existing) return existing.id;
+    await this.addCamera({ name, deviceIndex: 0, sourceType: "phone" });
+    // AddCamera doesn't echo the id; read it back from the refreshed list by matching the name.
+    const after = await this.listCameraStates();
+    return [...after].reverse().find(c => c.name === name && c.sourceType === "phone")?.id ?? "";
+  }
+
+  private async listCameraStates(): Promise<CameraState[]> {
+    const data: any = await this.sendCommand("GetCameras");
+    try { return JSON.parse(data?.cameras ?? "[]") as CameraState[]; } catch { return []; }
+  }
+
+  // ── Phone data devices (native; readable as $device.<id>.<channel>) ──────────
+
+  /** Current data devices and their latest channel values. */
+  public async getDevices(): Promise<DeviceState[]> {
+    const data: any = await this.sendCommand("GetDevices");
+    try { return JSON.parse(data?.devices ?? "[]") as DeviceState[]; } catch { return []; }
+  }
+
+  /** Create a data device; returns its id (the controller assigns one). */
+  public async addDevice(name: string, enabled = true): Promise<string> {
+    const data: any = await this.sendCommand("AddDevice", { name, enabled });
+    return typeof data?.id === "string" ? data.id : "";
+  }
+
+  public removeDevice(id: string) {
+    return this.sendCommand("RemoveDevice", { id });
+  }
+
+  public setDeviceConfig(id: string, patch: { name?: string; enabled?: boolean; providerConfig?: string }) {
+    return this.sendCommand("SetDeviceConfig", { id, ...patch });
+  }
+
+
   /**
    * Open a stream URL, or log into a Sofia (DVRIP/XMeye) camera, once on the
    * controller and grab one frame (docs/network-cameras.md). A failed test
@@ -1707,6 +1773,53 @@ export class RobotConnectService {
   public cameraWsUrl(id: string): string | null {
     if (!this.url) return null;
     return this.url.replace(/\/control$/, '') + `/camera/${id}/ws`;
+  }
+
+  /** WebSocket a phone connects to push JPEG frames IN for a "phone" camera. */
+  public cameraIngestUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/camera/${encodeURIComponent(id)}/ingest`;
+  }
+
+  /** WebSocket a phone connects to negotiate a WebRTC H.264 stream for a "phone" camera. */
+  public cameraWebrtcUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/camera/${encodeURIComponent(id)}/webrtc`;
+  }
+
+  /** WebSocket a phone connects to push data-channel values IN for a device. */
+  public deviceIngestUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/devices/${encodeURIComponent(id)}/ingest`;
+  }
+
+  /**
+   * URL of a plugin's custom-GUI entry page (served by the controller). Points at the entry
+   * file itself (e.g. `…/plugins/<id>/ui/index.html`), not the `…/ui/` directory — the bare
+   * `…/ui` path is the UI WebSocket, so a directory URL collides with it. Relative assets +
+   * `ui-bridge.js` resolve against the entry's folder, and the bridge derives the socket URL from it.
+   */
+  public pluginUiUrl(id: string, entry: string): string | null {
+    const base = this.httpBaseUrl();
+    if (!base) return null;
+    return `${base}/plugins/${encodeURIComponent(id)}/${entry.replace(/^\/+/, '')}`;
+  }
+
+  /** Invoke a plugin UI action without the UI socket (the embedded GUI uses its own socket instead). */
+  public invokePluginAction(id: string, action: string, args?: Record<string, unknown>): Promise<any> {
+    return this.sendCommand('InvokePluginAction', { id, action, args: args ?? {} });
+  }
+
+  /** Calls an expression function `id.name(args)` and returns its numeric result. */
+  public async callPluginFunction(id: string, name: string, args: number[]): Promise<number> {
+    const data: any = await this.sendCommand('CallPluginFunction', { id, name, args });
+    return typeof data?.value === 'number' ? data.value : Number(data?.value);
+  }
+
+  /** Runs a plugin step once (for testing from the plugin page) and returns its outputs map. */
+  public async runPluginStep(id: string, stepId: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const data: any = await this.sendCommand('RunPluginStep', { id, stepId, params });
+    return (data?.outputs ?? {}) as Record<string, unknown>;
   }
 
   public cameraSnapshotUrl(id: string): string | null {
