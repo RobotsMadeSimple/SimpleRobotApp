@@ -44,7 +44,7 @@ function PluginCard({ plugin, onChanged }: { plugin: PluginSummary; onChanged: (
   return (
     <Card
       padded={false}
-      onPress={() => router.push({ pathname: "/(tabs)/io/plugin-detail", params: { id: plugin.id } })}
+      onPress={() => router.push({ pathname: "/(tabs)/program/plugin-detail", params: { id: plugin.id } })}
       style={styles.card}
     >
       <View style={styles.head}>
@@ -181,7 +181,7 @@ export default function PluginsPage() {
       <PageHeader
         title="Plugins"
         subtitle="External extensions that add program steps, functions, and services"
-        crumbs={[{ label: "I/O", href: "/io" }, { label: "Plugins" }]}
+        crumbs={[{ label: "Program", href: "/program" }, { label: "Plugins" }]}
         right={
           <>
             <Button

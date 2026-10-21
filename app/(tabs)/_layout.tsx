@@ -16,6 +16,7 @@ import { colors } from "@/src/components/ui/kit";
 import { NavRail } from "@/src/components/ui/NavRail";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
+import { ProviderAutoStart } from "@/src/components/provider/ProviderAutoStart";
 import { RobotProvider } from "@/src/providers/RobotProvider";
 import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { StatusBar } from "expo-status-bar";
@@ -28,6 +29,7 @@ export default function Layout() {
         <SafeAreaProvider>
           <RobotProvider>
             <StatusBar style="dark" />
+            <ProviderAutoStart />
             <TabLayout />
             <AppAlertHost />
             <FaultRecoveryOverlay />

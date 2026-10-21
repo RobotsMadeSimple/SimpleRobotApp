@@ -11,10 +11,10 @@ export default function IOLayout() {
       <Stack.Screen name="aux-axis" />
       <Stack.Screen name="cameras" />
       <Stack.Screen name="camera-calibrate" />
+      <Stack.Screen name="phone-provider" />
+      <Stack.Screen name="loadcell-calibrate" />
       <Stack.Screen name="configure" />
       <Stack.Screen name="configure-relay" />
-      <Stack.Screen name="plugins" />
-      <Stack.Screen name="plugin-detail" />
     </Stack>
   );
 }

@@ -14,9 +14,10 @@ import {
 import {
   copyText, formatUptime, isActive, runtimeLabel, showError, stateLabel, stateTone,
 } from "@/src/components/ui/plugins/pluginUi";
+import { PluginUiView } from "@/src/components/ui/plugins/PluginUiView";
 import { useActionPending } from "@/src/hooks/useActionPending";
 import { useIsWide } from "@/src/components/ui/responsive";
-import type { PluginConfigField, PluginConfigValues, PluginDetail } from "@/src/models/robotModels";
+import type { PluginConfigField, PluginConfigValues, PluginDetail, PluginFunctionDef, PluginStepDef } from "@/src/models/robotModels";
 import { useConnected } from "@/src/providers/RobotProvider";
 import { PluginConfigError, robotClient } from "@/src/services/RobotConnectService";
 
@@ -157,6 +158,205 @@ function ConfigFieldRow({
         </FormRow>
       );
   }
+}
+
+// ── Callable functions ────────────────────────────────────────────────────────
+
+/** Turn a controller error code/message into something readable under a Call button. */
+function friendlyFnError(e: unknown): string {
+  const s = e instanceof Error ? e.message : String(e);
+  if (/pluginNotRunning/i.test(s)) return "Plugin is not running";
+  if (/pluginFunctionTimeout/i.test(s)) return "Timed out waiting for the plugin";
+  if (/unknownPluginFunction/i.test(s)) return "Function not found";
+  if (/badParams/i.test(s)) return s.replace(/^badParams:?\s*/i, "").trim() || "Bad arguments";
+  return s.replace(/^pluginFunctionFailed:?\s*/i, "").trim() || "Call failed";
+}
+
+/** One plugin expression function with inline arg inputs + a Call button that shows the result. */
+function FunctionRow({ pluginId, fn, disabled }: { pluginId: string; fn: PluginFunctionDef; disabled: boolean }) {
+  const min = Math.max(0, fn.minArgs ?? 0);
+  const max = Math.max(min, fn.maxArgs ?? min);
+  const [args, setArgs] = useState<string[]>(() => Array(max).fill(""));
+  const [result, setResult] = useState<{ value: number } | { error: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const call = async () => {
+    // Drop trailing blanks for the optional (index ≥ min) slots, then validate what remains.
+    let end = max;
+    while (end > min && args[end - 1].trim() === "") end--;
+    const nums: number[] = [];
+    for (let i = 0; i < end; i++) {
+      const t = (args[i] ?? "").trim();
+      if (t === "") { setResult({ error: `Argument ${i + 1} is required` }); return; }
+      const n = Number(t);
+      if (!Number.isFinite(n)) { setResult({ error: `Argument ${i + 1} must be a number` }); return; }
+      nums.push(n);
+    }
+    setBusy(true);
+    setResult(null);
+    try {
+      const value = await robotClient.callPluginFunction(pluginId, fn.name, nums);
+      setResult({ value });
+    } catch (e) {
+      setResult({ error: friendlyFnError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.fnRow}>
+      <Text style={type.mono}>{fn.signature ?? `${pluginId}.${fn.name}()`}</Text>
+      {!!fn.description && <Text style={type.body}>{fn.description}</Text>}
+      <View style={styles.fnCallRow}>
+        {max > 0 && (
+          <View style={styles.fnArgs}>
+            {Array.from({ length: max }).map((_, i) => (
+              <Input
+                key={i}
+                value={args[i] ?? ""}
+                onChangeText={v => { setArgs(a => { const n = [...a]; n[i] = v; return n; }); setResult(null); }}
+                placeholder={i < min ? `arg ${i + 1}` : `arg ${i + 1} (opt)`}
+                keyboardType="numeric"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[type.mono, styles.fnArg]}
+              />
+            ))}
+          </View>
+        )}
+        <Button
+          label="Call" size="sm" variant="secondary" disabled={disabled || busy} loading={busy}
+          icon={<Play size={14} color={buttonTextColor("secondary")} />}
+          onPress={call} style={styles.selfStart}
+        />
+      </View>
+      {result && "value" in result && (
+        <Text style={[type.mono, styles.fnResult]}>= {String(result.value)}</Text>
+      )}
+      {result && "error" in result && (
+        <Text style={[type.caption, styles.errorText]}>{result.error}</Text>
+      )}
+      {disabled && !result && <Text style={type.caption}>Start the plugin to call its functions.</Text>}
+    </View>
+  );
+}
+
+// ── Runnable steps ─────────────────────────────────────────────────────────────
+
+/** Readable text for a RunPluginStep failure. */
+function friendlyStepError(e: unknown): string {
+  const s = e instanceof Error ? e.message : String(e);
+  if (/pluginNotRunning/i.test(s)) return "Plugin is not running";
+  if (/pluginStepTimeout/i.test(s)) return "Step timed out";
+  if (/unknownPluginStep/i.test(s)) return "Step not found";
+  if (/pluginParam/i.test(s)) return s.replace(/^pluginParam\w*:?\s*/i, "").trim() || "Bad parameters";
+  return s.replace(/^pluginStepFailed:?\s*/i, "").trim() || "Step failed";
+}
+
+// Param kinds the test UI can supply inline; richer kinds (point/list/image/variable)
+// only make sense inside a program with real data, so they're shown but not entered here.
+const STEP_TESTABLE_TYPES = new Set(["number", "boolean", "string", "enum"]);
+
+/** One plugin step with inline param inputs + a Run button that executes it once and shows outputs. */
+function StepRow({ pluginId, step, disabled }: { pluginId: string; step: PluginStepDef; disabled: boolean }) {
+  const params = useMemo(() => step.params ?? [], [step.params]);
+  const [values, setValues] = useState<Record<string, string | boolean>>(() => {
+    const init: Record<string, string | boolean> = {};
+    for (const p of params) {
+      if (p.type === "boolean") init[p.key] = p.default === true;
+      else init[p.key] = p.default === undefined || p.default === null ? "" : String(p.default);
+    }
+    return init;
+  });
+  const [result, setResult] = useState<{ outputs: Record<string, unknown> } | { error: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const setVal = (key: string, v: string | boolean) => { setValues(s => ({ ...s, [key]: v })); setResult(null); };
+
+  const run = async () => {
+    const payload: Record<string, unknown> = {};
+    for (const p of params) {
+      if (!STEP_TESTABLE_TYPES.has(p.type)) continue;
+      const v = values[p.key];
+      if (p.type === "boolean") { payload[p.key] = v === true; continue; }
+      const t = String(v ?? "").trim();
+      if (t === "") {
+        if (p.required) { setResult({ error: `${p.label || p.key} is required` }); return; }
+        continue;
+      }
+      if (p.type === "number") {
+        const n = Number(t);
+        if (!Number.isFinite(n)) { setResult({ error: `${p.label || p.key} must be a number` }); return; }
+        payload[p.key] = n;
+      } else {
+        payload[p.key] = t; // string / enum
+      }
+    }
+    setBusy(true);
+    setResult(null);
+    try {
+      const outputs = await robotClient.runPluginStep(pluginId, step.id, payload);
+      setResult({ outputs });
+    } catch (e) {
+      setResult({ error: friendlyStepError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.fnRow}>
+      <Text style={type.title}>{step.label}</Text>
+      {!!step.description && <Text style={type.body}>{step.description}</Text>}
+      {params.map(p => {
+        if (!STEP_TESTABLE_TYPES.has(p.type)) {
+          return <Text key={p.key} style={type.caption}>{p.label || p.key} ({p.type}) — set this inside a program</Text>;
+        }
+        if (p.type === "boolean") {
+          return (
+            <FormRow key={p.key} label={p.label || p.key} hint={p.help} inline>
+              <Switch value={values[p.key] === true} onValueChange={v => setVal(p.key, v)}
+                      trackColor={{ false: colors.border, true: colors.success }} />
+            </FormRow>
+          );
+        }
+        if (p.type === "enum") {
+          return (
+            <FormRow key={p.key} label={p.label || p.key} hint={p.help}>
+              <SegmentedControl size="sm" options={p.options ?? []} value={String(values[p.key] ?? "")} onChange={v => setVal(p.key, v)} />
+            </FormRow>
+          );
+        }
+        return (
+          <FormRow key={p.key} label={p.label || p.key} hint={p.help}>
+            <Input
+              value={String(values[p.key] ?? "")}
+              onChangeText={v => setVal(p.key, v)}
+              keyboardType={p.type === "number" ? "numeric" : "default"}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={type.mono}
+            />
+          </FormRow>
+        );
+      })}
+      <Button
+        label="Run" size="sm" variant="secondary" disabled={disabled || busy} loading={busy}
+        icon={<Play size={14} color={buttonTextColor("secondary")} />}
+        onPress={run} style={styles.selfStart}
+      />
+      {result && "outputs" in result && (
+        Object.keys(result.outputs).length === 0
+          ? <Text style={[type.mono, styles.fnResult]}>Done — no outputs</Text>
+          : Object.entries(result.outputs).map(([k, v]) => (
+              <Text key={k} style={[type.mono, styles.fnResult]}>{k} = {typeof v === "object" ? JSON.stringify(v) : String(v)}</Text>
+            ))
+      )}
+      {result && "error" in result && <Text style={[type.caption, styles.errorText]}>{result.error}</Text>}
+      {disabled && !result && <Text style={type.caption}>Start the plugin to run its steps.</Text>}
+    </View>
+  );
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -327,7 +527,7 @@ export default function PluginDetailPage() {
         onPress: async () => {
           try {
             await robotClient.uninstallPlugin(plugin.id);
-            if (router.canGoBack()) router.back(); else router.replace("/(tabs)/io/plugins");
+            if (router.canGoBack()) router.back(); else router.replace("/(tabs)/program/plugins");
           } catch (e) { showError("Uninstall failed", e); }
         },
       },
@@ -336,8 +536,8 @@ export default function PluginDetailPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const crumbs = [
-    { label: "I/O", href: "/io" },
-    { label: "Plugins", href: "/(tabs)/io/plugins" },
+    { label: "Program", href: "/program" },
+    { label: "Plugins", href: "/(tabs)/program/plugins" },
     { label: plugin?.name ?? pluginId ?? "Plugin" },
   ];
 
@@ -353,7 +553,7 @@ export default function PluginDetailPage() {
                 icon={<Plug size={32} color={colors.textFaint} />}
                 title="Plugin not found"
                 subtitle="It may have been uninstalled."
-                action={<Button label="Back to plugins" variant="secondary" onPress={() => router.replace("/(tabs)/io/plugins")} />}
+                action={<Button label="Back to plugins" variant="secondary" onPress={() => router.replace("/(tabs)/program/plugins")} />}
               />
             </Card>
           )}
@@ -372,6 +572,17 @@ export default function PluginDetailPage() {
   const properties = m.properties ?? [];
   const live = plugin.properties ?? {};
   const undocumented = Object.keys(live).filter(k => !properties.some(p => p.name === k));
+
+  // Custom GUI (served by the controller, talks to it directly over its own UI socket).
+  const uiUri = m.ui?.entry ? robotClient.pluginUiUrl(plugin.id, m.ui.entry) : null;
+  const uiCard = m.ui && uiUri ? (
+    <>
+      <SectionHeader title={m.ui.title || "App"} />
+      <Card style={styles.uiCard} padded={false}>
+        <PluginUiView uri={uiUri} style={styles.uiView} />
+      </Card>
+    </>
+  ) : null;
 
   const statusCard = (
     <>
@@ -462,20 +673,13 @@ export default function PluginDetailPage() {
         <Text style={type.sectionLabel}>Steps ({steps.length})</Text>
         {steps.length === 0 && <Text style={type.subtitle}>None</Text>}
         {steps.map(s => (
-          <View key={s.id} style={styles.item}>
-            <Text style={type.title}>{s.label}</Text>
-            <Text style={type.caption}>{(s.params?.length ?? 0)} params · {(s.outputs?.length ?? 0)} outputs</Text>
-            {!!s.description && <Text style={type.body}>{s.description}</Text>}
-          </View>
+          <StepRow key={s.id} pluginId={plugin.id} step={s} disabled={!plugin.connected} />
         ))}
         <Divider />
         <Text style={type.sectionLabel}>Functions ({functions.length})</Text>
         {functions.length === 0 && <Text style={type.subtitle}>None</Text>}
         {functions.map(f => (
-          <View key={f.name} style={styles.item}>
-            <Text style={type.mono}>{f.signature ?? `${plugin.id}.${f.name}()`}</Text>
-            {!!f.description && <Text style={type.body}>{f.description}</Text>}
-          </View>
+          <FunctionRow key={f.name} pluginId={plugin.id} fn={f} disabled={!plugin.connected} />
         ))}
         <Divider />
         <Text style={type.sectionLabel}>Properties ({properties.length})</Text>
@@ -568,6 +772,7 @@ export default function PluginDetailPage() {
         right={<StatusPill label={stateLabel(plugin.state)} tone={stateTone(plugin.state)} dot />}
       />
       <Screen>
+        {uiCard}
         {wide ? (
           <View style={styles.cols}>
             <View style={styles.col}>{statusCard}{externalCard}{contributionsCard}</View>
@@ -594,6 +799,8 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  uiCard: { overflow: "hidden", padding: 0 },
+  uiView: { width: "100%", height: 560, backgroundColor: colors.background },
   cols: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
   col: { flex: 1, gap: spacing.md, minWidth: 0 },
   stack: { gap: spacing.md },
@@ -606,6 +813,11 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   passwordRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   item: { gap: 2 },
+  fnRow: { gap: spacing.xs, paddingVertical: spacing.xs },
+  fnCallRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, flexWrap: "wrap", marginTop: spacing.xs },
+  fnArgs: { flexDirection: "row", gap: spacing.xs, flexWrap: "wrap", flex: 1, minWidth: 0 },
+  fnArg: { minWidth: 72, flexGrow: 1 },
+  fnResult: { color: colors.success },
   propRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   propValue: { minWidth: 60, textAlign: "right", color: colors.text },
   inputError: { borderColor: colors.danger, backgroundColor: colors.dangerSoft },

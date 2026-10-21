@@ -7,15 +7,16 @@ import { useConnected,
   useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AuxDeviceState,
-  CameraState } from "@/src/models/robotModels";
+  CameraState,
+  DeviceState } from "@/src/models/robotModels";
 import {
   Camera,
   CircuitBoard,
   Cpu,
   Gauge,
-  Plug,
   Plus,
   Radio,
+  Smartphone,
   Wifi,
   WifiOff,
   X,
@@ -27,8 +28,11 @@ import React,
   useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -36,8 +40,8 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
-import { pluginNeedsAttention } from "@/src/components/ui/plugins/pluginUi";
-import { cameraSourceSummary, cameraSourceTag } from "@/src/components/ui/camera/cameraSource";
+import { cameraSourceSummary, cameraSourceTag, isPhoneCamera } from "@/src/components/ui/camera/cameraSource";
+import { DEFAULT_PHONE_DEVICE_NAME } from "@/src/components/provider/providerUtil";
 
 import {
   Button,
@@ -45,6 +49,7 @@ import {
   colors,
   Divider,
   InfoTip,
+  Input,
   ListRow,
   radii,
   PageHeader,
@@ -134,8 +139,12 @@ export default function IoPage() {
   const [ioConfig,    setIoConfig]    = useState<IOConfig | null>(null);
   const [auxDevices,  setAuxDevices]  = useState<AuxDeviceState[]>([]);
   const [cameras,     setCameras]     = useState<CameraState[]>([]);
+  const [devices,     setDevices]     = useState<DeviceState[]>([]);
   const [addModal,    setAddModal]    = useState(false);
   const [enabling,    setEnabling]    = useState<keyof IOConfig | null>(null);
+  // Add-Device modal → "Phone" opens a name step (set up the device; a phone links to it later).
+  const [phoneNameStep, setPhoneNameStep] = useState(false);
+  const [phoneName,     setPhoneName]     = useState(DEFAULT_PHONE_DEVICE_NAME);
 
   // Which cards to show comes from the robot config. Load it when the tab gains
   // focus AND whenever the connection comes up: if the controller starts while
@@ -182,6 +191,14 @@ export default function IoPage() {
     const unsub = robotClient.onCameras(cams => setCameras(cams));
     const poll  = setInterval(() => robotClient.getCameras().catch(() => {}), 3000);
     return () => { unsub(); clearInterval(poll); };
+  }, []);
+
+  // The phone shows up as ONE "This phone" IO device (camera + sensors), fed by the provider
+  // screen. Devices have no live-push topic, so poll GetDevices (no-op on older controllers).
+  useEffect(() => {
+    robotClient.getDevices().then(setDevices).catch(() => {});
+    const poll = setInterval(() => robotClient.getDevices().then(setDevices).catch(() => {}), 3000);
+    return () => clearInterval(poll);
   }, []);
 
   const enableDeviceType = async (field: keyof IOConfig) => {
@@ -278,6 +295,58 @@ export default function IoPage() {
     t => !ioConfig?.[t.field as keyof IOConfig] || t.field === "enableCameras"
   );
 
+  // A phone device is an all-encompassing IO device (camera + sensors). It's set up here (from any
+  // phone/tablet/web) as a named entry; a phone then *links* to it from the device card to become
+  // its provider. Every DeviceManager device is a phone/client device. Its backing
+  // "phone" camera is surfaced through the device, never as a standalone card in the Cameras list.
+  const phoneDevices   = devices;
+  const visibleCameras = cameras.filter(c => !isPhoneCamera(c));
+
+  // The phone this device is assigned to provide from (stored in the device's providerConfig blob),
+  // for display. null = not linked to any phone yet.
+  const assignedPhoneName = (dev: DeviceState): string | null => {
+    try {
+      const p = JSON.parse(dev.providerConfig ?? "");
+      return typeof p?.assignedPhoneName === "string" && p.assignedPhoneName ? p.assignedPhoneName : null;
+    } catch { return null; }
+  };
+  // A phone device is "live" when its channels are fresh OR its backing camera is streaming — a
+  // camera-only WebRTC stream pushes no channels, so the device's own freshness alone reads as Offline.
+  const phoneDeviceLive = (dev: DeviceState): boolean =>
+    dev.connected || cameras.some(c => isPhoneCamera(c) && c.name === dev.name && c.connected);
+
+  // Create a named phone device (setup only — no streaming starts until a phone links to it).
+  const createPhoneDevice = async (name: string) => {
+    const trimmed = name.trim() || DEFAULT_PHONE_DEVICE_NAME;
+    await robotClient.addDevice(trimmed).catch(() => {});
+    robotClient.getDevices().then(setDevices).catch(() => {});
+  };
+
+  // Open the provider for a device so THIS phone starts feeding it (the "link" step).
+  const linkThisPhoneTo = (dev: DeviceState) => {
+    router.push({ pathname: "/(tabs)/io/phone-provider", params: { deviceId: dev.id, name: dev.name } });
+  };
+
+  const removePhoneDevice = (dev: DeviceState) => {
+    robotClient.removeDevice(dev.id).catch(() => {});
+    // Also remove the backing phone camera this device owns (named after the device), so nothing is orphaned.
+    const cam = cameras.find(c => isPhoneCamera(c) && c.name === dev.name);
+    if (cam) robotClient.removeCamera(cam.id).catch(() => {});
+    setDevices(prev => prev.filter(d => d.id !== dev.id));
+  };
+
+  const closeAddModal = () => {
+    setAddModal(false);
+    setPhoneNameStep(false);
+    setPhoneName(DEFAULT_PHONE_DEVICE_NAME);
+  };
+
+  const addPhoneDevice = async () => {
+    const name = phoneName;
+    closeAddModal();
+    await createPhoneDevice(name);
+  };
+
   // Devices online/offline summary — STB4100 is always present; the rest only
   // count once their device type is enabled, mirroring the cards rendered below.
   const connectionFlags = ioConfig ? [
@@ -285,16 +354,12 @@ export default function IoPage() {
     ...(ioConfig.enableNanoCards ? nanos.map(n => n.connected) : []),
     ...(ioConfig.enableRelayCard ? [relay?.connected ?? false] : []),
     ...(ioConfig.enableAuxAxis ? auxDevices.map(d => d.connected) : []),
-    ...(ioConfig.enableCameras ? cameras.map(c => c.connected) : []),
+    ...(ioConfig.enableCameras ? visibleCameras.map(c => c.connected) : []),
+    ...phoneDevices.map(phoneDeviceLive),
   ] : [];
   const totalDevices   = connectionFlags.length;
   const onlineDevices  = connectionFlags.filter(Boolean).length;
   const offlineDevices = totalDevices - onlineDevices;
-
-  // Plugins summary from the status poll (GetStatus.plugins, additive).
-  const pluginList     = status.plugins ?? [];
-  const pluginsRunning = pluginList.filter(p => p.state === "running" || p.state === "degraded").length;
-  const pluginsWarn    = pluginList.some(pluginNeedsAttention);
 
   return (
     <View style={styles.container}>
@@ -368,8 +433,30 @@ export default function IoPage() {
           />
         ))}
 
-        {/* One card per camera */}
-        {ioConfig?.enableCameras && cameras.map(cam => (
+        {/* One card per phone IO device (camera + sensors). Tapping links THIS phone as the
+            provider; a device set up on one phone can be linked from another. */}
+        {phoneDevices.map(dev => {
+          const live = phoneDeviceLive(dev);
+          const provider = assignedPhoneName(dev);
+          const subtitle = provider
+            ? (live ? `Provided by ${provider} · streaming` : `Provided by ${provider}`)
+            : "Not linked — open to assign a phone";
+          return (
+            <DeviceNavCard
+              key={dev.id}
+              icon={<Smartphone size={20} color={colors.accent} />}
+              iconBg={colors.accentSoft}
+              name={dev.name}
+              subtitle={subtitle}
+              connected={live}
+              onPress={() => linkThisPhoneTo(dev)}
+              onDelete={() => confirmRemove(dev.name, () => removePhoneDevice(dev))}
+            />
+          );
+        })}
+
+        {/* One card per camera (phone cameras excluded — they live under the phone device) */}
+        {ioConfig?.enableCameras && visibleCameras.map(cam => (
           <DeviceNavCard
             key={cam.id}
             icon={<Camera size={20} color={colors.accent} />}
@@ -383,23 +470,6 @@ export default function IoPage() {
             footer={<CameraCalibrationControls camera={cam} layout="footer" />}
           />
         ))}
-
-        {/* Plugins — external extensions; summary comes from GetStatus.plugins */}
-        <DeviceNavCard
-          icon={<Plug size={20} color={pluginsWarn ? colors.warning : colors.accent} />}
-          iconBg={pluginsWarn ? colors.warningSoft : colors.accentSoft}
-          name="Plugins"
-          subtitle={pluginList.length === 0 ? "No plugins installed" : "External steps, functions, and services"}
-          connected={connected}
-          statusPill={
-            <StatusPill
-              label={`${pluginsRunning} running / ${pluginList.length} installed`}
-              tone={pluginsWarn ? "warning" : pluginsRunning > 0 ? "success" : "neutral"}
-              dot
-            />
-          }
-          onPress={() => router.push("/(tabs)/io/plugins")}
-        />
 
         {/* Add Device button */}
         <Button
@@ -417,45 +487,80 @@ export default function IoPage() {
         animationType="fade"
         onRequestClose={() => setAddModal(false)}
       >
+        <KeyboardAvoidingView
+          style={styles.modalOuter}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
         <Pressable style={styles.modalOverlay} onPress={() => setAddModal(false)}>
           <Pressable style={styles.modalCard} onPress={() => {}}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Device</Text>
-              <TouchableOpacity onPress={() => setAddModal(false)} hitSlop={8}>
+              <Text style={styles.modalTitle}>{phoneNameStep ? "Set up a phone" : "Add Device"}</Text>
+              <TouchableOpacity onPress={closeAddModal} hitSlop={8}>
                 <X size={20} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.modalSubtitle}>
-              Select a device type to add to this controller.
-            </Text>
-
-            {addableTypes.length === 0 ? (
-              <View style={styles.allAddedRow}>
-                <Text style={styles.allAddedText}>All device types are already added.</Text>
-              </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {phoneNameStep ? (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  Name this phone device. Set it up here, then open it on any phone to stream that
+                  phone&apos;s camera & sensors — the phone that links can be a different one.
+                </Text>
+                <Input
+                  value={phoneName}
+                  onChangeText={setPhoneName}
+                  placeholder={DEFAULT_PHONE_DEVICE_NAME}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={addPhoneDevice}
+                />
+                <View style={styles.modalButtons}>
+                  <Button label="Back" variant="secondary" style={styles.modalBtnFlex} onPress={() => setPhoneNameStep(false)} />
+                  <Button label="Add" style={styles.modalBtnFlex} onPress={addPhoneDevice} />
+                </View>
+              </>
             ) : (
-              addableTypes.map((devType, idx, arr) => {
-                const busy = enabling === devType.field;
-                return (
-                  <View key={devType.field}>
-                    <ListRow
-                      card={false}
-                      title={devType.name}
-                      subtitle={devType.subtitle}
-                      icon={devType.icon}
-                      iconColor={devType.iconBg}
-                      onPress={devType.onAdd}
-                      chevron={!busy}
-                      right={busy ? <ActivityIndicator size="small" color={colors.accent} /> : undefined}
-                    />
-                    {idx < arr.length - 1 && <Divider inset />}
-                  </View>
-                );
-              })
+              <>
+                <Text style={styles.modalSubtitle}>
+                  Select a device type to add to this controller.
+                </Text>
+                {addableTypes.map((devType) => {
+                  const busy = enabling === devType.field;
+                  return (
+                    <View key={devType.field}>
+                      <ListRow
+                        card={false}
+                        title={devType.name}
+                        subtitle={devType.subtitle}
+                        icon={devType.icon}
+                        iconColor={devType.iconBg}
+                        onPress={devType.onAdd}
+                        chevron={!busy}
+                        right={busy ? <ActivityIndicator size="small" color={colors.accent} /> : undefined}
+                      />
+                      <Divider inset />
+                    </View>
+                  );
+                })}
+
+                {/* A phone IO device (camera + sensors). Multiple are allowed, and the phone that
+                    links as provider can be a different one than set it up here. */}
+                <ListRow
+                  card={false}
+                  title="Phone"
+                  subtitle="Camera & sensors — streamed from a phone"
+                  icon={<Smartphone size={20} color={colors.accent} />}
+                  iconColor={colors.accentSoft}
+                  onPress={() => { setPhoneName(DEFAULT_PHONE_DEVICE_NAME); setPhoneNameStep(true); }}
+                  chevron
+                />
+              </>
             )}
+            </ScrollView>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -475,6 +580,7 @@ const styles = StyleSheet.create({
   deleteBtn: { padding: spacing.xs + 2, marginLeft: 0 },
 
   // ── Add Device modal ───────────────────────────────────────────────────────
+  modalOuter: { flex: 1 },
   modalOverlay: {
     flex: 1,
     backgroundColor: colors.overlay,
@@ -487,6 +593,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     width: "100%",
     maxWidth: 400,
+    maxHeight: "85%",
     padding: spacing.lg + 4,
     ...shadows.raised,
   },
@@ -498,6 +605,10 @@ const styles = StyleSheet.create({
   },
   modalTitle:    type.pageTitle,
   modalSubtitle: { ...type.subtitle, marginBottom: spacing.md, lineHeight: 18 },
+
+  // Phone set-up step (name entry) buttons.
+  modalButtons: { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.md },
+  modalBtnFlex: { flex: 1 },
 
   allAddedRow: { paddingVertical: spacing.lg, alignItems: "center" },
   allAddedText: { fontSize: 14, color: colors.textFaint },

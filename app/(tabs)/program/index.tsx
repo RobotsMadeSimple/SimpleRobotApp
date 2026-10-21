@@ -6,7 +6,7 @@ import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
-import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
+import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Plug, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -298,6 +298,10 @@ export default function ProgramScreen() {
     programSummaries.filter(p => !builtNames.has(p.name)).length;
   const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
 
+  // Plugins summary from the status poll (GetStatus.plugins, additive).
+  const pluginList     = robotStatus?.plugins ?? [];
+  const pluginsRunning = pluginList.filter(p => p.state === "running" || p.state === "degraded").length;
+
   const activeCount = programSummaries.filter(
     p => p.status === "Running" || p.status === "Starting" || p.status === "Finishing"
   ).length;
@@ -395,6 +399,16 @@ export default function ProgramScreen() {
                 onPress: () => router.navigate("/(tabs)/program/vision"),
               }]
             : []),
+          {
+            key: "plugins",
+            title: "Plugins",
+            subtitle: pluginList.length === 0
+              ? "External steps, functions, and services"
+              : `${pluginsRunning} running / ${pluginList.length} installed`,
+            icon: <Plug size={20} color={colors.accent} />,
+            iconColor: colors.accentSoft,
+            onPress: () => router.navigate("/(tabs)/program/plugins"),
+          },
         ].map((item, i, arr) => (
           <View key={item.key}>
             <ListRow

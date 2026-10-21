@@ -12,6 +12,8 @@ export default function ProgramLayout() {
       <Stack.Screen name="vision"          options={{ headerShown: false }} />
       <Stack.Screen name="vision-editor"   options={{ headerShown: false }} />
       <Stack.Screen name="cnc-builder"     options={{ headerShown: false }} />
+      <Stack.Screen name="plugins"         options={{ headerShown: false }} />
+      <Stack.Screen name="plugin-detail"   options={{ headerShown: false }} />
     </Stack>
   );
 }
