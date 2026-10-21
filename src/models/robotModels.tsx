@@ -1,6 +1,9 @@
 ﻿// ── Nano IO ───────────────────────────────────────────────────────────────────
 
-export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured';
+export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured' | 'LoadCell';
+
+/** Display units for a load cell; grams is the master behind the scenes. */
+export type LoadCellUnit = 'g' | 'kg' | 'oz' | 'lb' | 'N';
 
 export type NanoPinState = {
   pin: number;
@@ -10,6 +13,14 @@ export type NanoPinState = {
   nanoId: string;
   nanoName: string;
   pixelCount: number;
+  // Load cell (type === 'LoadCell') ─ grams is the master; the app converts to `unit` for display.
+  sckPin?: number;
+  raw?: number;
+  grams?: number;
+  unit?: LoadCellUnit;
+  tareOffset?: number;
+  countsPerGram?: number;
+  sampleRateHz?: number;
 };
 
 export type NanoState = {
@@ -125,8 +136,30 @@ export type CameraState = {
   hwaccel?: string;
 };
 
-export type CameraSourceType = "usb" | "network" | "sofia";
+export type CameraSourceType = "usb" | "network" | "sofia" | "phone";
 export type CameraTransport = "tcp" | "udp";
+
+/** One live value a phone/client pushed over `/devices/{id}/ingest`. */
+export type DeviceChannel = {
+  key: string;
+  value: number;
+  /** Optional unit label from the phone (informational). */
+  unit?: string;
+  /** Phone-supplied sample timestamp (Unix ms). */
+  unixMs: number;
+};
+
+/** A phone/client data device (native, not a plugin). Readable in expressions as `$device.<id>.<channel>`. */
+export type DeviceState = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** True while channel data has arrived recently. */
+  connected: boolean;
+  /** App-owned provider settings JSON (stored on the controller, pulled by whichever phone provides). */
+  providerConfig?: string;
+  channels: DeviceChannel[];
+};
 export type CameraStream = "Main" | "Extra1";
 export type CameraCodec = "h264" | "hevc";
 export type CameraDecoder = "opencv" | "ffmpeg";
@@ -411,7 +444,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'MoveWithForce' | 'Unknown';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -1023,6 +1056,19 @@ export type ProgramStep = {
   outputNanoId?: string;   // only for nano
   pulseMs?: number;        // >0 = pulse; set to outputValue for pulseMs then flip
   pulseBlocking?: boolean; // when true, block program execution until pulse completes
+  // Load cell (Tare, ReadLoadCell, MoveWithForce)
+  loadCellNanoId?: string;
+  loadCellPin?: number;
+  loadCellUnit?: string;   // ReadLoadCell: unit to store (default grams)
+  // Move with force
+  forceAxis?: string;              // X/Y/Z/RX/RY/RZ
+  forceDirection?: number;         // +1 / -1
+  forceTargetGrams?: number;
+  forceToleranceGrams?: number;
+  forceMaxTravelMm?: number;
+  forceApproachSpeed?: number;
+  forceHoldMs?: number;
+  forceTimeoutMs?: number;
   waitMs?: number;
   loopCount?: number;
   loopSteps?: ProgramStep[];
@@ -1047,15 +1093,18 @@ export type ProgramStep = {
   ifSteps?: ProgramStep[];
   elseIfBranches?: ElseIfBranch[];
   elseSteps?: ProgramStep[];
-  // SetTool
+  // SetTool — toolId is the stable link (rename-proof); toolName is a display label / fallback.
   toolName?: string;
+  toolId?: string;
   // SetJointPosition — manually home one joint by declaring its value (no motion).
   // jointIndex: 0=J1/X, 1=Horizontal/Y, 2=Vertical/Z, 3=J4/RZ. jointValue is the literal;
   // an expressions.jointValue entry overrides it at runtime (e.g. an external reading).
   jointIndex?: number;
   jointValue?: number;
-  // SetLocal / ClearLocal — also used as per-step local override on move steps
+  // SetLocal / ClearLocal — also used as per-step local override on move steps.
+  // localId is the stable link (rename-proof); localName is a display label / fallback.
   localName?: string;
+  localId?: string;
   // JumpL / JumpJ
   jumpZ?: number;
   jumpZStart?: number;
@@ -1409,6 +1458,8 @@ export type Point = {
 }
 
 export type Tool = {
+  /** Stable id (rename-proof) — program steps link by this; name is a display/convenience alias. */
+  id?: string
   name: string
   description: string
   lastUpdatedUnixMs: number
@@ -1421,6 +1472,8 @@ export type Tool = {
 }
 
 export type Local = {
+  /** Stable id (rename-proof) — program steps link by this; name is a display/convenience alias. */
+  id?: string
   name: string
   description: string
   lastUpdatedUnixMs: number
@@ -1739,6 +1792,8 @@ export type PluginManifest = {
   steps?: PluginStepDef[];
   functions?: PluginFunctionDef[];
   properties?: PluginPropertyDef[];
+  /** A custom GUI the plugin ships; shown in a WebView on the plugin detail page. */
+  ui?: { entry: string; title?: string };
 };
 
 export type PluginSummary = {

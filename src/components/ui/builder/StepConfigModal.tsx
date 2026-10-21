@@ -870,6 +870,178 @@ export function StepConfigModal({
         );
       }
 
+      case "MoveWithForce": {
+        const lcNanos = nanos ?? [];
+        const nid = draft!.loadCellNanoId
+          ?? lcNanos.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
+          ?? lcNanos[0]?.id;
+        const lcPins = (lcNanos.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
+        const axis = draft!.forceAxis ?? "Z";
+        const dir = draft!.forceDirection ?? -1;
+        const numField = (label: string, value: number | undefined, onChange: (n: number | undefined) => void, placeholder: string) => (
+          <>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{label}</Text>
+            <TextInput style={ms.input} keyboardType="numeric"
+              value={value != null ? String(value) : ""}
+              onChangeText={v => onChange(v.trim() === "" ? undefined : Number(v))}
+              placeholder={placeholder} placeholderTextColor={colors.textFaint} />
+          </>
+        );
+        return (
+          <>
+            {lcNanos.length > 1 && (
+              <>
+                <Text style={ms.fieldLabel}>NANO DEVICE</Text>
+                <View style={ms.segRow}>
+                  {lcNanos.map(n => {
+                    const active = nid === n.id;
+                    return (
+                      <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                        onPress={() => set({ loadCellNanoId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+            <Text style={lcNanos.length > 1 ? [ms.fieldLabel, { marginTop: 12 }] : ms.fieldLabel}>LOAD CELL (FORCE SOURCE)</Text>
+            {lcPins.length === 0 ? (
+              <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No load cells configured on this Nano — add one on the I/O page.</Text>
+            ) : (
+              <View style={ms.segRow}>
+                {lcPins.map(p => {
+                  const active = draft!.loadCellPin === p.pin;
+                  return (
+                    <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ loadCellNanoId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
+            <View style={ms.segRow}>
+              {(["X", "Y", "Z", "RX", "RY", "RZ"] as const).map(a => {
+                const active = axis === a;
+                return (
+                  <TouchableOpacity key={a} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ forceAxis: a })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{a}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
+            <View style={ms.segRow}>
+              {([{ v: 1, l: `${axis}+` }, { v: -1, l: `${axis}−` }]).map(({ v, l }) => {
+                const active = dir === v;
+                return (
+                  <TouchableOpacity key={v} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                    onPress={() => set({ forceDirection: v })} activeOpacity={0.8}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{l}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {numField("TARGET FORCE (grams)", draft!.forceTargetGrams, n => set({ forceTargetGrams: n }), "500")}
+            {numField("TOLERANCE (grams)", draft!.forceToleranceGrams, n => set({ forceToleranceGrams: n }), "20")}
+            {numField("MAX TRAVEL (mm)", draft!.forceMaxTravelMm, n => set({ forceMaxTravelMm: n }), "10")}
+            {numField("APPROACH SPEED (mm/s)", draft!.forceApproachSpeed, n => set({ forceApproachSpeed: n }), "5")}
+            {numField("HOLD TIME (ms, 0 = reach then finish)", draft!.forceHoldMs, n => set({ forceHoldMs: n !== undefined ? Math.round(n) : undefined }), "0")}
+            {numField("TIMEOUT (ms)", draft!.forceTimeoutMs, n => set({ forceTimeoutMs: n !== undefined ? Math.round(n) : undefined }), "20000")}
+            <Text style={[ms.hintText, { marginTop: 10 }]}>
+              {`Presses along ${axis}${dir < 0 ? "−" : "+"} until ${draft!.forceTargetGrams ?? 0} g of contact force, then holds it. Stops on max travel or timeout for safety, and backs off if the force runs over. Use 80 SPS on the load cell for smooth holding.`}
+            </Text>
+          </>
+        );
+      }
+      case "Tare":
+      case "ReadLoadCell": {
+        const lcNanos = nanos ?? [];
+        const nid = draft!.loadCellNanoId
+          ?? lcNanos.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
+          ?? lcNanos[0]?.id;
+        const lcPins = (lcNanos.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
+        const isRead = draft!.type === "ReadLoadCell";
+        const numVars = (variables ?? []).filter(v => !v.isImage);
+        const unit = draft!.loadCellUnit ?? "g";
+        return (
+          <>
+            {lcNanos.length > 1 && (
+              <>
+                <Text style={ms.fieldLabel}>NANO DEVICE</Text>
+                <View style={ms.segRow}>
+                  {lcNanos.map(n => {
+                    const active = nid === n.id;
+                    return (
+                      <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                        onPress={() => set({ loadCellNanoId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>LOAD CELL</Text>
+            {lcPins.length === 0 ? (
+              <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No load cells configured on this Nano — add one on the I/O page.</Text>
+            ) : (
+              <View style={ms.segRow}>
+                {lcPins.map(p => {
+                  const active = draft!.loadCellPin === p.pin;
+                  return (
+                    <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ loadCellNanoId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            {!isRead && (
+              <Text style={[ms.hintText, { marginTop: 8 }]}>Zeros the selected load cell (sets its current reading to 0).</Text>
+            )}
+            {isRead && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>UNIT</Text>
+                <View style={ms.segRow}>
+                  {(["g", "kg", "oz", "lb", "N"] as const).map(u => {
+                    const active = unit === u;
+                    return (
+                      <TouchableOpacity key={u} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                        onPress={() => set({ loadCellUnit: u })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]}>{u}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STORE IN VARIABLE</Text>
+                {numVars.length === 0 ? (
+                  <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>Create a variable first (Set Variable step).</Text>
+                ) : (
+                  <View style={[ms.segRow, { flexWrap: "wrap" }]}>
+                    {numVars.map(v => {
+                      const active = draft!.variableName === v.name;
+                      return (
+                        <TouchableOpacity key={v.name} style={[ms.seg, active && ms.segActive]}
+                          onPress={() => set({ variableName: v.name })} activeOpacity={0.8}>
+                          <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{`$${v.name}`}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+                <Text style={[ms.hintText, { marginTop: 8 }]}>
+                  {`Reads the load cell weight (in ${unit}) into $${draft!.variableName ?? "the variable"} each time this step runs.`}
+                </Text>
+              </>
+            )}
+          </>
+        );
+      }
       case "SetOutput": {
         const selectedCard = draft!.outputCard ?? "stb";
         const outputPins = selectedCard === "nano"
@@ -887,7 +1059,11 @@ export function StepConfigModal({
                 const active = selectedCard === key;
                 return (
                   <TouchableOpacity key={key} style={[ms.seg, active && ms.segActive, { flex: 1, flexDirection: "column", alignItems: "center", gap: 2, paddingVertical: 6 }]}
-                    onPress={() => set({ outputCard: key, outputNumber: 1, outputNanoId: key === "nano" ? (nanos?.[0]?.id ?? undefined) : undefined })}
+                    onPress={() => set({
+                      outputCard: key,
+                      outputNumber: 1,
+                      outputNanoId:   key === "nano"  ? (nanos?.[0]?.id ?? undefined) : undefined,
+                    })}
                     activeOpacity={0.8}>
                     <Icon size={14} color={active ? color : colors.textMuted} />
                     <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
@@ -1795,13 +1971,17 @@ export function StepConfigModal({
             <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 6 }}>
               Select which tool TCP offset to activate for subsequent move steps.
             </Text>
-            {[{ name: 'none', label: 'None (clear tool)' }, ...allTools.map(t => ({ name: t.name, label: t.name }))].map((t, i, arr) => {
-              const active = (draft!.toolName ?? 'none') === t.name;
+            {[{ id: undefined as string | undefined, name: 'none', label: 'None (clear tool)' }, ...allTools.map(t => ({ id: t.id, name: t.name, label: t.name }))].map((t, i, arr) => {
+              const isNone = t.name === 'none';
+              // Match by stable id when the step carries one (rename-proof), else by name.
+              const active = isNone
+                ? !draft!.toolId && !draft!.toolName
+                : (draft!.toolId ? draft!.toolId === t.id : draft!.toolName === t.name);
               return (
                 <TouchableOpacity
-                  key={t.name}
+                  key={t.id ?? t.name}
                   style={[ms.row, i < arr.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                  onPress={() => set({ toolName: t.name === 'none' ? undefined : t.name })}
+                  onPress={() => set(isNone ? { toolId: undefined, toolName: undefined } : { toolId: t.id, toolName: t.name })}
                   activeOpacity={0.7}
                 >
                   <View style={[ms.radioRing, active && ms.radioRingActive]}>
@@ -1828,13 +2008,17 @@ export function StepConfigModal({
             <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 6 }}>
               Select which local coordinate frame to activate for subsequent move steps.
             </Text>
-            {[{ name: 'none', label: 'None (clear local)' }, ...allLocals.map(l => ({ name: l.name, label: l.name }))].map((l, i, arr) => {
-              const active = (draft!.localName ?? 'none') === l.name;
+            {[{ id: undefined as string | undefined, name: 'none', label: 'None (clear local)' }, ...allLocals.map(l => ({ id: l.id, name: l.name, label: l.name }))].map((l, i, arr) => {
+              const isNone = l.name === 'none';
+              // Match by stable id when the step carries one (rename-proof), else by name.
+              const active = isNone
+                ? !draft!.localId && !draft!.localName
+                : (draft!.localId ? draft!.localId === l.id : draft!.localName === l.name);
               return (
                 <TouchableOpacity
-                  key={l.name}
+                  key={l.id ?? l.name}
                   style={[ms.row, i < arr.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                  onPress={() => set({ localName: l.name === 'none' ? undefined : l.name })}
+                  onPress={() => set(isNone ? { localId: undefined, localName: undefined } : { localId: l.id, localName: l.name })}
                   activeOpacity={0.7}
                 >
                   <View style={[ms.radioRing, active && ms.radioRingActive]}>

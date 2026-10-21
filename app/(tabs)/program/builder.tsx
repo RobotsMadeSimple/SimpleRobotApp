@@ -54,6 +54,7 @@ import { usePluginContributions } from "@/src/components/ui/builder/usePluginCon
 import { pluginStepFields } from "@/src/components/ui/builder/pluginSteps";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
+import { renameVariableInSteps, renameVariableInVariables } from "@/src/components/ui/builder/renameVariable";
 import { newId, getStepsAtScope, setStepsAtScope, backfillPointIds, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
 import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
@@ -498,10 +499,20 @@ export default function BuilderScreen() {
   function openEditVar(v: ProgramVariable) { setEditingVar(v); setVarModalOpen(true); }
 
   function saveVar(v: ProgramVariable) {
-    setVariables(prev => {
-      const idx = prev.findIndex(x => x.id === v.id);
-      if (idx >= 0) { const next = [...prev]; next[idx] = v; return next; }
-      return [...prev, v];
+    // A rename must rewrite every `$name` reference across the program (and bare-name target fields),
+    // or the links orphan — the name is the symbol in the expression language. Done atomically with
+    // the variable-list update so steps + variables stay consistent in one commit.
+    const oldName = editingVar?.name;
+    const isRename = !!oldName && oldName !== v.name;
+    commit(d => {
+      const idx = d.variables.findIndex(x => x.id === v.id);
+      let variables = idx >= 0 ? d.variables.map((x, i) => (i === idx ? v : x)) : [...d.variables, v];
+      let steps = d.steps;
+      if (isRename) {
+        variables = renameVariableInVariables(variables, oldName!, v.name);
+        steps = renameVariableInSteps(d.steps, oldName!, v.name);
+      }
+      return { ...d, variables, steps };
     });
   }
 

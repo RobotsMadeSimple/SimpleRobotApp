@@ -67,6 +67,8 @@ export function StepTypePicker({
   const pluginSteps = useMemo(() => (onPickPlugin ? allPluginSteps : []), [onPickPlugin, allPluginSteps]);
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState<StepCategoryKey | null>(null);
+  // Within the Plugins category, a second layer: pick a plugin, then its steps.
+  const [activePlugin, setActivePlugin] = useState<string | null>(null);
   const [gridWidth, setGridWidth] = useState(360);
   const paneLayout = usePaneLayout();
   const isWide = paneLayout !== "single";
@@ -76,11 +78,22 @@ export function StepTypePicker({
   const tileWidth = (gridWidth - GAP * (cols - 1)) / cols;
 
   useEffect(() => {
-    if (visible) { setSearch(""); setActiveCat(null); }
+    if (visible) { setSearch(""); setActiveCat(null); setActivePlugin(null); }
     // Pick up plugins installed or started since the builder opened.
     if (visible && onPickPlugin && contributions.status !== "unsupported") contributions.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
+
+  // Plugin steps grouped by plugin, for the plugin-name layer (Plugins → plugin → steps).
+  const pluginGroups = useMemo(() => {
+    const m = new Map<string, { pluginId: string; pluginName: string; running: boolean; steps: PluginStepContribution[] }>();
+    for (const c of pluginSteps) {
+      let g = m.get(c.pluginId);
+      if (!g) { g = { pluginId: c.pluginId, pluginName: c.pluginName, running: c.running, steps: [] }; m.set(c.pluginId, g); }
+      g.steps.push(c);
+    }
+    return [...m.values()].sort((a, b) => a.pluginName.localeCompare(b.pluginName));
+  }, [pluginSteps]);
 
   const q = search.trim().toLowerCase();
   const searchResults = useMemo(() => {
@@ -106,6 +119,7 @@ export function StepTypePicker({
   const activeCategory = activeCat === "plugins"
     ? (pluginSteps.length > 0 ? PLUGIN_CATEGORY : null)
     : activeCat ? STEP_CATEGORIES.find(c => c.key === activeCat) ?? null : null;
+  const selectedGroup = activePlugin ? pluginGroups.find(g => g.pluginId === activePlugin) ?? null : null;
   const resultCount = (searchResults?.length ?? 0) + pluginResults.length;
 
   function renderPluginTile(c: PluginStepContribution, opts?: { showCategory?: boolean }) {
@@ -131,6 +145,28 @@ export function StepTypePicker({
             <Text style={[pt.catTagText, { color: PLUGIN_CATEGORY.color }]} numberOfLines={1}>{PLUGIN_CATEGORY.label}</Text>
           </View>
         )}
+      </TouchableOpacity>
+    );
+  }
+
+  function renderPluginGroupTile(g: { pluginId: string; pluginName: string; running: boolean; steps: PluginStepContribution[] }) {
+    const theme = STEP_THEME["Plugin"];
+    const count = g.steps.length;
+    return (
+      <TouchableOpacity
+        key={g.pluginId}
+        style={[pt.tile, { width: tileWidth }, !g.running && pt.tileNotRunning]}
+        onPress={() => setActivePlugin(g.pluginId)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${g.pluginName} — ${count} step${count !== 1 ? "s" : ""}${g.running ? "" : " (not running)"}`}
+      >
+        <View style={[pt.tileIcon, { backgroundColor: theme.iconBg }]}>
+          <StepIcon type="Plugin" size={20} color={theme.iconColor} />
+        </View>
+        <Text style={[pt.tileLabel, { color: theme.accent }]} numberOfLines={2}>{g.pluginName}</Text>
+        <Text style={pt.tileSub} numberOfLines={1}>{count} step{count !== 1 ? "s" : ""}</Text>
+        {!g.running && <Text style={pt.notRunning}>not running</Text>}
       </TouchableOpacity>
     );
   }
@@ -177,7 +213,7 @@ export function StepTypePicker({
       <TouchableOpacity
         key={cat.key}
         style={[pt.catTile, { width: tileWidth }]}
-        onPress={() => setActiveCat(cat.key)}
+        onPress={() => { setActiveCat(cat.key); setActivePlugin(null); }}
         activeOpacity={0.7}
         accessibilityRole="button"
         accessibilityLabel={`${cat.label} — ${count} block${count !== 1 ? "s" : ""}`}
@@ -199,14 +235,14 @@ export function StepTypePicker({
             {activeCategory && !q ? (
               <TouchableOpacity
                 style={pt.backRow}
-                onPress={() => setActiveCat(null)}
+                onPress={() => { if (selectedGroup) setActivePlugin(null); else setActiveCat(null); }}
                 hitSlop={8}
                 activeOpacity={0.7}
                 accessibilityRole="button"
-                accessibilityLabel="Back to categories"
+                accessibilityLabel={selectedGroup ? "Back to plugins" : "Back to categories"}
               >
                 <ChevronLeft size={18} color={colors.textMuted} />
-                <Text style={ms.title} numberOfLines={1}>{activeCategory.label}</Text>
+                <Text style={ms.title} numberOfLines={1}>{selectedGroup ? selectedGroup.pluginName : activeCategory.label}</Text>
               </TouchableOpacity>
             ) : (
               <Text style={ms.title}>Add Step</Text>
@@ -257,12 +293,23 @@ export function StepTypePicker({
                 </>
               )
             ) : activeCategory?.key === "plugins" ? (
-              <>
-                <CategoryBanner cat={activeCategory} />
-                <View style={pt.grid}>
-                  {pluginSteps.map(c => renderPluginTile(c))}
-                </View>
-              </>
+              selectedGroup ? (
+                // Layer 3 — the chosen plugin's steps.
+                <>
+                  <CategoryBanner cat={activeCategory} />
+                  <View style={pt.grid}>
+                    {selectedGroup.steps.map(c => renderPluginTile(c))}
+                  </View>
+                </>
+              ) : (
+                // Layer 2 — one tile per plugin; tap to see its steps.
+                <>
+                  <CategoryBanner cat={activeCategory} />
+                  <View style={pt.grid}>
+                    {pluginGroups.map(g => renderPluginGroupTile(g))}
+                  </View>
+                </>
+              )
             ) : activeCategory ? (
               <>
                 <CategoryBanner cat={activeCategory} />

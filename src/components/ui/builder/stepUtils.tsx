@@ -8,7 +8,9 @@ import {
   Clock,
   Cpu,
   Brackets,
+  ArrowDownToLine,
   Gauge,
+  Scale,
   Globe,
   Grid3x3,
   Hash,
@@ -146,6 +148,12 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       if (card === "nano")  return `Nano · Pin ${num}  →  ${val}${pulse}`;
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
+    case "Tare":
+      return `Tare Load Cell${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}`;
+    case "ReadLoadCell":
+      return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `  (${step.loadCellUnit})` : ""}`;
+    case "MoveWithForce":
+      return `Move with Force  ${step.forceAxis ?? "Z"}${(step.forceDirection ?? -1) < 0 ? "−" : "+"}  →  ${step.forceTargetGrams ?? 0} g`;
     case "Wait": {
       if (step.waitMode === 'condition') {
         const g = step.waitCondition;
@@ -277,6 +285,9 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "JumpL":
     case "JumpJ":        return <ArrowRight    size={size} color={color} />;
     case "SetOutput":    return <Zap           size={size} color={color} />;
+    case "Tare":         return <Scale         size={size} color={color} />;
+    case "ReadLoadCell": return <Gauge         size={size} color={color} />;
+    case "MoveWithForce":return <ArrowDownToLine size={size} color={color} />;
     case "Wait":         return <Clock         size={size} color={color} />;
     case "Loop":         return <RefreshCw     size={size} color={color} />;
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
@@ -326,6 +337,9 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   JumpL:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Jump Linear"  },
   JumpJ:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Jump Joint"   },
   SetOutput:    { accent: "#ea580c", iconBg: "#fed7aa", iconColor: "#ea580c", label: "Set Output"   },
+  Tare:         { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Tare Load Cell" },
+  ReadLoadCell: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Read Load Cell" },
+  MoveWithForce:{ accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Move with Force" },
   Wait:         { accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait"         },
   Loop:         { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Loop"         },
   StatusUpdate: { accent: "#475569", iconBg: "#e2e8f0", iconColor: "#475569", label: "Status Update"},
@@ -467,6 +481,16 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
                   :                    `STB · Output ${num}  →  ${val}`;
       const lines = [label];
       if (step.pulseMs && step.pulseMs > 0) lines.push(`Pulse  ${step.pulseMs} ms${step.pulseBlocking ? "  (blocking)" : ""}`);
+      return lines.join('\n');
+    }
+    case "Tare":
+      return `Tare Load Cell${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
+    case "ReadLoadCell":
+      return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `\nunit: ${step.loadCellUnit}` : ""}`;
+    case "MoveWithForce": {
+      const lines = [`Press ${step.forceAxis ?? "Z"}${(step.forceDirection ?? -1) < 0 ? "−" : "+"}  →  ${step.forceTargetGrams ?? 0} g`];
+      if (step.forceHoldMs) lines.push(`hold ${step.forceHoldMs} ms`);
+      if (step.forceMaxTravelMm) lines.push(`max travel ${step.forceMaxTravelMm} mm`);
       return lines.join('\n');
     }
     case "Wait": {
@@ -755,6 +779,9 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "JumpL",        label: "Jump Linear",   desc: "Lift, move linearly over the target, then lower — avoids obstacles" },
   { type: "JumpJ",        label: "Jump Joint",    desc: "Lift, move via joint interpolation over the target, then lower — avoids obstacles" },
   { type: "SetOutput",    label: "Set Output",    desc: "Turn a digital output ON or OFF" },
+  { type: "Tare",         label: "Tare Load Cell", desc: "Zero a load cell (set its current reading to 0)" },
+  { type: "ReadLoadCell", label: "Read Load Cell", desc: "Read a load cell's weight into a variable" },
+  { type: "MoveWithForce", label: "Move with Force", desc: "Press in a direction and hold a target contact force (load cell)" },
   { type: "Wait",         label: "Wait",          desc: "Pause execution for a set duration" },
   { type: "Loop",         label: "Loop",          desc: "Repeat a block of steps N times" },
   { type: "StatusUpdate", label: "Status Update", desc: "Publish a message, warning, or error to the monitor" },
@@ -831,7 +858,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "MoveWithForce", "RunHoming", "SetJointPosition", "CncProgram"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,
@@ -855,7 +882,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "io", label: "I/O & Aux Axes", icon: Zap,
     desc: "Drive digital outputs and auxiliary stepper axes.",
     color: accents.orange, soft: accents.orangeSoft,
-    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
+    types: ["SetOutput", "Tare", "ReadLoadCell", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
   },
   {
     key: "vision", label: "Vision", icon: ScanSearch,
