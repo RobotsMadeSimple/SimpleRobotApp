@@ -8,6 +8,7 @@ import {
   ViewStyle,
 } from "react-native";
 import { AnimatedPressable } from "./AnimatedPressable";
+import { withHaptic } from "./haptics";
 import { colors } from "@/src/components/ui/kit";
 
 /**
@@ -39,7 +40,7 @@ export function ActionButton({
     <AnimatedPressable
       style={style}
       disabled={inactive}
-      onPress={inactive ? undefined : onPress}
+      onPress={inactive ? undefined : withHaptic("light", onPress)}
     >
       {loading ? (
         <ActivityIndicator size="small" color={spinnerColor} />

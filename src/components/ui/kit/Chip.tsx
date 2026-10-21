@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
+import { withHaptic } from "@/src/components/ui/haptics";
 import { colors, radii, spacing } from "./theme";
 
 type ChipProps = {
@@ -24,7 +25,7 @@ export function Chip({ label, selected = false, onPress, tint, disabled, style }
   const [fg, bg] = tint ?? [colors.accent, colors.accentSoft];
   return (
     <Pressable
-      onPress={onPress}
+      onPress={withHaptic("selection", onPress)}
       disabled={disabled || !onPress}
       accessibilityRole="button"
       accessibilityState={{ selected, disabled: !!disabled }}

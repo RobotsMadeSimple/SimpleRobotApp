@@ -54,6 +54,16 @@ import { colors, spacing, radii, type, shadows } from "@/src/components/ui/kit";
 `ListRow` also takes `titleColor?` (accent-colored action rows) and
 `subtitleLines?` (default 1) for two-line descriptions.
 
+**Haptics** are built into the shared pressables (`haptics.ts`), so taps feel
+physical on device with no per-screen wiring: `Button` (light tap, `primary`
+firmer, `destructive`/STOP a warning buzz — override or silence with the
+`haptic` prop), pressable `Card`/`ListRow`/`RadioRow`/`Chip` and
+`SegmentedControl` (a `selection` tick), `DeleteIconButton` (firm), and
+`AppAlert` (a cue when a dialog appears + on its buttons). Native only — a no-op
+on web/Electron. For a targeted outcome cue call `haptic("success" | "error" |
+…)` directly (exported from the kit); keep it off rapid/continuous controls
+(e.g. the jog repeat) to avoid buzzing.
+
 Keep using existing shared pieces where a screen already has them:
 `ProgramListLayout`, `AppAlert`, `NotConnectedOverlay`,
 `AnimatedPressable`, `useWideContent`/`usePaneLayout` from `responsive.ts`.

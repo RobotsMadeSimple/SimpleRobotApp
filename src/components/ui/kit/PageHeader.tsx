@@ -89,7 +89,9 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
             Always rendered — a landing page shows its own name as the single
             crumb, so the bar is a consistent landmark on every wide screen. */}
         {(
-          <View style={styles.crumbBar}>
+          // Pad past the status bar: the app draws edge-to-edge, so without the top inset the crumb
+          // bar renders under the status bar and the system intercepts taps on the breadcrumbs.
+          <View style={[styles.crumbBar, { paddingTop: insets.top + spacing.md + 2 }]}>
             <View style={[styles.crumbRow, wideContent]}>
               {trail.map((crumb, i) => {
                 const last = i === trail.length - 1;

@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { haptic, type HapticKind } from "@/src/components/ui/haptics";
 import { colors, radii, spacing } from "./theme";
 
 export type ButtonVariant =
@@ -33,9 +34,18 @@ type Props = {
   loading?: boolean;
   disabled?: boolean;
   onPress?: (e: GestureResponderEvent) => void;
+  /** Override the tap haptic, or pass `false` to silence it (defaults by variant). */
+  haptic?: HapticKind | false;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 };
+
+/** Default haptic per variant: STOP/destructive warns, primary CTAs tap firmer, the rest tap light. */
+function defaultHaptic(variant: ButtonVariant): HapticKind {
+  return variant === "destructive" ? "warning"
+    : variant === "primary" ? "medium"
+    : "light";
+}
 
 /** Text/icon color to use inside each button variant (for `icon`). */
 export function buttonTextColor(variant: ButtonVariant): string {
@@ -51,10 +61,15 @@ export function buttonTextColor(variant: ButtonVariant): string {
  */
 export function Button({
   label, variant = "primary", size = "md", icon,
-  loading = false, disabled = false, onPress, style, textStyle,
+  loading = false, disabled = false, onPress, haptic: hapticKind, style, textStyle,
 }: Props) {
   const inactive = disabled || loading;
   const textColor = buttonTextColor(variant);
+  const kind = hapticKind === undefined ? defaultHaptic(variant) : hapticKind;
+
+  const handlePress = onPress
+    ? (e: GestureResponderEvent) => { if (kind) haptic(kind); onPress(e); }
+    : undefined;
 
   return (
     <AnimatedPressable
@@ -68,7 +83,7 @@ export function Button({
         inactive && styles.dimmed,
       ]}
       disabled={inactive}
-      onPress={inactive ? undefined : onPress}
+      onPress={inactive ? undefined : handlePress}
     >
       {loading ? (
         <ActivityIndicator size="small" color={textColor} />

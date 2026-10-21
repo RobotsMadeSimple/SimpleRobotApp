@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Info, Trash2 } from "lucide-react-native";
 import { AnimatedPressable } from "./AnimatedPressable";
+import { haptic } from "@/src/components/ui/haptics";
 import { colors, shadows, spacing } from "@/src/components/ui/kit";
 
 // A drop-in replacement for React Native's Alert.alert that works on web too
@@ -51,6 +52,15 @@ export function AppAlertHost() {
     return () => { enqueue = null; };
   }, []);
 
+  // One cue when a dialog appears — a warning buzz if it guards a destructive action, else a soft tap.
+  const alertBuzzed = React.useRef(false);
+  useEffect(() => {
+    if (!current) { alertBuzzed.current = false; return; }
+    if (alertBuzzed.current) return;
+    alertBuzzed.current = true;
+    haptic(current.buttons?.some(b => b.style === "destructive") ? "warning" : "light");
+  }, [current]);
+
   function dismiss(btn?: AlertButton) {
     setQueue(q => q.slice(1));
     btn?.onPress?.();
@@ -99,7 +109,7 @@ export function AppAlertHost() {
                         ? styles.btnDestructive
                         : styles.btnDefault,
                   ]}
-                  onPress={() => dismiss(btn)}
+                  onPress={() => { haptic(isDestructive ? "medium" : "selection"); dismiss(btn); }}
                 >
                   {isDestructive && <Trash2 size={15} color={colors.onAccent} />}
                   <Text
