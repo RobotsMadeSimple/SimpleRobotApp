@@ -1,6 +1,6 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { enrichByAddress } from "./connectionStore";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -1352,6 +1352,119 @@ export class RobotConnectService {
   public setLoadCellUnit(nanoId: string, pin: number, unit: string) {
     return this.sendCommand("SetLoadCellUnit", { nanoId, pin, unit })
       .then(() => this.getIO().catch(() => {}));
+  }
+
+  // ── IO value history + recordings ────────────────────────────────────────────
+
+  /** Stable history channel key for a load cell (rename-proof: nano id + DT pin). */
+  public ioChannelForLoadCell(nanoId: string, pin: number): string {
+    return `nano/${nanoId}/${pin}`;
+  }
+
+  /** WebSocket URL for a channel's live sample stream (backfills the last `windowMs`, then streams). */
+  public ioHistoryWsUrl(channelKey: string, windowMs: number): string | null {
+    if (!this.url) return null;
+    const base = this.url.replace(/\/control$/, "");
+    return `${base}/io/history/ws?channel=${encodeURIComponent(channelKey)}&window=${Math.round(windowMs)}`;
+  }
+
+  /**
+   * Open the live sample stream for one channel. `onBatch` is called with each arriving batch
+   * (oldest-first). Auto-reconnects until the returned close function is called.
+   */
+  public openIoHistoryStream(
+    channelKey: string,
+    windowMs: number,
+    onBatch: (samples: IoSample[]) => void,
+  ): () => void {
+    const url = this.ioHistoryWsUrl(channelKey, windowMs);
+    if (!url) return () => {};
+    let closed = false;
+    let ws: WebSocket | null = null;
+    let retry: any;
+    const open = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(url);
+        ws.onmessage = (ev: any) => {
+          try {
+            const msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+            if (msg && Array.isArray(msg.samples) && msg.samples.length) onBatch(msg.samples as IoSample[]);
+          } catch { /* ignore a malformed frame */ }
+        };
+        ws.onclose = () => { ws = null; if (!closed) retry = setTimeout(open, 1000); };
+        ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
+      } catch { if (!closed) retry = setTimeout(open, 1000); }
+    };
+    open();
+    return () => { closed = true; clearTimeout(retry); try { ws?.close(); } catch { /* noop */ } ws = null; };
+  }
+
+  private normIoWindow(w: any, channelKey = ""): IoHistoryWindow {
+    return {
+      channelKey: w?.channelKey ?? channelKey,
+      unit:       w?.unit ?? "g",
+      fromUnixMs: w?.fromUnixMs ?? 0,
+      toUnixMs:   w?.toUnixMs ?? 0,
+      samples:    Array.isArray(w?.samples) ? w.samples : [],
+    };
+  }
+
+  public async getIoHistoryConfig(): Promise<{ maxRetentionMs: number }> {
+    const d: any = await this.sendCommand("GetIoHistoryConfig");
+    return { maxRetentionMs: d?.maxRetentionMs ?? 600_000 };
+  }
+
+  public setIoHistoryRetention(maxRetentionMs: number) {
+    return this.sendCommand("SetIoHistoryRetention", { maxRetentionMs });
+  }
+
+  public async getIoHistoryWindow(
+    channelKey: string, fromUnixMs?: number, toUnixMs?: number, maxPoints?: number,
+  ): Promise<IoHistoryWindow> {
+    const d: any = await this.sendCommand("GetIoHistoryWindow", {
+      channelKey,
+      ...(fromUnixMs != null && { fromUnixMs }),
+      ...(toUnixMs   != null && { toUnixMs }),
+      ...(maxPoints  != null && { maxPoints }),
+    });
+    return this.normIoWindow(d?.window, channelKey);
+  }
+
+  public async startIoRecording(channelKey: string, name?: string): Promise<IoRecordingMeta> {
+    const d: any = await this.sendCommand("StartIoRecording", { channelKey, ...(name != null && { name }) });
+    return d?.recording as IoRecordingMeta;
+  }
+
+  public async stopIoRecording(id: string): Promise<IoRecordingMeta> {
+    const d: any = await this.sendCommand("StopIoRecording", { id });
+    return d?.recording as IoRecordingMeta;
+  }
+
+  public async listIoRecordings(): Promise<IoRecordingMeta[]> {
+    const d: any = await this.sendCommand("ListIoRecordings");
+    return Array.isArray(d?.recordings) ? d.recordings : [];
+  }
+
+  public async getIoRecordingWindow(
+    id: string, fromUnixMs?: number, toUnixMs?: number, maxPoints?: number,
+  ): Promise<{ window: IoHistoryWindow; recording: IoRecordingMeta | null }> {
+    const d: any = await this.sendCommand("GetIoRecordingWindow", {
+      id,
+      ...(fromUnixMs != null && { fromUnixMs }),
+      ...(toUnixMs   != null && { toUnixMs }),
+      ...(maxPoints  != null && { maxPoints }),
+    });
+    return { window: this.normIoWindow(d?.window), recording: d?.recording ?? null };
+  }
+
+  public async saveIoRecording(id: string): Promise<IoRecordingMeta> {
+    const d: any = await this.sendCommand("SaveIoRecording", { id });
+    return d?.recording as IoRecordingMeta;
+  }
+
+  public deleteIoRecording(id: string) {
+    return this.sendCommand("DeleteIoRecording", { id });
   }
 
   public setRobotIdentity(fields: { robotName?: string; robotType?: string }) {

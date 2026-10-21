@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import {
   Check,
   ChevronDown,
+  Plus,
 } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -21,16 +22,21 @@ import {
 } from "react-native";
 
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { LOAD_CELL_UNITS } from "@/src/components/ui/loadcell";
 import {
   accents,
   Button,
   colors,
+  Divider,
+  FormRow,
   InfoTip,
   Input,
   PageHeader,
   radii,
+  SegmentedControl,
   shadows,
   spacing,
+  type,
 } from "@/src/components/ui/kit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,6 +228,55 @@ function ColumnHeaders({ style }: { style?: any }) {
   );
 }
 
+/** Modal to add an HX711 load cell: pick the DT + SCK pins and a display unit. */
+function AddLoadCellModal({ nanoId, onClose }: { nanoId: string; onClose: () => void }) {
+  const [dt, setDt] = useState("");
+  const [sck, setSck] = useState("");
+  const [unit, setUnit] = useState("g");
+  const [busy, setBusy] = useState(false);
+
+  const dtN = Number(dt), sckN = Number(sck);
+  const valid = Number.isInteger(dtN) && Number.isInteger(sckN) && dtN >= 0 && dtN <= 19 && sckN >= 0 && sckN <= 19 && dtN !== sckN;
+
+  const add = async () => {
+    if (!valid) return;
+    setBusy(true);
+    try {
+      await robotClient.configureLoadCell(nanoId, dtN, sckN, unit);
+      onClose();
+      router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { nanoId, pin: String(dtN) } });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable style={styles.modalCard} onPress={() => {}}>
+          <Text style={type.pageTitle}>Add Load Cell</Text>
+          <Text style={[type.subtitle, { marginBottom: spacing.sm }]}>
+            Wire the HX711 to two Nano pins. DT (data) and SCK (clock) must be different pins.
+          </Text>
+          <FormRow label="DT pin (data)" hint="e.g. 4">
+            <Input value={dt} onChangeText={setDt} keyboardType="numeric" placeholder="D?" style={styles.pinField} />
+          </FormRow>
+          <Divider />
+          <FormRow label="SCK pin (clock)" hint="e.g. 5">
+            <Input value={sck} onChangeText={setSck} keyboardType="numeric" placeholder="D?" style={styles.pinField} />
+          </FormRow>
+          <Divider />
+          <FormRow label="Unit">
+            <SegmentedControl options={LOAD_CELL_UNITS.map(u => ({ label: u, value: u }))} value={unit} onChange={setUnit} />
+          </FormRow>
+          <View style={styles.modalButtons}>
+            <Button label="Cancel" variant="secondary" style={{ flex: 1 }} onPress={onClose} />
+            <Button label="Add" style={{ flex: 1 }} loading={busy} disabled={!valid} onPress={add} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 export default function ConfigurePage() {
   const { nanoId } = useLocalSearchParams<{ nanoId: string }>();
   const nanos       = useNanoIO();
@@ -248,6 +303,7 @@ export default function ConfigurePage() {
 
   const [edits, setEdits] = useState<PinEdit[]>(initialEdits);
   const [saving, setSaving] = useState(false);
+  const [addLc, setAddLc] = useState(false);
 
   // Reset when navigating to a different nano
   useEffect(() => { setEdits(initialEdits); }, [initialEdits]);
@@ -379,7 +435,19 @@ export default function ConfigurePage() {
               />
             ))
           )}
+
+          {/* Load cells use the HX711's own 2-pin (DT/SCK) serial protocol rather than
+              a simple pin type, so they're added here instead of via the pin dropdown. */}
+          <Button
+            variant="dashed"
+            label="Add Load Cell"
+            icon={<Plus size={15} color={colors.accent} />}
+            onPress={() => setAddLc(true)}
+            style={styles.addLcBtn}
+          />
         </ScrollView>
+
+        {addLc && <AddLoadCellModal nanoId={nano.id} onClose={() => setAddLc(false)} />}
       </View>
     </KeyboardAvoidingView>
   );
@@ -515,4 +583,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warningSoft,
     textAlign: "center",
   },
+
+  // ── Add Load Cell ──────────────────────────────────────────────────────────
+  addLcBtn:      { marginTop: spacing.sm },
+  modalOverlay:  { flex: 1, backgroundColor: colors.overlay, justifyContent: "center", alignItems: "center", padding: spacing.xl },
+  modalCard:     { backgroundColor: colors.surface, borderRadius: radii.xl, width: "100%", maxWidth: 400, padding: spacing.lg + 4, gap: spacing.xs, ...shadows.raised },
+  modalButtons:  { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.md },
+  pinField:      { minWidth: 70, textAlign: "center" },
 });

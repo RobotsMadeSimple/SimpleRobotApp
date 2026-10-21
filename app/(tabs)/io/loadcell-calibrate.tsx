@@ -1,17 +1,28 @@
-import { useLocalSearchParams } from "expo-router";
-import { CheckCircle2, Scale } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { CheckCircle2, Circle, Download, ListChecks, Save, Scale, Square } from "lucide-react-native";
+import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { IoHistoryGraph } from "@/src/components/ui/io/IoHistoryGraph";
 import {
-  Button, Card, colors, Divider, FormRow, Input, PageHeader, Screen, SectionHeader,
+  Button, buttonTextColor, Card, colors, Divider, FormRow, Input, PageHeader, Screen, SectionHeader,
   SegmentedControl, spacing, StatusPill, type,
 } from "@/src/components/ui/kit";
 import { formatLoadCell, LOAD_CELL_UNITS, unitToGrams } from "@/src/components/ui/loadcell";
-import type { LoadCellUnit } from "@/src/models/robotModels";
+import type { IoRecordingMeta, LoadCellUnit } from "@/src/models/robotModels";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { exportSamplesCsv } from "@/src/services/ioExport";
+
+const RETENTION_PRESETS = [
+  { label: "1m", value: "60000" },
+  { label: "5m", value: "300000" },
+  { label: "10m", value: "600000" },
+  { label: "30m", value: "1800000" },
+  { label: "1h", value: "3600000" },
+];
 
 /**
  * Load cell calibration wizard: pick a display unit, zero the cell (tare = 0 offset), then teach the
@@ -36,6 +47,67 @@ export default function LoadCellCalibrateScreen() {
 
   const [known, setKnown] = useState("");
   const [busy, setBusy] = useState<"tare" | "cal" | null>(null);
+
+  // ── Live graph + recording ──────────────────────────────────────────────────
+  const channelKey = nanoId ? `nano/${nanoId}/${pinNum}` : null;
+  const [recording, setRecording] = useState<IoRecordingMeta | null>(null); // active
+  const [lastRec, setLastRec]     = useState<IoRecordingMeta | null>(null);  // just stopped
+  const [elapsed, setElapsed]     = useState(0);
+  const [recBusy, setRecBusy]     = useState(false);
+  const [expBusy, setExpBusy]     = useState(false);
+  const [saveBusy, setSaveBusy]   = useState(false);
+  const [retentionMs, setRetentionMs] = useState(600_000);
+
+  useEffect(() => { robotClient.getIoHistoryConfig().then(c => setRetentionMs(c.maxRetentionMs)).catch(() => {}); }, []);
+
+  // Tick the elapsed timer while a recording is active.
+  useEffect(() => {
+    if (!recording?.active) return;
+    const start = recording.startUnixMs;
+    const tick = () => setElapsed(Math.max(0, Math.round((Date.now() - start) / 1000)));
+    tick();
+    const iv = setInterval(tick, 500);
+    return () => clearInterval(iv);
+  }, [recording]);
+
+  const startRec = async () => {
+    if (!channelKey) return;
+    setRecBusy(true);
+    try { setLastRec(null); setRecording(await robotClient.startIoRecording(channelKey)); }
+    catch (e) { appAlert("Recording failed", String(e)); }
+    finally { setRecBusy(false); }
+  };
+  const stopRec = async () => {
+    if (!recording) return;
+    setRecBusy(true);
+    try { setLastRec(await robotClient.stopIoRecording(recording.id)); setRecording(null); }
+    catch (e) { appAlert("Stop failed", String(e)); }
+    finally { setRecBusy(false); }
+  };
+  const exportLast = async () => {
+    if (!lastRec) return;
+    setExpBusy(true);
+    try {
+      const { window } = await robotClient.getIoRecordingWindow(lastRec.id, undefined, undefined, 1_000_000);
+      await exportSamplesCsv(lastRec.name, window.samples, unit);
+    } catch (e) { appAlert("Export failed", String(e)); }
+    finally { setExpBusy(false); }
+  };
+  const saveLast = async () => {
+    if (!lastRec) return;
+    setSaveBusy(true);
+    try { setLastRec(await robotClient.saveIoRecording(lastRec.id)); }
+    catch (e) { appAlert("Save failed", String(e)); }
+    finally { setSaveBusy(false); }
+  };
+  const changeRetention = (v: string) => {
+    const ms = Number(v);
+    setRetentionMs(ms);
+    robotClient.setIoHistoryRetention(ms).catch(() => {});
+  };
+  const recDurationLabel = lastRec?.endUnixMs
+    ? ` · ${Math.max(1, Math.round((lastRec.endUnixMs - lastRec.startUnixMs) / 1000))}s`
+    : "";
 
   const crumbs = [{ label: "I/O", href: "/io" }, { label: cell?.nano?.name ?? "Nano", href: nanoId ? `/io/nanos?nanoId=${nanoId}` : "/io" }, { label: "Calibrate" }];
 
@@ -79,6 +151,71 @@ export default function LoadCellCalibrateScreen() {
             {raw != null ? ` · raw ${raw}` : ""}
             {cell.p.sampleRateHz ? ` · ${Math.round(cell.p.sampleRateHz)} Hz` : ""}
           </Text>
+        </Card>
+
+        {/* Live graph + recording */}
+        <SectionHeader title="Live graph" />
+        <Card style={styles.stack}>
+          <IoHistoryGraph channelKey={channelKey} unit={unit} useRaw={!calibrated} windowMs={20000} height={180} />
+          <View style={styles.recRow}>
+            {recording?.active ? (
+              <Button
+                label={`Stop · ${elapsed}s`}
+                variant="destructive"
+                icon={<Square size={15} color={buttonTextColor("destructive")} />}
+                loading={recBusy}
+                onPress={stopRec}
+                style={styles.grow}
+              />
+            ) : (
+              <Button
+                label="Record"
+                icon={<Circle size={15} color={colors.onAccent} />}
+                loading={recBusy}
+                onPress={startRec}
+                disabled={!channelKey}
+                style={styles.grow}
+              />
+            )}
+            <Button
+              label="Recordings"
+              variant="secondary"
+              icon={<ListChecks size={15} color={buttonTextColor("secondary")} />}
+              onPress={() => router.push({ pathname: "/(tabs)/io/recordings", params: channelKey ? { channelKey } : {} })}
+            />
+          </View>
+
+          {lastRec && !lastRec.active && (
+            <View style={styles.lastRec}>
+              <Text style={type.body}>
+                {lastRec.name} · {lastRec.sampleCount} samples{recDurationLabel}
+              </Text>
+              <View style={styles.recRow}>
+                <Button
+                  label="Export CSV"
+                  variant="secondary"
+                  icon={<Download size={15} color={buttonTextColor("secondary")} />}
+                  loading={expBusy}
+                  onPress={exportLast}
+                  style={styles.grow}
+                />
+                <Button
+                  label={lastRec.saved ? "Saved" : "Save"}
+                  variant="secondary"
+                  icon={<Save size={15} color={buttonTextColor("secondary")} />}
+                  loading={saveBusy}
+                  disabled={lastRec.saved}
+                  onPress={saveLast}
+                  style={styles.grow}
+                />
+              </View>
+            </View>
+          )}
+
+          <Divider />
+          <FormRow label="Keep history" hint="How long the rolling live history is kept in memory (saved recordings are kept regardless).">
+            <SegmentedControl options={RETENTION_PRESETS} value={String(retentionMs)} onChange={changeRetention} />
+          </FormRow>
         </Card>
 
         <SectionHeader title="Units" />
@@ -145,4 +282,7 @@ const styles = StyleSheet.create({
   readingValue: { fontSize: 40, fontWeight: "800", color: colors.text, fontVariant: ["tabular-nums"] },
   weightInput: { minWidth: 120, textAlign: "right" },
   doneRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  recRow: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
+  grow: { flex: 1 },
+  lastRec: { gap: spacing.sm, backgroundColor: colors.surface, borderRadius: 8, padding: spacing.sm },
 });

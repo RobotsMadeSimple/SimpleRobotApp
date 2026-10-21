@@ -13,6 +13,8 @@ export default function IOLayout() {
       <Stack.Screen name="camera-calibrate" />
       <Stack.Screen name="phone-provider" />
       <Stack.Screen name="loadcell-calibrate" />
+      <Stack.Screen name="recordings" />
+      <Stack.Screen name="recording-detail" />
       <Stack.Screen name="configure" />
       <Stack.Screen name="configure-relay" />
     </Stack>

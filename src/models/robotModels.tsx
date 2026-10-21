@@ -32,6 +32,34 @@ export type NanoState = {
 
 export type NeoPixelColor = { r: number; g: number; b: number };
 
+// ── IO value history / recordings ──────────────────────────────────────────────
+// Mirrors the controller History models. A channel is addressed by a stable key
+// (`nano/<nanoId>/<pin>` for load cells). Short sample keys keep high-rate batches small.
+
+/** One timestamped sample: t = unix ms, v = value (grams for a load cell), r = raw reading. */
+export type IoSample = { t: number; v: number; r: number };
+
+export type IoRecordingMeta = {
+  id: string;
+  channelKey: string;
+  name: string;
+  unit: LoadCellUnit;
+  label: string;
+  startUnixMs: number;
+  endUnixMs?: number | null;
+  sampleCount: number;
+  active: boolean;
+  saved: boolean;
+};
+
+export type IoHistoryWindow = {
+  channelKey: string;
+  unit: LoadCellUnit;
+  fromUnixMs: number;
+  toUnixMs: number;
+  samples: IoSample[];
+};
+
 // ── Aux Axis ──────────────────────────────────────────────────────────────────
 
 export type AuxAxisChannelState = {
@@ -444,7 +472,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'MoveWithForce' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'MoveWithForce' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -1197,6 +1225,12 @@ export type ProgramStep = {
   jsonOutbound?: JsonKeyValue[];
   jsonInbound?: JsonInboundMapping[];
   jsonImageOutbound?: JsonImageMapping[];
+  // StartRecording — capture a load cell (loadCellNanoId/loadCellPin) into this list variable (filled on StopRecording)
+  recordVariableName?: string;
+  // ExportData — write variable(s) to a file; exportColumns reuses the HttpRequest outbound row shape
+  exportFormat?: string;   // "csv" | "json"
+  exportPath?: string;     // $variable / $time_ms template
+  exportColumns?: JsonKeyValue[];
   // CaptureImage
   captureImageVariableName?: string;
   captureImageCameraId?: string;

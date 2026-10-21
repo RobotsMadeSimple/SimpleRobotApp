@@ -1,13 +1,14 @@
 import { IORow } from "@/src/components/ui/io/ioShared";
-import { formatLoadCell, LOAD_CELL_UNITS } from "@/src/components/ui/loadcell";
+import { IoSparkline } from "@/src/components/ui/io/IoHistoryGraph";
+import { formatLoadCell } from "@/src/components/ui/loadcell";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { NanoState } from "@/src/models/robotModels";
-import { Gauge, LogIn, LogOut, Plus, Settings2, Sparkles } from "lucide-react-native";
+import { Gauge, LogIn, LogOut, Settings2, Sparkles } from "lucide-react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import React from "react";
+import { StyleSheet, Text, View } from "react-native";
 
 import {
   Button,
@@ -16,15 +17,10 @@ import {
   colors,
   Divider,
   EmptyState,
-  FormRow,
-  Input,
   ListRow,
   PageHeader,
-  radii,
   Screen,
   SectionHeader,
-  SegmentedControl,
-  shadows,
   spacing,
   StatTile,
   StatusPill,
@@ -102,7 +98,12 @@ function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
                 iconColor={colors.accentSoft}
                 chevron
                 onPress={() => router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { nanoId: nano.id, pin: String(pin.pin) } })}
-                right={<Text style={[styles.lcValue, !calibrated && styles.lcValueRaw]}>{value}</Text>}
+                right={
+                  <View style={styles.lcRight}>
+                    <IoSparkline channelKey={`nano/${nano.id}/${pin.pin}`} useRaw={!calibrated} />
+                    <Text style={[styles.lcValue, !calibrated && styles.lcValueRaw]}>{value}</Text>
+                  </View>
+                }
               />
               {i < loadcells.length - 1 && <Divider inset />}
             </React.Fragment>
@@ -120,60 +121,10 @@ function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
   return <>{digital}{loadcellSection}</>;
 }
 
-/** Modal to add an HX711 load cell: pick the DT + SCK pins and a display unit. */
-function AddLoadCellModal({ nanoId, onClose }: { nanoId: string; onClose: () => void }) {
-  const [dt, setDt] = useState("");
-  const [sck, setSck] = useState("");
-  const [unit, setUnit] = useState("g");
-  const [busy, setBusy] = useState(false);
-
-  const dtN = Number(dt), sckN = Number(sck);
-  const valid = Number.isInteger(dtN) && Number.isInteger(sckN) && dtN >= 0 && dtN <= 19 && sckN >= 0 && sckN <= 19 && dtN !== sckN;
-
-  const add = async () => {
-    if (!valid) return;
-    setBusy(true);
-    try {
-      await robotClient.configureLoadCell(nanoId, dtN, sckN, unit);
-      onClose();
-      router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { nanoId, pin: String(dtN) } });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <Pressable style={styles.modalCard} onPress={() => {}}>
-          <Text style={type.pageTitle}>Add Load Cell</Text>
-          <Text style={[type.subtitle, { marginBottom: spacing.sm }]}>
-            Wire the HX711 to two Nano pins. DT (data) and SCK (clock) must be different pins.
-          </Text>
-          <FormRow label="DT pin (data)" hint="e.g. 4">
-            <Input value={dt} onChangeText={setDt} keyboardType="numeric" placeholder="D?" style={styles.pinField} />
-          </FormRow>
-          <Divider />
-          <FormRow label="SCK pin (clock)" hint="e.g. 5">
-            <Input value={sck} onChangeText={setSck} keyboardType="numeric" placeholder="D?" style={styles.pinField} />
-          </FormRow>
-          <Divider />
-          <FormRow label="Unit">
-            <SegmentedControl options={LOAD_CELL_UNITS.map(u => ({ label: u, value: u }))} value={unit} onChange={setUnit} />
-          </FormRow>
-          <View style={styles.modalButtons}>
-            <Button label="Cancel" variant="secondary" style={{ flex: 1 }} onPress={onClose} />
-            <Button label="Add" style={{ flex: 1 }} loading={busy} disabled={!valid} onPress={add} />
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
 export default function NanosPage() {
   const { nanoId } = useLocalSearchParams<{ nanoId?: string }>();
   const nanos = useNanoIO();
   const isWide = useIsWide();
-  const [addLc, setAddLc] = useState(false);
 
   const nano = nanoId ? (nanos.find(n => n.id === nanoId) ?? null) : null;
 
@@ -218,18 +169,11 @@ export default function NanosPage() {
                         tint={[colors.warning, colors.warningSoft]} style={styles.statTile} />
             </View>
             <NanoDetail nano={nano} isWide={isWide} />
-            <Button
-              variant="dashed"
-              label="Add Load Cell"
-              icon={<Plus size={15} color={colors.accent} />}
-              onPress={() => setAddLc(true)}
-            />
           </>
         ) : (
           <EmptyState title="Device not found." />
         )}
       </Screen>
-      {nano && addLc && <AddLoadCellModal nanoId={nano.id} onClose={() => setAddLc(false)} />}
     </View>
   );
 }
@@ -241,10 +185,7 @@ const styles = StyleSheet.create({
   wideGroupsRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
   groupCol:      { gap: spacing.md },
   wideGroupCol:  { flex: 1, minWidth: 0 },
+  lcRight:       { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   lcValue:       { ...type.body, fontWeight: "700", color: colors.text, fontVariant: ["tabular-nums"] },
   lcValueRaw:    { color: colors.textMuted, fontWeight: "600" },
-  modalOverlay:  { flex: 1, backgroundColor: colors.overlay, justifyContent: "center", alignItems: "center", padding: spacing.xl },
-  modalCard:     { backgroundColor: colors.surface, borderRadius: radii.xl, width: "100%", maxWidth: 400, padding: spacing.lg + 4, gap: spacing.xs, ...shadows.raised },
-  modalButtons:  { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.md },
-  pinField:      { minWidth: 70, textAlign: "center" },
 });
