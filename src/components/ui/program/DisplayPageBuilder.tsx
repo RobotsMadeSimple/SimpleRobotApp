@@ -282,7 +282,9 @@ function WidgetCard({ widget, cellW, rowH, cols, selected, live, setScrollEnable
     .activateAfterLongPress(160)
     .maxPointers(1)
     .onStart(() => {
-      runOnJS(select)();
+      // Deliberately does NOT select: a drag must not pop the edit panel (it overlays the
+      // canvas and gets in the way of the move). Editing is a tap — see the `tap` gesture.
+      // The card still follows the finger via tx/ty, so the move has its own feedback.
       runOnJS(setScrollEnabled)(false);
     })
     .onUpdate((e) => {
@@ -306,7 +308,8 @@ function WidgetCard({ widget, cellW, rowH, cols, selected, live, setScrollEnable
 
   const resize = Gesture.Pan()
     .onStart(() => {
-      runOnJS(select)();
+      // Like the move gesture, resizing does not select — editing is a tap, so dragging the
+      // corner handle won't pop the edit panel over the canvas.
       runOnJS(setScrollEnabled)(false);
     })
     .onUpdate((e) => {
