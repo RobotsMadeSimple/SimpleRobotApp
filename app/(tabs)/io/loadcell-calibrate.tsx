@@ -1,16 +1,17 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { CheckCircle2, Circle, Download, ListChecks, Save, Scale, Square } from "lucide-react-native";
+import { Circle, Download, ListChecks, Save, Scale, Square } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { IoHistoryGraph } from "@/src/components/ui/io/IoHistoryGraph";
+import { LoadCellCalibrateWizard } from "@/src/components/ui/io/LoadCellCalibrateWizard";
 import {
-  Button, buttonTextColor, Card, colors, Divider, FormRow, Input, PageHeader, Screen, SectionHeader,
+  Button, buttonTextColor, Card, colors, Divider, FormRow, PageHeader, Screen, SectionHeader,
   SegmentedControl, spacing, StatusPill, type,
 } from "@/src/components/ui/kit";
-import { formatLoadCell, LOAD_CELL_UNITS, unitToGrams } from "@/src/components/ui/loadcell";
+import { formatLoadCell, LOAD_CELL_UNITS } from "@/src/components/ui/loadcell";
 import type { IoRecordingMeta, LoadCellUnit } from "@/src/models/robotModels";
 import { useNanoIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -45,8 +46,7 @@ export default function LoadCellCalibrateScreen() {
   const grams = cell?.p.grams ?? 0;
   const raw = cell?.p.raw;
 
-  const [known, setKnown] = useState("");
-  const [busy, setBusy] = useState<"tare" | "cal" | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // ── Live graph + recording ──────────────────────────────────────────────────
   const channelKey = nanoId ? `nano/${nanoId}/${pinNum}` : null;
@@ -112,15 +112,6 @@ export default function LoadCellCalibrateScreen() {
   const crumbs = [{ label: "I/O", href: "/io" }, { label: cell?.nano?.name ?? "Nano", href: nanoId ? `/io/nanos?nanoId=${nanoId}` : "/io" }, { label: "Calibrate" }];
 
   const setUnit = (u: string) => { if (nanoId) robotClient.setLoadCellUnit(nanoId, pinNum, u).catch(() => {}); };
-  const tare = async () => { if (!nanoId) return; setBusy("tare"); try { await robotClient.tareLoadCell(nanoId, pinNum); } finally { setBusy(null); } };
-  const calibrate = async () => {
-    if (!nanoId) return;
-    const v = parseFloat(known);
-    if (!isFinite(v) || v <= 0) return;
-    setBusy("cal");
-    try { await robotClient.calibrateLoadCell(nanoId, pinNum, unitToGrams(v, unit)); setKnown(""); }
-    finally { setBusy(null); }
-  };
 
   if (!cell) {
     return (
@@ -229,48 +220,31 @@ export default function LoadCellCalibrateScreen() {
           </FormRow>
         </Card>
 
-        <SectionHeader title="Step 1 — Zero" />
+        <SectionHeader title="Calibration" />
         <Card style={styles.stack}>
-          <Text style={type.body}>Remove all weight from the load cell, then tare to set the zero offset.</Text>
-          <Button label="Tare (set zero)" variant="secondary" loading={busy === "tare"} onPress={tare} />
-        </Card>
-
-        <SectionHeader title="Step 2 — Scale" />
-        <Card style={styles.stack}>
-          <Text style={type.body}>Place a known weight on the cell, enter its value, and capture.</Text>
-          <FormRow label={`Known weight (${unit})`}>
-            <Input
-              value={known}
-              onChangeText={setKnown}
-              placeholder={`e.g. ${unit === "g" ? "500" : unit === "kg" ? "1" : "1"}`}
-              keyboardType="decimal-pad"
-              returnKeyType="done"
-              onSubmitEditing={calibrate}
-              style={styles.weightInput}
-            />
-          </FormRow>
+          <Text style={type.body}>
+            {calibrated
+              ? `Calibrated · ${cell.p.countsPerGram?.toFixed(2)} counts/g. Re-run the wizard to re-zero or refine.`
+              : "Not calibrated yet. The wizard zeroes the cell, then teaches the scale with one known weight."}
+          </Text>
           <Button
-            label="Capture calibration"
+            label={calibrated ? "Re-calibrate" : "Calibrate"}
             icon={<Scale size={16} color={colors.onAccent} />}
-            loading={busy === "cal"}
-            disabled={!(parseFloat(known) > 0)}
-            onPress={calibrate}
+            onPress={() => setWizardOpen(true)}
           />
-          {calibrated && (
-            <View style={styles.doneRow}>
-              <CheckCircle2 size={16} color={colors.success} />
-              <Text style={type.caption}>
-                Calibrated · {cell.p.countsPerGram?.toFixed(2)} counts/g. Re-tare or re-capture any time to refine.
-              </Text>
-            </View>
-          )}
           <Divider />
           <Text style={type.caption}>
-            Tip: the reading updates live — place/remove the weight and watch it settle before capturing. For the
-            force-move feature, 80 SPS (HX711 RATE pin high) gives much smoother control than the 10 SPS default.
+            For the force-move feature, 80 SPS (HX711 RATE pin high) gives much smoother control than the 10 SPS default.
           </Text>
         </Card>
       </Screen>
+
+      <LoadCellCalibrateWizard
+        visible={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        nanoId={nanoId}
+        pin={pinNum}
+      />
     </View>
   );
 }
@@ -280,8 +254,6 @@ const styles = StyleSheet.create({
   stack: { gap: spacing.md },
   readingCard: { alignItems: "center", gap: spacing.xs, paddingVertical: spacing.lg },
   readingValue: { fontSize: 40, fontWeight: "800", color: colors.text, fontVariant: ["tabular-nums"] },
-  weightInput: { minWidth: 120, textAlign: "right" },
-  doneRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   recRow: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   grow: { flex: 1 },
   lastRec: { gap: spacing.sm, backgroundColor: colors.surface, borderRadius: 8, padding: spacing.sm },
