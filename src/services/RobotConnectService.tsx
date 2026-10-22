@@ -69,6 +69,7 @@ export class RobotConnectService {
   private nanoIO:         NanoState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
   private lastRelayJson:  string                        = "";
+  private lastNanosJson:  string                        = "";
   private auxAxis:        AuxDeviceState[]              = [];
   private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
@@ -271,6 +272,9 @@ export class RobotConnectService {
         // Relay board state now rides along in the status broadcast so relays
         // changed by a running program update live (not just on page entry).
         this.updateRelayFromStatus(data.relay);
+        // Nano state likewise rides along so live values (load-cell readings in
+        // particular) update every poll, not only on GetIO at page entry.
+        this.updateNanosFromStatus(data.nanos);
         this.emitStatus(data);
         break;
       
@@ -352,6 +356,23 @@ export class RobotConnectService {
     this.lastRelayJson = json;
     this.relayIO = relay as UsbRelayState;
     this.emitRelayIO();
+  }
+
+  // Apply nano state carried in the status broadcast. `data.nanos` is a JSON string
+  // (same shape GetIO returns). Only reparse + emit when the string changed, so the
+  // 100ms poll re-renders nano consumers on real change (e.g. a streaming load cell)
+  // but not when every digital pin is steady.
+  private updateNanosFromStatus(nanos: any) {
+    if (typeof nanos !== "string") return;
+    if (nanos === this.lastNanosJson) return;
+    this.lastNanosJson = nanos;
+    try {
+      const parsed = JSON.parse(nanos);
+      this.nanoIO = Array.isArray(parsed) ? (parsed as NanoState[]) : [];
+    } catch {
+      this.nanoIO = [];
+    }
+    this.emitNanoIO();
   }
 
   private decodeIO(data: any) {
