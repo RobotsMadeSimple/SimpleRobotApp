@@ -192,8 +192,11 @@ export function StepConfigModal({
         if (!focused || !sv || typeof focused.measureInWindow !== "function") return;
         focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => {
           if (typeof y !== "number") return;
-          const kbTop   = Dimensions.get("window").height - h;
-          const overlap = (y + ht + 24) - kbTop;        // how far the field dips under the keyboard
+          const kbTop = Dimensions.get("window").height - h;
+          // The pinned Cancel/Save footer (~64px) sits above the keyboard, so the real line a field
+          // must clear is the footer's top, not the keyboard's. Scroll it clear of that.
+          const occlusionTop = kbTop - 72;
+          const overlap = (y + ht + 12) - occlusionTop;
           if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
         });
       }));
@@ -3839,6 +3842,9 @@ export function StepConfigModal({
             <ScrollView ref={bodyScrollRef}
               onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
               scrollEventThrottle={16}
+              // flexShrink + minHeight:0 so the body yields to the pinned footer when the card is
+              // capped (keyboard up) — the footer then never overlaps the fields, and the body scrolls.
+              style={{ flexShrink: 1, minHeight: 0 }}
               showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingBottom: kbHeight > 0 ? 24 : 8 }}>
               {subPage ? (
