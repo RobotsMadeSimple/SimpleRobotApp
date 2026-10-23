@@ -171,6 +171,16 @@ export default function Robot() {
   // Saved list exists (reconnect to something you can't see right now).
   const savedOffline = saved.filter(s => !robots.some(d => connKey(d) === connKey(s)));
 
+  // Starred (saved) robots sort to the top of the discovered list, then alphabetically.
+  const robotLabel = (r: typeof robots[number]) =>
+    (r.robotName && r.robotName !== "Manual" ? r.robotName : r.ipAddress) ?? "";
+  const sortedRobots = [...robots].sort((a, b) => {
+    const sa = isSaved(a) ? 0 : 1;
+    const sb = isSaved(b) ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    return robotLabel(a).localeCompare(robotLabel(b));
+  });
+
   const savedSection = savedOffline.length > 0 ? (
     <>
       <SectionHeader
@@ -205,7 +215,7 @@ export default function Robot() {
         />
       ) : (
         <View>
-          {robots.map((r) => (
+          {sortedRobots.map((r) => (
             <RobotCard key={r.serialNumber || r.ipAddress} robot={r} />
           ))}
         </View>
