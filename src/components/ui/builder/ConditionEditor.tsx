@@ -1,26 +1,25 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ChevronDown, Plus, X } from "lucide-react-native";
+import { ChevronDown, Plus, Trash2 } from "lucide-react-native";
 import {
   ConditionGroup,
   ConditionItem,
   ProgramVariable,
 } from "@/src/models/robotModels";
-import { conditionItemText, newId } from "./stepUtils";
+import { conditionGroupText, conditionHasMixedJoins, conditionItemText, effectiveJoin, newId } from "./stepUtils";
 import { colors, spacing, radii, accents } from "@/src/components/ui/kit";
 import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── Condition editor ──────────────────────────────────────────────────────────
 //
 // Laid out like a filter builder (Notion / Airtable / Linear): each condition is one plain
-// row, and the and/or that joins them sits BETWEEN the rows as a tappable pill — so the
-// "match all / any" choice only appears once there is something to combine, right where it
-// reads naturally. Adding a condition is a quiet link, not a button.
+// row, and the and/or that joins each PAIR sits between the rows as a tappable pill, so the
+// joiner only appears once there is something to combine, right where it reads naturally.
+// Joiners can differ per pair (`A and B or C`); AND binds tighter than OR, and when they're
+// mixed the editor spells out how the group reads.
 
 export function conditionSummary(group: ConditionGroup | undefined): string {
-  if (!group || !group.items || group.items.length === 0) return "(no conditions)";
-  const join = group.combinator === "ANY" ? "  OR  " : "  AND  ";
-  return group.items.map(it => conditionItemText(it) || "?").join(join);
+  return conditionGroupText(group);
 }
 
 const accent = accents.cyan;
@@ -56,15 +55,15 @@ function ConditionRow({
       </View>
       <TouchableOpacity onPress={onDelete} hitSlop={10} activeOpacity={0.7} style={s.remove}
         accessibilityRole="button" accessibilityLabel="Remove condition">
-        <X size={15} color={colors.textFaint} />
+        <Trash2 size={15} color={colors.textFaint} />
       </TouchableOpacity>
     </View>
   );
 }
 
-/** The "— and —" / "— or —" joiner between two conditions; tap to switch the whole group. */
-function Connector({ combinator, onToggle }: { combinator: ConditionGroup["combinator"]; onToggle: () => void }) {
-  const label = combinator === "ANY" ? "or" : "and";
+/** The "— and —" / "— or —" joiner between two conditions; tap to switch just this pair. */
+function Connector({ join, onToggle }: { join: "AND" | "OR"; onToggle: () => void }) {
+  const label = join === "OR" ? "or" : "and";
   return (
     <View style={s.connectorRow}>
       <View style={s.connectorLine} />
@@ -90,7 +89,11 @@ export function ConditionGroupEditor({
   contextVariables?: ProgramVariable[];
 }) {
   const items = group.items ?? [];
-  const toggle = () => onChange({ ...group, combinator: group.combinator === "ANY" ? "ALL" : "ANY" });
+  // Flip the joiner on one pair only; it's stored on the later item of the pair.
+  const toggleJoin = (i: number) => {
+    const next: "AND" | "OR" = effectiveJoin(group, i) === "OR" ? "AND" : "OR";
+    onChange({ ...group, items: items.map((ci, j) => j === i ? { ...ci, join: next } : ci) });
+  };
   return (
     <View style={s.wrap}>
       {items.length === 0 && (
@@ -98,12 +101,16 @@ export function ConditionGroupEditor({
       )}
       {items.map((item, i) => (
         <React.Fragment key={item.id}>
-          {i > 0 && <Connector combinator={group.combinator} onToggle={toggle} />}
+          {i > 0 && <Connector join={effectiveJoin(group, i)} onToggle={() => toggleJoin(i)} />}
           <ConditionRow item={item} variables={variables} contextVariables={contextVariables}
-            onChange={updated => onChange({ ...group, items: items.map((ci, j) => j === i ? updated : ci) })}
+            onChange={updated => onChange({ ...group, items: items.map((ci, j) => j === i ? { ...updated, join: ci.join } : ci) })}
             onDelete={() => onChange({ ...group, items: items.filter((_, j) => j !== i) })} />
         </React.Fragment>
       ))}
+      {/* Mixed and/or — show how it groups, since "and" binds before "or". */}
+      {conditionHasMixedJoins(group) && (
+        <Text style={s.reads} numberOfLines={3}>Reads as  {conditionGroupText(group)}</Text>
+      )}
       <TouchableOpacity
         style={s.add}
         onPress={() => onChange({ ...group, items: [...items, { id: newId(), expr: "" }] })}
@@ -125,6 +132,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
   },
   empty: { fontSize: 12, color: colors.textFaint, fontStyle: "italic", marginBottom: spacing.sm },
+  reads: { fontSize: 11, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 15 },
 
   row: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
   field: {

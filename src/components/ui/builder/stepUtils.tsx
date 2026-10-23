@@ -166,7 +166,8 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       if (step.waitMode === 'condition') {
         const g = step.waitCondition;
         const condStr = g && (g.items ?? []).length > 0
-          ? ((g.items ?? []).length === 1 ? conditionItemText(g.items[0]) : `${g.combinator} of ${(g.items ?? []).length} conds`)
+          ? ((g.items ?? []).length === 1 ? conditionItemText(g.items[0])
+              : conditionHasMixedJoins(g) ? conditionGroupText(g) : `${g.combinator} of ${(g.items ?? []).length} conds`)
           : "condition";
         return step.waitTimeoutMs ? `Wait  ${condStr}  (${step.waitTimeoutMs} ms max)` : `Wait  ${condStr}`;
       }
@@ -180,7 +181,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
         const g = step.loopWhileCondition;
         if (!g || (g.items ?? []).length === 0) return "While  (no condition)";
         if ((g.items ?? []).length === 1) return `While  ${conditionItemText(g.items[0])}`;
-        return `While  ${g.combinator} of ${(g.items ?? []).length} conditions`;
+        return conditionHasMixedJoins(g) ? `While  ${conditionGroupText(g)}` : `While  ${g.combinator} of ${(g.items ?? []).length} conditions`;
       }
       const loopExpr = step.expressions?.loopCount;
       const loopVal  = loopExpr ? loopExpr : (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1));
@@ -206,7 +207,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       const g = step.condition;
       if (!g || (g.items ?? []).length === 0) return "If (no conditions)";
       if ((g.items ?? []).length === 1) return `If  ${conditionItemText(g.items[0])}`;
-      return `If  ${g.combinator} of ${(g.items ?? []).length} conditions`;
+      return conditionHasMixedJoins(g) ? `If  ${conditionGroupText(g)}` : `If  ${g.combinator} of ${(g.items ?? []).length} conditions`;
     }
     case "SetTool":    return step.toolName  ? `Set Tool  →  ${step.toolName}`  : "Set Tool  →  None";
     case "SetLocal":   return step.localName ? `Set Local  →  ${step.localName}` : "Set Local  →  None";
@@ -438,10 +439,40 @@ export function conditionItemText(i: { expr?: string; left?: string; operator?: 
 
 /** Spells out every item of a condition group joined by AND/OR (not just a count). */
 export function fmtConditionFull(group: ConditionGroup | undefined): string {
+  return conditionGroupText(group);
+}
+
+/** The joiner between item i-1 and item i: the item's own `join`, else the group default. */
+export function effectiveJoin(group: ConditionGroup, i: number): "AND" | "OR" {
+  const own = group.items?.[i]?.join;
+  if (own === "AND" || own === "OR") return own;
+  return group.combinator === "ANY" ? "OR" : "AND";
+}
+
+/** True when the group mixes AND and OR joiners, i.e. precedence matters to how it reads. */
+export function conditionHasMixedJoins(group: ConditionGroup | undefined): boolean {
+  const n = group?.items?.length ?? 0;
+  if (n < 3) return false;
+  const first = effectiveJoin(group!, 1);
+  for (let i = 2; i < n; i++) if (effectiveJoin(group!, i) !== first) return true;
+  return false;
+}
+
+/**
+ * The group as text, with AND binding tighter than OR: `A and B or C` → `(A AND B) OR C`.
+ * Mirrors the controller's evaluation order (an OR of AND-runs).
+ */
+export function conditionGroupText(group: ConditionGroup | undefined): string {
   const items = group?.items ?? [];
   if (items.length === 0) return "(no conditions)";
-  const join = group!.combinator === "ANY" ? "  OR  " : "  AND  ";
-  return items.map(i => conditionItemText(i) || "?").join(join);
+  const runs: string[][] = [[conditionItemText(items[0]) || "?"]];
+  for (let i = 1; i < items.length; i++) {
+    const t = conditionItemText(items[i]) || "?";
+    if (effectiveJoin(group!, i) === "OR") runs.push([t]); else runs[runs.length - 1].push(t);
+  }
+  return runs
+    .map(r => (runs.length > 1 && r.length > 1) ? `(${r.join("  AND  ")})` : r.join("  AND  "))
+    .join("  OR  ");
 }
 
 // ── Step detail ───────────────────────────────────────────────────────────────

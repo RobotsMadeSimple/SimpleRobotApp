@@ -806,6 +806,12 @@ export type ConditionItem = {
    * structured form, still read by the controller for older programs.
    */
   expr?: string;
+  /**
+   * How this item joins the one BEFORE it. Unset falls back to the group's `combinator`.
+   * AND binds tighter than OR: `A and B or C` reads as `(A and B) or C` — the controller
+   * evaluates the group as an OR of AND-runs.
+   */
+  join?: 'AND' | 'OR';
   left?: string;
   operator?: ConditionOp;
   right?: string;
