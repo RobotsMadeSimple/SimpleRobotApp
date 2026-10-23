@@ -184,6 +184,9 @@ export function StepRow({
   const pulseStyle = useAnimatedStyle(() => ({ opacity: 0.04 + pulse.value * 0.1 }));
   const isLoop        = step.type === "Loop";
   const isIfCondition = step.type === "IfCondition";
+  // An If block has nothing to configure beyond its branches, so tapping its header opens the
+  // IF condition editor directly (the body owns that modal; a tick nudges it open).
+  const [ifEditTick, setIfEditTick] = useState(0);
   const isSetSpeed    = step.type === "SetSpeedL" || step.type === "SetSpeedJ"
                      || step.type === "Label"      || step.type === "GoToLabel";
   const innerSteps    = step.loopSteps ?? [];
@@ -226,7 +229,7 @@ export function StepRow({
         {/* Card header row */}
         <TouchableOpacity
           style={sharedStyles.stepCardHeader}
-          onPress={selectMode ? onToggleSelect : onEdit}
+          onPress={selectMode ? onToggleSelect : isIfCondition ? () => setIfEditTick(t => t + 1) : onEdit}
           onLongPress={onLongPress}
           delayLongPress={300}
           activeOpacity={0.75}
@@ -283,6 +286,7 @@ export function StepRow({
             onUpdateIfCondition={onUpdateIfCondition}
             variables={variables}
             contextVariables={contextVariables}
+            editTrigger={ifEditTick}
           />
         )}
 

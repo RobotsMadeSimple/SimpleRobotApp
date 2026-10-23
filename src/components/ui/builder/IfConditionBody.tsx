@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -119,12 +119,15 @@ export function IfConditionBody({
   onUpdateIfCondition,
   variables,
   contextVariables,
+  editTrigger,
 }: {
   step: ProgramStep;
   onEnterScope: (frame: ScopeFrame) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
+  /** Bump to open the IF condition editor from outside (the step header tap). */
+  editTrigger?: number;
 }) {
   const theme          = STEP_THEME["IfCondition"] ?? STEP_THEME["MoveL"];
   const ifSteps        = step.ifSteps        ?? [];
@@ -141,6 +144,11 @@ export function IfConditionBody({
     setDraftCondition({ ...cond, items: [...(cond.items ?? [])] });
     setEditingKey(key);
   }
+
+  useEffect(() => {
+    if (editTrigger) openConditionEditor("if");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editTrigger]);
 
   function closeConditionEditor() {
     setEditingKey(null);
