@@ -243,6 +243,18 @@ export function StepConfigModal({
   // Leaving the main page (into a sub-page) always drops name-edit mode.
   useEffect(() => { if (subPage) setEditingName(false); }, [subPage]);
 
+  // Snapshot the draft when a sub-page opens so its Cancel can revert just that edit (the whole
+  // modal's Cancel still discards everything). draftRef tracks the latest draft without re-running
+  // the snapshot effect on every keystroke.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const subPageSnapshot = useRef<ProgramStep | null>(null);
+  const prevSubPage = useRef<SubPage>(null);
+  useEffect(() => {
+    if (prevSubPage.current === null && subPage !== null) subPageSnapshot.current = draftRef.current;
+    prevSubPage.current = subPage;
+  }, [subPage]);
+
 
   if (!draft) return null;
 
@@ -833,30 +845,38 @@ export function StepConfigModal({
             {modifierRow("Tool Offset",       hasToolOff,  toolOffSummary,  "toolOffset",  toolOffKeys)}
 
             {draft!.type === "MoveL" && (
-              <View style={[ms.modCard, !draft!.blend && ms.modCardOff]}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <View style={{ flex: 1, marginRight: 12 }}>
-                    <Text style={[ms.subRowLabel, !draft!.blend && ms.modLabelOff]}>Blend Into Next Move</Text>
-                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
-                      Round this corner instead of stopping, carrying speed into the next MoveL.
-                    </Text>
+              !draft!.blend ? (
+                // Like the other modifier rows, but with no sub-page: tapping just turns the flag on.
+                <TouchableOpacity style={ms.modRowAdd} onPress={() => set({ blend: true })} activeOpacity={0.7}>
+                  <Plus size={15} color={colors.textFaint} />
+                  <Text style={ms.modAddText}>Blend Into Next Move</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={ms.modCard}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <View style={{ flex: 1, marginRight: 12 }}>
+                      <Text style={ms.subRowLabel}>Blend Into Next Move</Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+                        Round this corner instead of stopping, carrying speed into the next MoveL.
+                      </Text>
+                    </View>
+                    {/* The × untoggles the flag and clears any radius override. */}
+                    <DeleteIconButton size={16} style={{ padding: 4 }}
+                      onPress={() => setDraft(d => {
+                        if (!d) return d;
+                        const exprs = { ...(d.expressions ?? {}) };
+                        delete exprs.blendRadius;
+                        return { ...d, blend: undefined, blendRadius: undefined,
+                          expressions: Object.keys(exprs).length > 0 ? exprs : undefined };
+                      })} />
                   </View>
-                  <Switch
-                    value={!!draft!.blend}
-                    onValueChange={v => set({ blend: v || undefined })}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                  />
+                  <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
+                  <ExpressionInput style={ms.input} fieldKey="blendRadius"
+                    value={draft!.blendRadius} expressions={draft!.expressions}
+                    onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
+                  <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
                 </View>
-                {draft!.blend && (
-                  <>
-                    <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
-                    <ExpressionInput style={ms.input} fieldKey="blendRadius"
-                      value={draft!.blendRadius} expressions={draft!.expressions}
-                      onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
-                    <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
-                  </>
-                )}
-              </View>
+              )
             )}
           </>
         );
@@ -3859,8 +3879,19 @@ export function StepConfigModal({
               )}
             </ScrollView>
 
-            {/* Actions — only on main page */}
-            {!subPage && (
+            {/* Actions — a sub-page confirms/cancels just its own edit; the main page saves/cancels all. */}
+            {subPage ? (
+              <View style={ms.actions}>
+                <TouchableOpacity style={ms.cancelBtn} activeOpacity={0.7}
+                  onPress={() => { if (subPageSnapshot.current) setDraft(subPageSnapshot.current); setSubPage(null); }}>
+                  <Text style={ms.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={ms.saveBtn} activeOpacity={0.7} onPress={() => setSubPage(null)}>
+                  <Check size={15} color="white" />
+                  <Text style={ms.saveText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
               <View style={ms.actions}>
                 <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
                   <Text style={ms.cancelText}>Cancel</Text>
