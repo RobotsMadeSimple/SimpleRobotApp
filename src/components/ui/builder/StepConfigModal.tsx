@@ -69,6 +69,7 @@ import { VarType, VariableEditModal } from "./VariableEditModal";
 import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
 import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
 import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
@@ -158,9 +159,14 @@ export function StepConfigModal({
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const cardWidth = Math.min(windowWidth - 48, 520);
-  // Wide enough to sit the edit card beside an always-visible variable/function/property helper
-  // (panel ~300 + gap + card ~520 + the overlay's side padding). Landscape tablets and desktop fit.
-  const wide = windowWidth >= 900;
+  // Two-pane (edit card + always-visible variable/function/property helper) whenever the app is in
+  // its wide layout — the same `useIsWide` that drives the nav rail, so every wide device (landscape
+  // tablets, unfolded foldables like the Z Fold, desktop) gets it. The two panes size to fit the
+  // available width so they never overflow on the narrower wide screens.
+  const wide = useIsWide();
+  const availWidth    = windowWidth - 48; // overlay side padding (2 * spacing.xl)
+  const panelWidth    = Math.min(300, Math.max(220, Math.round((availWidth - 16) * 0.4)));
+  const wideCardWidth = Math.min(520, availWidth - panelWidth - 16);
 
   // Keyboard-aware scrolling: on a phone the soft keyboard covers the lower half of the modal, so
   // when it opens we scroll the focused input up above it (and pad the bottom so there's room).
@@ -3775,11 +3781,11 @@ export function StepConfigModal({
               variables={variables}
               contextVariables={contextVariables}
               contextLabel="Caller Variables"
-              style={{ maxHeight: Math.round(windowHeight * 0.88) }}
+              style={{ width: panelWidth, maxHeight: Math.round(windowHeight * 0.88) }}
             />
           )}
           <View style={[ms.card, wide
-            ? { width: cardWidth, maxWidth: cardWidth, maxHeight: Math.round(windowHeight * 0.88) }
+            ? { width: wideCardWidth, maxWidth: wideCardWidth, maxHeight: Math.round(windowHeight * 0.88) }
             : { maxWidth: cardWidth, maxHeight: Math.round(windowHeight * 0.88) }]}>
             {/* Header */}
             <View style={ms.header}>
