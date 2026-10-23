@@ -172,6 +172,7 @@ export function StepConfigModal({
   // when it opens we scroll the focused input up above it (and pad the bottom so there's room).
   const bodyScrollRef = useRef<ScrollView>(null);
   const scrollYRef    = useRef(0);
+  const actionsRef    = useRef<View>(null);
   const [kbHeight, setKbHeight] = useState(0);
   // When the keyboard is up, cap the card so the whole thing — including the pinned Cancel/Save
   // footer — stays above it, with the top anchored (no window pan / clipped top). Use the smaller of
@@ -182,24 +183,38 @@ export function StepConfigModal({
     : Math.round(windowHeight * 0.88);
   useEffect(() => {
     if (!visible || Platform.OS === "web") return;
+    const adjust = (h: number) => {
+      const focused: any = (TextInput as any).State?.currentlyFocusedInput?.();
+      const sv = bodyScrollRef.current;
+      if (!focused || !sv || typeof focused.measureInWindow !== "function") return;
+      focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => {
+        if (typeof y !== "number") return;
+        const scrollNow = scrollYRef.current;
+        const scrollClearOf = (lineTop: number) => {
+          const overlap = (y + ht + 10) - lineTop;   // how far the field dips below the occluder
+          if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollNow + overlap), animated: true });
+        };
+        // The real occluder is the pinned Cancel/Save footer (which sits above the keyboard), so
+        // scroll the field clear of the footer's TOP — measured, since it's much taller than the
+        // keyboard gap. Fall back to a keyboard-relative estimate if the footer can't be measured.
+        const actions: any = actionsRef.current;
+        const kbFallback = () => scrollClearOf((Dimensions.get("window").height - h) - 112);
+        if (actions && typeof actions.measureInWindow === "function") {
+          actions.measureInWindow((_ax: number, ay: number) =>
+            (typeof ay === "number" && ay > 0) ? scrollClearOf(ay - 8) : kbFallback());
+        } else {
+          kbFallback();
+        }
+      });
+    };
     const onShow = (e: any) => {
       const h = e?.endCoordinates?.height ?? 0;
       setKbHeight(h);
-      // Two frames so the focused input's position reflects any layout the keyboard just caused.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        const focused: any = (TextInput as any).State?.currentlyFocusedInput?.();
-        const sv = bodyScrollRef.current;
-        if (!focused || !sv || typeof focused.measureInWindow !== "function") return;
-        focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => {
-          if (typeof y !== "number") return;
-          const kbTop = Dimensions.get("window").height - h;
-          // The pinned Cancel/Save footer (~64px) sits above the keyboard, so the real line a field
-          // must clear is the footer's top, not the keyboard's. Scroll it clear of that.
-          const occlusionTop = kbTop - 72;
-          const overlap = (y + ht + 12) - occlusionTop;
-          if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
-        });
-      }));
+      // Run once the card has re-laid-out for the keyboard (two frames), then again after the
+      // keyboard animation settles — the footer finishes sliding up by then, so the second pass
+      // corrects any under-scroll from measuring the footer before it reached its final spot.
+      requestAnimationFrame(() => requestAnimationFrame(() => adjust(h)));
+      setTimeout(() => adjust(h), 240);
     };
     const onHide = () => setKbHeight(0);
     const s1 = Keyboard.addListener("keyboardDidShow", onShow);
@@ -3915,7 +3930,7 @@ export function StepConfigModal({
 
             {/* Actions — a sub-page confirms/cancels just its own edit; the main page saves/cancels all. */}
             {subPage ? (
-              <View style={ms.actions}>
+              <View ref={actionsRef} style={ms.actions}>
                 <TouchableOpacity style={ms.cancelBtn} activeOpacity={0.7}
                   onPress={() => { if (subPageSnapshot.current) setDraft(subPageSnapshot.current); setSubPage(null); }}>
                   <Text style={ms.cancelText}>Cancel</Text>
@@ -3926,7 +3941,7 @@ export function StepConfigModal({
                 </TouchableOpacity>
               </View>
             ) : (
-              <View style={ms.actions}>
+              <View ref={actionsRef} style={ms.actions}>
                 <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
                   <Text style={ms.cancelText}>Cancel</Text>
                 </TouchableOpacity>
