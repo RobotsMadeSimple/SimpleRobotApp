@@ -172,49 +172,35 @@ export function StepConfigModal({
   // when it opens we scroll the focused input up above it (and pad the bottom so there's room).
   const bodyScrollRef = useRef<ScrollView>(null);
   const scrollYRef    = useRef(0);
-  const actionsRef    = useRef<View>(null);
   const [kbHeight, setKbHeight] = useState(0);
-  // When the keyboard is up, cap the card so the whole thing — including the pinned Cancel/Save
-  // footer — stays above it, with the top anchored (no window pan / clipped top). Use the smaller of
-  // the current window and the screen-minus-keyboard so it's right whether Android resizes the window
-  // (windowHeight already shrinks) or pans it (windowHeight stays full).
-  const cardMaxHeight = kbHeight > 0
-    ? Math.max(260, Math.min(windowHeight, Dimensions.get("screen").height - kbHeight) - 60)
-    : Math.round(windowHeight * 0.88);
+  // The card keeps a stable height whether or not the keyboard is up, so the pinned Cancel/Save
+  // footer never moves — the keyboard simply draws over it (dismiss it to tap them). windowHeight
+  // shrinks under adjustResize, so snapshot the keyboard-closed height and always size from that.
+  const fullWindowHRef = useRef(windowHeight);
+  if (kbHeight === 0) fullWindowHRef.current = windowHeight;
+  const cardMaxHeight = Math.round(fullWindowHRef.current * 0.88);
   useEffect(() => {
     if (!visible || Platform.OS === "web") return;
-    const adjust = (h: number) => {
+    const adjust = (kbTop: number) => {
       const focused: any = (TextInput as any).State?.currentlyFocusedInput?.();
       const sv = bodyScrollRef.current;
       if (!focused || !sv || typeof focused.measureInWindow !== "function") return;
       focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => {
         if (typeof y !== "number") return;
-        const scrollNow = scrollYRef.current;
-        const scrollClearOf = (lineTop: number) => {
-          const overlap = (y + ht + 10) - lineTop;   // how far the field dips below the occluder
-          if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollNow + overlap), animated: true });
-        };
-        // The real occluder is the pinned Cancel/Save footer (which sits above the keyboard), so
-        // scroll the field clear of the footer's TOP — measured, since it's much taller than the
-        // keyboard gap. Fall back to a keyboard-relative estimate if the footer can't be measured.
-        const actions: any = actionsRef.current;
-        const kbFallback = () => scrollClearOf((Dimensions.get("window").height - h) - 112);
-        if (actions && typeof actions.measureInWindow === "function") {
-          actions.measureInWindow((_ax: number, ay: number) =>
-            (typeof ay === "number" && ay > 0) ? scrollClearOf(ay - 8) : kbFallback());
-        } else {
-          kbFallback();
-        }
+        // Scroll the focused field — plus the live-value line + "＋ Insert" chip it renders beneath
+        // itself when focused — clear of the keyboard's top. The footer stays fixed behind the
+        // keyboard, so it is no longer the occluder; only the keyboard is.
+        const overlap = (y + ht + 72) - kbTop;
+        if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
       });
     };
     const onShow = (e: any) => {
       const h = e?.endCoordinates?.height ?? 0;
+      const kbTop = e?.endCoordinates?.screenY ?? (Dimensions.get("screen").height - h);
       setKbHeight(h);
-      // Run once the card has re-laid-out for the keyboard (two frames), then again after the
-      // keyboard animation settles — the footer finishes sliding up by then, so the second pass
-      // corrects any under-scroll from measuring the footer before it reached its final spot.
-      requestAnimationFrame(() => requestAnimationFrame(() => adjust(h)));
-      setTimeout(() => adjust(h), 240);
+      // Two frames to let the field settle, then again after the keyboard animation finishes.
+      requestAnimationFrame(() => requestAnimationFrame(() => adjust(kbTop)));
+      setTimeout(() => adjust(kbTop), 240);
     };
     const onHide = () => setKbHeight(0);
     const s1 = Keyboard.addListener("keyboardDidShow", onShow);
@@ -3861,7 +3847,8 @@ export function StepConfigModal({
               // capped (keyboard up) — the footer then never overlaps the fields, and the body scrolls.
               style={{ flexShrink: 1, minHeight: 0 }}
               showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: kbHeight > 0 ? 24 : 8 }}>
+              // Room to scroll a bottom field up above the keyboard (the body extends behind it).
+              contentContainerStyle={{ paddingBottom: kbHeight > 0 ? kbHeight : 8 }}>
               {subPage ? (
                 renderSubPage()
               ) : (
@@ -3930,7 +3917,7 @@ export function StepConfigModal({
 
             {/* Actions — a sub-page confirms/cancels just its own edit; the main page saves/cancels all. */}
             {subPage ? (
-              <View ref={actionsRef} style={ms.actions}>
+              <View style={ms.actions}>
                 <TouchableOpacity style={ms.cancelBtn} activeOpacity={0.7}
                   onPress={() => { if (subPageSnapshot.current) setDraft(subPageSnapshot.current); setSubPage(null); }}>
                   <Text style={ms.cancelText}>Cancel</Text>
@@ -3941,7 +3928,7 @@ export function StepConfigModal({
                 </TouchableOpacity>
               </View>
             ) : (
-              <View ref={actionsRef} style={ms.actions}>
+              <View style={ms.actions}>
                 <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
                   <Text style={ms.cancelText}>Cancel</Text>
                 </TouchableOpacity>
