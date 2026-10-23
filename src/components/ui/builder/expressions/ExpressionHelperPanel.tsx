@@ -15,13 +15,15 @@ import { variableToken } from "./ExpressionEditorModal";
  * function, always visible, with a search. Tapping one inserts it into whichever expression field is
  * currently focused (tracked by the ActiveField registry).
  */
-export function ExpressionHelperPanel({ variables, contextVariables, contextLabel, style, onInsert }: {
+export function ExpressionHelperPanel({ variables, contextVariables, contextLabel, style, onInsert, onClose }: {
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
   contextLabel?: string;
   style?: any;
   /** When set, inserts route here instead of the focused-field registry (modal use on narrow). */
   onInsert?: (token: string) => void;
+  /** When set (modal use), shows a close × in the header and a Cancel button at the bottom. */
+  onClose?: () => void;
 }) {
   const reg = useActiveFieldRegistry();
   const env = useExpressionEnv();
@@ -61,7 +63,15 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
 
   return (
     <View style={[hs.panel, style]}>
-      <Text style={hs.title}>Insert</Text>
+      <View style={hs.titleRow}>
+        <Text style={hs.title}>Insert</Text>
+        {onClose && (
+          <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}
+            accessibilityRole="button" accessibilityLabel="Close">
+            <X size={18} color={colors.textFaint} />
+          </TouchableOpacity>
+        )}
+      </View>
       <Text style={hs.hint}>
         {onInsert ? "Tap to insert into the field." : active ? "Tap to insert into the focused field." : "Focus a field, then tap to insert."}
       </Text>
@@ -126,6 +136,12 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
           </View>
         )}
       </ScrollView>
+      {onClose && (
+        <TouchableOpacity style={hs.cancel} onPress={onClose} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel="Cancel">
+          <Text style={hs.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -152,6 +168,7 @@ export function ExpressionHelperModal({ visible, onClose, variables, contextVari
             contextVariables={contextVariables}
             contextLabel={contextLabel}
             onInsert={tok => { onInsert(tok); onClose(); }}
+            onClose={onClose}
             style={[hs.modalPanel, { maxHeight: panelMaxHeight }]}
           />
         </Pressable>
@@ -182,7 +199,13 @@ const hs = StyleSheet.create({
     width: 300, backgroundColor: colors.surface, borderRadius: radii.xl, padding: 16,
     shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 6,
   },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 15, fontWeight: "800", color: colors.text },
+  cancel: {
+    marginTop: 12, paddingVertical: 11, alignItems: "center",
+    borderRadius: radii.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  cancelText: { fontSize: 14, fontWeight: "600", color: colors.textMuted },
   hint:  { fontSize: 11, color: colors.textFaint, marginTop: 2, marginBottom: 10 },
   tabBar: { flexDirection: "row", gap: 4, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: 3, marginBottom: 8 },
   tab:    { flex: 1, paddingVertical: 6, borderRadius: radii.sm - 2, alignItems: "center" },
