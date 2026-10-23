@@ -147,7 +147,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       const val   = step.outputValue ? "ON" : "OFF";
       const pulse = step.pulseMs && step.pulseMs > 0 ? `  pulse ${step.pulseMs} ms` : "";
       if (card === "relay") return `Relay ${num}  →  ${val}${pulse}`;
-      if (card === "nano")  return `Nano · Pin ${num}  →  ${val}${pulse}`;
+      if (card === "io")  return `IO · Pin ${num}  →  ${val}${pulse}`;
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
     case "Tare":
@@ -166,7 +166,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       if (step.waitMode === 'condition') {
         const g = step.waitCondition;
         const condStr = g && (g.items ?? []).length > 0
-          ? ((g.items ?? []).length === 1 ? `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}` : `${g.combinator} of ${(g.items ?? []).length} conds`)
+          ? ((g.items ?? []).length === 1 ? conditionItemText(g.items[0]) : `${g.combinator} of ${(g.items ?? []).length} conds`)
           : "condition";
         return step.waitTimeoutMs ? `Wait  ${condStr}  (${step.waitTimeoutMs} ms max)` : `Wait  ${condStr}`;
       }
@@ -179,7 +179,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       if (step.loopMode === 'while') {
         const g = step.loopWhileCondition;
         if (!g || (g.items ?? []).length === 0) return "While  (no condition)";
-        if ((g.items ?? []).length === 1) return `While  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
+        if ((g.items ?? []).length === 1) return `While  ${conditionItemText(g.items[0])}`;
         return `While  ${g.combinator} of ${(g.items ?? []).length} conditions`;
       }
       const loopExpr = step.expressions?.loopCount;
@@ -205,7 +205,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
     case "IfCondition": {
       const g = step.condition;
       if (!g || (g.items ?? []).length === 0) return "If (no conditions)";
-      if ((g.items ?? []).length === 1) return `If  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
+      if ((g.items ?? []).length === 1) return `If  ${conditionItemText(g.items[0])}`;
       return `If  ${g.combinator} of ${(g.items ?? []).length} conditions`;
     }
     case "SetTool":    return step.toolName  ? `Set Tool  →  ${step.toolName}`  : "Set Tool  →  None";
@@ -430,12 +430,18 @@ export function fmtSetVar(varName: string | undefined, expr: string | undefined)
 
 // ── Condition formatting ──────────────────────────────────────────────────────
 
+/** The text a condition item shows: its expression, or the legacy left/op/right rebuilt as one. */
+export function conditionItemText(i: { expr?: string; left?: string; operator?: string; right?: string }): string {
+  if (i.expr != null) return i.expr;
+  return [i.left, i.operator, i.right].filter(s => s && s.length > 0).join(" ");
+}
+
 /** Spells out every item of a condition group joined by AND/OR (not just a count). */
 export function fmtConditionFull(group: ConditionGroup | undefined): string {
   const items = group?.items ?? [];
   if (items.length === 0) return "(no conditions)";
   const join = group!.combinator === "ANY" ? "  OR  " : "  AND  ";
-  return items.map(i => `${i.left || "?"} ${i.operator} ${i.right || "?"}`).join(join);
+  return items.map(i => conditionItemText(i) || "?").join(join);
 }
 
 // ── Step detail ───────────────────────────────────────────────────────────────
@@ -491,7 +497,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const num   = step.outputNumber ?? 1;
       const val   = step.outputValue ? "ON" : "OFF";
       const label = card === "relay" ? `Relay ${num}  →  ${val}`
-                  : card === "nano"  ? `Nano · Pin ${num}  →  ${val}`
+                  : card === "io"  ? `IO · Pin ${num}  →  ${val}`
                   :                    `STB · Output ${num}  →  ${val}`;
       const lines = [label];
       if (step.pulseMs && step.pulseMs > 0) lines.push(`Pulse  ${step.pulseMs} ms${step.pulseBlocking ? "  (blocking)" : ""}`);

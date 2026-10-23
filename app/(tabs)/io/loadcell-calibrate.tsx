@@ -13,7 +13,7 @@ import {
 } from "@/src/components/ui/kit";
 import { formatLoadCell, LOAD_CELL_UNITS } from "@/src/components/ui/loadcell";
 import type { IoRecordingMeta, LoadCellUnit } from "@/src/models/robotModels";
-import { useNanoIO } from "@/src/providers/RobotProvider";
+import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { exportSamplesCsv } from "@/src/services/ioExport";
 
@@ -31,15 +31,15 @@ const RETENTION_PRESETS = [
  * the known weight is entered in the chosen display unit and converted to grams before sending.
  */
 export default function LoadCellCalibrateScreen() {
-  const { nanoId, pin } = useLocalSearchParams<{ nanoId?: string; pin?: string }>();
+  const { deviceId, pin } = useLocalSearchParams<{ deviceId?: string; pin?: string }>();
   const pinNum = Number(pin);
-  const nanos = useNanoIO();
+  const ioDevices = useIoDevices();
 
   const cell = useMemo(() => {
-    const nano = nanos.find(n => n.id === nanoId);
+    const nano = ioDevices.find(n => n.id === deviceId);
     const p = nano?.pins.find(pp => pp.pin === pinNum && pp.type === "LoadCell");
     return p ? { nano, p } : null;
-  }, [nanos, nanoId, pinNum]);
+  }, [ioDevices, deviceId, pinNum]);
 
   const unit = (cell?.p.unit ?? "g") as LoadCellUnit;
   const calibrated = (cell?.p.countsPerGram ?? 0) !== 0;
@@ -49,7 +49,7 @@ export default function LoadCellCalibrateScreen() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   // ── Live graph + recording ──────────────────────────────────────────────────
-  const channelKey = nanoId ? `nano/${nanoId}/${pinNum}` : null;
+  const channelKey = deviceId ? `io/${deviceId}/${pinNum}` : null;
   const [recording, setRecording] = useState<IoRecordingMeta | null>(null); // active
   const [lastRec, setLastRec]     = useState<IoRecordingMeta | null>(null);  // just stopped
   const [elapsed, setElapsed]     = useState(0);
@@ -109,9 +109,9 @@ export default function LoadCellCalibrateScreen() {
     ? ` · ${Math.max(1, Math.round((lastRec.endUnixMs - lastRec.startUnixMs) / 1000))}s`
     : "";
 
-  const crumbs = [{ label: "I/O", href: "/io" }, { label: cell?.nano?.name ?? "Nano", href: nanoId ? `/io/nanos?nanoId=${nanoId}` : "/io" }, { label: "Calibrate" }];
+  const crumbs = [{ label: "I/O", href: "/io" }, { label: cell?.nano?.name ?? "Nano", href: deviceId ? `/io/nanos?deviceId=${deviceId}` : "/io" }, { label: "Calibrate" }];
 
-  const setUnit = (u: string) => { if (nanoId) robotClient.setLoadCellUnit(nanoId, pinNum, u).catch(() => {}); };
+  const setUnit = (u: string) => { if (deviceId) robotClient.setLoadCellUnit(deviceId, pinNum, u).catch(() => {}); };
 
   if (!cell) {
     return (
@@ -242,7 +242,7 @@ export default function LoadCellCalibrateScreen() {
       <LoadCellCalibrateWizard
         visible={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        nanoId={nanoId}
+        deviceId={deviceId}
         pin={pinNum}
       />
     </View>

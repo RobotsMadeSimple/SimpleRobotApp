@@ -17,8 +17,6 @@ import {
   Copy,
   Cpu,
   History as HistoryIcon,
-  Eye,
-  EyeOff,
   ImagePlus,
   Plus,
   Repeat,
@@ -63,7 +61,6 @@ import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHisto
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, programFromDoc, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
 import { EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
-import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
 import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
 import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
 import { ExpressionEnvProvider } from "@/src/components/ui/builder/expressions/ExpressionEnv";
@@ -392,23 +389,6 @@ export default function BuilderScreen() {
       });
       if (firstIdx < 0) rebuilt.push(loop);
       return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
-    });
-    exitSelect();
-  }
-
-  // Every selected step is already off → the action switches them back on;
-  // otherwise it switches them all off.
-  function selectionAllDisabled(): boolean {
-    const sel = selectedInOrder();
-    return sel.length > 0 && sel.every(s => !isStepEnabled(s));
-  }
-
-  function setSelectedEnabled(enabled: boolean) {
-    if (selectedIds.length === 0) return;
-    setSteps(prev => {
-      const scoped = getStepsAtScope(prev, scopeStackRef.current)
-        .map(s => selectedIds.includes(s.id) ? withStepEnabled(s, enabled) : s);
-      return setStepsAtScope(prev, scopeStackRef.current, scoped);
     });
     exitSelect();
   }
@@ -1571,19 +1551,6 @@ export default function BuilderScreen() {
           >
             <Repeat2 size={16} color={accents.purple} />
             <Text style={[styles.selectActionText, { color: accents.purple }]}>Routine</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
-            onPress={() => setSelectedEnabled(selectionAllDisabled())}
-            disabled={selectedIds.length === 0}
-            activeOpacity={0.7}
-          >
-            {selectionAllDisabled()
-              ? <Eye size={16} color={colors.textSecondary} />
-              : <EyeOff size={16} color={colors.textSecondary} />}
-            <Text style={[styles.selectActionText, { color: colors.textSecondary }]}>
-              {selectionAllDisabled() ? "Enable" : "Disable"}
-            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}

@@ -43,7 +43,7 @@ export function widgetSummary(w: DisplayWidget): string {
     case "image":
       return c.variable ? `$${c.variable}` : "(pick a variable)";
     case "graph":
-      return c.source === "variable" ? (c.variable || "(expression)") : c.nanoId ? `${c.nanoId}/${c.pin}` : "(set nano + pin)";
+      return c.source === "variable" ? (c.variable || "(expression)") : c.deviceId ? `${c.deviceId}/${c.pin}` : "(set nano + pin)";
     case "button":
       return c.action === "stop" ? "Stop" : "Run";
     case "text":

@@ -9,13 +9,13 @@ import {
 } from "@/src/components/ui/kit";
 import { formatLoadCell, unitToGrams } from "@/src/components/ui/loadcell";
 import type { LoadCellUnit } from "@/src/models/robotModels";
-import { useNanoIO } from "@/src/providers/RobotProvider";
+import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 
 type Props = {
   visible: boolean;
   onClose: () => void;
-  nanoId?: string;
+  deviceId?: string;
   pin: number;
 };
 
@@ -25,19 +25,19 @@ type Props = {
  * the master unit; the known weight is entered in the cell's display unit and converted before
  * sending. The live reading (and a small graph) stay visible so you can watch the value settle.
  */
-export function LoadCellCalibrateWizard({ visible, onClose, nanoId, pin }: Props) {
+export function LoadCellCalibrateWizard({ visible, onClose, deviceId, pin }: Props) {
   const insets = useSafeAreaInsets();
-  const nanos = useNanoIO();
+  const ioDevices = useIoDevices();
   const cell = useMemo(() => {
-    const nano = nanos.find(n => n.id === nanoId);
+    const nano = ioDevices.find(n => n.id === deviceId);
     return nano?.pins.find(p => p.pin === pin && p.type === "LoadCell") ?? null;
-  }, [nanos, nanoId, pin]);
+  }, [ioDevices, deviceId, pin]);
 
   const unit = (cell?.unit ?? "g") as LoadCellUnit;
   const calibrated = (cell?.countsPerGram ?? 0) !== 0;
   const grams = cell?.grams ?? 0;
   const raw = cell?.raw;
-  const channelKey = nanoId ? `nano/${nanoId}/${pin}` : null;
+  const channelKey = deviceId ? `io/${deviceId}/${pin}` : null;
 
   const [step, setStep] = useState(0); // 0 Zero · 1 Scale · 2 Done
   const [known, setKnown] = useState("");
@@ -52,17 +52,17 @@ export function LoadCellCalibrateWizard({ visible, onClose, nanoId, pin }: Props
   }, [visible]);
 
   const tare = async () => {
-    if (!nanoId) return;
+    if (!deviceId) return;
     setBusy("tare");
-    try { await robotClient.tareLoadCell(nanoId, pin); setStep(1); }
+    try { await robotClient.tareLoadCell(deviceId, pin); setStep(1); }
     finally { setBusy(null); }
   };
   const capture = async () => {
-    if (!nanoId) return;
+    if (!deviceId) return;
     const v = parseFloat(known);
     if (!isFinite(v) || v <= 0) return;
     setBusy("cal");
-    try { await robotClient.calibrateLoadCell(nanoId, pin, unitToGrams(v, unit)); setStep(2); }
+    try { await robotClient.calibrateLoadCell(deviceId, pin, unitToGrams(v, unit)); setStep(2); }
     finally { setBusy(null); }
   };
 

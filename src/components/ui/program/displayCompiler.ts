@@ -88,7 +88,7 @@ function widgetBody(w: DisplayWidget, ctx: CompileCtx): string {
       const label = esc(c.label || (c.source === "variable" ? c.variable || "" : "Load cell"));
       const subscribe = c.source === "variable"
         ? `robot.onExpr(${js(c.variable)},function(v){if(typeof v==='number'){pts.push(v);if(pts.length>240)pts=pts.slice(pts.length-240);}});`
-        : `robot.onHistory(${js(c.nanoId)},${num(c.pin, 0)},function(s){s.forEach(function(x){pts.push(x.v);});if(pts.length>240)pts=pts.slice(pts.length-240);});`;
+        : `robot.onHistory(${js(c.deviceId)},${num(c.pin, 0)},function(s){s.forEach(function(x){pts.push(x.v);});if(pts.length>240)pts=pts.slice(pts.length-240);});`;
       return `<div class="dp-card">
   <div class="dp-lbl">${label}</div>
   <canvas id="${id}_c" style="flex:1 1 auto;width:100%;min-height:0;"></canvas>

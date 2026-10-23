@@ -21,6 +21,8 @@ import { FunctionsList } from "./FunctionsList";
 import { pluginGroupTitle, useSplitSymbols } from "./pluginSymbols";
 import { applyCompletion, completionsAt, insertAt, isExpressionText } from "./completions";
 import { useLiveValue } from "./useLiveValue";
+import { VarPickerModal } from "../VarPicker";
+import { ms } from "../builderStyles";
 
 // ── The standardized symbol strip ─────────────────────────────────────────────
 //
@@ -33,9 +35,9 @@ import { useLiveValue } from "./useLiveValue";
 /** `[label, inserted text]`. The label is the maths spelling, the insert is what the evaluator reads. */
 export type OpChip = [string, string];
 
-const OPERATOR_CHIPS: OpChip[]   = [["+", "+"], ["−", "-"], ["×", "*"], ["÷", "/"]];
-const GROUPING_CHIPS: OpChip[]   = [["(", "("], [")", ")"]];
-const COMPARISON_CHIPS: OpChip[] = [
+export const OPERATOR_CHIPS: OpChip[]   = [["+", "+"], ["−", "-"], ["×", "*"], ["÷", "/"]];
+export const GROUPING_CHIPS: OpChip[]   = [["(", "("], [")", ")"]];
+export const COMPARISON_CHIPS: OpChip[] = [
   ["==", "=="], ["!=", "!="], ["<", "<"], ["<=", "<="], [">", ">"], [">=", ">="],
   ["and", "and"], ["or", "or"],
 ];
@@ -60,7 +62,7 @@ export function variableToken(v: ProgramVariable): string {
 const NEWLINE = /\r?\n/g;
 
 /** A plain number evaluates to itself — everything else is worth asking the controller about. */
-function worthEvaluating(text: string): boolean {
+export function worthEvaluating(text: string): boolean {
   const t = text.trim();
   return !!t && !/^-?\d*\.?\d+$/.test(t);
 }
@@ -430,12 +432,7 @@ function EditorCard({
  * so the keyboard can never cover what is being edited and the adders are the same
  * everywhere. Expressions keep their purple, with an `fx` badge as the affordance.
  */
-export function ExpressionField({
-  value, onChange, title, placeholder, hint,
-  variables, contextVariables, contextLabel,
-  comparisons, extraOps,
-  style, accent = accents.purple, clearable = true,
-}: {
+export type ExpressionFieldProps = {
   value: string;
   /** Called with the committed text on Done, and with "" when the field is cleared. */
   onChange: (next: string) => void;
@@ -452,36 +449,72 @@ export function ExpressionField({
   /** Tint for expression text — lets a screen keep its own accent. */
   accent?: string;
   clearable?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
+};
+
+/**
+ * Every expression-capable field. When an ExpressionFieldProvider + host are in scope it edits
+ * INLINE with the keyboard-docked tool bar; otherwise it falls back to the tap-to-open sheet.
+ */
+/**
+ * An expression-capable field, edited INLINE. You type the value and any operators (`+ - * /`,
+ * comparisons) straight from the keyboard; the one affordance is an "Insert variable" chip that
+ * opens the same centred modal selector the rest of the app uses (variables, caller vars, read-only
+ * properties and IO), so nothing is hidden behind a keyboard or a bottom sheet. Commits live.
+ */
+export function ExpressionField({
+  value, onChange, title, placeholder,
+  variables, contextVariables, contextLabel, extraOps,
+  style, accent = accents.purple, clearable = true,
+}: ExpressionFieldProps) {
+  const env = useExpressionEnv();
+  const inputRef  = useRef<TextInput | null>(null);
+  const selRef    = useRef({ start: value.length, end: value.length });
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [forcedSel, setForcedSel] = useState<{ start: number; end: number } | null>(null);
+  const [varOpen, setVarOpen] = useState(false);
+  const [fnOpen,  setFnOpen]  = useState(false);
+  const [focused, setFocused] = useState(false);
   const isExpr = isExpressionText(value);
-  const shown  = value.trim();
+  const live = useLiveValue(env, value, worthEvaluating(value));
+  const hasVars = (variables?.length ?? 0) + (contextVariables?.length ?? 0) > 0;
+  // Insert chips are clutter when you're not editing — show them only while the field is focused
+  // (or a picker it launched is open, so tapping a chip doesn't make the row vanish mid-tap).
+  const showChips = focused || varOpen || fnOpen;
+
+  useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
+
+  // Splice a token at the caret, spacing it off a preceding word/value; commit live and keep focus.
+  function insert(token: string) {
+    const at    = Math.min(selRef.current.end, value.length);
+    const next  = insertAt(value, at, token);
+    const caret = next.length - (value.length - at);
+    onChange(next.replace(NEWLINE, " "));
+    selRef.current = { start: caret, end: caret };
+    setForcedSel({ start: caret, end: caret });
+    inputRef.current?.focus();
+  }
 
   return (
     <View>
-      {/* The clear × is a SIBLING of the open-editor touchable, not a child —
-          nesting role="button" inside role="button" renders <button><button>
-          on web (react-native-web maps the role to a real element), which
-          React DOM rejects as invalid nesting at hydration. */}
       <View style={[style, s.fieldBox]}>
-        <TouchableOpacity
-          style={s.fieldMain}
-          onPress={() => setOpen(true)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`${title}: ${shown || "empty"}. Opens the expression editor.`}
-        >
-          <Text
-            style={[s.fieldText, !shown && { color: colors.textFaint }, shown && isExpr && { color: accent }]}
-            numberOfLines={1}
-          >
-            {shown || placeholder || "0"}
-          </Text>
-          {/* The affordance: faint on a plain value (this field can take an expression),
-              in the accent once it holds one. */}
-          <Text style={[s.fx, { color: isExpr && shown ? accent : colors.textFaint }]}>fx</Text>
-        </TouchableOpacity>
-        {clearable && shown.length > 0 && (
+        <TextInput
+          ref={inputRef}
+          style={[s.fieldText, isExpr && { color: accent }]}
+          value={value}
+          onChangeText={next => { onChange(next.replace(NEWLINE, " ")); setForcedSel(null); }}
+          onSelectionChange={e => { selRef.current = e.nativeEvent.selection; }}
+          selection={forcedSel ?? undefined}
+          placeholder={placeholder ?? "0"}
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          multiline
+          blurOnSubmit={false}
+          onFocus={() => { if (blurTimer.current) clearTimeout(blurTimer.current); setFocused(true); }}
+          onBlur={() => { blurTimer.current = setTimeout(() => setFocused(false), 150); }}
+          accessibilityLabel={title}
+        />
+        {clearable && value.trim().length > 0 && (
           <TouchableOpacity onPress={() => onChange("")} hitSlop={8} activeOpacity={0.7} style={s.fieldClear}
             accessibilityRole="button" accessibilityLabel={`Clear ${title}`}>
             <X size={13} color={colors.textFaint} />
@@ -489,21 +522,104 @@ export function ExpressionField({
         )}
       </View>
 
-      <ExpressionEditorModal
-        visible={open}
-        title={title}
-        hint={hint}
-        initialText={value}
-        placeholder={placeholder}
-        variables={variables}
-        contextVariables={contextVariables}
-        contextLabel={contextLabel}
-        comparisons={comparisons}
-        extraOps={extraOps}
-        onCancel={() => setOpen(false)}
-        onCommit={next => { setOpen(false); onChange(next); }}
+      {/* Live value / error, only when there is something to say. */}
+      {live.kind === "value" && <Text style={s.inlineLive} numberOfLines={1}>= {live.text}</Text>}
+      {live.kind === "error" && <Text style={s.inlineLiveErr} numberOfLines={2}>{live.text}</Text>}
+
+      {/* Insert chips — shown while editing. Variables and functions each open a centred modal
+          selector; any field-specific tokens sit beside them. */}
+      {showChips && (
+        <View style={s.inlineChips}>
+          {hasVars && (
+            <TouchableOpacity onPress={() => setVarOpen(true)} activeOpacity={0.7}
+              style={s.insertChip} accessibilityRole="button" accessibilityLabel="Insert variable">
+              <Text style={s.insertChipText}>＋ $Variable</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => setFnOpen(true)} activeOpacity={0.7}
+            style={s.insertChip} accessibilityRole="button" accessibilityLabel="Insert function">
+            <Text style={s.insertChipText}>＋ ƒunction</Text>
+          </TouchableOpacity>
+          {(extraOps ?? []).map(([label, ins]) => (
+            <TouchableOpacity key={`x:${ins}`} onPress={() => insert(ins)} activeOpacity={0.7}
+              style={s.opChip} accessibilityRole="button" accessibilityLabel={`Insert ${label}`}>
+              <Text style={s.opChipText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {hasVars && (
+        <VarPickerModal
+          visible={varOpen}
+          onClose={() => setVarOpen(false)}
+          variables={variables ?? []}
+          contextVariables={contextVariables}
+          contextLabel={contextLabel}
+          selected={undefined}
+          title="Insert Variable"
+          onSelect={v => { setVarOpen(false); if (v) insert(variableToken(v)); }}
+          onPickSymbol={name => { setVarOpen(false); insert(`$${name}`); }}
+        />
+      )}
+      <FunctionPickerModal
+        visible={fnOpen}
+        onClose={() => setFnOpen(false)}
+        onInsert={name => { setFnOpen(false); insert(`${name}(`); }}
       />
     </View>
+  );
+}
+
+/** Centred modal (same shell as the variable selector) listing built-in + plugin functions. */
+function FunctionPickerModal({ visible, onClose, onInsert }: {
+  visible: boolean; onClose: () => void; onInsert: (name: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const split = useSplitSymbols();
+  useEffect(() => { if (visible) setSearch(""); }, [visible]);
+  const pick = (name: string) => { onClose(); onInsert(name); };
+  const pluginGroups = split.plugins
+    .map(g => ({ g, fns: g.functions.filter(f => !search.trim()
+      || f.name.toLowerCase().includes(search.trim().toLowerCase())
+      || f.description.toLowerCase().includes(search.trim().toLowerCase())) }))
+    .filter(x => x.fns.length > 0);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ms.overlay} onPress={onClose}>
+        <Pressable style={[ms.card, { maxHeight: "80%" }]} onPress={() => {}}>
+          <View style={ms.header}>
+            <View style={{ width: 18 }} />
+            <Text style={ms.title}>Insert Function</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color={colors.textFaint} />
+            </TouchableOpacity>
+          </View>
+          <View style={s.fnSearchBox}>
+            <TextInput style={s.fnSearchInput} value={search} onChangeText={setSearch}
+              placeholder="Search functions…" placeholderTextColor={colors.textFaint}
+              autoCapitalize="none" autoCorrect={false} autoFocus />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
+                <X size={13} color={colors.textFaint} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
+            {split.functions.length > 0 && (
+              <FunctionsList functions={split.functions} search={search} onInsert={pick} />
+            )}
+            {pluginGroups.map(({ g, fns }) => (
+              <React.Fragment key={g.id}>
+                <Text style={s.fnGroupHdr}>{pluginGroupTitle(g)}</Text>
+                <FunctionsList functions={fns} search="" onInsert={pick} />
+              </React.Fragment>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -625,4 +741,23 @@ const s = StyleSheet.create({
   fieldText:  { flex: 1, fontSize: 14, color: colors.text },
   fx:         { fontSize: 12, fontWeight: "700", fontStyle: "italic" },
   fieldClear: { paddingLeft: 2 },
+
+  // Inline field: live value/error + the insert-chip row beneath the input.
+  inlineLive:    { fontSize: 12, fontWeight: "700", color: colors.success, marginTop: 5 },
+  inlineLiveErr: { fontSize: 12, color: colors.danger, marginTop: 5 },
+  inlineChips:   { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 7 },
+  insertChip: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: radii.sm,
+    backgroundColor: "#ede9fe", borderWidth: 1, borderColor: "#c4b5fd",
+  },
+  insertChipText: { fontSize: 13, fontWeight: "700", color: accents.purple },
+
+  // Function picker modal
+  fnSearchBox: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1,
+    borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: 10,
+    backgroundColor: colors.surfaceMuted, marginBottom: 8 },
+  fnSearchInput: { flex: 1, fontSize: 14, color: colors.text, paddingVertical: 9 },
+  fnGroupHdr: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4,
+    marginTop: 10, marginBottom: 4 },
 });

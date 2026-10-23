@@ -5,12 +5,12 @@ export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured' | 'LoadCe
 /** Display units for a load cell; grams is the master behind the scenes. */
 export type LoadCellUnit = 'g' | 'kg' | 'oz' | 'lb' | 'N';
 
-export type NanoPinState = {
+export type IoPinState = {
   pin: number;
   type: PinType;
   value: boolean;
   name: string;
-  nanoId: string;
+  deviceId: string;
   nanoName: string;
   pixelCount: number;
   // Load cell (type === 'LoadCell') ─ grams is the master; the app converts to `unit` for display.
@@ -23,18 +23,18 @@ export type NanoPinState = {
   sampleRateHz?: number;
 };
 
-export type NanoState = {
+export type IoDeviceState = {
   id: string;
   name: string;
   connected: boolean;
-  pins: NanoPinState[];
+  pins: IoPinState[];
 };
 
 export type NeoPixelColor = { r: number; g: number; b: number };
 
 // ── IO value history / recordings ──────────────────────────────────────────────
 // Mirrors the controller History models. A channel is addressed by a stable key
-// (`nano/<nanoId>/<pin>` for load cells). Short sample keys keep high-rate batches small.
+// (`io/<deviceId>/<pin>` for load cells). Short sample keys keep high-rate batches small.
 
 /** One timestamped sample: t = unix ms, v = value (grams for a load cell), r = raw reading. */
 export type IoSample = { t: number; v: number; r: number };
@@ -800,9 +800,15 @@ export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=' | 'contains' | '
 
 export type ConditionItem = {
   id: string;
-  left: string;
-  operator: ConditionOp;
-  right: string;
+  /**
+   * A boolean expression — `$enabled`, `$speed > 5`, `$a == $b`. A bare variable is true when
+   * non-zero. This is how conditions are authored now; left/operator/right below are the legacy
+   * structured form, still read by the controller for older programs.
+   */
+  expr?: string;
+  left?: string;
+  operator?: ConditionOp;
+  right?: string;
 };
 
 export type ConditionGroup = {
@@ -1040,12 +1046,6 @@ export type ProgramStep = {
   id: string;
   type: StepType;
   name?: string;
-  /**
-   * `false` = the executor skips this step (still counted for progress, logged as
-   * "[Skipped — disabled] …"). Absent or `true` runs it, so the editor only ever
-   * writes `false` and clears the field otherwise.
-   */
-  enabled?: boolean;
   /** Free text shown under the step in the editor. Never executed. */
   comment?: string;
   pointName?: string;
@@ -1086,12 +1086,12 @@ export type ProgramStep = {
   overrideRZ?: number;
   outputNumber?: number;
   outputValue?: boolean;
-  outputCard?: string;     // "stb" | "relay" | "nano"
-  outputNanoId?: string;   // only for nano
+  outputCard?: string;     // "stb" | "relay" | "io"
+  outputDeviceId?: string;   // only for nano
   pulseMs?: number;        // >0 = pulse; set to outputValue for pulseMs then flip
   pulseBlocking?: boolean; // when true, block program execution until pulse completes
   // Load cell (Tare, ReadLoadCell, MoveWithForce)
-  loadCellNanoId?: string;
+  loadCellDeviceId?: string;
   loadCellPin?: number;
   loadCellUnit?: string;   // ReadLoadCell: unit to store (default grams)
   // Move with force
@@ -1231,7 +1231,7 @@ export type ProgramStep = {
   jsonOutbound?: JsonKeyValue[];
   jsonInbound?: JsonInboundMapping[];
   jsonImageOutbound?: JsonImageMapping[];
-  // StartRecording — capture a load cell (loadCellNanoId/loadCellPin) into this list variable (filled on StopRecording)
+  // StartRecording — capture a load cell (loadCellDeviceId/loadCellPin) into this list variable (filled on StopRecording)
   recordVariableName?: string;
   // ExportData — write variable(s) to a file; exportColumns reuses the HttpRequest outbound row shape
   exportFormat?: string;   // "csv" | "json"

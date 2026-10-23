@@ -220,9 +220,11 @@ export function ExpressionInput({
       onChangeValue(n);
       onChangeExpr(fieldKey, undefined);
     } else {
-      // Clear the stale number so the expression is the only active value.
+      // Clear the stale number so the expression is the only active value. Store the RAW text (not
+      // trimmed) so trailing spaces survive while editing — otherwise deleting a `$var` would also
+      // swallow the space after it and the next backspace would eat a real character.
       onChangeValue(undefined);
-      onChangeExpr(fieldKey, t);
+      onChangeExpr(fieldKey, raw);
     }
   }
 
@@ -347,9 +349,9 @@ export function TemplateInput({
             <TouchableOpacity
               onPress={() => setVarPickerOpen(true)}
               activeOpacity={0.7}
-              style={[exprStyles.opChip, { backgroundColor: "#ede9fe", borderColor: "#c4b5fd" }]}
+              style={exprStyles.chip}
             >
-              <Text style={[exprStyles.opChipText, { color: accents.purple, fontSize: 13 }]}>$var</Text>
+              <Text style={exprStyles.chipText}>＋ $Variable</Text>
             </TouchableOpacity>
           )}
           {(quickTokens ?? []).map(t => (

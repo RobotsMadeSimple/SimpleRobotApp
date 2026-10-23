@@ -2,9 +2,9 @@ import { IORow } from "@/src/components/ui/io/ioShared";
 import { IoSparkline } from "@/src/components/ui/io/IoHistoryGraph";
 import { formatLoadCell } from "@/src/components/ui/loadcell";
 import { useIsWide } from "@/src/components/ui/responsive";
-import { useNanoIO } from "@/src/providers/RobotProvider";
+import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { NanoState } from "@/src/models/robotModels";
+import { IoDeviceState } from "@/src/models/robotModels";
 import { Gauge, LogIn, LogOut, Settings2, Sparkles } from "lucide-react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import React from "react";
@@ -29,7 +29,7 @@ import {
 
 const GROUP_ICONS = { Inputs: LogIn, Outputs: LogOut, Neopixel: Sparkles } as const;
 
-function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
+function NanoDetail({ nano, isWide }: { nano: IoDeviceState; isWide: boolean }) {
   const inputs    = nano.pins.filter(p => p.type === "Input");
   const outputs   = nano.pins.filter(p => p.type === "Output");
   const neopixels = nano.pins.filter(p => p.type === "Neopixel");
@@ -64,7 +64,7 @@ function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
               value={pin.value}
               onToggle={
                 pin.type === "Output"
-                  ? () => robotClient.setNanoOutput(nano.id, pin.pin, !pin.value)
+                  ? () => robotClient.setIoOutput(nano.id, pin.pin, !pin.value)
                   : undefined
               }
             />
@@ -97,10 +97,10 @@ function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
                 icon={<Gauge size={20} color={colors.accent} />}
                 iconColor={colors.accentSoft}
                 chevron
-                onPress={() => router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { nanoId: nano.id, pin: String(pin.pin) } })}
+                onPress={() => router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { deviceId: nano.id, pin: String(pin.pin) } })}
                 right={
                   <View style={styles.lcRight}>
-                    <IoSparkline channelKey={`nano/${nano.id}/${pin.pin}`} useRaw={!calibrated} />
+                    <IoSparkline channelKey={`io/${nano.id}/${pin.pin}`} useRaw={!calibrated} />
                     <Text style={[styles.lcValue, !calibrated && styles.lcValueRaw]}>{value}</Text>
                   </View>
                 }
@@ -121,12 +121,12 @@ function NanoDetail({ nano, isWide }: { nano: NanoState; isWide: boolean }) {
   return <>{digital}{loadcellSection}</>;
 }
 
-export default function NanosPage() {
-  const { nanoId } = useLocalSearchParams<{ nanoId?: string }>();
-  const nanos = useNanoIO();
+export default function IoDevicesPage() {
+  const { deviceId } = useLocalSearchParams<{ deviceId?: string }>();
+  const ioDevices = useIoDevices();
   const isWide = useIsWide();
 
-  const nano = nanoId ? (nanos.find(n => n.id === nanoId) ?? null) : null;
+  const nano = deviceId ? (ioDevices.find(n => n.id === deviceId) ?? null) : null;
 
   const inputCount    = nano?.pins.filter(p => p.type === "Input").length ?? 0;
   const outputCount   = nano?.pins.filter(p => p.type === "Output").length ?? 0;
@@ -151,7 +151,7 @@ export default function NanosPage() {
                 label="Configure"
                 icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
                 onPress={() =>
-                  router.push({ pathname: "/(tabs)/io/configure", params: { nanoId: nano.id } })
+                  router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: nano.id } })
                 }
               />
             </View>

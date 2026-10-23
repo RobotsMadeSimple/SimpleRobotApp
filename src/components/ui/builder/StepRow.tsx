@@ -22,7 +22,7 @@ import { colors, accents, radii } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { STEP_THEME, StepIcon, categoryForStep, stepDetail, stepLabel, ScopeFrame } from "./stepUtils";
 import { IfConditionBody } from "./IfConditionBody";
-import { DisabledPill, ProblemBadge, StepComment, stepHasError } from "./StepAnnotations";
+import { ProblemBadge, StepComment, stepHasError } from "./StepAnnotations";
 import type { StepProblems } from "./useProgramValidation";
 
 // ── Insert divider ────────────────────────────────────────────────────────────
@@ -194,10 +194,7 @@ export function StepRow({
   const category      = categoryForStep(step.type);
   const detail        = stepDetail(step, undefined, undefined, points);
   const detailLines   = detail ? detail.split("\n") : [];
-  // Disabled steps stay fully editable and draggable; they only read as switched off.
-  const disabled      = step.enabled === false;
   const showName      = !(isSetSpeed || isIfCondition) || !!step.name;
-  const strike        = disabled ? sharedStyles.stepCardStruck : null;
 
   return (
     <View
@@ -218,7 +215,6 @@ export function StepRow({
         { borderLeftColor: category.color },
         problems && (stepHasError(problems) ? sharedStyles.stepCardError : sharedStyles.stepCardWarning),
         selected && sharedStyles.stepCardSelected,
-        disabled && sharedStyles.stepCardDisabled,
       ]}>
         {isError && (
           <Animated.View
@@ -251,13 +247,12 @@ export function StepRow({
 
           <View style={sharedStyles.stepCardText}>
             <View style={sharedStyles.stepCardTypeRow}>
-              <Text style={[sharedStyles.stepCardType, { color: theme.accent }, !showName && strike]}>
+              <Text style={[sharedStyles.stepCardType, { color: theme.accent }]}>
                 {index + 1} · {theme.label.toUpperCase()}
               </Text>
-              {disabled && <DisabledPill />}
             </View>
             {showName && (
-              <Text style={[sharedStyles.stepCardName, strike]} numberOfLines={1}>
+              <Text style={sharedStyles.stepCardName} numberOfLines={1}>
                 {step.name || detailLines[0] || step.type}
               </Text>
             )}

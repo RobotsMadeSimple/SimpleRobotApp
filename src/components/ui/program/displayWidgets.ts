@@ -77,7 +77,7 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
     label: "Graph",
     hint: "A live line chart of a load cell or a variable.",
     defaultSize: { w: 6, h: 4 },
-    defaultConfig: { source: "loadcell", nanoId: "", pin: 0, variable: "", label: "", color: "#2563eb" },
+    defaultConfig: { source: "loadcell", deviceId: "", pin: 0, variable: "", label: "", color: "#2563eb" },
     fields: [
       { key: "label", label: "Label (optional)", kind: "text" },
       {
@@ -89,7 +89,7 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
           { label: "Variable (sampled over time)", value: "variable" },
         ],
       },
-      { key: "nanoId", label: "Nano id", kind: "text", showWhen: { key: "source", equals: ["loadcell"] } },
+      { key: "deviceId", label: "Nano id", kind: "text", showWhen: { key: "source", equals: ["loadcell"] } },
       { key: "pin", label: "Load-cell DT pin", kind: "number", showWhen: { key: "source", equals: ["loadcell"] } },
       { key: "variable", label: "Value (expression)", kind: "expression", placeholder: "$force", showWhen: { key: "source", equals: ["variable"] } },
       { key: "color", label: "Line colour", kind: "text", placeholder: "#2563eb" },

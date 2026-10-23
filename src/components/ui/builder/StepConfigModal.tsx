@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  Dimensions,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,12 +15,11 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
+import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
   AuxDeviceState,
-  CameraState,
   ColorVisionStepOutput,
   ConditionGroup,
   Grid,
@@ -43,9 +45,10 @@ import {
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
   useBuiltPrograms,
+  useCameras,
   useGrids,
   useLocals,
-  useNanoIO,
+  useIoDevices,
   usePoints,
   useRelayIO,
   useSelectedRobot,
@@ -56,18 +59,26 @@ import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { colors, radii, accents } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
+import { STEP_THEME } from "./stepUtils";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
 import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType, VariableEditModal } from "./VariableEditModal";
-import { StepMetaFields } from "./StepMetaFields";
 import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
 import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
+
+// Step types whose config fields read live aux-stepper state. Only these fetch aux state on open;
+// every other step type opens without touching the network (the modal used to fetch robot config,
+// vision programs AND aux state on every open — slow over WiFi on a real robot).
+const AUX_STEP_TYPES = new Set<string>([
+  "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable",
+  "GripperAction", "ConveyorAction", "RotaryIndex",
+]);
 
 export function StepConfigModal({
   visible,
@@ -103,33 +114,29 @@ export function StepConfigModal({
   const locals        = useLocals();
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
-  const nanos         = useNanoIO();
+  const ioDevices         = useIoDevices();
   const relay         = useRelayIO();
   const robot         = useSelectedRobot();
   // ASTRO and CNC 4-axis robots only have Z rotation — hide RX/RY offset fields.
   const rzOnly        = robot?.robotType === 'ASTRO' || robot?.robotType === 'CNC4Axis';
-  // Keep the overlay unrendered until the modal window settles (a couple of frames). The card is
-  // top-anchored with a maxHeight %, so it otherwise grows as the window height resolves a frame
-  // late; showing it only after the settle avoids the visible jump. Same approach as AppAlert.
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (!visible) return;
-    // setTimeout, not requestAnimationFrame — rAF doesn't fire reliably while the UI is idle.
-    const t = setTimeout(() => setReady(true), 32);
-    return () => { clearTimeout(t); setReady(false); };
-  }, [visible]);
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
+  // Step name is edited in-place in the header via a pencil toggle.
+  const [editingName, setEditingName] = useState(false);
+  // Description + status description collapse to an "Add …" button when empty, to save room.
+  const [showComment, setShowComment] = useState(false);
+  const [showStatus,  setShowStatus]  = useState(false);
   // Which modifier row is currently showing its inline "clear?" confirmation.
   const [clearConfirm, setClearConfirm] = useState<SubPage>(null);
   const [gridPointMode, setGridPointMode] = useState<'savedPoint' | 'gridPoint' | 'stackPoint' | 'variable'>('savedPoint');
   const [gridPickerOpen, setGridPickerOpen] = useState(false);
   const [stackPickerOpen, setStackPickerOpen] = useState(false);
-  const [ioConfig, setIoConfig]       = useState<{ enableStbCard: boolean; enableNanoCards: boolean; enableRelayCard: boolean } | null>(null);
+  const [ioConfig, setIoConfig]       = useState<{ enableStbCard: boolean; enableIoDevices: boolean; enableRelayCard: boolean } | null>(null);
   const [auxDevices, setAuxDevices]       = useState<AuxDeviceState[]>([]);
   const [visionPrograms, setVisionPrograms] = useState<VisionProgram[]>([]);
-  const [cameraDevices, setCameraDevices]   = useState<CameraState[]>([]);
+  // Cameras are already streamed globally by the provider — no need to re-subscribe per open.
+  const cameraDevices = useCameras();
   const [visionProgPickerOpen, setVisionProgPickerOpen] = useState(false);
   const [zonePickerOpen, setZonePickerOpen] = useState(false);
   const [zoneVarPickerOpen, setZoneVarPickerOpen] = useState(false);
@@ -148,26 +155,64 @@ export function StepConfigModal({
   const [captureVarCreateOpen, setCaptureVarCreateOpen] = useState(false);
   const [httpReceiveInboundPicker, setHttpReceiveInboundPicker] = useState<number | null>(null);
 
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const cardWidth = Math.min(windowWidth - 48, 520);
 
+  // Keyboard-aware scrolling: on a phone the soft keyboard covers the lower half of the modal, so
+  // when it opens we scroll the focused input up above it (and pad the bottom so there's room).
+  const bodyScrollRef = useRef<ScrollView>(null);
+  const scrollYRef    = useRef(0);
+  const [kbHeight, setKbHeight] = useState(0);
   useEffect(() => {
-    if (!visible) return;
-    robotClient.getRobotConfig()
-      .then(cfg => setIoConfig({
-        enableStbCard:   cfg.enableStbCard   ?? true,
-        enableNanoCards: cfg.enableNanoCards ?? true,
-        enableRelayCard: cfg.enableRelayCard ?? false,
-      }))
-      .catch(() => setIoConfig({ enableStbCard: true, enableNanoCards: true, enableRelayCard: false }));
-    robotClient.getAuxState().catch(() => {});
-    robotClient.getVisionPrograms()
-      .then(({ programs }) => setVisionPrograms(programs))
-      .catch(() => {});
-    const unsubAux     = robotClient.onAuxAxis(devices => setAuxDevices(devices));
-    const unsubCameras = robotClient.onCameras(cams => setCameraDevices(cams));
-    return () => { unsubAux(); unsubCameras(); };
+    if (!visible || Platform.OS === "web") return;
+    const onShow = (e: any) => {
+      const h = e?.endCoordinates?.height ?? 0;
+      setKbHeight(h);
+      // Two frames so the focused input's position reflects any layout the keyboard just caused.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const focused: any = (TextInput as any).State?.currentlyFocusedInput?.();
+        const sv = bodyScrollRef.current;
+        if (!focused || !sv || typeof focused.measureInWindow !== "function") return;
+        focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => {
+          if (typeof y !== "number") return;
+          const kbTop   = Dimensions.get("window").height - h;
+          const overlap = (y + ht + 24) - kbTop;        // how far the field dips under the keyboard
+          if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
+        });
+      }));
+    };
+    const onHide = () => setKbHeight(0);
+    const s1 = Keyboard.addListener("keyboardDidShow", onShow);
+    const s2 = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => { s1.remove(); s2.remove(); };
   }, [visible]);
+
+  // Only fetch the data a given step type actually uses. Opening a Move/Wait/Logic/etc. step now
+  // makes zero network calls; IO/Vision/Aux steps fetch just their own data. (Previously every open
+  // fired getRobotConfig + getVisionPrograms + getAuxState + two subscriptions — slow over WiFi.)
+  const draftType = draft?.type;
+  useEffect(() => {
+    if (!visible || !draftType) return;
+    if (draftType === "SetOutput") {
+      robotClient.getRobotConfig()
+        .then(cfg => setIoConfig({
+          enableStbCard:   cfg.enableStbCard   ?? true,
+          enableIoDevices: cfg.enableIoDevices ?? true,
+          enableRelayCard: cfg.enableRelayCard ?? false,
+        }))
+        .catch(() => setIoConfig({ enableStbCard: true, enableIoDevices: true, enableRelayCard: false }));
+    }
+    if (draftType === "RunVision") {
+      robotClient.getVisionPrograms()
+        .then(({ programs }) => setVisionPrograms(programs))
+        .catch(() => {});
+    }
+    if (AUX_STEP_TYPES.has(draftType)) {
+      robotClient.getAuxState().catch(() => {});
+      const unsubAux = robotClient.onAuxAxis(devices => setAuxDevices(devices));
+      return () => { unsubAux(); };
+    }
+  }, [visible, draftType]);
 
   useEffect(() => {
     if (step) {
@@ -190,7 +235,13 @@ export function StepConfigModal({
     }
     setSubPage(null);
     setClearConfirm(null);
+    setEditingName(false);
+    setShowComment(false);
+    setShowStatus(false);
   }, [step]);
+
+  // Leaving the main page (into a sub-page) always drops name-edit mode.
+  useEffect(() => { if (subPage) setEditingName(false); }, [subPage]);
 
 
   if (!draft) return null;
@@ -882,11 +933,11 @@ export function StepConfigModal({
       }
 
       case "MoveWithForce": {
-        const lcNanos = nanos ?? [];
-        const nid = draft!.loadCellNanoId
-          ?? lcNanos.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
-          ?? lcNanos[0]?.id;
-        const lcPins = (lcNanos.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
+        const lcIoDevices = ioDevices ?? [];
+        const nid = draft!.loadCellDeviceId
+          ?? lcIoDevices.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
+          ?? lcIoDevices[0]?.id;
+        const lcPins = (lcIoDevices.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
         const axis = draft!.forceAxis ?? "Z";
         const dir = draft!.forceDirection ?? -1;
         const numField = (label: string, value: number | undefined, onChange: (n: number | undefined) => void, placeholder: string) => (
@@ -900,15 +951,15 @@ export function StepConfigModal({
         );
         return (
           <>
-            {lcNanos.length > 1 && (
+            {lcIoDevices.length > 1 && (
               <>
                 <Text style={ms.fieldLabel}>NANO DEVICE</Text>
                 <View style={ms.segRow}>
-                  {lcNanos.map(n => {
+                  {lcIoDevices.map(n => {
                     const active = nid === n.id;
                     return (
                       <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                        onPress={() => set({ loadCellNanoId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
+                        onPress={() => set({ loadCellDeviceId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
                         <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
                       </TouchableOpacity>
                     );
@@ -916,7 +967,7 @@ export function StepConfigModal({
                 </View>
               </>
             )}
-            <Text style={lcNanos.length > 1 ? [ms.fieldLabel, { marginTop: 12 }] : ms.fieldLabel}>LOAD CELL (FORCE SOURCE)</Text>
+            <Text style={lcIoDevices.length > 1 ? [ms.fieldLabel, { marginTop: 12 }] : ms.fieldLabel}>LOAD CELL (FORCE SOURCE)</Text>
             {lcPins.length === 0 ? (
               <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No load cells configured on this Nano — add one on the I/O page.</Text>
             ) : (
@@ -925,7 +976,7 @@ export function StepConfigModal({
                   const active = draft!.loadCellPin === p.pin;
                   return (
                     <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                      onPress={() => set({ loadCellNanoId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
+                      onPress={() => set({ loadCellDeviceId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
                       <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
                     </TouchableOpacity>
                   );
@@ -970,25 +1021,25 @@ export function StepConfigModal({
       }
       case "Tare":
       case "ReadLoadCell": {
-        const lcNanos = nanos ?? [];
-        const nid = draft!.loadCellNanoId
-          ?? lcNanos.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
-          ?? lcNanos[0]?.id;
-        const lcPins = (lcNanos.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
+        const lcIoDevices = ioDevices ?? [];
+        const nid = draft!.loadCellDeviceId
+          ?? lcIoDevices.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
+          ?? lcIoDevices[0]?.id;
+        const lcPins = (lcIoDevices.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
         const isRead = draft!.type === "ReadLoadCell";
         const numVars = (variables ?? []).filter(v => !v.isImage);
         const unit = draft!.loadCellUnit ?? "g";
         return (
           <>
-            {lcNanos.length > 1 && (
+            {lcIoDevices.length > 1 && (
               <>
                 <Text style={ms.fieldLabel}>NANO DEVICE</Text>
                 <View style={ms.segRow}>
-                  {lcNanos.map(n => {
+                  {lcIoDevices.map(n => {
                     const active = nid === n.id;
                     return (
                       <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                        onPress={() => set({ loadCellNanoId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
+                        onPress={() => set({ loadCellDeviceId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
                         <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
                       </TouchableOpacity>
                     );
@@ -1005,7 +1056,7 @@ export function StepConfigModal({
                   const active = draft!.loadCellPin === p.pin;
                   return (
                     <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                      onPress={() => set({ loadCellNanoId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
+                      onPress={() => set({ loadCellDeviceId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
                       <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
                     </TouchableOpacity>
                   );
@@ -1055,24 +1106,24 @@ export function StepConfigModal({
       }
       case "StartRecording":
       case "StopRecording": {
-        const lcNanos = nanos ?? [];
-        const nid = draft!.loadCellNanoId
-          ?? lcNanos.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
-          ?? lcNanos[0]?.id;
-        const lcPins = (lcNanos.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
+        const lcIoDevices = ioDevices ?? [];
+        const nid = draft!.loadCellDeviceId
+          ?? lcIoDevices.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
+          ?? lcIoDevices[0]?.id;
+        const lcPins = (lcIoDevices.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
         const isStart = draft!.type === "StartRecording";
         const recVars = (variables ?? []).filter(v => !v.isImage);
         return (
           <>
-            {lcNanos.length > 1 && (
+            {lcIoDevices.length > 1 && (
               <>
                 <Text style={ms.fieldLabel}>NANO DEVICE</Text>
                 <View style={ms.segRow}>
-                  {lcNanos.map(n => {
+                  {lcIoDevices.map(n => {
                     const active = nid === n.id;
                     return (
                       <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                        onPress={() => set({ loadCellNanoId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
+                        onPress={() => set({ loadCellDeviceId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
                         <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
                       </TouchableOpacity>
                     );
@@ -1089,7 +1140,7 @@ export function StepConfigModal({
                   const active = draft!.loadCellPin === p.pin;
                   return (
                     <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                      onPress={() => set({ loadCellNanoId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
+                      onPress={() => set({ loadCellDeviceId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
                       <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
                     </TouchableOpacity>
                   );
@@ -1248,8 +1299,8 @@ export function StepConfigModal({
       }
       case "SetOutput": {
         const selectedCard = draft!.outputCard ?? "stb";
-        const outputPins = selectedCard === "nano"
-          ? (nanos ?? []).flatMap(n => (n.pins ?? []).filter(p => p.type === "Output"))
+        const outputPins = selectedCard === "io"
+          ? (ioDevices ?? []).flatMap(n => (n.pins ?? []).filter(p => p.type === "Output"))
           : [];
         return (
           <>
@@ -1258,7 +1309,7 @@ export function StepConfigModal({
               {([
                 { key: "stb",   label: "STB4100", Icon: CircuitBoard, color: colors.success, enabled: ioConfig?.enableStbCard   ?? true  },
                 { key: "relay", label: "Relay",   Icon: Radio,        color: "#0891b2", enabled: ioConfig?.enableRelayCard  ?? false },
-                { key: "nano",  label: "Nano",    Icon: Cpu,          color: "#4f46e5", enabled: ioConfig?.enableNanoCards  ?? true  },
+                { key: "io",  label: "IO Device",    Icon: Cpu,          color: "#4f46e5", enabled: ioConfig?.enableIoDevices  ?? true  },
               ] as const).filter(c => c.enabled).map(({ key, label, Icon, color }) => {
                 const active = selectedCard === key;
                 return (
@@ -1266,7 +1317,7 @@ export function StepConfigModal({
                     onPress={() => set({
                       outputCard: key,
                       outputNumber: 1,
-                      outputNanoId:   key === "nano"  ? (nanos?.[0]?.id ?? undefined) : undefined,
+                      outputDeviceId:   key === "io"  ? (ioDevices?.[0]?.id ?? undefined) : undefined,
                     })}
                     activeOpacity={0.8}>
                     <Icon size={14} color={active ? color : colors.textMuted} />
@@ -1311,17 +1362,17 @@ export function StepConfigModal({
               </>
             )}
 
-            {selectedCard === "nano" && (
+            {selectedCard === "io" && (
               <>
-                {(nanos ?? []).length > 1 && (
+                {(ioDevices ?? []).length > 1 && (
                   <>
                     <Text style={[ms.fieldLabel, { marginTop: 12 }]}>NANO DEVICE</Text>
                     <View style={ms.segRow}>
-                      {(nanos ?? []).map(n => {
-                        const active = (draft!.outputNanoId ?? nanos?.[0]?.id) === n.id;
+                      {(ioDevices ?? []).map(n => {
+                        const active = (draft!.outputDeviceId ?? ioDevices?.[0]?.id) === n.id;
                         return (
                           <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                            onPress={() => set({ outputNanoId: n.id, outputNumber: 1 })} activeOpacity={0.8}>
+                            onPress={() => set({ outputDeviceId: n.id, outputNumber: 1 })} activeOpacity={0.8}>
                             <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
                           </TouchableOpacity>
                         );
@@ -1549,7 +1600,7 @@ export function StepConfigModal({
                   </>
                 )}
               </>
-            ) : (
+            ) : loopMode === 'forEach' ? (
               <>
                 <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ITERATE OVER</Text>
                 {loopSourceVars.length === 0
@@ -1642,7 +1693,7 @@ export function StepConfigModal({
                   </>
                 )}
               </>
-            )}
+            ) : null}
             {loopMode === 'while' && (
               <>
                 <Text style={[ms.fieldLabel, { marginTop: 12 }]}>REPEAT WHILE</Text>
@@ -3689,13 +3740,12 @@ export function StepConfigModal({
   return (
     <>
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
-        {ready && (
         <View style={ms.overlay}>
           {/* Backdrop sits BEHIND the card (not wrapping it) so the card's
               ScrollView owns its gestures cleanly — a Pressable wrapping the
               ScrollView blocks scrolling when a drag starts on a focused input. */}
           <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? setSubPage(null) : onClose()} />
-          <View style={[ms.card, { maxWidth: cardWidth }]}>
+          <View style={[ms.card, { maxWidth: cardWidth, maxHeight: Math.round(windowHeight * 0.88) }]}>
             {/* Header */}
             <View style={ms.header}>
               {subPage ? (
@@ -3703,14 +3753,46 @@ export function StepConfigModal({
                   <ArrowLeft size={18} color={colors.text} />
                 </TouchableOpacity>
               ) : <View style={{ width: 18 }} />}
-              <Text style={ms.title}>{subPage ? subPageTitle[subPage] : "Configure Step"}</Text>
+
+              {subPage ? (
+                <Text style={ms.title}>{subPageTitle[subPage]}</Text>
+              ) : editingName ? (
+                <TextInput
+                  style={[ms.title, { flex: 1, textAlign: "center", marginHorizontal: 8, paddingVertical: 2 }]}
+                  value={draft!.name ?? ""}
+                  onChangeText={v => set({ name: v || undefined })}
+                  placeholder={STEP_THEME[draft!.type]?.label ?? "Step name"}
+                  placeholderTextColor={colors.textFaint}
+                  autoFocus
+                  selectTextOnFocus
+                  returnKeyType="done"
+                  onSubmitEditing={() => setEditingName(false)}
+                  onBlur={() => setEditingName(false)}
+                />
+              ) : (
+                <TouchableOpacity
+                  style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: 8 }}
+                  onPress={() => setEditingName(true)}
+                  activeOpacity={0.7}
+                  hitSlop={8}
+                >
+                  <Text style={ms.title} numberOfLines={1}>
+                    {draft!.name?.trim() || STEP_THEME[draft!.type]?.label || "Configure Step"}
+                  </Text>
+                  <Pencil size={14} color={colors.textFaint} />
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
                 <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 8 }}>
+            <ScrollView ref={bodyScrollRef}
+              onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: kbHeight > 0 ? kbHeight + 16 : 8 }}>
               {subPage ? (
                 renderSubPage()
               ) : (
@@ -3718,19 +3800,32 @@ export function StepConfigModal({
                   {/* Plugin steps open with what they are: plugin · step and its description. */}
                   {draft!.type === "Plugin" && <PluginStepHeader step={draft!} />}
 
-                  {/* Step name — all step types except SetSpeed */}
-                  {!isSetSpeed && (
+                  {/* Description (a note for editors, never executed) — at the very top, collapsed to
+                      an "Add" button until it has content so it takes no room when unused. */}
+                  {(draft!.comment || showComment) ? (
                     <>
-                      <Text style={ms.fieldLabel}>STEP NAME  (optional)</Text>
-                      <TextInput style={[ms.input, { marginBottom: 14 }]}
-                        value={draft!.name ?? ""} onChangeText={v => set({ name: v || undefined })}
-                        placeholder="e.g. Pick part, Place on conveyor…" placeholderTextColor="#c4c4c4"
-                        returnKeyType="next" />
+                      <Text style={ms.fieldLabel}>DESCRIPTION  (optional)</Text>
+                      <TextInput
+                        style={[ms.input, { marginBottom: 14, minHeight: 56 }]}
+                        value={draft!.comment ?? ""}
+                        onChangeText={v => set({ comment: v.trim() ? v : undefined })}
+                        placeholder="What this step does — a note for whoever edits next. Never executed."
+                        placeholderTextColor={colors.textFaint}
+                        multiline
+                        textAlignVertical="top"
+                        autoFocus={showComment && !draft!.comment}
+                      />
                     </>
+                  ) : (
+                    <TouchableOpacity style={[ms.modRowAdd, { marginBottom: 12 }]} onPress={() => setShowComment(true)} activeOpacity={0.7}>
+                      <Plus size={15} color={colors.textFaint} />
+                      <Text style={ms.modAddText}>Add description</Text>
+                    </TouchableOpacity>
                   )}
 
-                  {/* Status description — move steps only */}
-                  {isMove && (
+                  {/* Status description — the optional runtime message shown in the monitor while this
+                      step runs. Same collapse-when-empty treatment. */}
+                  {draft!.type !== "StatusUpdate" && ((draft!.statusMessage || showStatus) ? (
                     <>
                       <Text style={ms.fieldLabel}>STATUS DESCRIPTION  (optional)</Text>
                       <View style={{ marginBottom: 14 }}>
@@ -3744,7 +3839,12 @@ export function StepConfigModal({
                         />
                       </View>
                     </>
-                  )}
+                  ) : (
+                    <TouchableOpacity style={[ms.modRowAdd, { marginBottom: 12 }]} onPress={() => setShowStatus(true)} activeOpacity={0.7}>
+                      <Plus size={15} color={colors.textFaint} />
+                      <Text style={ms.modAddText}>Add status description</Text>
+                    </TouchableOpacity>
+                  ))}
 
                   {/* Sub-row buttons for moves, inline body for everything else */}
                   {isMove ? (
@@ -3755,8 +3855,6 @@ export function StepConfigModal({
                     renderMainBody()
                   )}
 
-                  {/* Enabled + comment — every step type */}
-                  <StepMetaFields step={draft!} onChange={setDraft} />
                 </>
               )}
             </ScrollView>
@@ -3782,7 +3880,6 @@ export function StepConfigModal({
             )}
           </View>
         </View>
-        )}
     </Modal>
     {/* Vision program picker */}
     <BottomSheet visible={visionProgPickerOpen} onClose={() => setVisionProgPickerOpen(false)} title="Select Vision Program">

@@ -1,7 +1,7 @@
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { useNanoIO } from "@/src/providers/RobotProvider";
+import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { NanoPinState, PinType } from "@/src/models/robotModels";
+import { IoPinState, PinType } from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   Check,
@@ -72,6 +72,20 @@ const NANO_PINS: PinDef[] = [
   { pin: 19, label: "A5",  note: "Analog / SCL" },
 ];
 
+// Uno + CNC Shield spare pins free for digital IO — the stepper driver uses the rest
+// (D2–D8, D12/D13) and D0/D1 are the serial link. Inputs/outputs only (no HX711/NeoPixel).
+const AUX_IO_PINS: PinDef[] = [
+  { pin:  9, label: "D9"  },
+  { pin: 10, label: "D10" },
+  { pin: 11, label: "D11" },
+  { pin: 14, label: "A0"  },
+  { pin: 15, label: "A1"  },
+  { pin: 16, label: "A2"  },
+  { pin: 17, label: "A3"  },
+  { pin: 18, label: "A4", note: "SDA" },
+  { pin: 19, label: "A5", note: "SCL" },
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Local pin edit state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +100,11 @@ type PinEdit = {
 
 const TYPE_OPTIONS: Array<PinType | "Unconfigured"> = [
   "Unconfigured", "Input", "Output", "Neopixel",
+];
+
+// Aux-stepper spare-pin IO is digital only.
+const AUX_TYPE_OPTIONS: Array<PinType | "Unconfigured"> = [
+  "Unconfigured", "Input", "Output",
 ];
 
 // Pin-type colors: Input/Neopixel map onto kit tokens; Output keeps the
@@ -107,9 +126,11 @@ function typeLabel(type: PinType | "Unconfigured") {
 function TypeDropdown({
   value,
   onChange,
+  options = TYPE_OPTIONS,
 }: {
   value: PinType | "Unconfigured";
   onChange: (v: PinType | "Unconfigured") => void;
+  options?: Array<PinType | "Unconfigured">;
 }) {
   const [open, setOpen] = useState(false);
   const { fg, bg } = typeColor(value);
@@ -128,7 +149,7 @@ function TypeDropdown({
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.typeModalOverlay} onPress={() => setOpen(false)}>
           <View style={styles.typeMenuCard}>
-            {TYPE_OPTIONS.map(opt => {
+            {options.map(opt => {
               const { fg: ofg, bg: obg } = typeColor(opt);
               const selected = opt === value;
               return (
@@ -163,10 +184,12 @@ function PinRow({
   def,
   edit,
   onChange,
+  options,
 }: {
   def: PinDef;
   edit: PinEdit;
   onChange: (updated: Partial<PinEdit>) => void;
+  options?: Array<PinType | "Unconfigured">;
 }) {
   const isConfigured = edit.type !== "Unconfigured";
 
@@ -182,6 +205,7 @@ function PinRow({
       <TypeDropdown
         value={edit.type}
         onChange={v => onChange({ type: v, dirty: true })}
+        options={options}
       />
 
       {/* Name input — only shown when configured */}
@@ -229,7 +253,7 @@ function ColumnHeaders({ style }: { style?: any }) {
 }
 
 /** Modal to add an HX711 load cell: pick the DT + SCK pins and a display unit. */
-function AddLoadCellModal({ nanoId, onClose }: { nanoId: string; onClose: () => void }) {
+function AddLoadCellModal({ deviceId, onClose }: { deviceId: string; onClose: () => void }) {
   const [dt, setDt] = useState("");
   const [sck, setSck] = useState("");
   const [unit, setUnit] = useState("g");
@@ -242,9 +266,9 @@ function AddLoadCellModal({ nanoId, onClose }: { nanoId: string; onClose: () => 
     if (!valid) return;
     setBusy(true);
     try {
-      await robotClient.configureLoadCell(nanoId, dtN, sckN, unit);
+      await robotClient.configureLoadCell(deviceId, dtN, sckN, unit);
       onClose();
-      router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { nanoId, pin: String(dtN) } });
+      router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { deviceId, pin: String(dtN) } });
     } finally { setBusy(false); }
   };
 
@@ -278,18 +302,23 @@ function AddLoadCellModal({ nanoId, onClose }: { nanoId: string; onClose: () => 
 }
 
 export default function ConfigurePage() {
-  const { nanoId } = useLocalSearchParams<{ nanoId: string }>();
-  const nanos       = useNanoIO();
-  const nano        = nanos.find(n => n.id === nanoId);
+  const { deviceId, kind } = useLocalSearchParams<{ deviceId: string; kind?: string }>();
+  const ioDevices       = useIoDevices();
+  const nano        = ioDevices.find(n => n.id === deviceId);
   const wideContent = useWideContent();
   const isWide      = useIsWide();
 
-  // Build initial edit state from the current nanoIO snapshot
+  // Aux-stepper device: only its spare pins are free, and only digital in/out (no HX711/NeoPixel).
+  const isAux       = kind === "aux";
+  const pinDefs     = isAux ? AUX_IO_PINS : NANO_PINS;
+  const typeOptions = isAux ? AUX_TYPE_OPTIONS : TYPE_OPTIONS;
+
+  // Build initial edit state from the current ioDevices snapshot
   const initialEdits = useMemo<PinEdit[]>(() => {
-    const configuredMap = new Map<number, NanoPinState>();
+    const configuredMap = new Map<number, IoPinState>();
     nano?.pins.forEach(p => configuredMap.set(p.pin, p));
 
-    return NANO_PINS.map(def => {
+    return pinDefs.map(def => {
       const existing = configuredMap.get(def.pin);
       return {
         pin:        def.pin,
@@ -299,7 +328,7 @@ export default function ConfigurePage() {
         dirty:      false,
       };
     });
-  }, [nano?.id]); // intentionally only recomputes when the nano ID changes
+  }, [nano?.id, pinDefs]); // recomputes on device change (pinDefs is stable per device kind)
 
   const [edits, setEdits] = useState<PinEdit[]>(initialEdits);
   const [saving, setSaving] = useState(false);
@@ -328,19 +357,19 @@ export default function ConfigurePage() {
 
         if (nowCfg) {
           // Add or update type/pixelCount
-          await robotClient.configureNanoPin(
-            nanoId,
+          await robotClient.configureIoPin(
+            deviceId,
             edit.pin,
             edit.type as PinType,
             Number(edit.pixelCount) || 8,
           );
           // Set name (pin now exists in state)
           if (edit.name.trim() !== "") {
-            await robotClient.renameNanoPin(nanoId, edit.pin, edit.name.trim());
+            await robotClient.renameIoPin(deviceId, edit.pin, edit.name.trim());
           }
         } else if (wasCfg) {
           // Was configured, now unconfigured → remove
-          await robotClient.configureNanoPin(nanoId, edit.pin, "Unconfigured" as any);
+          await robotClient.configureIoPin(deviceId, edit.pin, "Unconfigured" as any);
         }
       }
 
@@ -376,12 +405,14 @@ export default function ConfigurePage() {
     >
       <View style={styles.container}>
         <PageHeader
-          title="Configure Pins"
+          title={isAux ? "Configure IO" : "Configure Pins"}
           subtitle={nano.name}
           crumbs={[
             { label: "I/O", href: "/io" },
-            { label: nano.name, href: `/(tabs)/io/nanos?nanoId=${encodeURIComponent(nano.id)}` },
-            { label: "Configure Pins" },
+            { label: nano.name, href: isAux
+                ? `/(tabs)/io/auxiliary?deviceId=${encodeURIComponent(nano.id)}`
+                : `/(tabs)/io/nanos?deviceId=${encodeURIComponent(nano.id)}` },
+            { label: isAux ? "Configure IO" : "Configure Pins" },
           ]}
           right={
             <Button
@@ -409,7 +440,7 @@ export default function ConfigurePage() {
         >
           {isWide ? (
             <View style={styles.pinColumnsRow}>
-              {[NANO_PINS.slice(0, Math.ceil(NANO_PINS.length / 2)), NANO_PINS.slice(Math.ceil(NANO_PINS.length / 2))].map(
+              {[pinDefs.slice(0, Math.ceil(pinDefs.length / 2)), pinDefs.slice(Math.ceil(pinDefs.length / 2))].map(
                 (colPins, ci) => (
                   <View key={ci} style={styles.pinColumn}>
                     <ColumnHeaders />
@@ -419,6 +450,7 @@ export default function ConfigurePage() {
                         def={def}
                         edit={edits.find(e => e.pin === def.pin)!}
                         onChange={partial => updatePin(def.pin, partial)}
+                        options={typeOptions}
                       />
                     ))}
                   </View>
@@ -426,28 +458,32 @@ export default function ConfigurePage() {
               )}
             </View>
           ) : (
-            NANO_PINS.map(def => (
+            pinDefs.map(def => (
               <PinRow
                 key={def.pin}
                 def={def}
                 edit={edits.find(e => e.pin === def.pin)!}
                 onChange={partial => updatePin(def.pin, partial)}
+                options={typeOptions}
               />
             ))
           )}
 
           {/* Load cells use the HX711's own 2-pin (DT/SCK) serial protocol rather than
-              a simple pin type, so they're added here instead of via the pin dropdown. */}
-          <Button
-            variant="dashed"
-            label="Add Load Cell"
-            icon={<Plus size={15} color={colors.accent} />}
-            onPress={() => setAddLc(true)}
-            style={styles.addLcBtn}
-          />
+              a simple pin type, so they're added here instead of via the pin dropdown.
+              Aux-stepper IO is digital-only, so the option isn't offered there. */}
+          {!isAux && (
+            <Button
+              variant="dashed"
+              label="Add Load Cell"
+              icon={<Plus size={15} color={colors.accent} />}
+              onPress={() => setAddLc(true)}
+              style={styles.addLcBtn}
+            />
+          )}
         </ScrollView>
 
-        {addLc && <AddLoadCellModal nanoId={nano.id} onClose={() => setAddLc(false)} />}
+        {addLc && <AddLoadCellModal deviceId={nano.id} onClose={() => setAddLc(false)} />}
       </View>
     </KeyboardAvoidingView>
   );

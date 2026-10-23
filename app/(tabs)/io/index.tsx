@@ -2,7 +2,7 @@ import {
   NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useConnected,
-  useNanoIO,
+  useIoDevices,
   useRelayIO,
   useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -66,7 +66,7 @@ import {
 
 type IOConfig = {
   enableStbCard:   boolean;
-  enableNanoCards: boolean;
+  enableIoDevices: boolean;
   enableRelayCard: boolean;
   enableAuxAxis:   boolean;
   enableCameras:   boolean;
@@ -132,7 +132,7 @@ function DeviceNavCard({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function IoPage() {
-  const nanos  = useNanoIO();
+  const ioDevices  = useIoDevices();
   const relay  = useRelayIO();
   const status = useRobotStatus();
 
@@ -154,7 +154,7 @@ export default function IoPage() {
   const loadIoPage = useCallback(() => {
     if (!connected) {
       setIoConfig(cfg => cfg ?? {
-        enableStbCard: true, enableNanoCards: false,
+        enableStbCard: true, enableIoDevices: false,
         enableRelayCard: false, enableAuxAxis: false, enableCameras: false,
       });
       return;
@@ -162,7 +162,7 @@ export default function IoPage() {
     robotClient.getRobotConfig()
       .then(cfg => setIoConfig({
         enableStbCard:   cfg.enableStbCard   ?? true,
-        enableNanoCards: cfg.enableNanoCards ?? false,
+        enableIoDevices: cfg.enableIoDevices ?? false,
         enableRelayCard: cfg.enableRelayCard ?? false,
         enableAuxAxis:   cfg.enableAuxAxis   ?? false,
         enableCameras:   cfg.enableCameras   ?? false,
@@ -241,13 +241,13 @@ export default function IoPage() {
   // (cameras are always offered since you can have multiple instances)
   const allDeviceTypes: AddableType[] = [
     {
-      field: "enableNanoCards",
+      field: "enableIoDevices",
       icon: <Cpu size={20} color="#4f46e5" />,
       iconBg: "#eef2ff",
       name: "Arduino Nano Device",
       subtitle: "Serial-connected microcontroller",
       onAdd: async () => {
-        await enableDeviceType("enableNanoCards");
+        await enableDeviceType("enableIoDevices");
         setAddModal(false);
       },
     },
@@ -347,11 +347,17 @@ export default function IoPage() {
     await createPhoneDevice(name);
   };
 
+  // An aux-stepper device's spare-pin IO rides the same ioDevices stream, but it is shown
+  // inside that device's Aux Stepper screen (not as its own card here), so exclude it from
+  // the generic IO-device cards and the count.
+  const auxIds = new Set(auxDevices.map(d => d.deviceId));
+  const nanoDevices = ioDevices.filter(n => !auxIds.has(n.id));
+
   // Devices online/offline summary — STB4100 is always present; the rest only
   // count once their device type is enabled, mirroring the cards rendered below.
   const connectionFlags = ioConfig ? [
     status.driverConnected,
-    ...(ioConfig.enableNanoCards ? nanos.map(n => n.connected) : []),
+    ...(ioConfig.enableIoDevices ? nanoDevices.map(n => n.connected) : []),
     ...(ioConfig.enableRelayCard ? [relay?.connected ?? false] : []),
     ...(ioConfig.enableAuxAxis ? auxDevices.map(d => d.connected) : []),
     ...(ioConfig.enableCameras ? visibleCameras.map(c => c.connected) : []),
@@ -392,8 +398,8 @@ export default function IoPage() {
           onPress={() => router.push("/(tabs)/io/stb")}
         />
 
-        {/* One card per Nano device */}
-        {ioConfig?.enableNanoCards && nanos.map((nano, idx) => (
+        {/* One card per Nano device (aux-stepper spare-pin IO is shown under its Aux card) */}
+        {ioConfig?.enableIoDevices && nanoDevices.map((nano, idx) => (
           <DeviceNavCard
             key={nano.id}
             icon={<Cpu size={20} color="#4f46e5" />}
@@ -401,8 +407,8 @@ export default function IoPage() {
             name={nano.name}
             subtitle={nano.name}
             connected={nano.connected}
-            onPress={() => router.push({ pathname: "/(tabs)/io/nanos", params: { nanoId: nano.id } })}
-            onDelete={idx === 0 ? () => confirmRemove("Arduino Nano Devices", () => disableDeviceType("enableNanoCards")) : undefined}
+            onPress={() => router.push({ pathname: "/(tabs)/io/nanos", params: { deviceId: nano.id } })}
+            onDelete={idx === 0 ? () => confirmRemove("Arduino Nano Devices", () => disableDeviceType("enableIoDevices")) : undefined}
           />
         ))}
 

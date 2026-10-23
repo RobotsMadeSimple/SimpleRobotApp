@@ -295,7 +295,7 @@ export default function AuxAxisConfigPage() {
             <SectionHeader
               title="Gripper"
               style={styles.sectionGap}
-              right={<InfoTip text="Open and Close drive the jaws to these gap widths; a program (or the Grip control) can drive to any gap in between. If the gripper loses steps, re-reference it from the Auxiliary screen's Set-Open / Set-Closed buttons." />}
+              right={<InfoTip text="These gap widths set the jaw range: a program's gripper block and the Auxiliary screen's Grip control drive to a gap within them, and the Set-Open / Set-Closed buttons re-reference the position here if the gripper loses steps. The manual Open / Close buttons are hold-to-jog (the jaws move while held) and use the open/close speeds below." />}
             />
             <Card>
               {GRIPPER_PRESETS.length > 0 && (

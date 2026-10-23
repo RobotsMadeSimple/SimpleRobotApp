@@ -34,7 +34,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   cameras:           "Cameras",
   configure:         "Configure",
   "configure-relay": "Configure Relay",
-  nanos:             "Nano IO",
+  ioDevices:             "Nano IO",
   relay:             "Relay",
   stb:               "STB Servos",
 

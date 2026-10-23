@@ -1,13 +1,13 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { enrichByAddress } from "./connectionStore";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
 type ToolsListener            = (tools: Tool[])                          => void;
 type LocalsListener           = (locals: Local[])                        => void;
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
-type NanoIOListener           = (nanos: NanoState[])                     => void;
+type IoDevicesListener           = (ioDevices: IoDeviceState[])                     => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type AuxAxisListener          = (aux: AuxDeviceState[])                  => void;
 type CamerasListener          = (cameras: CameraState[])                 => void;
@@ -53,7 +53,7 @@ export class RobotConnectService {
   private readonly toolsTopic         = createTopic<Tool[]>();
   private readonly localsTopic        = createTopic<Local[]>();
   private readonly builtProgramsTopic = createTopic<BuiltProgram[]>();
-  private readonly nanoIOTopic        = createTopic<NanoState[]>();
+  private readonly ioDevicesTopic        = createTopic<IoDeviceState[]>();
   private readonly relayIOTopic       = createTopic<UsbRelayState | null>();
   private readonly auxAxisTopic       = createTopic<AuxDeviceState[]>();
   private readonly camerasTopic       = createTopic<CameraState[]>();
@@ -66,10 +66,10 @@ export class RobotConnectService {
   private tools:        Tool[]             = [];
   private locals:       Local[]            = [];
   private builtPrograms:  BuiltProgram[]                = [];
-  private nanoIO:         NanoState[]                   = [];
+  private ioDevices:         IoDeviceState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
   private lastRelayJson:  string                        = "";
-  private lastNanosJson:  string                        = "";
+  private lastIoDevicesJson:  string                        = "";
   private auxAxis:        AuxDeviceState[]              = [];
   private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
@@ -274,7 +274,7 @@ export class RobotConnectService {
         this.updateRelayFromStatus(data.relay);
         // Nano state likewise rides along so live values (load-cell readings in
         // particular) update every poll, not only on GetIO at page entry.
-        this.updateNanosFromStatus(data.nanos);
+        this.updateIoDevicesFromStatus(data.ioDevices);
         this.emitStatus(data);
         break;
       
@@ -358,36 +358,36 @@ export class RobotConnectService {
     this.emitRelayIO();
   }
 
-  // Apply nano state carried in the status broadcast. `data.nanos` is a JSON string
+  // Apply nano state carried in the status broadcast. `data.ioDevices` is a JSON string
   // (same shape GetIO returns). Only reparse + emit when the string changed, so the
   // 100ms poll re-renders nano consumers on real change (e.g. a streaming load cell)
   // but not when every digital pin is steady.
-  private updateNanosFromStatus(nanos: any) {
-    if (typeof nanos !== "string") return;
-    if (nanos === this.lastNanosJson) return;
-    this.lastNanosJson = nanos;
+  private updateIoDevicesFromStatus(ioDevices: any) {
+    if (typeof ioDevices !== "string") return;
+    if (ioDevices === this.lastIoDevicesJson) return;
+    this.lastIoDevicesJson = ioDevices;
     try {
-      const parsed = JSON.parse(nanos);
-      this.nanoIO = Array.isArray(parsed) ? (parsed as NanoState[]) : [];
+      const parsed = JSON.parse(ioDevices);
+      this.ioDevices = Array.isArray(parsed) ? (parsed as IoDeviceState[]) : [];
     } catch {
-      this.nanoIO = [];
+      this.ioDevices = [];
     }
-    this.emitNanoIO();
+    this.emitIoDevices();
   }
 
   private decodeIO(data: any) {
     // Nano devices
-    if (!data.nanos) {
-      this.nanoIO = [];
+    if (!data.ioDevices) {
+      this.ioDevices = [];
     } else {
       try {
-        const parsed = JSON.parse(data.nanos);
-        this.nanoIO = Array.isArray(parsed) ? (parsed as NanoState[]) : [];
+        const parsed = JSON.parse(data.ioDevices);
+        this.ioDevices = Array.isArray(parsed) ? (parsed as IoDeviceState[]) : [];
       } catch {
-        this.nanoIO = [];
+        this.ioDevices = [];
       }
     }
-    this.emitNanoIO();
+    this.emitIoDevices();
 
     // USB relay board
     if (!data.relay) {
@@ -556,14 +556,14 @@ export class RobotConnectService {
     this.programImagesTopic.emit(this.programImages);
   }
 
-  onNanoIO(cb: NanoIOListener) {
-    const unsub = this.nanoIOTopic.on(cb);
-    cb(this.nanoIO);
+  onIoDevices(cb: IoDevicesListener) {
+    const unsub = this.ioDevicesTopic.on(cb);
+    cb(this.ioDevices);
     return unsub;
   }
 
-  private emitNanoIO() {
-    this.nanoIOTopic.emit(this.nanoIO);
+  private emitIoDevices() {
+    this.ioDevicesTopic.emit(this.ioDevices);
   }
 
   onRelayIO(cb: RelayIOListener) {
@@ -1340,54 +1340,54 @@ export class RobotConnectService {
     return this.sendCommand("GetIO");
   }
 
-  public setNanoOutput(nanoId: string, pin: number, value: boolean) {
-    return this.sendCommand("SetNanoOutput", { nanoId, pin, value });
+  public setIoOutput(deviceId: string, pin: number, value: boolean) {
+    return this.sendCommand("SetNanoOutput", { deviceId, pin, value });
   }
 
-  public setNeoPixel(nanoId: string, pin: number, colors: NeoPixelColor[]) {
-    return this.sendCommand("SetNeoPixel", { nanoId, pin, colors });
+  public setNeoPixel(deviceId: string, pin: number, colors: NeoPixelColor[]) {
+    return this.sendCommand("SetNeoPixel", { deviceId, pin, colors });
   }
 
-  public renameNanoPin(nanoId: string, pin: number, name: string) {
-    return this.sendCommand("RenameNanoPin", { nanoId, pin, name })
+  public renameIoPin(deviceId: string, pin: number, name: string) {
+    return this.sendCommand("RenameNanoPin", { deviceId, pin, name })
       .then(() => this.getIO().catch(() => {}));
   }
 
-  public configureNanoPin(nanoId: string, pin: number, type: string, pixelCount = 8) {
-    return this.sendCommand("ConfigureNanoPin", { nanoId, pin, type, pixelCount })
+  public configureIoPin(deviceId: string, pin: number, type: string, pixelCount = 8) {
+    return this.sendCommand("ConfigureNanoPin", { deviceId, pin, type, pixelCount })
       .then(() => this.getIO().catch(() => {}));
   }
 
   // ── Load cell (HX711) ──────────────────────────────────────────────────────
 
   /** Configure a Nano pin pair as an HX711 load cell (dtPin = data, sckPin = clock). */
-  public configureLoadCell(nanoId: string, dtPin: number, sckPin: number, unit = "g") {
-    return this.sendCommand("ConfigureLoadCell", { nanoId, dtPin, sckPin, unit })
+  public configureLoadCell(deviceId: string, dtPin: number, sckPin: number, unit = "g") {
+    return this.sendCommand("ConfigureLoadCell", { deviceId, dtPin, sckPin, unit })
       .then(() => this.getIO().catch(() => {}));
   }
 
   /** Zero the load cell — capture its current raw reading as the tare offset. */
-  public tareLoadCell(nanoId: string, pin: number) {
-    return this.sendCommand("TareLoadCell", { nanoId, pin })
+  public tareLoadCell(deviceId: string, pin: number) {
+    return this.sendCommand("TareLoadCell", { deviceId, pin })
       .then(() => this.getIO().catch(() => {}));
   }
 
   /** Second calibration point: with a known weight on the cell, derive counts-per-gram. */
-  public calibrateLoadCell(nanoId: string, pin: number, knownGrams: number) {
-    return this.sendCommand("CalibrateLoadCell", { nanoId, pin, knownGrams })
+  public calibrateLoadCell(deviceId: string, pin: number, knownGrams: number) {
+    return this.sendCommand("CalibrateLoadCell", { deviceId, pin, knownGrams })
       .then(() => this.getIO().catch(() => {}));
   }
 
-  public setLoadCellUnit(nanoId: string, pin: number, unit: string) {
-    return this.sendCommand("SetLoadCellUnit", { nanoId, pin, unit })
+  public setLoadCellUnit(deviceId: string, pin: number, unit: string) {
+    return this.sendCommand("SetLoadCellUnit", { deviceId, pin, unit })
       .then(() => this.getIO().catch(() => {}));
   }
 
   // ── IO value history + recordings ────────────────────────────────────────────
 
   /** Stable history channel key for a load cell (rename-proof: nano id + DT pin). */
-  public ioChannelForLoadCell(nanoId: string, pin: number): string {
-    return `nano/${nanoId}/${pin}`;
+  public ioChannelForLoadCell(deviceId: string, pin: number): string {
+    return `io/${deviceId}/${pin}`;
   }
 
   /** WebSocket URL for a channel's live sample stream (backfills the last `windowMs`, then streams). */
@@ -1523,7 +1523,7 @@ export class RobotConnectService {
     m3Direction: number;
     m4Direction: number;
     enableStbCard: boolean;
-    enableNanoCards: boolean;
+    enableIoDevices: boolean;
     enableRelayCard: boolean;
     enableAuxAxis: boolean;
     enableCameras: boolean;
@@ -1580,7 +1580,7 @@ export class RobotConnectService {
     j1HomingDirection?: number;
     j4HomeOffsetDeg?: number;
     enableStbCard?: boolean;
-    enableNanoCards?: boolean;
+    enableIoDevices?: boolean;
     enableRelayCard?: boolean;
     enableAuxAxis?: boolean;
     enableCameras?: boolean;

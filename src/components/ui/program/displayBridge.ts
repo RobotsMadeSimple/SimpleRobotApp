@@ -105,14 +105,14 @@ export const BRIDGE_JS = `
     /** Subscribe to program state changes. cb(state). Returns an unsubscribe function. */
     onState: function (cb) { subs.state.push(cb); return unsub(subs.state, cb); },
     /** Stream a load cell's live samples. cb(samples) with [{ t, v, r }]. Returns unsubscribe. */
-    onHistory: function (nanoId, pin, cb) {
-      var ch = nanoId + '/' + pin;
+    onHistory: function (deviceId, pin, cb) {
+      var ch = deviceId + '/' + pin;
       if (!subs.history[ch]) subs.history[ch] = [];
       subs.history[ch].push(cb);
-      call('subscribeHistory', [nanoId, pin]);
+      call('subscribeHistory', [deviceId, pin]);
       return function () {
         var a = subs.history[ch] || []; var i = a.indexOf(cb); if (i >= 0) a.splice(i, 1);
-        if (a.length === 0) call('unsubscribeHistory', [nanoId, pin]);
+        if (a.length === 0) call('unsubscribeHistory', [deviceId, pin]);
       };
     },
   };
@@ -285,21 +285,21 @@ export function useDisplayHost({ programName, programId, post }: UseDisplayHostO
             .catch((e) => reply(false, String(e)));
           break;
         case "subscribeHistory": {
-          const nanoId = m.args?.[0];
+          const deviceId = m.args?.[0];
           const pin = Number(m.args?.[1]);
-          const ch = robotClient.ioChannelForLoadCell(nanoId, pin);
+          const ch = robotClient.ioChannelForLoadCell(deviceId, pin);
           if (!historyStreams.current[ch]) {
             historyStreams.current[ch] = robotClient.openIoHistoryStream(ch, 30_000, (samples) =>
-              push({ event: "history", channel: `${nanoId}/${pin}`, samples }),
+              push({ event: "history", channel: `${deviceId}/${pin}`, samples }),
             );
           }
           reply(true);
           break;
         }
         case "unsubscribeHistory": {
-          const nanoId = m.args?.[0];
+          const deviceId = m.args?.[0];
           const pin = Number(m.args?.[1]);
-          const ch = robotClient.ioChannelForLoadCell(nanoId, pin);
+          const ch = robotClient.ioChannelForLoadCell(deviceId, pin);
           historyStreams.current[ch]?.();
           delete historyStreams.current[ch];
           reply(true);

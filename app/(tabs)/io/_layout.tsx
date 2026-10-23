@@ -5,7 +5,7 @@ export default function IOLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="stb" />
-      <Stack.Screen name="nanos" />
+      <Stack.Screen name="ioDevices" />
       <Stack.Screen name="relay" />
       <Stack.Screen name="auxiliary" />
       <Stack.Screen name="aux-axis" />
