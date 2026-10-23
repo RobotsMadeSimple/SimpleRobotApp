@@ -25,6 +25,7 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
   const env = useExpressionEnv();
   const split = useSplitSymbols();
   const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<"vars" | "props" | "fns">("vars");
 
   const active = reg?.active ?? null;
   const insert = (tok: string) => active?.insert(tok);
@@ -47,6 +48,13 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
     <View style={[hs.panel, style]}>
       <Text style={hs.title}>Insert</Text>
       <Text style={hs.hint}>{active ? "Tap to insert into the focused field." : "Focus a field, then tap to insert."}</Text>
+      <View style={hs.tabBar}>
+        {([["vars", "Variables"], ["props", "Properties"], ["fns", "Functions"]] as const).map(([t, label]) => (
+          <TouchableOpacity key={t} style={[hs.tab, tab === t && hs.tabActive]} onPress={() => setTab(t)} activeOpacity={0.7}>
+            <Text style={[hs.tabText, tab === t && hs.tabTextActive]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <View style={hs.searchBox}>
         <TextInput style={hs.searchInput} value={search} onChangeText={setSearch}
           placeholder="Search…" placeholderTextColor={colors.textFaint} autoCapitalize="none" autoCorrect={false} />
@@ -57,34 +65,46 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
         )}
       </View>
       <ScrollView style={hs.scroll} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
-        {shownVars.length > 0 && (
-          <Section title="Variables">
-            {shownVars.map(v => <Chip key={v.id} label={"$" + v.name} onPress={() => insert(variableToken(v))} />)}
-          </Section>
-        )}
-        {shownContext.length > 0 && (
-          <Section title={contextLabel ?? "Caller variables"}>
-            {shownContext.map(v => <Chip key={"c:" + v.id} label={"$" + v.name} onPress={() => insert(variableToken(v))} />)}
-          </Section>
-        )}
-        {shownGlobals.length > 0 && (
-          <Section title="Globals">
-            {shownGlobals.map(v => <Chip key={"g:" + v.name} label={"$" + v.name} onPress={() => insert("$" + v.name)} />)}
-          </Section>
-        )}
-        <SymbolSections search={search} onPick={name => insert("$" + name)} />
-        {functions.length > 0 && (
+        {tab === "vars" && (
           <>
-            <Text style={hs.section}>Functions</Text>
-            <FunctionsList functions={functions} search={search} onInsert={name => insert(name + "(")} />
+            {shownVars.length > 0 && (
+              <Section title="Variables">
+                {shownVars.map(v => <Chip key={v.id} label={"$" + v.name} onPress={() => insert(variableToken(v))} />)}
+              </Section>
+            )}
+            {shownContext.length > 0 && (
+              <Section title={contextLabel ?? "Caller variables"}>
+                {shownContext.map(v => <Chip key={"c:" + v.id} label={"$" + v.name} onPress={() => insert(variableToken(v))} />)}
+              </Section>
+            )}
+            {shownGlobals.length > 0 && (
+              <Section title="Globals">
+                {shownGlobals.map(v => <Chip key={"g:" + v.name} label={"$" + v.name} onPress={() => insert("$" + v.name)} />)}
+              </Section>
+            )}
+            {shownVars.length + shownContext.length + shownGlobals.length === 0 && <Text style={hs.empty}>No variables yet.</Text>}
           </>
         )}
-        {pluginGroups.map(({ g, fns }) => (
-          <React.Fragment key={g.id}>
-            <Text style={hs.section}>{pluginGroupTitle(g)}</Text>
-            <FunctionsList functions={fns} search="" onInsert={name => insert(name + "(")} />
-          </React.Fragment>
-        ))}
+
+        {tab === "props" && <SymbolSections search={search} onPick={name => insert("$" + name)} />}
+
+        {tab === "fns" && (
+          <>
+            {functions.length > 0 && (
+              <>
+                <Text style={hs.section}>Functions</Text>
+                <FunctionsList functions={functions} search={search} onInsert={name => insert(name + "(")} />
+              </>
+            )}
+            {pluginGroups.map(({ g, fns }) => (
+              <React.Fragment key={g.id}>
+                <Text style={hs.section}>{pluginGroupTitle(g)}</Text>
+                <FunctionsList functions={fns} search="" onInsert={name => insert(name + "(")} />
+              </React.Fragment>
+            ))}
+            {functions.length === 0 && pluginGroups.length === 0 && <Text style={hs.empty}>No functions.</Text>}
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -114,6 +134,12 @@ const hs = StyleSheet.create({
   },
   title: { fontSize: 15, fontWeight: "800", color: colors.text },
   hint:  { fontSize: 11, color: colors.textFaint, marginTop: 2, marginBottom: 10 },
+  tabBar: { flexDirection: "row", gap: 4, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: 3, marginBottom: 8 },
+  tab:    { flex: 1, paddingVertical: 6, borderRadius: radii.sm - 2, alignItems: "center" },
+  tabActive: { backgroundColor: colors.surface, ...(({ shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 })) },
+  tabText:   { fontSize: 12, fontWeight: "700", color: colors.textMuted },
+  tabTextActive: { color: colors.text },
+  empty: { fontSize: 12, color: colors.textFaint, fontStyle: "italic", marginTop: 10 },
   searchBox: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.border,
     borderRadius: radii.sm, paddingHorizontal: 10, backgroundColor: colors.surfaceMuted, marginBottom: 8 },
   searchInput: { flex: 1, fontSize: 13, color: colors.text, paddingVertical: 8 },
