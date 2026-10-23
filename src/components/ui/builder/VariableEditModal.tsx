@@ -42,7 +42,7 @@ const TYPE_OPTIONS: { key: VarType; label: string; desc: string; color: string; 
   { key: "image",     label: "Image",     desc: "A camera frame, from CaptureImage",   color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
   { key: "list",      label: "List",      desc: "Numbers, booleans, points or records", color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
   { key: "stopwatch", label: "Stopwatch", desc: "Elapsed milliseconds",                color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
-  { key: "computed",  label: "Computed",  desc: "A formula, re-evaluated every time it is read", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
+  { key: "computed",  label: "Property",  desc: "A formula, re-evaluated every time it is read", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
 ];
 
 /**
@@ -796,7 +796,7 @@ function TypeGridModal({ visible, onClose, title, options, selected, onSelect }:
                     onPress={() => onSelect(opt.key)}
                     activeOpacity={0.75}
                     style={{
-                      width: "47%", flexGrow: 1, minWidth: 140,
+                      width: "47%", minWidth: 140,
                       borderRadius: 12, borderWidth: 1.5,
                       borderColor: active ? opt.color : colors.border,
                       backgroundColor: active ? opt.bg : colors.surface,
