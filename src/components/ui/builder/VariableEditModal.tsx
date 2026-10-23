@@ -11,7 +11,6 @@ import {
   View,
 } from "react-native";
 import { Check, ChevronDown, Minus, Plus, X } from "lucide-react-native";
-import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { colors, accents } from "@/src/components/ui/kit";
 import {
   ListElementType,
@@ -744,77 +743,81 @@ export function VariableEditModal({
 
     {/* Sibling of the modal, not a child — a Modal nested inside a Modal is unreliable,
         and every other picker in the builder is hung off the end the same way. */}
-    <BottomSheet
+    <TypeGridModal
       visible={visible && typePickerOpen}
       onClose={() => setTypePickerOpen(false)}
       title="Variable Type"
-    >
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
-        {TYPE_OPTIONS.map((opt, i) => {
-          const active = varType === opt.key;
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              onPress={() => pickType(opt.key)}
-              activeOpacity={0.7}
-              style={[
-                { flexDirection: "row", alignItems: "center", gap: 12,
-                  paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
-                active && { backgroundColor: opt.bg },
-              ]}
-            >
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : colors.text }}>
-                  {opt.label}
-                </Text>
-                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
-              </View>
-              {active && <Check size={16} color={opt.color} />}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
+      options={TYPE_OPTIONS}
+      selected={varType}
+      onSelect={k => pickType(k as VarType)}
+    />
 
-    {/* Only reachable while the type is List, which is the only state that renders its
-        trigger — but gated on varType anyway so a stale open flag cannot outlive it. */}
-    <BottomSheet
+    {/* Only reachable while the type is List, which is the only state that renders its trigger. */}
+    <TypeGridModal
       visible={visible && varType === "list" && elemPickerOpen}
       onClose={() => setElemPickerOpen(false)}
       title="List Of"
-    >
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
-        {ELEMENT_OPTIONS.map((opt, i) => {
-          const active = elemType === opt.key;
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              onPress={() => pickElem(opt.key)}
-              activeOpacity={0.7}
-              style={[
-                { flexDirection: "row", alignItems: "center", gap: 12,
-                  paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
-                active && { backgroundColor: opt.bg },
-              ]}
-            >
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : colors.text }}>
-                  {opt.label}
-                </Text>
-                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
-              </View>
-              {active && <Check size={16} color={opt.color} />}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
+      options={ELEMENT_OPTIONS}
+      selected={elemType}
+      onSelect={k => pickElem(k as ListElementType)}
+    />
     </>
+  );
+}
+
+/** A centred grid modal (like the step type picker) so every type — including the last ones — is
+ * visible at once, rather than scrolling off the bottom of a sheet. */
+function TypeGridModal({ visible, onClose, title, options, selected, onSelect }: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  options: { key: string; label: string; desc: string; color: string; bg: string; border: string }[];
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ms.overlay} onPress={onClose}>
+        <Pressable style={[ms.card, { maxHeight: "86%" }]} onPress={() => {}}>
+          <View style={ms.header}>
+            <View style={{ width: 18 }} />
+            <Text style={ms.title}>{title}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color={colors.textFaint} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 6 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+              {options.map(opt => {
+                const active = selected === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => onSelect(opt.key)}
+                    activeOpacity={0.75}
+                    style={{
+                      width: "47%", flexGrow: 1, minWidth: 140,
+                      borderRadius: 12, borderWidth: 1.5,
+                      borderColor: active ? opt.color : colors.border,
+                      backgroundColor: active ? opt.bg : colors.surface,
+                      padding: 12,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: active ? opt.color : colors.text, flex: 1 }} numberOfLines={1}>
+                        {opt.label}
+                      </Text>
+                      {active && <Check size={15} color={opt.color} />}
+                    </View>
+                    <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 4 }}>{opt.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
