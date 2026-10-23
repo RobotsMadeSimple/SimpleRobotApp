@@ -310,11 +310,16 @@ export function TemplateInput({
   insertToken?: (v: ProgramVariable) => string;
 }) {
   const [varPickerOpen, setVarPickerOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
   const inputRef = useRef<any>(null);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
 
   const hasVars  = (variables?.length ?? 0) > 0;
   const hasRef   = /[${]/.test(value);
   const warning  = useMemo(() => braceMissingSigil(value), [value]);
+  // Insert chips are shown only while editing (or a picker they opened is up), to save room.
+  const showChips = focused || varPickerOpen;
 
   function append(token: string) {
     onChange(value + token);
@@ -335,6 +340,8 @@ export function TemplateInput({
           autoCorrect={autoCapitalize === "sentences"}
           autoFocus={autoFocus}
           returnKeyType="done"
+          onFocus={() => { if (blurTimer.current) clearTimeout(blurTimer.current); setFocused(true); }}
+          onBlur={() => { blurTimer.current = setTimeout(() => setFocused(false), 150); }}
         />
         {value.length > 0 && (
           <TouchableOpacity onPress={() => onChange("")} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 6 }}>
@@ -343,7 +350,7 @@ export function TemplateInput({
         )}
       </View>
 
-      {(hasVars || quickTokens?.length) && (
+      {showChips && (hasVars || quickTokens?.length) && (
         <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
           {hasVars && (
             <TouchableOpacity
