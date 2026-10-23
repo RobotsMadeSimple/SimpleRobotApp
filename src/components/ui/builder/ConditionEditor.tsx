@@ -1,16 +1,21 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Plus, X } from "lucide-react-native";
+import { ChevronDown, Plus, X } from "lucide-react-native";
 import {
   ConditionGroup,
   ConditionItem,
   ProgramVariable,
 } from "@/src/models/robotModels";
 import { conditionItemText, newId } from "./stepUtils";
-import { colors, spacing, radii, accents } from "@/src/components/ui/kit";
+import { colors, spacing, accents } from "@/src/components/ui/kit";
 import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── Condition editor ──────────────────────────────────────────────────────────
+//
+// Laid out like a filter builder (Notion / Airtable / Linear): each condition is one plain
+// row, and the and/or that joins them sits BETWEEN the rows as a tappable pill — so the
+// "match all / any" choice only appears once there is something to combine, right where it
+// reads naturally. Adding a condition is a quiet link, not a button.
 
 export function conditionSummary(group: ConditionGroup | undefined): string {
   if (!group || !group.items || group.items.length === 0) return "(no conditions)";
@@ -18,7 +23,9 @@ export function conditionSummary(group: ConditionGroup | undefined): string {
   return group.items.map(it => conditionItemText(it) || "?").join(join);
 }
 
-function ConditionItemEditor({
+const accent = accents.cyan;
+
+function ConditionRow({
   item,
   variables,
   contextVariables,
@@ -32,10 +39,10 @@ function ConditionItemEditor({
   onDelete: () => void;
 }) {
   return (
-    <View style={condStyles.row}>
+    <View style={s.row}>
       <View style={{ flex: 1 }}>
         <ExpressionField
-          style={condStyles.field}
+          style={s.field}
           value={conditionItemText(item)}
           onChange={v => onChange({ id: item.id, expr: v })}
           title="Condition"
@@ -44,11 +51,29 @@ function ConditionItemEditor({
           variables={variables}
           contextVariables={contextVariables}
           contextLabel="Caller Variables"
+          clearable={false}
         />
       </View>
-      <TouchableOpacity onPress={onDelete} hitSlop={8} activeOpacity={0.7} style={{ paddingLeft: 8, paddingTop: 10 }}>
+      <TouchableOpacity onPress={onDelete} hitSlop={10} activeOpacity={0.7} style={s.remove}
+        accessibilityRole="button" accessibilityLabel="Remove condition">
         <X size={15} color={colors.textFaint} />
       </TouchableOpacity>
+    </View>
+  );
+}
+
+/** The "— and —" / "— or —" joiner between two conditions; tap to switch the whole group. */
+function Connector({ combinator, onToggle }: { combinator: ConditionGroup["combinator"]; onToggle: () => void }) {
+  const label = combinator === "ANY" ? "or" : "and";
+  return (
+    <View style={s.connectorRow}>
+      <View style={s.connectorLine} />
+      <TouchableOpacity style={s.connectorPill} onPress={onToggle} activeOpacity={0.7} hitSlop={6}
+        accessibilityRole="button" accessibilityLabel={`Joined with ${label} — tap to switch`}>
+        <Text style={s.connectorText}>{label}</Text>
+        <ChevronDown size={12} color={accent} />
+      </TouchableOpacity>
+      <View style={s.connectorLine} />
     </View>
   );
 }
@@ -64,50 +89,53 @@ export function ConditionGroupEditor({
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
 }) {
-  const accent = accents.cyan;
+  const items = group.items ?? [];
+  const toggle = () => onChange({ ...group, combinator: group.combinator === "ANY" ? "ALL" : "ANY" });
   return (
-    <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.md }}>
-        <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, marginRight: 4 }}>MATCH</Text>
-        {(["ALL", "ANY"] as const).map(opt => (
-          <TouchableOpacity key={opt}
-            style={[{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
-              group.combinator === opt ? { borderColor: accent, backgroundColor: accent } : { borderColor: colors.borderStrong, backgroundColor: colors.surface }]}
-            onPress={() => onChange({ ...group, combinator: opt })} activeOpacity={0.7}>
-            <Text style={{ fontSize: 12, fontWeight: "700", color: group.combinator === opt ? colors.onAccent : colors.textMuted }}>{opt}</Text>
-          </TouchableOpacity>
-        ))}
-        <Text style={{ fontSize: 11, color: colors.textMuted }}>
-          {group.combinator === "ALL" ? "conditions must be true" : "one must be true"}
-        </Text>
-      </View>
-      {(group.items ?? []).length === 0 && (
-        <Text style={{ fontSize: 12, color: colors.textFaint, marginBottom: spacing.md, fontStyle: "italic" }}>No conditions — branch always runs.</Text>
+    <View style={s.wrap}>
+      {items.length === 0 && (
+        <Text style={s.empty}>No conditions — runs right away.</Text>
       )}
-      {(group.items ?? []).map((item, i) => (
-        <ConditionItemEditor key={item.id} item={item} variables={variables} contextVariables={contextVariables}
-          onChange={updated => onChange({ ...group, items: (group.items ?? []).map((ci, j) => j === i ? updated : ci) })}
-          onDelete={() => onChange({ ...group, items: (group.items ?? []).filter((_, j) => j !== i) })} />
+      {items.map((item, i) => (
+        <React.Fragment key={item.id}>
+          {i > 0 && <Connector combinator={group.combinator} onToggle={toggle} />}
+          <ConditionRow item={item} variables={variables} contextVariables={contextVariables}
+            onChange={updated => onChange({ ...group, items: items.map((ci, j) => j === i ? updated : ci) })}
+            onDelete={() => onChange({ ...group, items: items.filter((_, j) => j !== i) })} />
+        </React.Fragment>
       ))}
       <TouchableOpacity
-        style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1.5, borderColor: "#bae6fd", borderStyle: "dashed", borderRadius: radii.sm, paddingVertical: spacing.md, backgroundColor: colors.accentSoft }}
-        onPress={() => onChange({ ...group, items: [...(group.items ?? []), { id: newId(), expr: "" }] })}
-        activeOpacity={0.7}>
+        style={s.add}
+        onPress={() => onChange({ ...group, items: [...items, { id: newId(), expr: "" }] })}
+        activeOpacity={0.7} hitSlop={6}
+        accessibilityRole="button" accessibilityLabel="Add condition">
         <Plus size={14} color={accent} />
-        <Text style={{ fontSize: 13, fontWeight: "600", color: accent }}>Add Condition</Text>
+        <Text style={s.addText}>Add condition</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-const condStyles = StyleSheet.create({
-  row: {
-    flexDirection: "row", alignItems: "flex-start", marginBottom: 10,
-    borderWidth: 1, borderColor: "#e0f2fe", borderRadius: radii.sm,
-    padding: 10, backgroundColor: colors.surface,
-  },
+const s = StyleSheet.create({
+  wrap: { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
+  empty: { fontSize: 12, color: colors.textFaint, fontStyle: "italic", marginBottom: spacing.sm },
+
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
   field: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 8,
     paddingHorizontal: 10, paddingVertical: 9, minHeight: 38,
   },
+  remove: { paddingTop: 12, paddingHorizontal: 2 },
+
+  connectorRow: { flexDirection: "row", alignItems: "center", gap: 8, marginVertical: 6 },
+  connectorLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+  connectorPill: {
+    flexDirection: "row", alignItems: "center", gap: 3,
+    paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999,
+    backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: "#bae6fd",
+  },
+  connectorText: { fontSize: 12, fontWeight: "700", color: accent },
+
+  add: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 8, marginTop: 2 },
+  addText: { fontSize: 13, fontWeight: "600", color: accent },
 });
