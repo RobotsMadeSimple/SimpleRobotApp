@@ -117,13 +117,20 @@ export function ConditionGroupEditor({
 }
 
 const s = StyleSheet.create({
-  wrap: { paddingHorizontal: spacing.md, paddingTop: spacing.xs },
+  // One soft container around the whole group, so rows + joiners + add-link read as a unit.
+  wrap: {
+    marginHorizontal: spacing.md, marginTop: spacing.xs,
+    padding: spacing.sm + 2, paddingBottom: spacing.xs,
+    borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+  },
   empty: { fontSize: 12, color: colors.textFaint, fontStyle: "italic", marginBottom: spacing.sm },
 
   row: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
   field: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 8,
     paddingHorizontal: 10, paddingVertical: 9, minHeight: 38,
+    backgroundColor: colors.surface,
   },
   remove: { paddingTop: 12, paddingHorizontal: 2 },
 
