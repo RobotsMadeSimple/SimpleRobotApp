@@ -21,9 +21,9 @@ import { FunctionsList } from "./FunctionsList";
 import { pluginGroupTitle, useSplitSymbols } from "./pluginSymbols";
 import { applyCompletion, completionsAt, insertAt, isExpressionText } from "./completions";
 import { useLiveValue } from "./useLiveValue";
-import { VarPickerModal } from "../VarPicker";
 import { ms } from "../builderStyles";
 import { useActiveFieldRegistry } from "./ActiveField";
+import { ExpressionHelperModal } from "./ExpressionHelperPanel";
 
 // ── The standardized symbol strip ─────────────────────────────────────────────
 //
@@ -478,15 +478,14 @@ export function ExpressionField({
   const insertRef    = useRef<(t: string) => void>(() => {});
   const stableInsert = useRef((t: string) => insertRef.current(t)).current;
   const [forcedSel, setForcedSel] = useState<{ start: number; end: number } | null>(null);
-  const [varOpen, setVarOpen] = useState(false);
-  const [fnOpen,  setFnOpen]  = useState(false);
+  const [helperOpen, setHelperOpen] = useState(false);
   const [focused, setFocused] = useState(false);
+  const wide = useIsWide();
   const isExpr = isExpressionText(value);
   const live = useLiveValue(env, value, worthEvaluating(value));
-  const hasVars = (variables?.length ?? 0) + (contextVariables?.length ?? 0) > 0;
-  // Insert chips are clutter when you're not editing — show them only while the field is focused
-  // (or a picker it launched is open, so tapping a chip doesn't make the row vanish mid-tap).
-  const showChips = focused || varOpen || fnOpen;
+  // Insert affordance is clutter when you're not editing — show it only while the field is focused
+  // (or the helper it launched is open, so tapping it doesn't make the row vanish mid-tap).
+  const showChips = focused || helperOpen;
 
   useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
 
@@ -540,20 +539,17 @@ export function ExpressionField({
       {live.kind === "value" && <Text style={s.inlineLive} numberOfLines={1}>= {live.text}</Text>}
       {live.kind === "error" && <Text style={s.inlineLiveErr} numberOfLines={2}>{live.text}</Text>}
 
-      {/* Insert chips — shown while editing. Variables and functions each open a centred modal
-          selector; any field-specific tokens sit beside them. */}
-      {showChips && (
+      {/* Insert — one button opens the full insert panel (variables, properties, functions, plugins)
+          as a modal on narrow screens; on wide the always-visible side panel handles it. Field-
+          specific quick tokens sit beside it. */}
+      {showChips && (!wide || (extraOps?.length ?? 0) > 0) && (
         <View style={s.inlineChips}>
-          {hasVars && (
-            <TouchableOpacity onPress={() => setVarOpen(true)} activeOpacity={0.7}
-              style={s.insertChip} accessibilityRole="button" accessibilityLabel="Insert variable">
-              <Text style={s.insertChipText}>＋ $Variable</Text>
+          {!wide && (
+            <TouchableOpacity onPress={() => setHelperOpen(true)} activeOpacity={0.7}
+              style={s.insertChip} accessibilityRole="button" accessibilityLabel="Insert variable, property or function">
+              <Text style={s.insertChipText}>＋ Insert</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={() => setFnOpen(true)} activeOpacity={0.7}
-            style={s.insertChip} accessibilityRole="button" accessibilityLabel="Insert function">
-            <Text style={s.insertChipText}>＋ ƒunction</Text>
-          </TouchableOpacity>
           {(extraOps ?? []).map(([label, ins]) => (
             <TouchableOpacity key={`x:${ins}`} onPress={() => insert(ins)} activeOpacity={0.7}
               style={s.opChip} accessibilityRole="button" accessibilityLabel={`Insert ${label}`}>
@@ -563,79 +559,21 @@ export function ExpressionField({
         </View>
       )}
 
-      {hasVars && (
-        <VarPickerModal
-          visible={varOpen}
-          onClose={() => setVarOpen(false)}
-          variables={variables ?? []}
+      {!wide && (
+        <ExpressionHelperModal
+          visible={helperOpen}
+          onClose={() => setHelperOpen(false)}
+          variables={variables}
           contextVariables={contextVariables}
-          contextLabel={contextLabel}
-          selected={undefined}
-          title="Insert Variable"
-          onSelect={v => { setVarOpen(false); if (v) insert(variableToken(v)); }}
-          onPickSymbol={name => { setVarOpen(false); insert(`$${name}`); }}
+          contextLabel={contextLabel ?? "Caller Variables"}
+          onInsert={stableInsert}
         />
       )}
-      <FunctionPickerModal
-        visible={fnOpen}
-        onClose={() => setFnOpen(false)}
-        onInsert={name => { setFnOpen(false); insert(`${name}(`); }}
-      />
     </View>
   );
 }
 
 /** Centred modal (same shell as the variable selector) listing built-in + plugin functions. */
-function FunctionPickerModal({ visible, onClose, onInsert }: {
-  visible: boolean; onClose: () => void; onInsert: (name: string) => void;
-}) {
-  const [search, setSearch] = useState("");
-  const split = useSplitSymbols();
-  useEffect(() => { if (visible) setSearch(""); }, [visible]);
-  const pick = (name: string) => { onClose(); onInsert(name); };
-  const pluginGroups = split.plugins
-    .map(g => ({ g, fns: g.functions.filter(f => !search.trim()
-      || f.name.toLowerCase().includes(search.trim().toLowerCase())
-      || f.description.toLowerCase().includes(search.trim().toLowerCase())) }))
-    .filter(x => x.fns.length > 0);
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={ms.overlay} onPress={onClose}>
-        <Pressable style={[ms.card, { maxHeight: "80%" }]} onPress={() => {}}>
-          <View style={ms.header}>
-            <View style={{ width: 18 }} />
-            <Text style={ms.title}>Insert Function</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
-              <X size={18} color={colors.textFaint} />
-            </TouchableOpacity>
-          </View>
-          <View style={s.fnSearchBox}>
-            <TextInput style={s.fnSearchInput} value={search} onChangeText={setSearch}
-              placeholder="Search functions…" placeholderTextColor={colors.textFaint}
-              autoCapitalize="none" autoCorrect={false} autoFocus />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} activeOpacity={0.7}>
-                <X size={13} color={colors.textFaint} />
-              </TouchableOpacity>
-            )}
-          </View>
-          <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
-            {split.functions.length > 0 && (
-              <FunctionsList functions={split.functions} search={search} onInsert={pick} />
-            )}
-            {pluginGroups.map(({ g, fns }) => (
-              <React.Fragment key={g.id}>
-                <Text style={s.fnGroupHdr}>{pluginGroupTitle(g)}</Text>
-                <FunctionsList functions={fns} search="" onInsert={pick} />
-              </React.Fragment>
-            ))}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
 
 function OpButton({ label, wide, onPress }: { label: string; wide?: boolean; onPress: () => void }) {
   return (

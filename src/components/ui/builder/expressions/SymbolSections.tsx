@@ -11,7 +11,14 @@ import { pluginGroupTitle, useSplitSymbols } from "./pluginSymbols";
  * expression. Properties are read-only system values (`$robot.x`, `$time.hour`, …);
  * IO names read the boards. Picking one hands back its name without the `$`.
  */
-export function SymbolSections({ search, onPick }: { search: string; onPick: (name: string) => void }) {
+export function SymbolSections({ search, onPick, includePlugins = true, pluginsOnly = false }: {
+  search: string;
+  onPick: (name: string) => void;
+  /** Include plugin-contributed property groups ($scale.weight). */
+  includePlugins?: boolean;
+  /** Show ONLY the plugin property groups (for a dedicated Plugins tab). */
+  pluginsOnly?: boolean;
+}) {
   const env = useExpressionEnv();
   const split = useSplitSymbols();
   if (!env?.symbols) return null;
@@ -28,13 +35,15 @@ export function SymbolSections({ search, onPick }: { search: string; onPick: (na
 
   return (
     <>
-      <Section title="PROPERTIES · READ-ONLY" count={properties.length}>
-        {properties.map((p, i) => (
-          <SymbolRow key={p.name} name={p.name} description={p.description} tint={accents.cyan} readOnly
-            last={i === properties.length - 1} onPress={() => onPick(p.name)} />
-        ))}
-      </Section>
-      {pluginGroups.map(({ g, props }) => (
+      {!pluginsOnly && (
+        <Section title="PROPERTIES · READ-ONLY" count={properties.length}>
+          {properties.map((p, i) => (
+            <SymbolRow key={p.name} name={p.name} description={p.description} tint={accents.cyan} readOnly
+              last={i === properties.length - 1} onPress={() => onPick(p.name)} />
+          ))}
+        </Section>
+      )}
+      {(pluginsOnly || includePlugins) && pluginGroups.map(({ g, props }) => (
         <Section key={g.id} title={pluginGroupTitle(g).toUpperCase()} count={props.length}>
           {props.map((p, i) => (
             <SymbolRow key={p.name} name={p.name} description={p.description} tint={accents.cyan} readOnly
@@ -42,12 +51,14 @@ export function SymbolSections({ search, onPick }: { search: string; onPick: (na
           ))}
         </Section>
       ))}
-      <Section title="IO" count={io.length}>
-        {io.map((x, i) => (
-          <SymbolRow key={x.name} name={x.name} description={x.description} tint={colors.success}
-            last={i === io.length - 1} onPress={() => onPick(x.name)} />
-        ))}
-      </Section>
+      {!pluginsOnly && (
+        <Section title="IO" count={io.length}>
+          {io.map((x, i) => (
+            <SymbolRow key={x.name} name={x.name} description={x.description} tint={colors.success}
+              last={i === io.length - 1} onPress={() => onPick(x.name)} />
+          ))}
+        </Section>
+      )}
     </>
   );
 }
