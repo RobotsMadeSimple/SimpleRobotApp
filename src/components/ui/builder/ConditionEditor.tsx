@@ -7,7 +7,7 @@ import {
   ProgramVariable,
 } from "@/src/models/robotModels";
 import { conditionItemText, newId } from "./stepUtils";
-import { colors, spacing, accents } from "@/src/components/ui/kit";
+import { colors, spacing, radii, accents } from "@/src/components/ui/kit";
 import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── Condition editor ──────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ export function ConditionGroupEditor({
         activeOpacity={0.7} hitSlop={6}
         accessibilityRole="button" accessibilityLabel="Add condition">
         <Plus size={14} color={accent} />
-        <Text style={s.addText}>Add condition</Text>
+        <Text style={s.addText}>Add Condition</Text>
       </TouchableOpacity>
     </View>
   );
@@ -143,6 +143,12 @@ const s = StyleSheet.create({
   },
   connectorText: { fontSize: 12, fontWeight: "700", color: accent },
 
-  add: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 8, marginTop: 2 },
+  // Full-width dashed add button, as it was — it also closes the group off visually.
+  add: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    marginTop: spacing.sm, marginBottom: spacing.xs, paddingVertical: spacing.md,
+    borderWidth: 1.5, borderColor: "#bae6fd", borderStyle: "dashed", borderRadius: radii.sm,
+    backgroundColor: colors.accentSoft,
+  },
   addText: { fontSize: 13, fontWeight: "600", color: accent },
 });
