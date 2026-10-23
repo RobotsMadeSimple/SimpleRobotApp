@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { ArrowRight, Check, Pencil, Plus, Trash2, X } from "lucide-react-native";
-import { ConditionGroup, ElseIfBranch, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { ConditionGroup, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { ms, sharedStyles } from "./builderStyles";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { STEP_THEME } from "./stepUtils";
@@ -18,11 +18,15 @@ import { newId } from "./stepUtils";
 import { ScopeFrame } from "./stepUtils";
 import { colors, accents } from "@/src/components/ui/kit";
 
-// Each branch card has exactly two controls, and each looks like what it does: the condition is a
-// field (white box + pencil — tap to edit), and the footer is a button (Enter → — tap to open the
-// branch's steps). Branch delete is a trash can, like everywhere else in the builder.
+// The branches (IF, ELSE IF…, ELSE) sit side by side in a horizontal, snapping strip so the block
+// stays short no matter how many there are; the next card peeks in from the right and a dot row
+// shows where you are. Each card has exactly two controls that look like what they do: the
+// condition is a field (white box + pencil — tap to edit) and the footer is a button (Enter →).
+
+const CARD_GAP = 8;
 
 const ifStyles = StyleSheet.create({
+  strip: { paddingHorizontal: 10, paddingTop: 10, gap: CARD_GAP },
   branchCard: {
     borderRadius: 10,
     borderWidth: 1,
@@ -62,9 +66,12 @@ const ifStyles = StyleSheet.create({
     borderWidth: 1, backgroundColor: colors.surface,
   },
   enterText: { fontSize: 12, fontWeight: "700" },
+  dots: { flexDirection: "row", justifyContent: "center", gap: 5, paddingTop: 8 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.borderStrong },
+  dotOn: { backgroundColor: colors.textMuted, width: 14 },
   branchControlRow: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    marginTop: 10, paddingTop: 10,
+    marginHorizontal: 10, marginTop: 10, paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   branchControlBtn: {
@@ -126,7 +133,7 @@ export function IfConditionBody({
   onUpdateIfCondition: (updated: ProgramStep) => void;
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
-  /** Bump to open the IF condition editor from outside (the step header tap). */
+  /** Bump to open the IF condition editor from outside (the step header tap, or right after adding). */
   editTrigger?: number;
 }) {
   const theme          = STEP_THEME["IfCondition"] ?? STEP_THEME["MoveL"];
@@ -136,6 +143,15 @@ export function IfConditionBody({
 
   const [editingKey, setEditingKey]         = useState<null | "if" | string>(null);
   const [draftCondition, setDraftCondition] = useState<ConditionGroup | null>(null);
+
+  // Horizontal strip: card width from the measured body width, current page from scroll offset.
+  const [stripW, setStripW] = useState(0);
+  const [page, setPage]     = useState(0);
+  const stripRef            = useRef<ScrollView>(null);
+  const branchCount         = 1 + elseIfBranches.length + (elseSteps !== undefined ? 1 : 0);
+  const inner               = Math.max(0, stripW - 20);
+  const cardW               = branchCount > 1 ? Math.round(inner * 0.82) : inner;
+  const snap                = cardW + CARD_GAP;
 
   function openConditionEditor(key: "if" | string) {
     const cond = key === "if"
@@ -149,6 +165,15 @@ export function IfConditionBody({
     if (editTrigger) openConditionEditor("if");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editTrigger]);
+
+  // A newly added branch lands at the end of the strip — scroll to it so it's not hidden.
+  const prevCount = useRef(branchCount);
+  useEffect(() => {
+    if (branchCount > prevCount.current && snap > 0) {
+      requestAnimationFrame(() => stripRef.current?.scrollTo({ x: (branchCount - 1) * snap, animated: true }));
+    }
+    prevCount.current = branchCount;
+  }, [branchCount, snap]);
 
   function closeConditionEditor() {
     setEditingKey(null);
@@ -171,6 +196,7 @@ export function IfConditionBody({
   }
 
   const editingTitle = editingKey === "if" ? "If" : "Else If";
+  const cardStyle = cardW > 0 ? { width: cardW } : undefined;
 
   return (
     <View style={[sharedStyles.loopCardBody, { borderTopColor: theme.accent + "40" }]}>
@@ -205,77 +231,97 @@ export function IfConditionBody({
         </Pressable>
       </Modal>
 
-      <View style={{ gap: 6, padding: 10 }}>
-        {/* IF branch */}
-        <View style={[ifStyles.branchCard, { borderColor: "#bae6fd", backgroundColor: colors.accentSoft }]}>
-          <View style={ifStyles.branchHeader}>
-            <View style={[ifStyles.branchBadge, { backgroundColor: accents.cyan }]}>
-              <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>IF</Text>
-            </View>
-            <ConditionField group={step.condition} tint={accents.cyan} onPress={() => openConditionEditor("if")} />
-          </View>
-          <BranchFooter count={ifSteps.length} tint={accents.cyan}
-            onPress={() => onEnterScope({ kind: "ifTrue", stepId: step.id, label: "IF" })} />
-        </View>
-
-        {/* ELSE IF branches */}
-        {elseIfBranches.map((branch, idx) => (
-          <View key={branch.id} style={[ifStyles.branchCard, { borderColor: accents.purpleBorder, backgroundColor: "#faf5ff" }]}>
+      <View onLayout={e => setStripW(e.nativeEvent.layout.width)}>
+        <ScrollView
+          ref={stripRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={ifStyles.strip}
+          snapToInterval={branchCount > 1 ? snap : undefined}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          scrollEventThrottle={32}
+          onScroll={e => { if (snap > 0) setPage(Math.round(e.nativeEvent.contentOffset.x / snap)); }}
+        >
+          {/* IF branch */}
+          <View style={[ifStyles.branchCard, cardStyle, { borderColor: "#bae6fd", backgroundColor: colors.accentSoft }]}>
             <View style={ifStyles.branchHeader}>
-              <View style={[ifStyles.branchBadge, { backgroundColor: accents.purple }]}>
-                <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>ELSE IF</Text>
+              <View style={[ifStyles.branchBadge, { backgroundColor: accents.cyan }]}>
+                <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>IF</Text>
               </View>
-              <ConditionField group={branch.condition} tint={accents.purple} onPress={() => openConditionEditor(branch.id)} />
-              <DeleteBranchButton onPress={() => appAlert("Delete Branch", "Remove this ELSE IF branch and its steps?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) }) },
-              ])} />
+              <ConditionField group={step.condition} tint={accents.cyan} onPress={() => openConditionEditor("if")} />
             </View>
-            <BranchFooter count={(branch.steps ?? []).length} tint={accents.purple}
-              onPress={() => onEnterScope({ kind: "elseIf", stepId: step.id, label: `ELSE IF ${idx + 1}`, branchId: branch.id })} />
+            <BranchFooter count={ifSteps.length} tint={accents.cyan}
+              onPress={() => onEnterScope({ kind: "ifTrue", stepId: step.id, label: "IF" })} />
           </View>
-        ))}
 
-        {/* ELSE branch */}
-        {elseSteps !== undefined && (
-          <View style={[ifStyles.branchCard, { borderColor: colors.borderStrong, backgroundColor: colors.surfaceMuted }]}>
-            <View style={ifStyles.branchHeader}>
-              <View style={[ifStyles.branchBadge, { backgroundColor: colors.textMuted }]}>
-                <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>ELSE</Text>
+          {/* ELSE IF branches */}
+          {elseIfBranches.map((branch, idx) => (
+            <View key={branch.id} style={[ifStyles.branchCard, cardStyle, { borderColor: accents.purpleBorder, backgroundColor: "#faf5ff" }]}>
+              <View style={ifStyles.branchHeader}>
+                <View style={[ifStyles.branchBadge, { backgroundColor: accents.purple }]}>
+                  <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>ELSE IF</Text>
+                </View>
+                <ConditionField group={branch.condition} tint={accents.purple} onPress={() => openConditionEditor(branch.id)} />
+                <DeleteBranchButton onPress={() => appAlert("Delete Branch", "Remove this ELSE IF branch and its steps?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseIfBranches: elseIfBranches.filter(b => b.id !== branch.id) }) },
+                ])} />
               </View>
-              <Text style={ifStyles.elseText} numberOfLines={1}>otherwise</Text>
-              <DeleteBranchButton onPress={() => appAlert("Delete Branch", "Remove the ELSE branch and its steps?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
-              ])} />
+              <BranchFooter count={(branch.steps ?? []).length} tint={accents.purple}
+                onPress={() => onEnterScope({ kind: "elseIf", stepId: step.id, label: `ELSE IF ${idx + 1}`, branchId: branch.id })} />
             </View>
-            <BranchFooter count={(elseSteps ?? []).length} tint={colors.textMuted}
-              onPress={() => onEnterScope({ kind: "else", stepId: step.id, label: "ELSE" })} />
+          ))}
+
+          {/* ELSE branch */}
+          {elseSteps !== undefined && (
+            <View style={[ifStyles.branchCard, cardStyle, { borderColor: colors.borderStrong, backgroundColor: colors.surfaceMuted }]}>
+              <View style={ifStyles.branchHeader}>
+                <View style={[ifStyles.branchBadge, { backgroundColor: colors.textMuted }]}>
+                  <Text style={[ifStyles.branchLabel, { color: colors.onAccent }]}>ELSE</Text>
+                </View>
+                <Text style={ifStyles.elseText} numberOfLines={1}>otherwise</Text>
+                <DeleteBranchButton onPress={() => appAlert("Delete Branch", "Remove the ELSE branch and its steps?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Delete", style: "destructive", onPress: () => onUpdateIfCondition({ ...step, elseSteps: undefined }) },
+                ])} />
+              </View>
+              <BranchFooter count={(elseSteps ?? []).length} tint={colors.textMuted}
+                onPress={() => onEnterScope({ kind: "else", stepId: step.id, label: "ELSE" })} />
+            </View>
+          )}
+        </ScrollView>
+
+        {branchCount > 1 && (
+          <View style={ifStyles.dots}>
+            {Array.from({ length: branchCount }, (_, i) => (
+              <View key={i} style={[ifStyles.dot, i === Math.min(page, branchCount - 1) && ifStyles.dotOn]} />
+            ))}
           </View>
         )}
+      </View>
 
-        {/* Branch controls */}
-        <View style={ifStyles.branchControlRow}>
+      {/* Branch controls */}
+      <View style={ifStyles.branchControlRow}>
+        <TouchableOpacity
+          style={ifStyles.branchControlBtn}
+          onPress={() => onUpdateIfCondition({
+            ...step,
+            elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: "ALL", items: [] }, steps: [] }],
+          })}
+          activeOpacity={0.7}>
+          <Plus size={11} color={colors.textMuted} />
+          <Text style={ifStyles.branchControlText}>ELSE IF</Text>
+        </TouchableOpacity>
+        {elseSteps === undefined && (
           <TouchableOpacity
             style={ifStyles.branchControlBtn}
-            onPress={() => onUpdateIfCondition({
-              ...step,
-              elseIfBranches: [...elseIfBranches, { id: newId(), condition: { combinator: "ALL", items: [] }, steps: [] }],
-            })}
+            onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
             activeOpacity={0.7}>
             <Plus size={11} color={colors.textMuted} />
-            <Text style={ifStyles.branchControlText}>ELSE IF</Text>
+            <Text style={ifStyles.branchControlText}>ELSE</Text>
           </TouchableOpacity>
-          {elseSteps === undefined && (
-            <TouchableOpacity
-              style={ifStyles.branchControlBtn}
-              onPress={() => onUpdateIfCondition({ ...step, elseSteps: [] })}
-              activeOpacity={0.7}>
-              <Plus size={11} color={colors.textMuted} />
-              <Text style={ifStyles.branchControlText}>ELSE</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        )}
       </View>
     </View>
   );

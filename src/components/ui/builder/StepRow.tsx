@@ -118,6 +118,7 @@ export function StepRow({
   onPasteAfter,
   onEnterScope,
   onUpdateIfCondition,
+  ifEditRequest,
   onItemLayout,
   variables,
   contextVariables,
@@ -147,6 +148,8 @@ export function StepRow({
   onPasteAfter?: () => void;
   onEnterScope: (frame: ScopeFrame) => void;
   onUpdateIfCondition: (updated: ProgramStep) => void;
+  /** Bump (from the builder) to open this If step's condition editor, e.g. right after adding it. */
+  ifEditRequest?: number;
   onItemLayout: (id: string, height: number) => void;
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
@@ -286,7 +289,7 @@ export function StepRow({
             onUpdateIfCondition={onUpdateIfCondition}
             variables={variables}
             contextVariables={contextVariables}
-            editTrigger={ifEditTick}
+            editTrigger={ifEditTick + (ifEditRequest ?? 0)}
           />
         )}
 

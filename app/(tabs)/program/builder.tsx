@@ -506,6 +506,9 @@ export default function BuilderScreen() {
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [configOpen, setConfigOpen]         = useState(false);
   const [editingStep, setEditingStep]       = useState<ProgramStep | null>(null);
+  // A freshly added If step opens its IF condition editor (not the step modal); the row for
+  // that id picks this up and nudges its body's editor open.
+  const [ifEditRequest, setIfEditRequest]   = useState<{ id: string; tick: number } | null>(null);
 
   // When creating a routine from a CallRoutine step, remember which step and the
   // routine ids that existed beforehand, so we can auto-select the new one on return.
@@ -727,6 +730,11 @@ export default function BuilderScreen() {
       return setStepsAtScope(prev, scopeStackRef.current, newScoped);
     });
 
+    if (step.type === "IfCondition") {
+      // Nothing to configure on the step itself — go straight to its IF condition.
+      setIfEditRequest(r => ({ id: step.id, tick: (r?.tick ?? 0) + 1 }));
+      return;
+    }
     setEditingStep(step);
     setConfigOpen(true);
   }
@@ -1381,6 +1389,7 @@ export default function BuilderScreen() {
               onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
               onEnterScope={pushScope}
               onUpdateIfCondition={updateStep}
+              ifEditRequest={ifEditRequest?.id === step.id ? ifEditRequest.tick : undefined}
               onItemLayout={handleItemLayout}
               variables={variables}
               contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
