@@ -64,6 +64,7 @@ import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
 import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
 import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
 import { ExpressionEnvProvider } from "@/src/components/ui/builder/expressions/ExpressionEnv";
+import { ActiveFieldProvider } from "@/src/components/ui/builder/expressions/ActiveField";
 import { PropertiesSection } from "@/src/components/ui/builder/expressions/PropertiesSection";
 import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
@@ -1483,6 +1484,7 @@ export default function BuilderScreen() {
 
   return (
     <ExpressionEnvProvider programName={expressionProgramName} variables={expressionVariables} enabled={connected}>
+    <ActiveFieldProvider>
     <View style={styles.container}>
       {isWide ? (
         <PageHeader
@@ -1899,6 +1901,7 @@ export default function BuilderScreen() {
         </Pressable>
       </Modal>
     </View>
+    </ActiveFieldProvider>
     </ExpressionEnvProvider>
   );
 }

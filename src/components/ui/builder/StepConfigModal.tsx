@@ -68,6 +68,8 @@ import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType, VariableEditModal } from "./VariableEditModal";
 import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
 import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
+import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
+import { usePaneLayout } from "@/src/components/ui/responsive";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
@@ -157,6 +159,9 @@ export function StepConfigModal({
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const cardWidth = Math.min(windowWidth - 48, 520);
+  // On a desktop-width screen, put the edit card on the right with an always-visible variable/
+  // function/property helper on the left (there's room for the two-pane only at this tier).
+  const wide = usePaneLayout() === "desktop";
 
   // Keyboard-aware scrolling: on a phone the soft keyboard covers the lower half of the modal, so
   // when it opens we scroll the focused input up above it (and pad the bottom so there's room).
@@ -3765,6 +3770,15 @@ export function StepConfigModal({
               ScrollView owns its gestures cleanly — a Pressable wrapping the
               ScrollView blocks scrolling when a drag starts on a focused input. */}
           <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? setSubPage(null) : onClose()} />
+          <View style={wide ? ms.wideRow : undefined}>
+          {wide && (
+            <ExpressionHelperPanel
+              variables={variables}
+              contextVariables={contextVariables}
+              contextLabel="Caller Variables"
+              style={{ maxHeight: Math.round(windowHeight * 0.88) }}
+            />
+          )}
           <View style={[ms.card, { maxWidth: cardWidth, maxHeight: Math.round(windowHeight * 0.88) }]}>
             {/* Header */}
             <View style={ms.header}>
@@ -3909,6 +3923,7 @@ export function StepConfigModal({
                 </TouchableOpacity>
               </View>
             )}
+          </View>
           </View>
         </View>
     </Modal>

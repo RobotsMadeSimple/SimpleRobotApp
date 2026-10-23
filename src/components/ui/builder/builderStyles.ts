@@ -10,6 +10,8 @@ export const ms = StyleSheet.create({
     justifyContent: "flex-start", alignItems: "center",
     paddingTop: 52, paddingHorizontal: spacing.xl,
   },
+  // Wide-mode two-pane: the helper panel and the edit card side by side.
+  wideRow: { flexDirection: "row", alignItems: "flex-start", gap: 16 },
   card: {
     width: "100%", maxWidth: 480, maxHeight: "88%",
     backgroundColor: colors.surface, borderRadius: radii.xl,

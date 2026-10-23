@@ -23,6 +23,7 @@ import { applyCompletion, completionsAt, insertAt, isExpressionText } from "./co
 import { useLiveValue } from "./useLiveValue";
 import { VarPickerModal } from "../VarPicker";
 import { ms } from "../builderStyles";
+import { useActiveFieldRegistry } from "./ActiveField";
 
 // ── The standardized symbol strip ─────────────────────────────────────────────
 //
@@ -467,9 +468,15 @@ export function ExpressionField({
   style, accent = accents.purple, clearable = true,
 }: ExpressionFieldProps) {
   const env = useExpressionEnv();
+  const registry = useActiveFieldRegistry();
   const inputRef  = useRef<TextInput | null>(null);
   const selRef    = useRef({ start: value.length, end: value.length });
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyRef    = useRef("ef-" + Math.random().toString(36).slice(2));
+  // A stable wrapper the registry can hold that always reaches the latest insert (which captures
+  // the current value + caret).
+  const insertRef    = useRef<(t: string) => void>(() => {});
+  const stableInsert = useRef((t: string) => insertRef.current(t)).current;
   const [forcedSel, setForcedSel] = useState<{ start: number; end: number } | null>(null);
   const [varOpen, setVarOpen] = useState(false);
   const [fnOpen,  setFnOpen]  = useState(false);
@@ -493,6 +500,7 @@ export function ExpressionField({
     setForcedSel({ start: caret, end: caret });
     inputRef.current?.focus();
   }
+  insertRef.current = insert;
 
   return (
     <View>
@@ -510,8 +518,14 @@ export function ExpressionField({
           autoCorrect={false}
           multiline
           blurOnSubmit={false}
-          onFocus={() => { if (blurTimer.current) clearTimeout(blurTimer.current); setFocused(true); }}
-          onBlur={() => { blurTimer.current = setTimeout(() => setFocused(false), 150); }}
+          onFocus={() => {
+            if (blurTimer.current) clearTimeout(blurTimer.current);
+            setFocused(true);
+            registry?.activate({ key: keyRef.current, insert: stableInsert });
+          }}
+          onBlur={() => {
+            blurTimer.current = setTimeout(() => { setFocused(false); registry?.deactivate(keyRef.current); }, 150);
+          }}
           accessibilityLabel={title}
         />
         {clearable && value.trim().length > 0 && (
