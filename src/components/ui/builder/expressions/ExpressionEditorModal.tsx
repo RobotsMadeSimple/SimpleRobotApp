@@ -480,6 +480,7 @@ export function ExpressionField({
   const [forcedSel, setForcedSel] = useState<{ start: number; end: number } | null>(null);
   const [helperOpen, setHelperOpen] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [caret, setCaret] = useState(value.length);   // completions depend on the caret, so track it in state
   const wide = useIsWide();
   const isExpr = isExpressionText(value);
   const live = useLiveValue(env, value, worthEvaluating(value));
@@ -487,19 +488,49 @@ export function ExpressionField({
   // (or the helper it launched is open, so tapping it doesn't make the row vanish mid-tap).
   const showChips = focused || helperOpen;
 
+  // ── Autocomplete ("ghost" suggestions) ──────────────────────────────────────
+  const localVars = useMemo(
+    () => [...(variables ?? []), ...(contextVariables ?? [])],
+    [variables, contextVariables]);
+  // The token being typed ($name… or a bare function word) → matching completions.
+  const completion = useMemo(
+    () => (env ? completionsAt(value, Math.min(caret, value.length), env.symbols, localVars) : null),
+    [env, value, caret, localVars]);
+  // No active token but focused at a spot where a value belongs (empty, or just after an operator /
+  // space) → offer the field's variables to drop straight in. This is the "tap to autofill" case.
+  const fallback = useMemo(() => {
+    if (completion) return null;
+    const before = value.slice(0, Math.min(caret, value.length));
+    const atValueStart = before.length === 0 || /[\s(,+\-*/<>=!&|]$/.test(before);
+    if (!atValueStart) return null;
+    const items = localVars.map(v => ({
+      kind: "variable" as const, label: "$" + v.name, insert: variableToken(v), computed: v.isComputed,
+    }));
+    return items.length ? items.slice(0, 8) : null;
+  }, [completion, value, caret, localVars]);
+
   useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
 
-  // Splice a token at the caret, spacing it off a preceding word/value; commit live and keep focus.
-  function insert(token: string) {
-    const at    = Math.min(selRef.current.end, value.length);
-    const next  = insertAt(value, at, token);
-    const caret = next.length - (value.length - at);
+  // Commit new text with the caret at a set spot; keep focus and the completions in sync.
+  function commitAt(next: string, caretPos: number) {
     onChange(next.replace(NEWLINE, " "));
-    selRef.current = { start: caret, end: caret };
-    setForcedSel({ start: caret, end: caret });
+    selRef.current = { start: caretPos, end: caretPos };
+    setCaret(caretPos);
+    setForcedSel({ start: caretPos, end: caretPos });
     inputRef.current?.focus();
   }
+  // Splice a token at the caret, spacing it off a preceding word/value; commit live and keep focus.
+  function insert(token: string) {
+    const at = Math.min(selRef.current.end, value.length);
+    const next = insertAt(value, at, token);
+    commitAt(next, next.length - (value.length - at));
+  }
   insertRef.current = insert;
+  // Replace the token being typed with a chosen completion.
+  function applyComp(startAt: number, text: string) {
+    const at = Math.min(caret, value.length);
+    commitAt(applyCompletion(value, startAt, at, text), startAt + text.length);
+  }
 
   return (
     <View>
@@ -509,7 +540,7 @@ export function ExpressionField({
           style={[s.fieldText, isExpr && { color: accent }]}
           value={value}
           onChangeText={next => { onChange(next.replace(NEWLINE, " ")); setForcedSel(null); }}
-          onSelectionChange={e => { selRef.current = e.nativeEvent.selection; }}
+          onSelectionChange={e => { selRef.current = e.nativeEvent.selection; setCaret(e.nativeEvent.selection.start); }}
           selection={forcedSel ?? undefined}
           placeholder={placeholder ?? "0"}
           placeholderTextColor={colors.textFaint}
@@ -534,6 +565,30 @@ export function ExpressionField({
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Autocomplete "ghost" suggestions for the token being typed, or the field's variables when
+          you focus an empty / value-ready spot. Tap one to drop it in. */}
+      {focused && (completion || fallback) && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always"
+          style={s.suggestions} contentContainerStyle={s.suggestionsContent}>
+          {(completion
+            ? completion.items.map(item => ({
+                key: `${item.kind}:${item.label}`, label: item.label, kind: item.kind, computed: item.computed,
+                onPress: () => applyComp(completion.start, item.insert),
+              }))
+            : (fallback ?? []).map(item => ({
+                key: `fb:${item.label}`, label: item.label, kind: item.kind, computed: item.computed,
+                onPress: () => insert(item.insert),
+              }))
+          ).map(sg => (
+            <TouchableOpacity key={sg.key} style={s.suggestion} activeOpacity={0.7} onPress={sg.onPress}>
+              <Text style={[s.suggestionText, { color: KIND_TINT[sg.kind] }]}>
+                {sg.label}{sg.computed && <Text style={s.computedTag}>  ƒ</Text>}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
       {/* Live value / error, only when there is something to say. */}
       {live.kind === "value" && <Text style={s.inlineLive} numberOfLines={1}>= {live.text}</Text>}
