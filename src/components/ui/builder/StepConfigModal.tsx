@@ -173,6 +173,13 @@ export function StepConfigModal({
   const bodyScrollRef = useRef<ScrollView>(null);
   const scrollYRef    = useRef(0);
   const [kbHeight, setKbHeight] = useState(0);
+  // When the keyboard is up, cap the card so the whole thing — including the pinned Cancel/Save
+  // footer — stays above it, with the top anchored (no window pan / clipped top). Use the smaller of
+  // the current window and the screen-minus-keyboard so it's right whether Android resizes the window
+  // (windowHeight already shrinks) or pans it (windowHeight stays full).
+  const cardMaxHeight = kbHeight > 0
+    ? Math.max(260, Math.min(windowHeight, Dimensions.get("screen").height - kbHeight) - 60)
+    : Math.round(windowHeight * 0.88);
   useEffect(() => {
     if (!visible || Platform.OS === "web") return;
     const onShow = (e: any) => {
@@ -3781,12 +3788,12 @@ export function StepConfigModal({
               variables={variables}
               contextVariables={contextVariables}
               contextLabel="Caller Variables"
-              style={{ width: panelWidth, maxHeight: Math.round(windowHeight * 0.88) }}
+              style={{ width: panelWidth, maxHeight: cardMaxHeight }}
             />
           )}
           <View style={[ms.card, wide
-            ? { width: wideCardWidth, maxWidth: wideCardWidth, maxHeight: Math.round(windowHeight * 0.88) }
-            : { maxWidth: cardWidth, maxHeight: Math.round(windowHeight * 0.88) }]}>
+            ? { width: wideCardWidth, maxWidth: wideCardWidth, maxHeight: cardMaxHeight }
+            : { maxWidth: cardWidth, maxHeight: cardMaxHeight }]}>
             {/* Header */}
             <View style={ms.header}>
               {subPage ? (
@@ -3833,7 +3840,7 @@ export function StepConfigModal({
               onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: kbHeight > 0 ? kbHeight + 16 : 8 }}>
+              contentContainerStyle={{ paddingBottom: kbHeight > 0 ? 24 : 8 }}>
               {subPage ? (
                 renderSubPage()
               ) : (
