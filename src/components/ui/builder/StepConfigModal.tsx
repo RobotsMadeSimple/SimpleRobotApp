@@ -235,7 +235,11 @@ export function StepConfigModal({
     }
   }, [visible, draftType]);
 
+  // Rebuild the draft from the step on every open, not just when the step object changes: Cancel
+  // only hides the modal and the builder hands back the same step object next time, so without
+  // `visible` here a cancelled edit (e.g. a deleted condition) would still be sitting in the draft.
   useEffect(() => {
+    if (!visible) return;
     if (step) {
       // varPointName/varPointIndex were a separate tab before point targets merged into
       // one expression. Fold them into the equivalent pointNameExpr so the merged field
@@ -259,7 +263,7 @@ export function StepConfigModal({
     setEditingName(false);
     setShowComment(false);
     setShowStatus(false);
-  }, [step]);
+  }, [step, visible]);
 
   // Leaving the main page (into a sub-page) always drops name-edit mode.
   useEffect(() => { if (subPage) setEditingName(false); }, [subPage]);
