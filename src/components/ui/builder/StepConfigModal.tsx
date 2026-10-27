@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Dimensions,
-  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -16,6 +14,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
+import { addKeyboardListener } from "@/src/platform/keyboard";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -180,7 +179,7 @@ export function StepConfigModal({
   if (kbHeight === 0) fullWindowHRef.current = windowHeight;
   const cardMaxHeight = Math.round(fullWindowHRef.current * 0.88);
   useEffect(() => {
-    if (!visible || Platform.OS === "web") return;
+    if (!visible) return;
     const adjust = (kbTop: number) => {
       const focused: any = (TextInput as any).State?.currentlyFocusedInput?.();
       const sv = bodyScrollRef.current;
@@ -194,18 +193,15 @@ export function StepConfigModal({
         if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
       });
     };
-    const onShow = (e: any) => {
-      const h = e?.endCoordinates?.height ?? 0;
-      const kbTop = e?.endCoordinates?.screenY ?? (Dimensions.get("screen").height - h);
-      setKbHeight(h);
+    // One keyboard signal for native and the web mock keyboard, so the Playwright keyboard
+    // audit exercises this exact scroll-clear logic.
+    return addKeyboardListener(k => {
+      if (!k.visible) { setKbHeight(0); return; }
+      setKbHeight(k.height);
       // Two frames to let the field settle, then again after the keyboard animation finishes.
-      requestAnimationFrame(() => requestAnimationFrame(() => adjust(kbTop)));
-      setTimeout(() => adjust(kbTop), 240);
-    };
-    const onHide = () => setKbHeight(0);
-    const s1 = Keyboard.addListener("keyboardDidShow", onShow);
-    const s2 = Keyboard.addListener("keyboardDidHide", onHide);
-    return () => { s1.remove(); s2.remove(); };
+      requestAnimationFrame(() => requestAnimationFrame(() => adjust(k.screenY)));
+      setTimeout(() => adjust(k.screenY), 240);
+    });
   }, [visible]);
 
   // Only fetch the data a given step type actually uses. Opening a Move/Wait/Logic/etc. step now

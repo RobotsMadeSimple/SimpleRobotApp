@@ -15,6 +15,7 @@ import {
   Square,
 } from "lucide-react-native";
 import { auxRoleMeta } from "@/src/components/ui/io/auxRoles";
+import { useKeyboardHeight } from "@/src/platform/keyboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { ReactNode, useEffect, useState } from "react";
 import {
@@ -173,6 +174,7 @@ function AuxSetPositionModal({
   const unitLabel = auxUnitLabel(axis);
   const spu       = auxStepsPerUnit(axis);
   const [value, setValue] = useState("");
+  const kb        = useKeyboardHeight(); // lift the sheet clear of the keyboard (Modals aren't resized)
 
   const g         = gripperGeom(axis);
   const isGripper = axis.role === "Gripper" && g.ok;
@@ -191,7 +193,7 @@ function AuxSetPositionModal({
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <View style={[styles.modalBackdrop, { paddingBottom: kb }]}>
         <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
             <View style={styles.modalTitleRow}>
@@ -290,9 +292,10 @@ function GripperGapModal({ lo, hi, currentMm, onMove, onClose }: {
   const [value, setValue] = useState(currentMm.toFixed(1));
   const n     = parseFloat(value);
   const valid = isFinite(n) && n >= lo && n <= hi;
+  const kb    = useKeyboardHeight(); // lift the sheet clear of the keyboard (Modals aren't resized)
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <View style={[styles.modalBackdrop, { paddingBottom: kb }]}>
         <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
             <View style={styles.modalTitleRow}>
@@ -624,6 +627,8 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
                       style={styles.axisConfigBtn}
                       onPress={() => setSetPosAxis(axis)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Set position"
                     >
                       <Crosshair size={16} color={colors.textFaint} />
                     </AnimatedPressable>

@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "check:vision": "node ./scripts/check-vision-canvas.js",
+    "keyboard-audit": "node ./scripts/keyboard-audit.mjs",
     "electron": "npx expo export --platform web && electron electron.js",
     "electron:build": "npx expo export --platform web && npx esbuild electron.js --bundle --platform=node --outfile=electron-bundle.js --external:electron && electron-builder --win --publish never"
   },
@@ -101,6 +102,7 @@
     "esbuild": "^0.28.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~57.0.2",
+    "playwright": "^1.64.1",
     "typescript": "~6.0.3"
   },
   "private": true

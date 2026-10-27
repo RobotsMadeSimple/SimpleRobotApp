@@ -467,3 +467,5 @@ FodyWeavers.xsd
 # Local Expo native module build output
 modules/**/android/build/
 modules/**/android/.cxx/
+# Playwright keyboard audit failure screenshots
+scripts/keyboard-audit-out/

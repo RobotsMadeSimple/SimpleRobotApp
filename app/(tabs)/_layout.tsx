@@ -16,6 +16,7 @@ import { colors } from "@/src/components/ui/kit";
 import { NavRail } from "@/src/components/ui/NavRail";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
+import { MockKeyboard } from "@/src/components/dev/MockKeyboard";
 import { ProviderAutoStart } from "@/src/components/provider/ProviderAutoStart";
 import { RobotProvider } from "@/src/providers/RobotProvider";
 import { ActionSheetProvider } from "@expo/react-native-action-sheet";
@@ -33,6 +34,8 @@ export default function Layout() {
             <TabLayout />
             <AppAlertHost />
             <FaultRecoveryOverlay />
+            {/* Web-only fake keyboard for the Playwright keyboard audit; renders nothing unless enabled. */}
+            <MockKeyboard />
           </RobotProvider>
         </SafeAreaProvider>
       </ActionSheetProvider>
