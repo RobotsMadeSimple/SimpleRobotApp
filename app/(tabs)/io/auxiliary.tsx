@@ -10,12 +10,13 @@ import {
   ChevronRight,
   Crosshair,
   Gauge,
+  Pencil,
   Settings2,
   Square,
 } from "lucide-react-native";
 import { auxRoleMeta } from "@/src/components/ui/io/auxRoles";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { ReactNode, useEffect, useRef, useState } from "react";
+import React, { ReactNode, useEffect, useState } from "react";
 import {
   Modal,
   StyleSheet,
@@ -53,6 +54,12 @@ import {
 const AUX_JOG_VELOCITY = 800;
 const AUX_JOG_ACCEL    = 3200;
 const AUX_JOG_DECEL    = 5000;
+// Ceiling on any step rate we ask of the Uno. Its software step loop tops out around 10 kHz;
+// above that the firmware's velocity bookkeeping runs ahead of the pulses it can actually emit,
+// so a soft-stop computes a braking distance for a speed the motor never reached and the axis
+// keeps stepping long after release.
+const AUX_MAX_STEP_HZ  = 10000;
+const clampStepHz = (hz: number) => Math.max(1, Math.min(AUX_MAX_STEP_HZ, Math.round(hz)));
 
 // Aux Stepper Axis device-type tint (matches the purple used for this device
 // type on the IO index page's icon tile), via the kit's purple accent family.
@@ -68,6 +75,7 @@ function AuxJogButton({
   direction,
   velocity = AUX_JOG_VELOCITY,
   accel    = AUX_JOG_ACCEL,
+  decel    = AUX_JOG_DECEL,
   label,
   icon,
 }: {
@@ -78,6 +86,8 @@ function AuxJogButton({
   velocity?: number;
   /** Ramp (steps/s²) while held. */
   accel?: number;
+  /** Braking rate (steps/s²) on release. Must suit `velocity`: braking distance is v²/2d. */
+  decel?: number;
   /** Override the default ± label (e.g. "Open" / "Close"). */
   label?: string;
   /** Override the default chevron. */
@@ -87,12 +97,12 @@ function AuxJogButton({
     robotClient.jogAux({
       deviceId,
       axis:     axisIndex,
-      velocity: Math.max(1, velocity) * direction,
+      velocity: clampStepHz(velocity) * direction,
       accel,
     });
 
   const stopJog = () =>
-    robotClient.jogAux({ deviceId, axis: axisIndex, velocity: 0, decel: AUX_JOG_DECEL });
+    robotClient.jogAux({ deviceId, axis: axisIndex, velocity: 0, decel });
 
   return (
     <JogButton
@@ -248,12 +258,11 @@ function AuxSetPositionModal({
 
 // ── Gripper ───────────────────────────────────────────────────────────────────
 // Open / Close are hold-to-jog: the jaws travel open/closed while the button is
-// held and stop on release (at the gripper's configured open/close speed). The gap
-// slider is a live position control — while dragging it, the jaws follow the thumb
-// to that gap. Controller MoveAux is relative, so we send the delta from the last
-// commanded gap on each (throttled) step of the drag, and a final exact move on
-// release. The configured gap limits still drive programs and the Set-Position
-// re-reference.
+// held and stop on release (at the gripper's configured open/close speed, braking at
+// the gripper's accel so the stop distance matches the speed). The gap slider picks
+// a target gap: the thumb follows the finger, and the jaws move once, on release.
+// Controller MoveAux is relative, so the move is the delta from the tracked gap. The
+// configured gap limits still drive programs and the Set-Position re-reference.
 
 function gripperGeom(axis: AuxAxisChannelState) {
   const spm    = auxStepsPerUnit(axis);            // steps per mm of jaw gap
@@ -270,17 +279,67 @@ function gripperGeom(axis: AuxAxisChannelState) {
   return { spm, open, closed, stroke, openVel, closeVel, accel, overTravel, ok: spm > 0 && open !== closed };
 }
 
+// Type an exact gap to drive the jaws to — the tap target is the slider's mm readout.
+function GripperGapModal({ lo, hi, currentMm, onMove, onClose }: {
+  lo: number;
+  hi: number;
+  currentMm: number;
+  onMove: (mm: number) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(currentMm.toFixed(1));
+  const n     = parseFloat(value);
+  const valid = isFinite(n) && n >= lo && n <= hi;
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalTitleRow}>
+              <Text style={styles.modalTitle}>Move to Gap</Text>
+              <InfoTip text="Drives the jaws to this exact gap at the gripper's configured open/close speed." />
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <FormRow label={`Gap (mm, ${lo.toFixed(0)}–${hi.toFixed(0)})`}>
+            <Input
+              value={value}
+              onChangeText={setValue}
+              placeholder={currentMm.toFixed(1)}
+              keyboardType="decimal-pad"
+              returnKeyType="done"
+              autoFocus
+              selectTextOnFocus
+              onSubmitEditing={() => { if (valid) { onMove(n); onClose(); } }}
+            />
+          </FormRow>
+          <View style={styles.setPosBtnRow}>
+            <Button label="Cancel" variant="secondary" onPress={onClose} style={styles.setPosBtn} />
+            <Button
+              label="Move"
+              disabled={!valid}
+              onPress={() => { onMove(n); onClose(); }}
+              style={[styles.setPosBtn, { backgroundColor: AUX_TINT }]}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // Drag-to-position slider for the gripper gap. The thumb follows the tracked jaw gap
-// when idle and the finger while dragging; it reports a live mm value on begin/update
-// (throttled by the parent) and a final value on release.
-function GripperSlider({ lo, hi, trackedMm, tint, onBegin, onLive, onEnd }: {
+// when idle and the finger while dragging; it reports the chosen mm value once, on release.
+// Tapping the mm readout opens the exact-gap entry.
+function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onPressValue }: {
   lo: number;
   hi: number;
   trackedMm: number;
   tint: string;
-  onBegin: () => void;
-  onLive: (mm: number) => void;
   onEnd: (mm: number) => void;
+  onPressValue: () => void;
 }) {
   const [barW, setBarW]       = useState(1);
   const [dragFrac, setDragFrac] = useState<number | null>(null);
@@ -293,12 +352,11 @@ function GripperSlider({ lo, hi, trackedMm, tint, onBegin, onLive, onEnd }: {
   const frac     = dragFrac ?? idleFrac;
   const toMm     = (f: number) => lo + Math.max(0, Math.min(1, f)) * span;
 
-  const begin    = (f: number) => { onBegin(); setDragFrac(f); onLive(toMm(f)); };
-  const update   = (f: number) => { setDragFrac(f); onLive(toMm(f)); };
+  const update   = (f: number) => setDragFrac(f);
   const finishAt = (f: number) => { setDragFrac(null); onEnd(toMm(f)); };
 
   const pan = Gesture.Pan()
-    .onBegin(e  => { "worklet"; const f = Math.max(0, Math.min(1, e.x / barW)); lastFrac.value = f; runOnJS(begin)(f); })
+    .onBegin(e  => { "worklet"; const f = Math.max(0, Math.min(1, e.x / barW)); lastFrac.value = f; runOnJS(update)(f); })
     .onUpdate(e => { "worklet"; const f = Math.max(0, Math.min(1, e.x / barW)); lastFrac.value = f; runOnJS(update)(f); })
     .onFinalize(() => { "worklet"; runOnJS(finishAt)(lastFrac.value); });
 
@@ -306,7 +364,11 @@ function GripperSlider({ lo, hi, trackedMm, tint, onBegin, onLive, onEnd }: {
     <View style={styles.sliderWrap}>
       <View style={styles.sliderHeader}>
         <Text style={styles.sliderLabel}>GAP</Text>
-        <Text style={[styles.sliderValue, { color: tint }]}>{toMm(frac).toFixed(1)} mm</Text>
+        <TouchableOpacity onPress={onPressValue} hitSlop={8} activeOpacity={0.6} style={styles.sliderValueBtn}
+          accessibilityRole="button" accessibilityLabel="Move to an exact gap">
+          <Text style={[styles.sliderValue, { color: tint }]}>{toMm(frac).toFixed(1)} mm</Text>
+          <Pencil size={12} color={tint} />
+        </TouchableOpacity>
       </View>
       <GestureDetector gesture={pan}>
         <View style={styles.sliderHit} onLayout={e => setBarW(e.nativeEvent.layout.width)}>
@@ -326,11 +388,7 @@ function GripperSlider({ lo, hi, trackedMm, tint, onBegin, onLive, onEnd }: {
 
 function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAxisChannelState }) {
   const g = gripperGeom(axis);
-  // The gap we have commanded so far (mm). Seeded from the tracked position when a drag
-  // begins, then advanced by each relative move we send so the net commanded position
-  // tracks the slider without depending on the lagging dead-reckoned position mid-drag.
-  const commandedMm = useRef(0);
-  const lastSendTs  = useRef(0);
+  const [gapModal, setGapModal] = useState(false);
 
   if (!g.ok) {
     return (
@@ -346,25 +404,22 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
   // Hold-to-jog speed (steps/s) per direction, from the gripper's configured open/close
   // speed; accel falls back to the generic jog ramp when none is set. Open jogs toward the
   // wider gap (positive velocity — StartAuxContinuous applies InvertDirection), Close narrower.
-  const jogVelOpen  = Math.max(1, Math.round(g.openVel  * g.spm));
-  const jogVelClose = Math.max(1, Math.round(g.closeVel * g.spm));
+  // The release brakes at the same rate it ramped: a jog at the gripper's speed with the
+  // generic (gentle) jog decel would coast for v²/2d steps — metres of travel at high speed.
+  const jogVelOpen  = clampStepHz(g.openVel  * g.spm);
+  const jogVelClose = clampStepHz(g.closeVel * g.spm);
   const jogAccel    = g.accel > 0 ? Math.max(1, Math.round(g.accel * g.spm)) : AUX_JOG_ACCEL;
+  const jogDecel    = g.accel > 0 ? jogAccel : AUX_JOG_DECEL;
 
-  const beginSlide = () => { commandedMm.current = axis.position / g.spm; lastSendTs.current = 0; };
-  // Drive the jaws toward an absolute gap, relative to what we have commanded. Throttled while
-  // dragging (final=true forces the trailing move on release so the jaws land exactly on target).
-  const driveToGap = (mm: number, final = false) => {
+  // One relative move from the tracked gap to the gap chosen on the slider.
+  const driveToGap = (mm: number) => {
     const clamped = Math.max(lo, Math.min(hi, mm));
-    const now = Date.now();
-    if (!final && now - lastSendTs.current < 90) return;
-    const delta = Math.round((clamped - commandedMm.current) * g.spm);
-    if (delta === 0) { if (final) lastSendTs.current = now; return; }
+    const delta = Math.round((clamped - axis.position / g.spm) * g.spm);
+    if (delta === 0) return;
     const opening    = delta > 0;
-    const velSteps   = Math.max(1, Math.round((opening ? g.openVel : g.closeVel) * g.spm));
+    const velSteps   = clampStepHz((opening ? g.openVel : g.closeVel) * g.spm);
     const accelSteps = g.accel > 0 ? Math.max(1, Math.round(g.accel * g.spm)) : undefined;
     robotClient.moveAux(device.deviceId, axis.axisIndex, delta, velSteps, accelSteps, accelSteps);
-    commandedMm.current = clamped;
-    lastSendTs.current  = now;
   };
 
   return (
@@ -376,6 +431,7 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
           direction={-1}
           velocity={jogVelClose}
           accel={jogAccel}
+          decel={jogDecel}
           label="Close"
         />
         <AuxJogButton
@@ -384,6 +440,7 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
           direction={1}
           velocity={jogVelOpen}
           accel={jogAccel}
+          decel={jogDecel}
           label="Open"
         />
       </View>
@@ -392,10 +449,18 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
         hi={hi}
         trackedMm={axis.position / g.spm}
         tint={AUX_TINT}
-        onBegin={beginSlide}
-        onLive={mm => driveToGap(mm)}
-        onEnd={mm => driveToGap(mm, true)}
+        onEnd={driveToGap}
+        onPressValue={() => setGapModal(true)}
       />
+      {gapModal && (
+        <GripperGapModal
+          lo={lo}
+          hi={hi}
+          currentMm={axis.position / g.spm}
+          onMove={driveToGap}
+          onClose={() => setGapModal(false)}
+        />
+      )}
     </View>
   );
 }
@@ -723,7 +788,9 @@ const styles = StyleSheet.create({
   sliderWrap:   { gap: 4 },
   sliderHeader: { flexDirection: "row", alignItems: "center" },
   sliderLabel:  { fontSize: 12, fontWeight: "700", color: colors.textSecondary, letterSpacing: 0.5 },
-  sliderValue:  { marginLeft: "auto", fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  sliderValueBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: radii.sm, backgroundColor: colors.surfaceMuted },
+  sliderValue:  { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
   sliderHit:    { height: 40, justifyContent: "center" },
   sliderTrack:  { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden" },
   sliderFill:   { height: 6, borderRadius: 3 },
