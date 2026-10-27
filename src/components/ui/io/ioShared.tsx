@@ -1,4 +1,4 @@
-import { PinType } from "@/src/models/robotModels";
+import { DeviceFirmwareInfo, firmwareLabel, hasKnownFirmware, PinType } from "@/src/models/robotModels";
 import {
   Settings,
   ToggleLeft,
@@ -12,7 +12,30 @@ import {
   View,
 } from "react-native";
 
-import { accents, colors, radii, shadows, spacing, StatusPill, type } from "@/src/components/ui/kit";
+import { accents, colors, InfoTip, radii, shadows, spacing, StatusPill, type } from "@/src/components/ui/kit";
+
+// ── FirmwareChip ──────────────────────────────────────────────────────────────
+// Quiet caption-sized pill next to a board's status pill: "fw 1.1.0". Legacy
+// firmware that can't report its version shows "fw unknown" with a tip that
+// says why (and that flashing the latest sketch fixes it).
+
+export const LEGACY_FIRMWARE_TIP =
+  "Older firmware doesn't report its version or capabilities — flash the latest NanoEdgeDevice / AuxStepperDriver sketch.";
+
+export function FirmwareChip({ device }: { device: DeviceFirmwareInfo | null | undefined }) {
+  const known = hasKnownFirmware(device);
+  return (
+    <View style={fwStyles.wrap}>
+      <StatusPill label={firmwareLabel(device)} tone="neutral" style={fwStyles.pill} />
+      {!known && <InfoTip size={12} text={LEGACY_FIRMWARE_TIP} />}
+    </View>
+  );
+}
+
+const fwStyles = StyleSheet.create({
+  wrap: { flexDirection: "row", alignItems: "center", gap: 2 },
+  pill: { paddingVertical: 2, paddingHorizontal: spacing.xs + 2 },
+});
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
 //

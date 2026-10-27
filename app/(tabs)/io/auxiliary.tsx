@@ -1,10 +1,16 @@
 import { JogButton } from "@/src/components/ui/JogButton";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { ios, IORow } from "@/src/components/ui/io/ioShared";
+import { FirmwareChip, ios, IORow } from "@/src/components/ui/io/ioShared";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxAxisChannelState, AuxDeviceState, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import {
+  AuxAxisChannelState,
+  AuxDeviceState,
+  auxStepsPerUnit,
+  auxUnitLabel,
+  deviceSupports,
+} from "@/src/models/robotModels";
 import {
   ChevronLeft,
   ChevronRight,
@@ -477,6 +483,9 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
   // The Uno's spare-pin digital IO rides the shared IO-device stream under this device's id.
   const ioDevice = useIoDevices().find(d => d.id === device.deviceId);
   const ioPins   = ioDevice?.pins ?? [];
+  // A board whose firmware reports its capabilities but lacks `io` can't do pin IO at all;
+  // legacy firmware (no capability report) is assumed able, as before.
+  const ioSupported = deviceSupports(device, "io");
   const configureIo = () =>
     router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: device.deviceId, kind: "aux" } });
 
@@ -657,14 +666,20 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
       <View style={{ gap: spacing.md }}>
         <SectionHeader
           title="IO Pins"
-          right={
+          right={ioSupported ? (
             <AnimatedPressable style={styles.ioConfigLink} onPress={configureIo} hitSlop={8}>
               <Settings2 size={15} color={AUX_TINT} />
               <Text style={styles.ioConfigText}>Configure</Text>
             </AnimatedPressable>
-          }
+          ) : undefined}
         />
-        {ioPins.length === 0 ? (
+        {!ioSupported ? (
+          <Card>
+            <Text style={styles.ioEmpty}>
+              This board&apos;s firmware has no IO-pin support — flash AuxStepperDriver 1.1.0 or newer.
+            </Text>
+          </Card>
+        ) : ioPins.length === 0 ? (
           <Card>
             <Text style={styles.ioEmpty}>
               Configure the Uno&apos;s spare pins (D9–D11, A0–A5) as inputs or outputs to add digital IO to this device.
@@ -722,6 +737,7 @@ export default function AuxPage() {
         right={
           device ? (
             <View style={styles.headerActions}>
+              <FirmwareChip device={device} />
               <StatusPill
                 label={device.connected ? "Connected" : "Offline"}
                 tone={device.connected ? "success" : "danger"}

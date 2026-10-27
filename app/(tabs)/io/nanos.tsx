@@ -1,4 +1,4 @@
-import { IORow } from "@/src/components/ui/io/ioShared";
+import { FirmwareChip, IORow } from "@/src/components/ui/io/ioShared";
 import { IoSparkline } from "@/src/components/ui/io/IoHistoryGraph";
 import { formatLoadCell } from "@/src/components/ui/loadcell";
 import { useIsWide } from "@/src/components/ui/responsive";
@@ -140,6 +140,7 @@ export default function IoDevicesPage() {
         right={
           nano ? (
             <View style={styles.headerActions}>
+              <FirmwareChip device={nano} />
               <StatusPill
                 label={nano.connected ? "Connected" : "Offline"}
                 tone={nano.connected ? "success" : "danger"}

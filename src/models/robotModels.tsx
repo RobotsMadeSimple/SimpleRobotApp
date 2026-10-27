@@ -23,7 +23,44 @@ export type IoPinState = {
   sampleRateHz?: number;
 };
 
-export type IoDeviceState = {
+// ── Board firmware / capabilities ─────────────────────────────────────────────
+// Each serial board (NanoEdgeDevice, AuxStepperDriver) reports its sketch version
+// and what it can do. Legacy firmware reports neither: `firmwareVersion` is
+// null/"" and `capabilities` is null, and the UI then allows everything.
+
+/** Feature a board's firmware may advertise. */
+export type DeviceCapability = 'io' | 'neopixel' | 'loadcell' | 'stepper';
+
+/** The firmware fields shared by IoDeviceState and AuxDeviceState. */
+export type DeviceFirmwareInfo = {
+  /** Sketch version ("1.1.0"). null or "" = unknown / legacy firmware. */
+  firmwareVersion?: string | null;
+  /** Features the firmware advertises. null = unknown (legacy firmware). */
+  capabilities?: string[] | null;
+};
+
+/**
+ * True when the board can do `cap`. Unknown capabilities (legacy firmware that
+ * doesn't report them) count as supported — the UI only hides features a board
+ * has explicitly told us it lacks.
+ */
+export function deviceSupports(dev: DeviceFirmwareInfo | null | undefined, cap: DeviceCapability): boolean {
+  const caps = dev?.capabilities;
+  if (caps == null) return true;
+  return caps.includes(cap);
+}
+
+/** True when the board reported a firmware version (i.e. not legacy firmware). */
+export function hasKnownFirmware(dev: DeviceFirmwareInfo | null | undefined): boolean {
+  return !!dev?.firmwareVersion;
+}
+
+/** "fw 1.1.0", or "fw unknown" for legacy firmware. */
+export function firmwareLabel(dev: DeviceFirmwareInfo | null | undefined): string {
+  return hasKnownFirmware(dev) ? `fw ${dev!.firmwareVersion}` : 'fw unknown';
+}
+
+export type IoDeviceState = DeviceFirmwareInfo & {
   id: string;
   name: string;
   connected: boolean;
@@ -95,7 +132,7 @@ export type AuxAxisChannelState = {
   gripperOverTravelMm: number;
 };
 
-export type AuxDeviceState = {
+export type AuxDeviceState = DeviceFirmwareInfo & {
   connected: boolean;
   motorEnabled: boolean;
   deviceId: string;

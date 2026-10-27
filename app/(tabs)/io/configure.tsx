@@ -1,11 +1,18 @@
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { IoPinState, PinType } from "@/src/models/robotModels";
+import {
+  AuxDeviceState,
+  DeviceFirmwareInfo,
+  deviceSupports,
+  IoPinState,
+  PinType,
+} from "@/src/models/robotModels";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   Check,
   ChevronDown,
+  CircuitBoard,
   Plus,
 } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
@@ -28,6 +35,7 @@ import {
   Button,
   colors,
   Divider,
+  EmptyState,
   FormRow,
   InfoTip,
   Input,
@@ -301,22 +309,62 @@ function AddLoadCellModal({ deviceId, onClose }: { deviceId: string; onClose: ()
   );
 }
 
+/** What the page edits: a Nano IO device, or an aux-stepper board's spare-pin IO. */
+type ConfigDevice = DeviceFirmwareInfo & {
+  id: string;
+  name: string;
+  pins: IoPinState[];
+};
+
 export default function ConfigurePage() {
   const { deviceId, kind } = useLocalSearchParams<{ deviceId: string; kind?: string }>();
-  const ioDevices       = useIoDevices();
-  const nano        = ioDevices.find(n => n.id === deviceId);
+  const ioDevices   = useIoDevices();
   const wideContent = useWideContent();
   const isWide      = useIsWide();
 
   // Aux-stepper device: only its spare pins are free, and only digital in/out (no HX711/NeoPixel).
   const isAux       = kind === "aux";
   const pinDefs     = isAux ? AUX_IO_PINS : NANO_PINS;
-  const typeOptions = isAux ? AUX_TYPE_OPTIONS : TYPE_OPTIONS;
+
+  // An aux board only appears in the IO-device list once it has at least one pin
+  // configured, so look it up in the aux state too: a fresh Uno with no IO pins
+  // must still get the pin grid, not a "not found" page.
+  const [auxDevices, setAuxDevices] = useState<AuxDeviceState[]>([]);
+  useEffect(() => {
+    if (!isAux) return;
+    robotClient.getAuxState().catch(() => {});
+    return robotClient.onAuxAxis(setAuxDevices);
+  }, [isAux]);
+
+  const ioEntry = ioDevices.find(n => n.id === deviceId);
+  const auxEntry = isAux ? auxDevices.find(d => d.deviceId === deviceId) : undefined;
+
+  const device = useMemo<ConfigDevice | null>(() => {
+    if (isAux) {
+      if (!auxEntry && !ioEntry) return null;
+      return {
+        id:              deviceId,
+        name:            auxEntry?.deviceName ?? ioEntry?.name ?? deviceId,
+        pins:            ioEntry?.pins ?? [],
+        firmwareVersion: auxEntry?.firmwareVersion ?? ioEntry?.firmwareVersion,
+        capabilities:    auxEntry?.capabilities    ?? ioEntry?.capabilities,
+      };
+    }
+    return ioEntry ?? null;
+  }, [isAux, auxEntry, ioEntry, deviceId]);
+
+  // Capability gating: a board that reports its capabilities and lacks one hides
+  // that feature; legacy firmware (unknown capabilities) keeps everything visible.
+  const canNeopixel = !isAux && deviceSupports(device, "neopixel");
+  const canLoadCell = !isAux && deviceSupports(device, "loadcell");
+  const typeOptions = isAux
+    ? AUX_TYPE_OPTIONS
+    : canNeopixel ? TYPE_OPTIONS : TYPE_OPTIONS.filter(t => t !== "Neopixel");
 
   // Build initial edit state from the current ioDevices snapshot
   const initialEdits = useMemo<PinEdit[]>(() => {
     const configuredMap = new Map<number, IoPinState>();
-    nano?.pins.forEach(p => configuredMap.set(p.pin, p));
+    device?.pins.forEach(p => configuredMap.set(p.pin, p));
 
     return pinDefs.map(def => {
       const existing = configuredMap.get(def.pin);
@@ -328,7 +376,7 @@ export default function ConfigurePage() {
         dirty:      false,
       };
     });
-  }, [nano?.id, pinDefs]); // recomputes on device change (pinDefs is stable per device kind)
+  }, [device?.id, pinDefs]); // recomputes on device change (pinDefs is stable per device kind)
 
   const [edits, setEdits] = useState<PinEdit[]>(initialEdits);
   const [saving, setSaving] = useState(false);
@@ -347,7 +395,7 @@ export default function ConfigurePage() {
     setSaving(true);
     try {
       // Snapshot of what was configured before this save
-      const previousPins = new Set(nano?.pins.map(p => p.pin) ?? []);
+      const previousPins = new Set(device?.pins.map(p => p.pin) ?? []);
 
       for (const edit of edits) {
         if (!edit.dirty) continue;
@@ -390,10 +438,33 @@ export default function ConfigurePage() {
     }
   }
 
-  if (!nano) {
+  const pageTitle = isAux ? "Configure IO" : "Configure Pins";
+  const parentHref = isAux
+    ? `/(tabs)/io/auxiliary?deviceId=${encodeURIComponent(deviceId)}`
+    : `/(tabs)/io/nanos?deviceId=${encodeURIComponent(deviceId)}`;
+
+  if (!device) {
+    const kindLabel = isAux ? "aux stepper device" : "IO device";
     return (
-      <View style={styles.centred}>
-        <Text style={styles.notFound}>Nano device not found.</Text>
+      <View style={styles.container}>
+        <PageHeader
+          title={pageTitle}
+          subtitle={deviceId}
+          crumbs={[{ label: "I/O", href: "/io" }, { label: pageTitle }]}
+          backTo="/io"
+        />
+        <EmptyState
+          icon={<CircuitBoard size={28} color={colors.textFaint} />}
+          title="Device not found"
+          subtitle={`The ${kindLabel} ${deviceId} isn't connected to the controller.`}
+          action={
+            <Button
+              label="Back"
+              variant="secondary"
+              onPress={() => (router.canGoBack() ? router.back() : router.navigate("/io" as never))}
+            />
+          }
+        />
       </View>
     );
   }
@@ -405,14 +476,12 @@ export default function ConfigurePage() {
     >
       <View style={styles.container}>
         <PageHeader
-          title={isAux ? "Configure IO" : "Configure Pins"}
-          subtitle={nano.name}
+          title={pageTitle}
+          subtitle={device.name}
           crumbs={[
             { label: "I/O", href: "/io" },
-            { label: nano.name, href: isAux
-                ? `/(tabs)/io/auxiliary?deviceId=${encodeURIComponent(nano.id)}`
-                : `/(tabs)/io/nanos?deviceId=${encodeURIComponent(nano.id)}` },
-            { label: isAux ? "Configure IO" : "Configure Pins" },
+            { label: device.name, href: parentHref },
+            { label: pageTitle },
           ]}
           right={
             <Button
@@ -471,8 +540,9 @@ export default function ConfigurePage() {
 
           {/* Load cells use the HX711's own 2-pin (DT/SCK) serial protocol rather than
               a simple pin type, so they're added here instead of via the pin dropdown.
-              Aux-stepper IO is digital-only, so the option isn't offered there. */}
-          {!isAux && (
+              Aux-stepper IO is digital-only, and a Nano whose firmware reports no
+              `loadcell` capability can't drive one, so the option isn't offered there. */}
+          {canLoadCell && (
             <Button
               variant="dashed"
               label="Add Load Cell"
@@ -483,7 +553,7 @@ export default function ConfigurePage() {
           )}
         </ScrollView>
 
-        {addLc && <AddLoadCellModal deviceId={nano.id} onClose={() => setAddLc(false)} />}
+        {addLc && <AddLoadCellModal deviceId={device.id} onClose={() => setAddLc(false)} />}
       </View>
     </KeyboardAvoidingView>
   );
@@ -495,10 +565,6 @@ export default function ConfigurePage() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-
-  centred: { flex: 1, justifyContent: "center", alignItems: "center" },
-  notFound: { fontSize: 15, color: colors.textMuted },
-
 
   // ── Column headers ─────────────────────────────────────────────────────────
   colHeaders: {

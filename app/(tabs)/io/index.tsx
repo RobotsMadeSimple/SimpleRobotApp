@@ -41,6 +41,7 @@ import {
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { cameraSourceSummary, cameraSourceTag, isPhoneCamera } from "@/src/components/ui/camera/cameraSource";
+import { FirmwareChip } from "@/src/components/ui/io/ioShared";
 import { DEFAULT_PHONE_DEVICE_NAME } from "@/src/components/provider/providerUtil";
 
 import {
@@ -85,6 +86,7 @@ function DeviceNavCard({
   footer,
   tag,
   statusPill,
+  leading,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -99,6 +101,8 @@ function DeviceNavCard({
   tag?: string | null;
   /** Replaces the Connected/Offline pill (e.g. the Plugins summary). */
   statusPill?: React.ReactNode;
+  /** Extra quiet accessory before the status pill (the board's firmware chip). */
+  leading?: React.ReactNode;
 }) {
   const row = (
     <ListRow
@@ -112,6 +116,7 @@ function DeviceNavCard({
       chevron
       right={
         <View style={styles.rowAccessories}>
+          {leading}
           {!!tag && <StatusPill label={tag} tone="accent" />}
           {statusPill ?? (
             <StatusPill
@@ -407,6 +412,7 @@ export default function IoPage() {
             name={nano.name}
             subtitle={nano.name}
             connected={nano.connected}
+            leading={<FirmwareChip device={nano} />}
             onPress={() => router.push({ pathname: "/(tabs)/io/nanos", params: { deviceId: nano.id } })}
             onDelete={idx === 0 ? () => confirmRemove("Arduino Nano Devices", () => disableDeviceType("enableIoDevices")) : undefined}
           />
@@ -434,6 +440,7 @@ export default function IoPage() {
             name={dev.deviceName}
             subtitle={`${dev.deviceId}${dev.portName ? ` · ${dev.portName}` : ""}`}
             connected={dev.connected}
+            leading={<FirmwareChip device={dev} />}
             onPress={() => router.push({ pathname: "/(tabs)/io/auxiliary", params: { deviceId: dev.deviceId } })}
             onDelete={idx === 0 ? () => confirmRemove("Aux Stepper Axes", () => disableDeviceType("enableAuxAxis")) : undefined}
           />
