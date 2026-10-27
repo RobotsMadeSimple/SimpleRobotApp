@@ -15,6 +15,10 @@ export type CompileCtx = {
 
 const GAP = 8;
 
+// Grams per display unit for load-cell graphs — mirrors src/components/ui/loadcell.ts, which
+// isn't imported here so the compiled page stays a plain string with no runtime deps.
+const GRAMS_PER_UNIT: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, N: 1000 / 9.80665 };
+
 const esc = (s: string): string =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -85,16 +89,29 @@ function widgetBody(w: DisplayWidget, ctx: CompileCtx): string {
     }
 
     case "graph": {
-      const label = esc(c.label || (c.source === "variable" ? c.variable || "" : "Load cell"));
-      const subscribe = c.source === "variable"
+      const isLoadCell = c.source !== "variable";
+      // Load-cell samples arrive in grams (the master unit); scale into the chosen display unit.
+      const unit = isLoadCell ? String(c.unit || "g") : "";
+      const perUnit = GRAMS_PER_UNIT[unit] ?? 1;
+      const decimals = unit === "kg" || unit === "lb" ? 3 : unit === "oz" || unit === "N" ? 2 : unit === "g" ? 1 : 2;
+      const label = esc(c.label || (isLoadCell ? `Load cell (${unit})` : c.variable || ""));
+      // Optional fixed axis bounds (in the display unit); blank/non-numeric = auto-scale to the data.
+      const fixedMin = c.min === "" || c.min == null ? null : num(c.min, NaN);
+      const fixedMax = c.max === "" || c.max == null ? null : num(c.max, NaN);
+      const bounds = `var fmn=${Number.isFinite(fixedMin as number) ? fixedMin : "null"},fmx=${Number.isFinite(fixedMax as number) ? fixedMax : "null"};`;
+      const subscribe = !isLoadCell
         ? `robot.onExpr(${js(c.variable)},function(v){if(typeof v==='number'){pts.push(v);if(pts.length>240)pts=pts.slice(pts.length-240);}});`
-        : `robot.onHistory(${js(c.deviceId)},${num(c.pin, 0)},function(s){s.forEach(function(x){pts.push(x.v);});if(pts.length>240)pts=pts.slice(pts.length-240);});`;
+        : `robot.onHistory(${js(c.deviceId)},${num(c.pin, 0)},function(s){s.forEach(function(x){pts.push(x.v/${perUnit});});if(pts.length>240)pts=pts.slice(pts.length-240);});`;
       return `<div class="dp-card">
   <div class="dp-lbl">${label}</div>
   <canvas id="${id}_c" style="flex:1 1 auto;width:100%;min-height:0;"></canvas>
 </div>
-<script>(function(){var cv=document.getElementById('${id}_c'),pts=[],color=${js(c.color || "#2563eb")};
-  function draw(){var r=cv.getBoundingClientRect();cv.width=r.width;cv.height=r.height;var ctx=cv.getContext('2d'),w=cv.width,h=cv.height;ctx.clearRect(0,0,w,h);if(pts.length<2)return;var mn=Math.min.apply(null,pts),mx=Math.max.apply(null,pts),rg=(mx-mn)||1;ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2;pts.forEach(function(v,i){var x=i/(pts.length-1)*w,y=h-(v-mn)/rg*(h-8)-4;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
+<script>(function(){var cv=document.getElementById('${id}_c'),pts=[],color=${js(c.color || "#2563eb")},unit=${js(unit)},dec=${decimals};${bounds}
+  function fmt(v){return v.toFixed(dec)+(unit?' '+unit:'');}
+  function draw(){var r=cv.getBoundingClientRect();cv.width=r.width;cv.height=r.height;var ctx=cv.getContext('2d'),w=cv.width,h=cv.height;ctx.clearRect(0,0,w,h);if(pts.length<2)return;var mn=fmn!==null?fmn:Math.min.apply(null,pts),mx=fmx!==null?fmx:Math.max.apply(null,pts),rg=(mx-mn)||1,top=14,bot=4;
+    ctx.save();ctx.beginPath();ctx.rect(0,top,w,h-top-bot);ctx.clip();ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2;pts.forEach(function(v,i){var x=i/(pts.length-1)*w,y=h-bot-(v-mn)/rg*(h-top-bot);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();ctx.restore();
+    ctx.font='600 11px system-ui';ctx.fillStyle='#6b7280';ctx.textBaseline='top';ctx.textAlign='left';ctx.fillText('max '+fmt(mx),2,0);ctx.textBaseline='bottom';ctx.fillText('min '+fmt(mn),2,h);
+    ctx.textAlign='right';ctx.textBaseline='top';ctx.font='700 13px system-ui';ctx.fillStyle='#111827';ctx.fillText(fmt(pts[pts.length-1]),w-2,0);}
   ${subscribe}
   setInterval(draw,200);})();</script>`;
     }

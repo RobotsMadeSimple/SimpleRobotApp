@@ -77,7 +77,7 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
     label: "Graph",
     hint: "A live line chart of a load cell or a variable.",
     defaultSize: { w: 6, h: 4 },
-    defaultConfig: { source: "loadcell", deviceId: "", pin: 0, variable: "", label: "", color: "#2563eb" },
+    defaultConfig: { source: "loadcell", deviceId: "", pin: 0, unit: "g", variable: "", label: "", min: "", max: "", color: "#2563eb" },
     fields: [
       { key: "label", label: "Label (optional)", kind: "text" },
       {
@@ -91,7 +91,22 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
       },
       { key: "deviceId", label: "Nano id", kind: "text", showWhen: { key: "source", equals: ["loadcell"] } },
       { key: "pin", label: "Load-cell DT pin", kind: "number", showWhen: { key: "source", equals: ["loadcell"] } },
+      {
+        key: "unit",
+        label: "Unit",
+        kind: "select",
+        options: [
+          { label: "Grams (g)", value: "g" },
+          { label: "Kilograms (kg)", value: "kg" },
+          { label: "Ounces (oz)", value: "oz" },
+          { label: "Pounds (lb)", value: "lb" },
+          { label: "Newtons (N)", value: "N" },
+        ],
+        showWhen: { key: "source", equals: ["loadcell"] },
+      },
       { key: "variable", label: "Value (expression)", kind: "expression", placeholder: "$force", showWhen: { key: "source", equals: ["variable"] } },
+      { key: "min", label: "Axis min (blank = auto)", kind: "text", placeholder: "0" },
+      { key: "max", label: "Axis max (blank = auto)", kind: "text", placeholder: "5" },
       { key: "color", label: "Line colour", kind: "text", placeholder: "#2563eb" },
     ],
   },
