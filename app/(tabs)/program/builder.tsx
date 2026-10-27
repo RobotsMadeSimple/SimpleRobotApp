@@ -768,9 +768,18 @@ export default function BuilderScreen() {
 
   function buildProg(): BuiltProgram {
     const prog = programFromDoc(doc, programId, Date.now());
+    // The builder doesn't edit the display page, but SaveBuiltProgram replaces the whole
+    // program — so carry the robot's current page through, or saving from here wipes it.
+    // Prefer the id match: builtPrograms refreshes after the page editor saves.
+    const onRobot = (programId ? builtPrograms.find(p => p.id === programId) : undefined) ?? existing;
+    const page = onRobot ? {
+      displayPageHtml:   onRobot.displayPageHtml,
+      displayPageMode:   onRobot.displayPageMode,
+      displayPageLayout: onRobot.displayPageLayout,
+    } : {};
     // Self-migration: stamp a stable pointId onto any move step that still
     // references a point only by name, so renaming that point won't break it.
-    return { ...prog, steps: backfillPointIds(prog.steps, points) };
+    return { ...prog, ...page, steps: backfillPointIds(prog.steps, points) };
   }
 
   async function save(): Promise<boolean> {
