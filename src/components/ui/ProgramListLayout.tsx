@@ -20,12 +20,14 @@ export type SortState = { key: SortKey; dir: SortDir };
 /**
  * The direction a key starts in when you first pick it. Names read best A→Z, while
  * "modified" is nearly always asking "what did I touch last", so it opens newest-first.
- * These are also the directions the old fixed-direction chips used, so the default view
- * of every list is unchanged.
  */
 const DEFAULT_DIR: Record<SortKey, SortDir> = { name: "asc", modified: "desc" };
 
-export const defaultSort = (key: SortKey = "name"): SortState => ({ key, dir: DEFAULT_DIR[key] });
+/**
+ * Every program list opens on last-modified, newest first: what you just saved is what you
+ * want to run or edit next (Lucas, 2026-10-26). Tap "Name" for A→Z.
+ */
+export const defaultSort = (key: SortKey = "modified"): SortState => ({ key, dir: DEFAULT_DIR[key] });
 
 /**
  * Tapping a sort option: a different key switches to it in its natural direction, the
