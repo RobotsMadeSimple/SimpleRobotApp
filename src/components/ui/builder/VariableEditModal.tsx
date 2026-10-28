@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Check, ChevronDown, Minus, Plus, X } from "lucide-react-native";
 import { colors, accents } from "@/src/components/ui/kit";
+import { useKeyboardTop } from "@/src/platform/keyboard";
 import {
   ListElementType,
   ProgramVariable,
@@ -82,6 +83,7 @@ export function VariableEditModal({
   visible,
   variable,
   defaultType,
+  defaultElementType,
   variables,
   onSave,
   onClose,
@@ -89,10 +91,13 @@ export function VariableEditModal({
   visible: boolean;
   variable: ProgramVariable | null;
   defaultType?: VarType;
+  /** The element type a new list starts on (new variables only; lists default to Number). */
+  defaultElementType?: ListElementType;
   /**
    * The program's other variables, offered by the $var picker when the initial value is
-   * an expression. Optional — without it the field still accepts a typed expression, it
-   * just has nothing to insert.
+   * an expression, and checked so a new name does not collide with an existing one.
+   * Optional — without it the field still accepts a typed expression, it just has
+   * nothing to insert and nothing to check against.
    */
   variables?: ProgramVariable[];
   onSave: (v: ProgramVariable) => void;
@@ -186,7 +191,7 @@ export function VariableEditModal({
         setStringVal(""); setListValues([]);
       }
     } else {
-      setName(""); setValue("0"); setValueExpr(undefined); setStringVal(""); setDesc(""); setVarType(defaultType ?? "number"); setElemType("Number"); setListValues([]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
+      setName(""); setValue("0"); setValueExpr(undefined); setStringVal(""); setDesc(""); setVarType(defaultType ?? "number"); setElemType(defaultElementType ?? "Number"); setListValues([]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
     }
   }, [variable, visible]);
 
@@ -198,8 +203,13 @@ export function VariableEditModal({
   const existingList = variable ? variableList(variable) : null;
   const keptItems    = existingList?.elementType === elemType ? existingList.items : [];
   const nameOk       = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
+  // Another variable (not the one being edited) already has this name. The builder
+  // upserts by id, so without this check a second variable with the same name would be
+  // appended and every `$name` reference would become ambiguous. Case-insensitive, as
+  // the controller keys variables.
+  const duplicate    = nameOk && (variables ?? []).some(v => v.id !== variable?.id && v.name.toLowerCase() === name.trim().toLowerCase());
   // A computed variable is nothing but its formula, so it cannot be saved without one.
-  const canSave      = nameOk && (varType !== "computed" || formula.trim().length > 0);
+  const canSave      = nameOk && !duplicate && (varType !== "computed" || formula.trim().length > 0);
   const selectedType = TYPE_OPTIONS.find(o => o.key === varType)!;
   const selectedElem = ELEMENT_OPTIONS.find(o => o.key === elemType)!;
   // A variable cannot open with its own value — it does not have one yet when the
@@ -275,11 +285,17 @@ export function VariableEditModal({
     ? <Text style={ms.hintText}>Stores a camera frame as a base64 JPEG. Populated by a <Text style={{ fontWeight: "600" }}>CaptureImage</Text> step at runtime.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
+  // With the keyboard up, the card ends above it (the overlay anchors the card 52 px from the
+  // top), so the scroll view inside is bounded by the visible area and a field low in the form —
+  // the description under a long type hint — scrolls clear of the keyboard instead of under it.
+  const keyboardTop = useKeyboardTop();
+  const cardMaxHeight = keyboardTop != null ? Math.max(220, keyboardTop - 52 - 12) : undefined;
+
   return (
     <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeAll}>
       <Pressable style={ms.overlay} onPress={closeAll}>
-        <Pressable style={ms.card} onPress={() => {}}>
+        <Pressable style={[ms.card, cardMaxHeight != null && { maxHeight: cardMaxHeight }]} onPress={() => {}}>
           <View style={ms.header}>
             <View style={{ width: 18 }} />
             <Text style={ms.title}>{isNew ? "New Variable" : "Edit Variable"}</Text>
@@ -287,7 +303,7 @@ export function VariableEditModal({
               <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
           <Text style={ms.fieldLabel}>NAME</Text>
           <TextInput
@@ -302,6 +318,9 @@ export function VariableEditModal({
           />
           {name.trim().length > 0 && !nameOk && (
             <Text style={ms.fieldError}>Use letters, digits, and _ only. Must start with a letter.</Text>
+          )}
+          {duplicate && (
+            <Text style={ms.fieldError}>{`A variable named $${name.trim()} already exists.`}</Text>
           )}
 
           {/* Type — opens the picker sheet below */}

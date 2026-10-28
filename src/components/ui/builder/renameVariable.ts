@@ -15,14 +15,42 @@ import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 // Matching is case-insensitive because variable names are case-insensitive at runtime (the controller
 // keys variable maps with OrdinalIgnoreCase). The `$name` rewrite only ever touches a whole
 // `$identifier` token, so running it over an unrelated string is a safe no-op.
+//
+// The walk visits every nested array and object (child step lists, condition items, vision output
+// rows, pluginOutputs rows, exportColumns / jsonInbound / jsonOutbound rows), so a bare-name key is
+// matched wherever it appears in the tree — `pluginOutputs[i].variableName` is reached through the
+// same `variableName` entry as SetVariable's target.
+//
+// `pluginParams` is the one map whose KEYS are the plugin's own param names, not ours: a list /
+// image / variable param stores the bare variable name as its VALUE. So inside pluginParams a value
+// equal to the old name (case-insensitive, `$` and surrounding whitespace ignored) is rewritten
+// whole, and any other value is treated as an expression/template like every other string.
 
 // Fields whose value is exactly a variable name (no `$`): renamed by exact, case-insensitive match.
 const BARE_NAME_KEYS = new Set<string>([
+  // SetVariable / ReadLoadCell / HttpRequest+HttpReceive inbound rows / plugin output rows
   "variableName", "varPointName",
   "stopwatchVariableName", "waitTimeoutVariableName",
   "forEachVariableName", "forEachValueVariableName", "forEachIndexVariableName",
   "captureImageVariableName", "imageVar", "listVar",
+  // Move stop sub-page, StartRecording, RunVision zone override
+  "moveStopPositionVariableName", "moveStopFlagVariableName",
+  "recordVariableName", "visionZoneVar",
+  // RunVision output rows: blob, color, polygon, ArUco, line, barcode
+  "detectedVar", "countVar", "pointsVar",
+  "coverageVar", "passedVar", "cellsVar", "cellsPassedVar",
+  "foundVar", "angleVar", "centerXVar", "centerYVar",
+  "firstIdVar", "firstCenterXVar", "firstCenterYVar",
+  "firstAngleVar", "firstX1Var", "firstY1Var", "firstX2Var", "firstY2Var",
+  "firstValueVar", "firstFormatVar",
 ]);
+
+/** The bare name a list/image/variable plugin param stores, or the text as typed otherwise. */
+function renameParamValue(text: string, oldName: string, newName: string): string {
+  const bare = text.trim().replace(/^\$/, "");
+  if (bare.toLowerCase() === oldName.toLowerCase()) return newName;
+  return renameRefsInExpr(text, oldName, newName);
+}
 
 /** Rewrite whole `$old`, `$old.prop`, `$old[idx]` tokens to `$new` (case-insensitive on the name). */
 export function renameRefsInExpr(expr: string, oldName: string, newName: string): string {
@@ -41,7 +69,13 @@ function walk<T>(node: T, oldName: string, newName: string): T {
   if (node && typeof node === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-      if (typeof v === "string") {
+      if (k === "pluginParams" && v && typeof v === "object" && !Array.isArray(v)) {
+        const params: Record<string, unknown> = {};
+        for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
+          params[pk] = typeof pv === "string" ? renameParamValue(pv, oldName, newName) : pv;
+        }
+        out[k] = params;
+      } else if (typeof v === "string") {
         out[k] = BARE_NAME_KEYS.has(k)
           ? (v.toLowerCase() === oldName.toLowerCase() ? newName : v)
           : renameRefsInExpr(v, oldName, newName);

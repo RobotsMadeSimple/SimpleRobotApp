@@ -64,9 +64,9 @@ import { legacyForceMoveToMoveL } from "@/src/models/programMigrations";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
-import { VarPickerModal, VarSelectorButton } from "./VarPicker";
+import { VarPickerModal, VarSelectorButton, type VarCreateSpec } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
-import { VarType, VariableEditModal } from "./VariableEditModal";
+import { VarType } from "./VariableEditModal";
 import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
 import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
 import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
@@ -157,8 +157,13 @@ export function StepConfigModal({
   const [jsonInboundPicker,  setJsonInboundPicker]  = useState<number | null>(null);
   const [jsonOutboundPicker, setJsonOutboundPicker] = useState<number | null>(null);
   const [exportColumnPicker, setExportColumnPicker] = useState<number | null>(null);
-  const [captureVarCreateOpen, setCaptureVarCreateOpen] = useState(false);
   const [httpReceiveInboundPicker, setHttpReceiveInboundPicker] = useState<number | null>(null);
+  // The single-target steps whose variable used to be an inline chip/radio list. Every target
+  // now goes through the shared picker, which also offers "+ New <type> variable".
+  const [loadCellVarPicker,  setLoadCellVarPicker]  = useState(false);
+  const [recordVarPicker,    setRecordVarPicker]    = useState(false);
+  const [stopwatchVarPicker, setStopwatchVarPicker] = useState(false);
+  const [captureVarPicker,   setCaptureVarPicker]   = useState(false);
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const cardWidth = Math.min(windowWidth - 48, 520);
@@ -505,19 +510,13 @@ export function StepConfigModal({
             ? "Numeric variable that receives the axis position (mm or deg, or raw steps) when the condition fires."
             : "Points list variable replaced with the robot position when the condition fires — read it as $var[0]."}
         </Text>
-        {moveStopPosVars.length === 0
-          ? <Text style={[ms.hintText, { fontStyle: "italic" }]}>
-              {moveStopIsAux ? "No numeric variables yet — add one under Variables." : "No Points list variables yet — add one under Variables."}
-            </Text>
-          : varTargetRow(draft.moveStopPositionVariableName, "Record position variable",
-              () => setMoveStopPosVarPicker(true), () => set({ moveStopPositionVariableName: undefined }))}
+        {varTargetRow(draft.moveStopPositionVariableName, "Record position variable",
+          () => setMoveStopPosVarPicker(true), () => set({ moveStopPositionVariableName: undefined }))}
 
         <Text style={[ms.fieldLabel, { marginTop: 12 }]}>FIRED FLAG VARIABLE  (optional)</Text>
         <Text style={ms.hintText}>Set to 1 if the condition fired during the move, 0 if not.</Text>
-        {moveStopFlagVars.length === 0
-          ? <Text style={[ms.hintText, { fontStyle: "italic" }]}>No numeric or boolean variables yet — add one under Variables.</Text>
-          : varTargetRow(draft.moveStopFlagVariableName, "Fired flag variable",
-              () => setMoveStopFlagVarPicker(true), () => set({ moveStopFlagVariableName: undefined }))}
+        {varTargetRow(draft.moveStopFlagVariableName, "Fired flag variable",
+          () => setMoveStopFlagVarPicker(true), () => set({ moveStopFlagVariableName: undefined }))}
       </>
     );
   };
@@ -1119,7 +1118,8 @@ export function StepConfigModal({
           ?? lcIoDevices[0]?.id;
         const lcPins = (lcIoDevices.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
         const isRead = draft!.type === "ReadLoadCell";
-        const numVars = (variables ?? []).filter(v => !v.isImage);
+        // A weight is a number: no lists, strings, images, stopwatches or booleans.
+        const numVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage && !v.isStopwatch && !v.isBoolean);
         const unit = draft!.loadCellUnit ?? "g";
         return (
           <>
@@ -1172,22 +1172,24 @@ export function StepConfigModal({
                     );
                   })}
                 </View>
-                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STORE IN VARIABLE</Text>
-                {numVars.length === 0 ? (
-                  <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>Create a variable first (Set Variable step).</Text>
-                ) : (
-                  <View style={[ms.segRow, { flexWrap: "wrap" }]}>
-                    {numVars.map(v => {
-                      const active = draft!.variableName === v.name;
-                      return (
-                        <TouchableOpacity key={v.name} style={[ms.seg, active && ms.segActive]}
-                          onPress={() => set({ variableName: v.name })} activeOpacity={0.8}>
-                          <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{`$${v.name}`}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
+                <VarSelectorButton
+                  label="STORE IN VARIABLE"
+                  value={draft!.variableName}
+                  accent={accents.purple}
+                  placeholder="None — tap to select"
+                  onPress={() => setLoadCellVarPicker(true)}
+                />
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={loadCellVarPicker}
+                  onClose={() => setLoadCellVarPicker(false)}
+                  variables={numVars}
+                  selected={draft!.variableName}
+                  onSelect={v => { if (v) set({ variableName: v.name }); setLoadCellVarPicker(false); }}
+                  title="Store In Variable"
+                  create={{ type: "number" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
                 <Text style={[ms.hintText, { marginTop: 8 }]}>
                   {`Reads the load cell weight (in ${unit}) into $${draft!.variableName ?? "the variable"} each time this step runs.`}
                 </Text>
@@ -1204,7 +1206,8 @@ export function StepConfigModal({
           ?? lcIoDevices[0]?.id;
         const lcPins = (lcIoDevices.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
         const isStart = draft!.type === "StartRecording";
-        const recVars = (variables ?? []).filter(v => !v.isImage);
+        // Stop Recording fills the target with {t, v, r} records, so only an object list fits.
+        const recVars = (variables ?? []).filter(isRecordListVariable);
         return (
           <>
             {lcIoDevices.length > 1 && (
@@ -1241,22 +1244,24 @@ export function StepConfigModal({
             )}
             {isStart ? (
               <>
-                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>STORE INTO LIST VARIABLE</Text>
-                {recVars.length === 0 ? (
-                  <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>Create a variable first (Set Variable step).</Text>
-                ) : (
-                  <View style={[ms.segRow, { flexWrap: "wrap" }]}>
-                    {recVars.map(v => {
-                      const active = draft!.recordVariableName === v.name;
-                      return (
-                        <TouchableOpacity key={v.name} style={[ms.seg, active && ms.segActive]}
-                          onPress={() => set({ recordVariableName: v.name })} activeOpacity={0.8}>
-                          <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{`$${v.name}`}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
+                <VarSelectorButton
+                  label="STORE INTO LIST VARIABLE"
+                  value={draft!.recordVariableName}
+                  accent={accents.cyan}
+                  placeholder="None — tap to select"
+                  onPress={() => setRecordVarPicker(true)}
+                />
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={recordVarPicker}
+                  onClose={() => setRecordVarPicker(false)}
+                  variables={recVars}
+                  selected={draft!.recordVariableName}
+                  onSelect={v => { if (v) set({ recordVariableName: v.name }); setRecordVarPicker(false); }}
+                  title="Store Into List Variable"
+                  create={{ type: "list", elementType: "Record" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
                 <Text style={[ms.hintText, { marginTop: 8 }]}>
                   {`Captures every sample while recording; Stop Recording fills $${draft!.recordVariableName ?? "the variable"} with a list of {t, v, r} records.`}
                 </Text>
@@ -1277,7 +1282,8 @@ export function StepConfigModal({
         const exNumericVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage);
         const exListVars    = (variables ?? []).filter(v => isListVariable(v));
         const exStringVars  = (variables ?? []).filter(v => v.isString === true);
-        const exAllVars     = [...exListVars, ...exNumericVars, ...exStringVars];
+        const exImageVars   = (variables ?? []).filter(v => v.isImage === true);
+        const exAllVars     = [...exListVars, ...exNumericVars, ...exStringVars, ...exImageVars];
         return (
           <>
             <Text style={ms.hintText}>
@@ -1385,6 +1391,8 @@ export function StepConfigModal({
                 setExportColumnPicker(null);
               }}
               onClose={() => setExportColumnPicker(null)}
+              create={{ type: "list" }}
+              onCreateVariable={onSaveVariable} allVariables={variables}
             />
           </>
         );
@@ -1593,37 +1601,35 @@ export function StepConfigModal({
                   keyboardType="numeric" placeholder="0" placeholderTextColor="#c4c4c4"
                   returnKeyType="done" selectTextOnFocus
                 />
-                {scalarVars.length > 0 && (
-                  <>
-                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>TIMEOUT FLAG VARIABLE  (optional)</Text>
-                    <Text style={ms.hintText}>Set to 1 if timed out, 0 if condition was met. Leave blank to ignore.</Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
-                      <TouchableOpacity
-                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
-                        onPress={() => setWaitTimeoutVarPicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.waitTimeoutVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
-                          {draft!.waitTimeoutVariableName ?? "none"}
-                        </Text>
-                      </TouchableOpacity>
-                      {draft!.waitTimeoutVariableName && (
-                        <TouchableOpacity onPress={() => set({ waitTimeoutVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color={colors.textFaint} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <VarPickerModal
-                      filter={isAssignableVariable}
-                      visible={waitTimeoutVarPicker}
-                      onClose={() => setWaitTimeoutVarPicker(false)}
-                      variables={scalarVars}
-                      selected={draft!.waitTimeoutVariableName}
-                      onSelect={v => { set({ waitTimeoutVariableName: v?.name }); setWaitTimeoutVarPicker(false); }}
-                      title="Timeout Flag Variable"
-                      showNone
-                    />
-                  </>
-                )}
+                <Text style={[ms.fieldLabel, { marginTop: 14 }]}>TIMEOUT FLAG VARIABLE  (optional)</Text>
+                <Text style={ms.hintText}>Set to 1 if timed out, 0 if condition was met. Leave blank to ignore.</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                  <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
+                  <TouchableOpacity
+                    style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                    onPress={() => setWaitTimeoutVarPicker(true)} activeOpacity={0.7}>
+                    <Text style={{ color: draft!.waitTimeoutVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
+                      {draft!.waitTimeoutVariableName ?? "none"}
+                    </Text>
+                  </TouchableOpacity>
+                  {draft!.waitTimeoutVariableName && (
+                    <TouchableOpacity onPress={() => set({ waitTimeoutVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                      <X size={14} color={colors.textFaint} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={waitTimeoutVarPicker}
+                  onClose={() => setWaitTimeoutVarPicker(false)}
+                  variables={scalarVars}
+                  selected={draft!.waitTimeoutVariableName}
+                  onSelect={v => { set({ waitTimeoutVariableName: v?.name }); setWaitTimeoutVarPicker(false); }}
+                  title="Timeout Flag Variable"
+                  showNone
+                  create={{ type: "boolean" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
               </>
             )}
           </>
@@ -1660,56 +1666,49 @@ export function StepConfigModal({
                   value={draft!.loopCount ?? 1} expressions={draft!.expressions}
                   onChangeValue={v => set({ loopCount: v !== undefined ? Math.round(v) : 1 })}
                   onChangeExpr={setExpr} variables={variables} />
-                {scalarVarsLoop.length > 0 && (
-                  <>
-                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
-                    <Text style={ms.hintText}>Set to the current iteration number (0-based).</Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
-                      <TouchableOpacity
-                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
-                        onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachIndexVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
-                          {draft!.forEachIndexVariableName ?? "none"}
-                        </Text>
-                      </TouchableOpacity>
-                      {draft!.forEachIndexVariableName && (
-                        <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color={colors.textFaint} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <VarPickerModal
-                      filter={isAssignableVariable}
-                      visible={loopIndexVarPicker}
-                      onClose={() => setLoopIndexVarPicker(false)}
-                      variables={scalarVarsLoop}
-                      selected={draft!.forEachIndexVariableName}
-                      onSelect={v => { set({ forEachIndexVariableName: v?.name }); setLoopIndexVarPicker(false); }}
-                      title="Index Variable"
-                      showNone
-                    />
-                  </>
-                )}
+                <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
+                <Text style={ms.hintText}>Set to the current iteration number (0-based).</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                  <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
+                  <TouchableOpacity
+                    style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                    onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
+                    <Text style={{ color: draft!.forEachIndexVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
+                      {draft!.forEachIndexVariableName ?? "none"}
+                    </Text>
+                  </TouchableOpacity>
+                  {draft!.forEachIndexVariableName && (
+                    <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                      <X size={14} color={colors.textFaint} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={loopIndexVarPicker}
+                  onClose={() => setLoopIndexVarPicker(false)}
+                  variables={scalarVarsLoop}
+                  selected={draft!.forEachIndexVariableName}
+                  onSelect={v => { set({ forEachIndexVariableName: v?.name }); setLoopIndexVarPicker(false); }}
+                  title="Index Variable"
+                  showNone
+                  create={{ type: "number" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
               </>
             ) : loopMode === 'forEach' ? (
               <>
                 <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ITERATE OVER</Text>
-                {loopSourceVars.length === 0
-                  ? <Text style={ms.emptyHint}>No list variables defined yet.</Text>
-                  : (
-                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
-                      <TouchableOpacity
-                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
-                        onPress={() => setForEachSourcePicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
-                          {draft!.forEachVariableName ?? "select a list variable"}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  )
-                }
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
+                  <TouchableOpacity
+                    style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                    onPress={() => setForEachSourcePicker(true)} activeOpacity={0.7}>
+                    <Text style={{ color: draft!.forEachVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
+                      {draft!.forEachVariableName ?? "select a list variable"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
                 <VarPickerModal
                   visible={forEachSourcePicker}
                   onClose={() => setForEachSourcePicker(false)}
@@ -1717,73 +1716,75 @@ export function StepConfigModal({
                   selected={draft!.forEachVariableName}
                   onSelect={v => { set({ forEachVariableName: v?.name }); setForEachSourcePicker(false); }}
                   title="Source Variable"
+                  create={{ type: "list" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
                 />
 
-                {scalarVarsLoop.length > 0 && (
-                  <>
-                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>VALUE VARIABLE  (optional)</Text>
-                    {/* Mirrors the executor: only an element that is itself a value can be
-                        handed over, so on a point or record list this receives the index. */}
-                    <Text style={ms.hintText}>
-                      {forEachSourceIsScalar
-                        ? "Receives the current element each iteration."
-                        : "Receives the current index each iteration — a point or object element is not a number, so read it with $name[$i].field."}
+                <Text style={[ms.fieldLabel, { marginTop: 14 }]}>VALUE VARIABLE  (optional)</Text>
+                {/* Mirrors the executor: only an element that is itself a value can be
+                    handed over, so on a point or record list this receives the index. */}
+                <Text style={ms.hintText}>
+                  {forEachSourceIsScalar
+                    ? "Receives the current element each iteration."
+                    : "Receives the current index each iteration — a point or object element is not a number, so read it with $name[$i].field."}
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                  <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
+                  <TouchableOpacity
+                    style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                    onPress={() => setForEachValuePicker(true)} activeOpacity={0.7}>
+                    <Text style={{ color: draft!.forEachValueVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
+                      {draft!.forEachValueVariableName ?? "none"}
                     </Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
-                      <TouchableOpacity
-                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
-                        onPress={() => setForEachValuePicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachValueVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
-                          {draft!.forEachValueVariableName ?? "none"}
-                        </Text>
-                      </TouchableOpacity>
-                      {draft!.forEachValueVariableName && (
-                        <TouchableOpacity onPress={() => set({ forEachValueVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color={colors.textFaint} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <VarPickerModal
-                      filter={isAssignableVariable}
-                      visible={forEachValuePicker}
-                      onClose={() => setForEachValuePicker(false)}
-                      variables={scalarVarsLoop}
-                      selected={draft!.forEachValueVariableName}
-                      onSelect={v => { set({ forEachValueVariableName: v?.name }); setForEachValuePicker(false); }}
-                      title="Value Variable"
-                      showNone
-                    />
+                  </TouchableOpacity>
+                  {draft!.forEachValueVariableName && (
+                    <TouchableOpacity onPress={() => set({ forEachValueVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                      <X size={14} color={colors.textFaint} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={forEachValuePicker}
+                  onClose={() => setForEachValuePicker(false)}
+                  variables={scalarVarsLoop}
+                  selected={draft!.forEachValueVariableName}
+                  onSelect={v => { set({ forEachValueVariableName: v?.name }); setForEachValuePicker(false); }}
+                  title="Value Variable"
+                  showNone
+                  create={{ type: "number" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
 
-                    <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
-                    <Text style={ms.hintText}>Receives the current iteration index (0-based).</Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
-                      <TouchableOpacity
-                        style={[ms.input, { flex: 1, justifyContent: "center" }]}
-                        onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
-                        <Text style={{ color: draft!.forEachIndexVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
-                          {draft!.forEachIndexVariableName ?? "none"}
-                        </Text>
-                      </TouchableOpacity>
-                      {draft!.forEachIndexVariableName && (
-                        <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
-                          <X size={14} color={colors.textFaint} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <VarPickerModal
-                      filter={isAssignableVariable}
-                      visible={loopIndexVarPicker}
-                      onClose={() => setLoopIndexVarPicker(false)}
-                      variables={scalarVarsLoop}
-                      selected={draft!.forEachIndexVariableName}
-                      onSelect={v => { set({ forEachIndexVariableName: v?.name }); setLoopIndexVarPicker(false); }}
-                      title="Index Variable"
-                      showNone
-                    />
-                  </>
-                )}
+                <Text style={[ms.fieldLabel, { marginTop: 14 }]}>INDEX VARIABLE  (optional)</Text>
+                <Text style={ms.hintText}>Receives the current iteration index (0-based).</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                  <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
+                  <TouchableOpacity
+                    style={[ms.input, { flex: 1, justifyContent: "center" }]}
+                    onPress={() => setLoopIndexVarPicker(true)} activeOpacity={0.7}>
+                    <Text style={{ color: draft!.forEachIndexVariableName ? colors.text : colors.textFaint, fontSize: 14 }}>
+                      {draft!.forEachIndexVariableName ?? "none"}
+                    </Text>
+                  </TouchableOpacity>
+                  {draft!.forEachIndexVariableName && (
+                    <TouchableOpacity onPress={() => set({ forEachIndexVariableName: undefined })} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}>
+                      <X size={14} color={colors.textFaint} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={loopIndexVarPicker}
+                  onClose={() => setLoopIndexVarPicker(false)}
+                  variables={scalarVarsLoop}
+                  selected={draft!.forEachIndexVariableName}
+                  onSelect={v => { set({ forEachIndexVariableName: v?.name }); setLoopIndexVarPicker(false); }}
+                  title="Index Variable"
+                  showNone
+                  create={{ type: "number" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
               </>
             ) : null}
             {loopMode === 'while' && (
@@ -2240,7 +2241,7 @@ export function StepConfigModal({
         );
 
       case "SetVariable":
-        return <SetVariableFields draft={draft!} variables={variables} contextVariables={contextVariables} set={set} onCreateVariable={onCreateVariable} />;
+        return <SetVariableFields draft={draft!} variables={variables} contextVariables={contextVariables} set={set} onCreateVariable={onCreateVariable} onSaveVariable={onSaveVariable} />;
 
       case "Label": {
         const otherLabels = (scopeSteps ?? [])
@@ -3187,32 +3188,24 @@ export function StepConfigModal({
                 );
               })}
             </View>
-            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>STOPWATCH VARIABLE</Text>
-            {swVars.length === 0 ? (
-              <Text style={[ms.emptyHint, { marginTop: 4 }]}>
-                No stopwatch variables defined. Add a variable of type Stopwatch in the Variables section.
-              </Text>
-            ) : (
-              swVars.map((v, i) => {
-                const active = draft!.stopwatchVariableName === v.name;
-                return (
-                  <TouchableOpacity
-                    key={v.id}
-                    style={[ms.row, i < swVars.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                    onPress={() => set({ stopwatchVariableName: v.name })}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                      {active && <View style={ms.radioDot} />}
-                    </View>
-                    <View style={ms.rowText}>
-                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
-                      {v.description ? <Text style={ms.rowDesc}>{v.description}</Text> : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
-            )}
+            <VarSelectorButton
+              label="STOPWATCH VARIABLE"
+              value={draft!.stopwatchVariableName}
+              accent={accents.purple}
+              placeholder="None — tap to select"
+              onPress={() => setStopwatchVarPicker(true)}
+            />
+            <VarPickerModal
+              filter={isAssignableVariable}
+              visible={stopwatchVarPicker}
+              onClose={() => setStopwatchVarPicker(false)}
+              variables={swVars}
+              selected={draft!.stopwatchVariableName}
+              onSelect={v => { if (v) set({ stopwatchVariableName: v.name }); setStopwatchVarPicker(false); }}
+              title="Stopwatch Variable"
+              create={{ type: "stopwatch" }}
+              onCreateVariable={onSaveVariable} allVariables={variables}
+            />
           </>
         );
       }
@@ -3489,6 +3482,8 @@ export function StepConfigModal({
                 setJsonInboundPicker(null);
               }}
               onClose={() => setJsonInboundPicker(null)}
+              create={{ type: "number", label: "variable" }}
+              onCreateVariable={onSaveVariable} allVariables={variables}
             />
             {/* Variable picker for outbound rows — a list or image replaces the row's value
                 outright, a scalar appends into the expression being typed. */}
@@ -3518,6 +3513,8 @@ export function StepConfigModal({
                 setJsonOutboundPicker(null);
               }}
               onClose={() => setJsonOutboundPicker(null)}
+              create={{ type: "list" }}
+              onCreateVariable={onSaveVariable} allVariables={variables}
             />
           </>
         );
@@ -3554,44 +3551,24 @@ export function StepConfigModal({
               })
             )}
 
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, marginBottom: 0 }}>
-              <Text style={ms.fieldLabel}>IMAGE VARIABLE</Text>
-              <TouchableOpacity
-                onPress={() => setCaptureVarCreateOpen(true)}
-                hitSlop={8} activeOpacity={0.7}
-                style={{ flexDirection: "row", alignItems: "center", gap: 4,
-                  backgroundColor: "#e0f2fe", borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 4,
-                  borderWidth: 1, borderColor: "#7dd3fc" }}
-              >
-                <Plus size={12} color={accentImg} />
-                <Text style={{ fontSize: 12, fontWeight: "600", color: accentImg }}>New</Text>
-              </TouchableOpacity>
-            </View>
-            {imageVarsForCapture.length === 0 ? (
-              <Text style={ms.emptyHint}>
-                No image variables yet — tap <Text style={{ fontWeight: "700" }}>New</Text> to create one.
-              </Text>
-            ) : (
-              imageVarsForCapture.map((v, i) => {
-                const active = draft!.captureImageVariableName === v.name;
-                return (
-                  <TouchableOpacity
-                    key={v.id}
-                    style={[ms.row, i < imageVarsForCapture.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                    onPress={() => set({ captureImageVariableName: v.name })}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                      {active && <View style={ms.radioDot} />}
-                    </View>
-                    <View style={ms.rowText}>
-                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>${v.name}</Text>
-                      {v.description ? <Text style={ms.rowDesc}>{v.description}</Text> : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
-            )}
+            <VarSelectorButton
+              label="IMAGE VARIABLE"
+              value={draft!.captureImageVariableName}
+              accent={accentImg}
+              placeholder="None — tap to select"
+              onPress={() => setCaptureVarPicker(true)}
+            />
+            <VarPickerModal
+              filter={isAssignableVariable}
+              visible={captureVarPicker}
+              onClose={() => setCaptureVarPicker(false)}
+              variables={imageVarsForCapture}
+              selected={draft!.captureImageVariableName}
+              onSelect={v => { if (v) set({ captureImageVariableName: v.name }); setCaptureVarPicker(false); }}
+              title="Image Variable"
+              create={{ type: "image" }}
+              onCreateVariable={onSaveVariable} allVariables={variables}
+            />
           </>
         );
       }
@@ -3737,6 +3714,8 @@ export function StepConfigModal({
                 setHttpReceiveInboundPicker(null);
               }}
               onClose={() => setHttpReceiveInboundPicker(null)}
+              create={{ type: "number" }}
+              onCreateVariable={onSaveVariable} allVariables={variables}
             />
           </>
         );
@@ -3801,6 +3780,10 @@ export function StepConfigModal({
     ? ({ coverageVar: 'Coverage Variable', passedVar: 'Passed Variable',
          cellsVar: 'Cells Variable', cellsPassedVar: 'Cells Passed Variable' }[colorPicker.field])
     : '';
+  // What "+ New … variable" creates for each output — the type the controller writes there.
+  const colorPickerCreate: VarCreateSpec =
+    colorPicker?.field === 'cellsVar'  ? { type: "list", elementType: "Record" } :
+    colorPicker?.field === 'passedVar' ? { type: "boolean" } : { type: "number" };
 
   // Polygon inspection picker
   const polygonPickerVars     = polygonPicker ? (variables ?? []).filter(v => !isListVariable(v)) : [];
@@ -3810,6 +3793,7 @@ export function StepConfigModal({
   const polygonPickerTitle = polygonPicker
     ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', angleVar: 'Angle Variable', centerXVar: 'Center X Variable', centerYVar: 'Center Y Variable' }[polygonPicker.field] ?? 'Variable')
     : '';
+  const polygonPickerCreate: VarCreateSpec = polygonPicker?.field === 'foundVar' ? { type: "boolean" } : { type: "number" };
 
   // ArUco inspection picker
   const arucoPickerVars     = arucoPicker ? (variables ?? []).filter(v => !isListVariable(v)) : [];
@@ -3819,6 +3803,7 @@ export function StepConfigModal({
   const arucoPickerTitle = arucoPicker
     ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', firstIdVar: 'First Marker ID Variable', firstCenterXVar: 'First Center X Variable', firstCenterYVar: 'First Center Y Variable' }[arucoPicker.field] ?? 'Variable')
     : '';
+  const arucoPickerCreate: VarCreateSpec = arucoPicker?.field === 'foundVar' ? { type: "boolean" } : { type: "number" };
 
   // Derive picker variable list from the active field
   const pickerVars = visionPicker
@@ -3832,6 +3817,9 @@ export function StepConfigModal({
   const pickerTitle =
     visionPicker?.field === 'detectedVar' ? 'Detected Variable' :
     visionPicker?.field === 'countVar'    ? 'Count Variable'    : 'Points Variable';
+  const pickerCreate: VarCreateSpec =
+    visionPicker?.field === 'detectedVar' ? { type: "boolean" } :
+    visionPicker?.field === 'countVar'    ? { type: "number" }  : { type: "list", elementType: "Point" };
 
   return (
     <>
@@ -4121,6 +4109,8 @@ export function StepConfigModal({
       title="Zone Variable"
       showNone
       onSelect={v => { set({ visionZoneVar: v?.name, visionZoneId: undefined }); }}
+      create={{ type: "number", label: "variable" }}
+      onCreateVariable={onSaveVariable} allVariables={variables}
     />
     <VarPickerModal
       filter={isAssignableVariable}
@@ -4130,6 +4120,8 @@ export function StepConfigModal({
       selected={pickerSelected}
       title={pickerTitle}
       showNone
+      create={pickerCreate}
+      onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => {
         if (!visionPicker) return;
         const { inspId, field } = visionPicker;
@@ -4149,6 +4141,9 @@ export function StepConfigModal({
       variables={colorPickerVars}
       selected={colorPickerSelected}
       title={colorPickerTitle}
+      showNone
+      create={colorPickerCreate}
+      onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => {
         if (!colorPicker || !draft) return;
         const { inspId, field } = colorPicker;
@@ -4169,6 +4164,8 @@ export function StepConfigModal({
       selected={polygonPickerSelected}
       title={polygonPickerTitle}
       showNone
+      create={polygonPickerCreate}
+      onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => {
         if (!polygonPicker || !draft) return;
         const { inspId, field } = polygonPicker;
@@ -4189,6 +4186,8 @@ export function StepConfigModal({
       selected={arucoPickerSelected}
       title={arucoPickerTitle}
       showNone
+      create={arucoPickerCreate}
+      onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => {
         if (!arucoPicker || !draft) return;
         const { inspId, field } = arucoPicker;
@@ -4209,6 +4208,8 @@ export function StepConfigModal({
       selected={draft?.moveStopPositionVariableName}
       title="Record Position Variable"
       showNone
+      create={moveStopIsAux ? { type: "number" } : { type: "list", elementType: "Point" }}
+      onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => { set({ moveStopPositionVariableName: v?.name }); setMoveStopPosVarPicker(false); }}
     />
     <VarPickerModal
@@ -4219,18 +4220,9 @@ export function StepConfigModal({
       selected={draft?.moveStopFlagVariableName}
       title="Fired Flag Variable"
       showNone
+      create={{ type: "boolean" }}
+      onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => { set({ moveStopFlagVariableName: v?.name }); setMoveStopFlagVarPicker(false); }}
-    />
-    <VariableEditModal
-      visible={captureVarCreateOpen}
-      variable={null}
-      defaultType="image"
-      onSave={v => {
-        onSaveVariable?.(v);
-        set({ captureImageVariableName: v.name });
-        setCaptureVarCreateOpen(false);
-      }}
-      onClose={() => setCaptureVarCreateOpen(false)}
     />
     </>
   );

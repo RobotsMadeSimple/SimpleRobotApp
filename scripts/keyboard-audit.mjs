@@ -101,6 +101,20 @@ const SCENARIOS = [
     },
   },
   {
+    // A variable field's picker → "+ New … variable" → the variable editor, opened from inside
+    // the step modal (three layers deep); its name/value fields must still clear the keyboard.
+    name: "builder — new variable from a step field",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Motion", { exact: false }); await sleep(400);
+      await tap(p, "Move Linear"); await sleep(900);
+      await tap(p, "Stop on Condition"); await sleep(400);
+      await p.getByLabel("Record position variable").first().click({ force: true }); await sleep(500);
+      await p.getByLabel("New Points list variable").first().click({ force: true }); await sleep(700);
+    },
+  },
+  {
     // Same sub-page from an aux move (GripperAction), whose main page is an inline body.
     name: "builder — Gripper stop-on-condition sub-page",
     route: "/program/builder",

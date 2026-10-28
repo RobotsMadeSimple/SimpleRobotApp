@@ -17,8 +17,7 @@ import { Attention } from "@/src/components/ui/calibration/StepRequirements";
 import { ms } from "./builderStyles";
 import { TemplateInput } from "./NumericInputs";
 import { ExpressionField } from "./expressions/ExpressionEditorModal";
-import { VarPickerModal } from "./VarPicker";
-import { VarType, VariableEditModal } from "./VariableEditModal";
+import { VarPickerModal, type VarCreateSpec } from "./VarPicker";
 import { usePluginContributions } from "./usePluginContributions";
 import {
   PointRef,
@@ -134,6 +133,7 @@ export function PluginStepFields({
               onChange={t => setParam(def.key, t)}
               variables={variables}
               contextVariables={contextVariables}
+              onSaveVariable={onSaveVariable}
             />
             {issue?.code === "pluginParamEnum" && <Text style={ms.fieldError}>{issue.message}</Text>}
             {!!def.help && <Text style={styles.help}>{def.help}</Text>}
@@ -194,12 +194,13 @@ function defaultPlaceholder(def: PluginParamDef, fallback: string): string {
   return d !== undefined && d !== "" ? `default ${d}` : fallback;
 }
 
-function ParamField({ def, text, onChange, variables, contextVariables }: {
+function ParamField({ def, text, onChange, variables, contextVariables, onSaveVariable }: {
   def: PluginParamDef;
   text: string;
   onChange: (text: string) => void;
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
+  onSaveVariable?: (v: ProgramVariable) => void;
 }) {
   switch (def.type) {
     case "number":
@@ -237,7 +238,7 @@ function ParamField({ def, text, onChange, variables, contextVariables }: {
     case "list":
     case "image":
     case "variable":
-      return <VariableParam def={def} kind={def.type} text={text} onChange={onChange} variables={variables} contextVariables={contextVariables} />;
+      return <VariableParam def={def} kind={def.type} text={text} onChange={onChange} variables={variables} contextVariables={contextVariables} onSaveVariable={onSaveVariable} />;
     default:
       // A param type this app does not know: keep it editable as raw text.
       return (
@@ -329,10 +330,18 @@ function EnumParam({ def, text, onChange }: { def: PluginParamDef; text: string;
   );
 }
 
+/** What "+ New … variable" makes for a list / image / variable param. */
+const PARAM_CREATE: Record<"list" | "image" | "variable", VarCreateSpec> = {
+  list:     { type: "list" },
+  image:    { type: "image" },
+  variable: { type: "number", label: "variable" },
+};
+
 /** list / image / variable: a variable picker narrowed to the kind; the bare name is stored. */
-function VariableParam({ def, kind, text, onChange, variables, contextVariables }: {
+function VariableParam({ def, kind, text, onChange, variables, contextVariables, onSaveVariable }: {
   def: PluginParamDef; kind: "list" | "image" | "variable"; text: string; onChange: (t: string) => void;
   variables?: ProgramVariable[]; contextVariables?: ProgramVariable[];
+  onSaveVariable?: (v: ProgramVariable) => void;
 }) {
   const [open, setOpen] = useState(false);
   const name = text.trim().replace(/^\$/, "");
@@ -356,6 +365,8 @@ function VariableParam({ def, kind, text, onChange, variables, contextVariables 
         selected={name || undefined}
         title={def.label || def.key}
         showNone
+        create={PARAM_CREATE[kind]}
+        onCreateVariable={onSaveVariable}
         onSelect={v => onChange(v?.name ?? "")}
       />
     </>
@@ -544,9 +555,14 @@ function OutputRow({ def, variableName, onChange, variables, contextVariables, o
   onSaveVariable?: (v: ProgramVariable) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
   const fits = useMemo(() => outputVariableFilter(def.type), [def.type]);
   const filter = useMemo(() => (v: ProgramVariable) => isAssignableVariable(v) && fits(v), [fits]);
+  // The picker's "+ New" row makes a variable this output can be written into: a point
+  // output needs a Points list, which outputNewVarType alone ("list") would not preset.
+  const create = useMemo<VarCreateSpec>(() => ({
+    type: outputNewVarType(def.type),
+    elementType: def.type === "point" ? "Point" : undefined,
+  }), [def.type]);
 
   // A mapped variable the program knows but that cannot hold this output (pluginOutputType).
   const mapped = variableName
@@ -559,13 +575,6 @@ function OutputRow({ def, variableName, onChange, variables, contextVariables, o
       <View style={styles.labelRow}>
         <Text style={ms.fieldLabel}>{(def.label || def.key).toUpperCase()}</Text>
         <Text style={styles.typeChip}>{OUTPUT_TYPE_LABEL[def.type] ?? def.type}</Text>
-        <View style={{ flex: 1 }} />
-        {onSaveVariable && (
-          <TouchableOpacity onPress={() => setCreateOpen(true)} hitSlop={8} activeOpacity={0.7} style={styles.newBtn}>
-            <Plus size={12} color={accents.purple} />
-            <Text style={styles.newBtnText}>New</Text>
-          </TouchableOpacity>
-        )}
       </View>
       <VarButton
         value={variableName}
@@ -586,22 +595,10 @@ function OutputRow({ def, variableName, onChange, variables, contextVariables, o
         selected={variableName}
         title={def.label || def.key}
         showNone
+        create={create}
+        onCreateVariable={onSaveVariable}
         onSelect={v => onChange(v?.name)}
       />
-      {onSaveVariable && (
-        <VariableEditModal
-          visible={createOpen}
-          variable={null}
-          defaultType={outputNewVarType(def.type) as VarType}
-          variables={variables}
-          onSave={v => {
-            onSaveVariable(v);
-            onChange(v.name);
-            setCreateOpen(false);
-          }}
-          onClose={() => setCreateOpen(false)}
-        />
-      )}
     </View>
   );
 }

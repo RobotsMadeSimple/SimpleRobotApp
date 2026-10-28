@@ -9,11 +9,43 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ChevronDown, X } from "lucide-react-native";
-import { ProgramVariable, variableList } from "@/src/models/robotModels";
+import { ChevronDown, Plus, X } from "lucide-react-native";
+import { ListElementType, ProgramVariable, variableList } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
 import { colors, radii } from "@/src/components/ui/kit";
 import { SymbolSections } from "./expressions/SymbolSections";
+import { VariableEditModal, type VarType } from "./VariableEditModal";
+
+// ── Create-from-the-field ─────────────────────────────────────────────────────
+
+/**
+ * What a field needs, so the picker's "+ New … variable" row opens the editor preset
+ * to the right type. Step fields reference variables by name, so "linked" means the
+ * picker creates the variable, hands it to the program (onCreateVariable) and selects
+ * it into the field in one step.
+ */
+export type VarCreateSpec = {
+  /** "computed" is never offered: a formula cannot be an assignment target. */
+  type: VarType;
+  /** Lists only: the element type the editor starts on. */
+  elementType?: ListElementType;
+  /** The noun in "+ New <label> variable"; derived from type/elementType when absent. */
+  label?: string;
+};
+
+/** The noun for the "+ New … variable" row: "number", "Points list", "image", … */
+export function createLabel(spec: VarCreateSpec): string {
+  if (spec.label) return spec.label;
+  if (spec.type === "list") {
+    switch (spec.elementType) {
+      case "Point":   return "Points list";
+      case "Record":  return "Objects list";
+      case "Boolean": return "Booleans list";
+      default:        return "list";
+    }
+  }
+  return spec.type;
+}
 
 // ── Variable picker modal ─────────────────────────────────────────────────────
 
@@ -92,6 +124,9 @@ export function VarPickerModal({
   contextLabel,
   onPickSymbol,
   filter,
+  create,
+  onCreateVariable,
+  allVariables,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -114,13 +149,30 @@ export function VarPickerModal({
    * offered.
    */
   filter?: (v: ProgramVariable) => boolean;
+  /**
+   * The type a new variable should have for this field. With `onCreateVariable` it
+   * adds a "+ New <label> variable" row at the top of the list; a save appends the
+   * variable to the program and selects it into the field in one step.
+   */
+  create?: VarCreateSpec;
+  /** Appends the new variable to the program (the builder's saveVar). */
+  onCreateVariable?: (v: ProgramVariable) => void;
+  /**
+   * Every variable of the program, for the new-variable editor's duplicate-name check.
+   * Needed when `variables` is a pre-filtered list (only the Points lists, say): a name
+   * taken by a variable of another kind must still be refused.
+   */
+  allVariables?: ProgramVariable[];
 }) {
   const [search,     setSearch]     = useState("");
   const [kindFilter, setKindFilter] = useState<VarKind | "all">("all");
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
-    if (visible) { setSearch(""); setKindFilter("all"); }
+    if (visible) { setSearch(""); setKindFilter("all"); setCreateOpen(false); }
   }, [visible]);
+
+  const canCreate = !!create && !!onCreateVariable;
 
   const pickable = useMemo(
     () => filter ? variables.filter(filter) : variables, [variables, filter]);
@@ -149,6 +201,7 @@ export function VarPickerModal({
     }), [pickableContext, kindFilter, search]);
 
   return (
+    <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={ms.overlay} onPress={onClose}>
         <Pressable style={[ms.card, { maxHeight: "80%" }]} onPress={() => {}}>
@@ -160,7 +213,9 @@ export function VarPickerModal({
             </TouchableOpacity>
           </View>
 
-          {/* Search input */}
+          {/* Search input. While the editor is open on top, this field must not take
+              the focus back from the editor's name field, so it is not auto-focused
+              (and not editable) until the editor goes away. */}
           <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border,
             borderRadius: radii.sm, paddingHorizontal: 10, backgroundColor: colors.surfaceMuted, marginBottom: 8 }}>
             <TextInput
@@ -169,7 +224,8 @@ export function VarPickerModal({
               onChangeText={setSearch}
               placeholder="Search by name…"
               placeholderTextColor={colors.textFaint}
-              autoFocus
+              autoFocus={!createOpen}
+              editable={!createOpen}
               autoCapitalize="none"
               returnKeyType="search"
             />
@@ -210,6 +266,22 @@ export function VarPickerModal({
           )}
 
           <ScrollView showsVerticalScrollIndicator={false} bounces={false} keyboardShouldPersistTaps="always">
+            {/* Above "None" and the list: creating the variable the field needs is the
+                first thing on offer when the right one does not exist yet. Styled like
+                the step modal's dashed "Add …" rows. */}
+            {canCreate && (
+              <TouchableOpacity
+                style={ms.modRowAdd}
+                onPress={() => setCreateOpen(true)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`New ${createLabel(create!)} variable`}
+              >
+                <Plus size={15} color={colors.textFaint} />
+                <Text style={ms.modAddText}>New {createLabel(create!)} variable</Text>
+              </TouchableOpacity>
+            )}
+
             {showNone && (
               <TouchableOpacity
                 style={[ms.row, ms.rowBorder, !selected && ms.rowActive]}
@@ -288,6 +360,24 @@ export function VarPickerModal({
         </Pressable>
       </Pressable>
     </Modal>
+
+    {/* The editor for "+ New … variable". A sibling of the picker's Modal, not a
+        child — a Modal nested inside a Modal is unreliable, and VariableEditModal
+        hangs its own sheets off the end the same way. It sees every variable the
+        picker does, so its duplicate-name check covers both lists. A save appends
+        the variable, selects it and closes the picker, all in one tap. */}
+    {canCreate && (
+      <VariableEditModal
+        visible={visible && createOpen}
+        variable={null}
+        defaultType={create!.type}
+        defaultElementType={create!.elementType}
+        variables={[...(allVariables ?? variables), ...(contextVariables ?? [])]}
+        onSave={v => { onCreateVariable!(v); onSelect(v); onClose(); }}
+        onClose={() => setCreateOpen(false)}
+      />
+    )}
+    </>
   );
 }
 

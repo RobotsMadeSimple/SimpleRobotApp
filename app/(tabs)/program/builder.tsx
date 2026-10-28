@@ -485,15 +485,19 @@ export default function BuilderScreen() {
     // A rename must rewrite every `$name` reference across the program (and bare-name target fields),
     // or the links orphan — the name is the symbol in the expression language. Done atomically with
     // the variable-list update so steps + variables stay consistent in one commit.
-    const oldName = editingVar?.name;
-    const isRename = !!oldName && oldName !== v.name;
+    //
+    // Whether this is a rename is read off the stored variable with the same id, not off the
+    // editor's state: the step modal's pickers create variables through this same function, and
+    // a stale `editingVar` would otherwise turn a brand-new variable into a rename of the last one
+    // edited — rewriting every reference to it.
     commit(d => {
-      const idx = d.variables.findIndex(x => x.id === v.id);
-      let variables = idx >= 0 ? d.variables.map((x, i) => (i === idx ? v : x)) : [...d.variables, v];
+      const prev = d.variables.find(x => x.id === v.id);
+      const isRename = !!prev && prev.name !== v.name;
+      let variables = prev ? d.variables.map(x => (x.id === v.id ? v : x)) : [...d.variables, v];
       let steps = d.steps;
       if (isRename) {
-        variables = renameVariableInVariables(variables, oldName!, v.name);
-        steps = renameVariableInSteps(d.steps, oldName!, v.name);
+        variables = renameVariableInVariables(variables, prev.name, v.name);
+        steps = renameVariableInSteps(d.steps, prev.name, v.name);
       }
       return { ...d, variables, steps };
     });
@@ -1760,7 +1764,7 @@ export default function BuilderScreen() {
         defaultType={editingVar == null ? newVarDefault : undefined}
         variables={variables}
         onSave={saveVar}
-        onClose={() => setVarModalOpen(false)}
+        onClose={() => { setVarModalOpen(false); setEditingVar(null); }}
       />
 
       {/* Make Routine from selected steps */}

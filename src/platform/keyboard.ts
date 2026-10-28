@@ -55,6 +55,21 @@ export function addKeyboardListener(cb: Listener): () => void {
   return () => { s1.remove(); s2.remove(); };
 }
 
+/**
+ * The keyboard's top edge in window coordinates (null when hidden), re-rendering on change.
+ * A centred/top-anchored modal caps its card to this so the card — and its scroll view —
+ * end above the keyboard, which is what lets a low field scroll clear of it.
+ */
+export function useKeyboardTop(): number | null {
+  const read = () => { const k = getKeyboard(); return k.visible ? k.screenY : null; };
+  const [top, setTop] = useState<number | null>(read);
+  useEffect(() => {
+    if (getKeyboard().visible) setTimeout(() => setTop(read()), 0);
+    return addKeyboardListener(k => setTop(k.visible ? k.screenY : null));
+  }, []);
+  return top;
+}
+
 /** The keyboard's current height (0 when hidden), re-rendering on change. */
 export function useKeyboardHeight(): number {
   const [h, setH] = useState(() => getKeyboard().height);

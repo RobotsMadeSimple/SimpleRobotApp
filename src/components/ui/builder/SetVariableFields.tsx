@@ -1,19 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Modal,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { Check, ChevronDown, Plus } from "lucide-react-native";
+import { Check, ChevronDown } from "lucide-react-native";
 import { isAssignableVariable, isListVariable, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
-import { VarPickerModal } from "./VarPicker";
+import { VarPickerModal, type VarCreateSpec } from "./VarPicker";
 import type { VarType } from "./VariableEditModal";
 import { ms, svs } from "./builderStyles";
-import { colors, accents } from "@/src/components/ui/kit";
+import { accents } from "@/src/components/ui/kit";
 import { ExpressionField } from "./expressions/ExpressionEditorModal";
 
 // ── SetVariable helpers ───────────────────────────────────────────────────────
@@ -80,44 +79,40 @@ function SvDropdownModal({
   );
 }
 
+/** A SetVariable target can be any assignable kind; a plain number is the usual one. */
+const SET_VAR_CREATE: VarCreateSpec = { type: "number", label: "variable" };
+
 export function SetVariableFields({
   draft,
   variables,
   contextVariables,
   set,
-  onCreateVariable,
+  onSaveVariable,
 }: {
   draft: ProgramStep;
   variables: ProgramVariable[] | undefined;
   contextVariables?: ProgramVariable[];
   set: (p: Partial<ProgramStep>) => void;
+  /** Appends a variable created from the picker's "+ New variable" row to the program. */
+  onSaveVariable?: (v: ProgramVariable) => void;
+  /**
+   * @deprecated The picker creates variables itself now (see onSaveVariable). Accepted
+   * so an older caller still type-checks; it is not used.
+   */
   onCreateVariable?: (defaultType?: VarType) => void;
 }) {
-  // Only assignable variables are targets: a computed variable is a formula and a
-  // write to it is refused (validation code computedVariable).
-  const varList = (variables ?? []).filter(isAssignableVariable).map(v => v.name);
-  const contextVarList = (contextVariables ?? []).filter(isAssignableVariable).map(v => v.name);
   const initial = useMemo(() => parseVarExpr(draft.variableName, draft.variableExpr), []);
   const [op, setOp]           = useState<SetVarOp>(initial.op);
   const [rawVal, setRawVal]   = useState(initial.val);
   const [varDropOpen, setVarDropOpen] = useState(false);
   const [opDropOpen,  setOpDropOpen]  = useState(false);
   const [strVarPickerOpen, setStrVarPickerOpen] = useState(false);
-  const [pendingCreate, setPendingCreate] = useState(false);
-  const prevVarCount = useRef(variables?.length ?? 0);
-
-  useEffect(() => {
-    const current = variables?.length ?? 0;
-    if (pendingCreate && current > prevVarCount.current) {
-      const newest = variables![current - 1];
-      if (isAssignableVariable(newest)) selectVar(newest.name);
-      setPendingCreate(false);
-    }
-    prevVarCount.current = current;
-  }, [variables]);
 
   const selectedVar = [...(variables ?? []), ...(contextVariables ?? [])].find(v => v.name === draft.variableName);
   const isStringVar = selectedVar?.isString === true;
+  // Only assignable variables are targets: a computed variable is a formula and a
+  // write to it is refused (validation code computedVariable).
+  const hasTargets = (variables ?? []).some(isAssignableVariable) || (contextVariables ?? []).some(isAssignableVariable);
 
   function apply(varName: string | undefined, operator: SetVarOp, value: string) {
     if (!varName) return;
@@ -125,11 +120,12 @@ export function SetVariableFields({
     set({ variableName: varName, variableExpr: buildVarExpr(varName, effectiveOp, value) });
   }
 
-  function selectVar(name: string) {
+  // Takes the variable itself rather than its name: one just created by the picker is
+  // not in `variables` until the builder's commit comes back through props.
+  function selectVar(v: ProgramVariable) {
     setVarDropOpen(false);
-    const isStr = [...(variables ?? []), ...(contextVariables ?? [])].find(v => v.name === name)?.isString === true;
-    const effectiveOp: SetVarOp = isStr ? "=" : op;
-    set({ variableName: name, variableExpr: buildVarExpr(name, effectiveOp, rawVal) });
+    const effectiveOp: SetVarOp = v.isString === true ? "=" : op;
+    set({ variableName: v.name, variableExpr: buildVarExpr(v.name, effectiveOp, rawVal) });
   }
 
   function selectOp(next: SetVarOp) {
@@ -150,7 +146,9 @@ export function SetVariableFields({
     apply(draft.variableName, "=", next);
   }
 
-  if (varList.length === 0 && contextVarList.length === 0) {
+  // With nothing to pick and no way to create one here, the only route is the builder's
+  // Variables section. When the picker can create, the form stays so its "+ New" row is reachable.
+  if (!hasTargets && !onSaveVariable) {
     return (
       <Text style={ms.emptyHint}>
         No variables defined. Add variables in the Variables section of the builder.
@@ -237,50 +235,20 @@ export function SetVariableFields({
       {/* Live preview */}
       {preview && <Text style={svs.preview}>{preview}</Text>}
 
-      {/* Variable picker modal */}
-      <SvDropdownModal visible={varDropOpen} onClose={() => setVarDropOpen(false)} title="Select Variable">
-        {varList.map((name, i) => (
-          <TouchableOpacity
-            key={name}
-            style={[svs.optionRow, i < varList.length - 1 && svs.optionRowBorder, name === draft.variableName && svs.optionRowActive]}
-            onPress={() => selectVar(name)}
-            activeOpacity={0.7}
-          >
-            <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
-            {name === draft.variableName && <Check size={15} color={accents.purple} />}
-          </TouchableOpacity>
-        ))}
-        {contextVarList.length > 0 && (
-          <>
-            <View style={{ paddingHorizontal: 4, paddingTop: 10, paddingBottom: 4,
-              borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
-              marginTop: varList.length > 0 ? 4 : 0 }}>
-              <Text style={{ fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.5 }}>CALLER VARIABLES</Text>
-            </View>
-            {contextVarList.map((name, i) => (
-              <TouchableOpacity
-                key={`ctx_${name}`}
-                style={[svs.optionRow, i < contextVarList.length - 1 && svs.optionRowBorder, name === draft.variableName && svs.optionRowActive]}
-                onPress={() => selectVar(name)}
-                activeOpacity={0.7}
-              >
-                <Text style={[svs.optionText, name === draft.variableName && svs.optionTextActive]}>${name}</Text>
-                {name === draft.variableName && <Check size={15} color={accents.purple} />}
-              </TouchableOpacity>
-            ))}
-          </>
-        )}
-        {onCreateVariable && (
-          <TouchableOpacity
-            style={[svs.optionRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, marginTop: 4 }]}
-            onPress={() => { setVarDropOpen(false); setPendingCreate(true); onCreateVariable(); }}
-            activeOpacity={0.7}
-          >
-            <Plus size={14} color={accents.purple} />
-            <Text style={[svs.optionText, { color: accents.purple, marginLeft: 6 }]}>Create Variable…</Text>
-          </TouchableOpacity>
-        )}
-      </SvDropdownModal>
+      {/* Variable picker — the shared one, with search, kind chips and "+ New variable" */}
+      <VarPickerModal
+        visible={varDropOpen}
+        onClose={() => setVarDropOpen(false)}
+        variables={variables ?? []}
+        contextVariables={contextVariables}
+        contextLabel="Caller variables"
+        filter={isAssignableVariable}
+        selected={draft.variableName}
+        title="Variable"
+        create={SET_VAR_CREATE}
+        onCreateVariable={onSaveVariable}
+        onSelect={v => { if (v) selectVar(v); }}
+      />
 
       {/* Operator picker modal (numeric vars only) */}
       {!isStringVar && (
