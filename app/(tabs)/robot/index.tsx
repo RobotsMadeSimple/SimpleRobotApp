@@ -21,7 +21,7 @@ import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { connKey, isSaved, manualRobot, recordConnection, removeRecent, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
+import { connKey, isSaved, manualRobot, sameRobot, recordConnection, removeRecent, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
 import { ChevronDown, ChevronUp, Clock, QrCode, Radar, Star, Wifi, WifiOff, X } from "lucide-react-native";
 import { router } from "expo-router";
 import { useState } from "react";
@@ -166,10 +166,11 @@ export default function Robot() {
     </>
   );
 
-  // Dedupe: a saved robot that's also being discovered shows under "Discovered" (where its star is
-  // filled), so here we only list saved robots that aren't currently on the network — the reason the
-  // Saved list exists (reconnect to something you can't see right now).
-  const savedOffline = saved.filter(s => !robots.some(d => connKey(d) === connKey(s)));
+  // Dedupe: a saved robot that's also being discovered shows under "Discovered", so here we only
+  // list saved robots that aren't currently on the network — the reason the Saved list exists
+  // (reconnect to something you can't see right now). Matched by serial too, so a robot saved
+  // under its Tailscale address is hidden while it is discovered on the LAN.
+  const savedOffline = saved.filter(s => !robots.some(d => sameRobot(d, s)));
 
   // Starred (saved) robots sort to the top of the discovered list, then alphabetically.
   const robotLabel = (r: typeof robots[number]) =>
@@ -216,7 +217,7 @@ export default function Robot() {
       ) : (
         <View>
           {sortedRobots.map((r) => (
-            <RobotCard key={r.serialNumber || r.ipAddress} robot={r} />
+            <RobotCard key={connKey(r)} robot={r} />
           ))}
         </View>
       )}

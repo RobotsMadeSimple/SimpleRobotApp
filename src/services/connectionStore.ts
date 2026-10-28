@@ -9,9 +9,23 @@ const SAVED_KEY     = "savedConnections";
 const LEGACY_IP_KEY = "lastManualIp";   // migrated into recents on first load
 const MAX_RECENTS   = 8;
 
-/** Stable identity for de-duping: serial when known, else ip:port. */
+/** Identity of a recent/saved entry: its address. The same robot reached over several addresses
+ *  (LAN, Tailscale, …) is one entry per address, so each can be starred or removed on its own.
+ *  Keying by serial made those entries collide (duplicate React keys, one star toggling both). */
 export function connKey(r: RobotInfo): string {
-  return (r.serialNumber && r.serialNumber.trim()) || `${r.ipAddress}:${r.port}`;
+  return `${r.ipAddress}:${r.port}`;
+}
+
+/** Same physical robot: matching serial when both know it, else the same address. */
+export function sameRobot(a: RobotInfo, b: RobotInfo): boolean {
+  const sa = a.serialNumber?.trim(), sb = b.serialNumber?.trim();
+  return (!!sa && sa === sb) || connKey(a) === connKey(b);
+}
+
+/** Drops later entries whose address repeats an earlier one (lists saved by older builds). */
+function dedupe(list: RobotInfo[]): RobotInfo[] {
+  const seen = new Set<string>();
+  return list.filter(r => { const k = connKey(r); if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 type Listener = () => void;
@@ -40,8 +54,8 @@ function ensureLoaded(): Promise<void> {
         AsyncStorage.getItem(SAVED_KEY),
         AsyncStorage.getItem(LEGACY_IP_KEY),
       ]);
-      recents = parse(r);
-      saved   = parse(s);
+      recents = dedupe(parse(r));
+      saved   = dedupe(parse(s));
       // One-time migration: fold the old single "last manual ip" into recents.
       if (legacy && !recents.some(x => x.ipAddress === legacy)) {
         recents = [manualRobot(legacy), ...recents].slice(0, MAX_RECENTS);
