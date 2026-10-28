@@ -67,6 +67,30 @@ const SCENARIOS = [
     },
   },
   {
+    // Move step → "Stop on Condition" add-row → card → one condition row (an ExpressionField).
+    name: "builder — MoveL stop-on-condition card",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Motion", { exact: false }); await sleep(400);
+      await tap(p, "Move Linear"); await sleep(900);
+      await tap(p, "Stop on Condition"); await sleep(400);
+      await p.getByLabel("Add condition").first().click({ force: true }); await sleep(400);
+    },
+  },
+  {
+    // Same card on an aux move (GripperAction), below its own fields.
+    name: "builder — Gripper stop-on-condition card",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "I/O & Aux Axes", { exact: false }); await sleep(400);
+      await tap(p, "Gripper"); await sleep(900);
+      await tap(p, "Stop on Condition"); await sleep(400);
+      await p.getByLabel("Add condition").first().click({ force: true }); await sleep(400);
+    },
+  },
+  {
     name: "builder — Add Variable modal",
     route: "/program/builder",
     open: async p => { await tap(p, "Add Variable"); await sleep(800); },

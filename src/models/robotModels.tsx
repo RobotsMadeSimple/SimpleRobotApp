@@ -67,6 +67,24 @@ export type IoDeviceState = DeviceFirmwareInfo & {
   pins: IoPinState[];
 };
 
+/**
+ * The identifier-safe form of a nano or pin name for use in an expression symbol.
+ *
+ * Expression identifiers are `[A-Za-z0-9_]` only, so a nano named "Arduino Nano" with a pin
+ * "Load Cell" cannot be typed as `$io.Arduino Nano.Load Cell`. The controller publishes every
+ * IO value under the raw name AND, when the name holds other characters, an alias with every
+ * run of such characters replaced by one `_` (`io.Arduino_Nano.Load_Cell`). This mirrors that
+ * rule exactly, so a symbol the app composes resolves on the controller.
+ */
+export function ioSymbolName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]+/g, "_");
+}
+
+/** The `$io.<nano>.<pin>` expression symbol for an IO pin — a load cell reads in grams. */
+export function ioPinSymbol(nanoName: string, pinName: string): string {
+  return `$io.${ioSymbolName(nanoName)}.${ioSymbolName(pinName)}`;
+}
+
 export type NeoPixelColor = { r: number; g: number; b: number };
 
 // ── IO value history / recordings ──────────────────────────────────────────────
@@ -1146,6 +1164,26 @@ export type ProgramStep = {
   forceApproachSpeed?: number;
   forceHoldMs?: number;
   forceTimeoutMs?: number;
+  // Stop / record on condition — optional on move steps (MoveL, MoveJ, JumpL, JumpJ, AuxMove,
+  // GripperAction). The condition is evaluated every executor tick while the move is in flight;
+  // null/empty = feature off. A force limit is just `$io.<nano>.<loadcell> >= <grams>` (load cells
+  // read in grams; see ioPinSymbol()).
+  moveStopCondition?: ConditionGroup;
+  /**
+   * `stop` (default): the move ends where it is the first time the condition is true and the
+   * program continues with the next step. `record`: the move runs to its target; only the
+   * position at the first true evaluation is captured.
+   */
+  moveStopMode?: 'stop' | 'record';
+  /**
+   * Where to write the position at the moment the condition first became true. Robot moves: a
+   * Points list variable, replaced with exactly one element (the live robot position, so
+   * `$var[0]` reads it). Aux moves: a numeric variable receiving the axis position in its
+   * physical unit, or raw steps when the axis has no unit.
+   */
+  moveStopPositionVariableName?: string;
+  /** Numeric/boolean variable set when the move completes: 1 if the condition fired, 0 if not. */
+  moveStopFlagVariableName?: string;
   waitMs?: number;
   loopCount?: number;
   loopSteps?: ProgramStep[];

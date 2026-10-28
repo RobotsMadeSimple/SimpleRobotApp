@@ -129,6 +129,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
         hasToolOff  ? "toolOffset" : null,
         hasOffset   ? "offset"     : null,
         hasOverride ? "override"   : null,
+        moveStopTag(step),
       ].filter(Boolean).join("  ");
       const base = step.gridPoint
         ? `${step.type}  →  Grid Point`
@@ -222,15 +223,17 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
     case "AuxMove": {
       const axis = step.auxAxisIndex ?? 0;
       const isAbs = step.auxAbsolute;
+      const tag = moveStopTag(step);
+      const withTag = (label: string) => tag ? `${label}  (${tag})` : label;
       if (step.auxUnit && step.auxDistance != null) {
         const val = isAbs ? `→ ${step.auxDistance}` : (step.auxDistance >= 0 ? `+${step.auxDistance}` : `${step.auxDistance}`);
-        return `Aux Move  ·  Axis ${axis}  ·  ${val} ${step.auxUnit}`;
+        return withTag(`Aux Move  ·  Axis ${axis}  ·  ${val} ${step.auxUnit}`);
       }
       if (step.auxSteps != null) {
         const val = isAbs ? `→ ${step.auxSteps}` : (step.auxSteps >= 0 ? `+${step.auxSteps}` : `${step.auxSteps}`);
-        return `Aux Move  ·  Axis ${axis}  ·  ${val} steps`;
+        return withTag(`Aux Move  ·  Axis ${axis}  ·  ${val} steps`);
       }
-      return `Aux Move  ·  Axis ${axis}`;
+      return withTag(`Aux Move  ·  Axis ${axis}`);
     }
     case "AuxContinuous":
       return `Aux Run  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s`;
@@ -241,7 +244,8 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
     case "GripperAction": {
       const ga = step.gripperAction ?? "Open";
       const detail = ga === "GripTo" ? `Grip to ${step.gripTargetMm ?? "?"} mm` : ga;
-      return `Gripper  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${detail}`;
+      const tag = moveStopTag(step);
+      return `Gripper  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${detail}${tag ? `  (${tag})` : ""}`;
     }
     case "ConveyorAction": {
       const a = step.conveyorAction ?? "RunForward";
@@ -416,6 +420,27 @@ export function fmtMoveModifiers(step: ProgramStep): string[] {
   ].filter(Boolean) as string[];
 }
 
+/**
+ * A move step's optional stop condition as one detail line:
+ * `stop when  $io.Nano.Load_Cell >= 2000  → $contact  fired → $hit`, or `record when …`.
+ * Null when the step has none.
+ */
+export function fmtMoveStop(step: ProgramStep): string | null {
+  const g = step.moveStopCondition;
+  if (!g) return null;
+  const verb = step.moveStopMode === "record" ? "record when" : "stop when";
+  const parts = [`${verb}  ${conditionGroupText(g)}`];
+  if (step.moveStopPositionVariableName) parts.push(`→ $${step.moveStopPositionVariableName}`);
+  if (step.moveStopFlagVariableName)     parts.push(`fired → $${step.moveStopFlagVariableName}`);
+  return parts.join("  ");
+}
+
+/** Short label suffix for a move step with a stop condition — "stop on condition" / "record on condition". */
+export function moveStopTag(step: ProgramStep): string | null {
+  if (!step.moveStopCondition) return null;
+  return step.moveStopMode === "record" ? "record on condition" : "stop on condition";
+}
+
 // ── fmtSetVar (needed by stepDetail and stepLabel) ────────────────────────────
 
 export function fmtSetVar(varName: string | undefined, expr: string | undefined): string {
@@ -497,6 +522,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.type === "MoveL" && step.blend)
         lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
+      const stopLine = fmtMoveStop(step);
+      if (stopLine) lines.push(stopLine);
       return lines.join('\n');
     }
     case "JumpL":
@@ -521,6 +548,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.type === "JumpL" && step.blend)
         lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
+      const stopLine = fmtMoveStop(step);
+      if (stopLine) lines.push(stopLine);
       return lines.join('\n');
     }
     case "SetOutput": {
@@ -645,7 +674,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       parts.push(step.auxAbsolute ? "absolute" : "relative");
       if (step.auxVelocity != null) parts.push(`${step.auxVelocity} ${unit}/s`);
       if (step.auxWaitForDone === false) parts.push("no wait");
-      return parts.join("  ·  ");
+      const stopLine = fmtMoveStop(step);
+      return stopLine ? `${parts.join("  ·  ")}\n${stopLine}` : parts.join("  ·  ");
     }
     case "AuxContinuous":
       return `Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s  (continuous)`;
@@ -655,7 +685,9 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.auxEnable === false ? "Disable motor drivers" : "Enable motor drivers";
     case "GripperAction": {
       const ga = step.gripperAction ?? "Open";
-      return ga === "GripTo" ? `Gripper · grip to ${step.gripTargetMm ?? "?"} mm` : `Gripper · ${ga}`;
+      const line = ga === "GripTo" ? `Gripper · grip to ${step.gripTargetMm ?? "?"} mm` : `Gripper · ${ga}`;
+      const stopLine = fmtMoveStop(step);
+      return stopLine ? `${line}\n${stopLine}` : line;
     }
     case "ConveyorAction": {
       const a = step.conveyorAction ?? "RunForward";

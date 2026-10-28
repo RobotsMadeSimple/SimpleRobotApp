@@ -35,6 +35,7 @@ import {
   VisionStepOutput,
   auxStepsPerUnit,
   auxUnitLabel,
+  ioPinSymbol,
   isAssignableVariable,
   isListVariable,
   isPointListVariable,
@@ -58,7 +59,7 @@ import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { colors, radii, accents } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
-import { STEP_THEME } from "./stepUtils";
+import { STEP_THEME, newId } from "./stepUtils";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
@@ -147,6 +148,8 @@ export function StepConfigModal({
   const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
   const [threadPresetPickerOpen, setThreadPresetPickerOpen] = useState(false);
   const [waitTimeoutVarPicker,  setWaitTimeoutVarPicker]  = useState(false);
+  const [moveStopPosVarPicker,  setMoveStopPosVarPicker]  = useState(false);
+  const [moveStopFlagVarPicker, setMoveStopFlagVarPicker] = useState(false);
   const [loopIndexVarPicker,    setLoopIndexVarPicker]    = useState(false);
   const [forEachSourcePicker,   setForEachSourcePicker]   = useState(false);
   const [forEachValuePicker,    setForEachValuePicker]    = useState(false);
@@ -181,17 +184,26 @@ export function StepConfigModal({
   useEffect(() => {
     if (!visible) return;
     const adjust = (kbTop: number) => {
-      const focused: any = (TextInput as any).State?.currentlyFocusedInput?.();
+      // Native exposes currentlyFocusedInput() (a host component with measureInWindow); react-native-web
+      // only has currentlyFocusedField(), which hands back the DOM node — measure that with its rect.
+      const state: any = (TextInput as any).State;
+      const focused: any = state?.currentlyFocusedInput?.() ?? state?.currentlyFocusedField?.();
       const sv = bodyScrollRef.current;
-      if (!focused || !sv || typeof focused.measureInWindow !== "function") return;
-      focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => {
+      if (!focused || !sv) return;
+      const clear = (y: number, ht: number) => {
         if (typeof y !== "number") return;
         // Scroll the focused field — plus the live-value line + "＋ Insert" chip it renders beneath
         // itself when focused — clear of the keyboard's top. The footer stays fixed behind the
         // keyboard, so it is no longer the occluder; only the keyboard is.
         const overlap = (y + ht + 72) - kbTop;
         if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
-      });
+      };
+      if (typeof focused.measureInWindow === "function") {
+        focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => clear(y, ht));
+      } else if (typeof focused.getBoundingClientRect === "function") {
+        const r = focused.getBoundingClientRect();
+        clear(r.top, r.height);
+      }
     };
     // One keyboard signal for native and the web mock keyboard, so the Playwright keyboard
     // audit exercises this exact scroll-clear logic.
@@ -364,6 +376,137 @@ export function StepConfigModal({
           <Text style={ms.subRowValue} numberOfLines={1}>{value}</Text>
         </TouchableOpacity>
         <DeleteIconButton onPress={() => setClearConfirm(page)} size={16} style={{ padding: 4 }} />
+      </View>
+    );
+  };
+
+  // ── Stop / record on condition (move steps) ───────────────────────────────
+  // Optional on MoveL/MoveJ/JumpL/JumpJ/AuxMove/GripperAction. Unset: a dashed "Add …" row like
+  // the blend row. Set: a card holding the condition editor, the stop/record mode and the two
+  // optional variable targets; its × clears all four wire fields at once. What the position
+  // variable may be depends on the step: a Points list for a robot move (the live pose, one
+  // element), a plain number for an aux move (the axis position).
+  const moveStopIsAux = draft.type === "AuxMove" || draft.type === "GripperAction";
+  const moveStopPosVars = moveStopIsAux
+    ? (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage && !v.isBoolean && !v.isStopwatch)
+    : (variables ?? []).filter(isPointListVariable);
+  const moveStopFlagVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage && !v.isStopwatch);
+  // Named load cells on named nanos — the only pins the controller publishes as `io.<nano>.<pin>`.
+  const loadCellChips = (ioDevices ?? []).flatMap(n => !n.name ? [] :
+    (n.pins ?? []).filter(p => p.type === "LoadCell" && !!p.name)
+      .map(p => ({ key: `${n.id}/${p.pin}`, nano: n.name, pin: p.name })));
+  const clearMoveStop = () => set({
+    moveStopCondition: undefined, moveStopMode: undefined,
+    moveStopPositionVariableName: undefined, moveStopFlagVariableName: undefined,
+  });
+
+  // "$ [name ▾] ×" — the same variable-target row the Wait step's timeout flag uses.
+  const varTargetRow = (value: string | undefined, label: string, onOpen: () => void, onClear: () => void) => (
+    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+      <Text style={{ fontSize: 13, color: accents.purple, fontWeight: "600", marginRight: 6 }}>$</Text>
+      <TouchableOpacity style={[ms.input, { flex: 1, justifyContent: "center" }]} onPress={onOpen} activeOpacity={0.7}
+        accessibilityRole="button" accessibilityLabel={label}>
+        <Text style={{ color: value ? colors.text : colors.textFaint, fontSize: 14 }}>{value ?? "none"}</Text>
+      </TouchableOpacity>
+      {value && (
+        <TouchableOpacity onPress={onClear} hitSlop={8} style={{ marginLeft: 8 }} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel={`Clear ${label}`}>
+          <X size={14} color={colors.textFaint} />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  const moveStopCard = () => {
+    const cond = draft.moveStopCondition;
+    if (!cond) {
+      return (
+        <TouchableOpacity style={ms.modRowAdd} activeOpacity={0.7}
+          onPress={() => set({ moveStopCondition: { combinator: "ALL", items: [] } })}
+          accessibilityRole="button" accessibilityLabel="Stop on Condition">
+          <Plus size={15} color={colors.textFaint} />
+          <Text style={ms.modAddText}>Stop on Condition</Text>
+        </TouchableOpacity>
+      );
+    }
+    const mode = draft.moveStopMode ?? "stop";
+    const addRow = (expr: string) =>
+      set({ moveStopCondition: { ...cond, items: [...(cond.items ?? []), { id: newId(), expr }] } });
+    return (
+      <View style={ms.modCard}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <Text style={ms.subRowLabel}>Stop or Record on Condition</Text>
+            <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+              Checked continuously while this move is in flight.
+            </Text>
+          </View>
+          {/* The × clears the condition, mode and both variable targets. */}
+          <DeleteIconButton size={16} style={{ padding: 4 }} onPress={clearMoveStop} />
+        </View>
+        {draft.type === "AuxMove" && draft.auxWaitForDone === false && (
+          <Text style={[ms.hintText, { color: colors.warning }]}>
+            {"Only applies while the step waits for the move — turn \"Wait until move completes\" on."}
+          </Text>
+        )}
+        <Text style={[ms.fieldLabel, { marginTop: 10 }]}>CONDITION</Text>
+        <ConditionGroupEditor
+          group={cond}
+          onChange={g => set({ moveStopCondition: g })}
+          variables={variables}
+          contextVariables={contextVariables}
+        />
+        {loadCellChips.length > 0 && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {loadCellChips.map(c => (
+              <TouchableOpacity key={c.key} style={stopCond.chip} activeOpacity={0.7}
+                onPress={() => addRow(`${ioPinSymbol(c.nano, c.pin)} >= 1000`)}
+                accessibilityRole="button" accessibilityLabel={`Add force limit on ${c.pin}`}>
+                <Plus size={12} color={accents.cyan} />
+                <Text style={stopCond.chipText}>{`Force ≥ … on ${c.pin}`}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+        <Text style={ms.hintText}>{"Force limit: $io.<nano>.<load cell> >= grams. Load cells read in grams."}</Text>
+
+        <Text style={[ms.fieldLabel, { marginTop: 12 }]}>MODE</Text>
+        <View style={ms.segRow}>
+          {([{ label: "Stop here", val: "stop" }, { label: "Record position", val: "record" }] as const).map(({ label, val }) => {
+            const active = mode === val;
+            return (
+              <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                onPress={() => set({ moveStopMode: val })} activeOpacity={0.8}>
+                <Text style={[ms.segText, active && ms.segTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={ms.hintText}>
+          {mode === "stop"
+            ? "The move ends where it is the first time the condition is true; the next step runs right away."
+            : "The move carries on to its target; only the position at the first true evaluation is captured."}
+        </Text>
+
+        <Text style={[ms.fieldLabel, { marginTop: 12 }]}>RECORD POSITION VARIABLE  (optional)</Text>
+        <Text style={ms.hintText}>
+          {moveStopIsAux
+            ? "Numeric variable that receives the axis position (mm or deg, or raw steps) when the condition fires."
+            : "Points list variable replaced with the robot position when the condition fires — read it as $var[0]."}
+        </Text>
+        {moveStopPosVars.length === 0
+          ? <Text style={[ms.hintText, { fontStyle: "italic" }]}>
+              {moveStopIsAux ? "No numeric variables yet — add one under Variables." : "No Points list variables yet — add one under Variables."}
+            </Text>
+          : varTargetRow(draft.moveStopPositionVariableName, "Record position variable",
+              () => setMoveStopPosVarPicker(true), () => set({ moveStopPositionVariableName: undefined }))}
+
+        <Text style={[ms.fieldLabel, { marginTop: 12 }]}>FIRED FLAG VARIABLE  (optional)</Text>
+        <Text style={ms.hintText}>Set to 1 if the condition fired during the move, 0 if not.</Text>
+        {moveStopFlagVars.length === 0
+          ? <Text style={[ms.hintText, { fontStyle: "italic" }]}>No numeric or boolean variables yet — add one under Variables.</Text>
+          : varTargetRow(draft.moveStopFlagVariableName, "Fired flag variable",
+              () => setMoveStopFlagVarPicker(true), () => set({ moveStopFlagVariableName: undefined }))}
       </View>
     );
   };
@@ -899,6 +1042,7 @@ export function StepConfigModal({
                 </View>
               )
             )}
+            {moveStopCard()}
           </>
         );
       }
@@ -969,6 +1113,7 @@ export function StepConfigModal({
                 )}
               </View>
             )}
+            {moveStopCard()}
           </>
         );
       }
@@ -2646,6 +2791,7 @@ export function StepConfigModal({
               When on, the program waits for the aux move to finish before the next step.
               When off, the robot and aux axis can move simultaneously.
             </Text>
+            <View style={{ marginTop: 14 }}>{moveStopCard()}</View>
           </>
         );
       }
@@ -2993,6 +3139,7 @@ export function StepConfigModal({
                 Open and Close drive to the configured gap limits; Grip to drives to the gap above.
                 Speed and accel fall back to the gripper's configured open/close time when left blank.
               </Text>
+              <View style={{ marginTop: 14 }}>{moveStopCard()}</View>
             </>
           );
         }
@@ -4146,6 +4293,26 @@ export function StepConfigModal({
         set({ arucoOutputs: next });
       }}
     />
+    <VarPickerModal
+      filter={isAssignableVariable}
+      visible={moveStopPosVarPicker}
+      onClose={() => setMoveStopPosVarPicker(false)}
+      variables={moveStopPosVars}
+      selected={draft?.moveStopPositionVariableName}
+      title="Record Position Variable"
+      showNone
+      onSelect={v => { set({ moveStopPositionVariableName: v?.name }); setMoveStopPosVarPicker(false); }}
+    />
+    <VarPickerModal
+      filter={isAssignableVariable}
+      visible={moveStopFlagVarPicker}
+      onClose={() => setMoveStopFlagVarPicker(false)}
+      variables={moveStopFlagVars}
+      selected={draft?.moveStopFlagVariableName}
+      title="Fired Flag Variable"
+      showNone
+      onSelect={v => { set({ moveStopFlagVariableName: v?.name }); setMoveStopFlagVarPicker(false); }}
+    />
     <VariableEditModal
       visible={captureVarCreateOpen}
       variable={null}
@@ -4161,4 +4328,12 @@ export function StepConfigModal({
   );
 }
 
-
+// Load-cell shortcut chips on the stop-condition card — cyan, the condition editor's accent.
+const stopCond = StyleSheet.create({
+  chip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+    borderWidth: 1, borderColor: "#bae6fd", backgroundColor: colors.accentSoft,
+  },
+  chipText: { fontSize: 12, fontWeight: "600", color: accents.cyan },
+});
