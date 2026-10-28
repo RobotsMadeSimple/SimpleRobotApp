@@ -1,4 +1,5 @@
-import { BuiltProgram, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { BuiltProgram, IoDeviceState, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { migrateLegacySteps } from "@/src/models/programMigrations";
 import { ScopeFrame, newId } from "./stepUtils";
 
 /**
@@ -37,12 +38,15 @@ export function rehydrateIds(src: ProgramStep[]): ProgramStep[] {
   }));
 }
 
-/** The editable document for a stored program. */
-export function docFromProgram(p: BuiltProgram, overrides?: Partial<EditorDoc>): EditorDoc {
+/**
+ * The editable document for a stored program. `ioDevices` lets steps whose block was removed
+ * (Move with Force) open as their modern equivalent — see programMigrations.ts.
+ */
+export function docFromProgram(p: BuiltProgram, overrides?: Partial<EditorDoc>, ioDevices: IoDeviceState[] = []): EditorDoc {
   return {
     name:                 p.name,
     description:          p.description ?? "",
-    steps:                rehydrateIds(p.steps ?? []),
+    steps:                migrateLegacySteps(rehydrateIds(p.steps ?? []), ioDevices),
     variables:            p.variables ?? [],
     isRoutine:            p.isRoutine ?? false,
     isBackground:         p.isBackground ?? false,

@@ -355,7 +355,9 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   SetOutput:    { accent: "#ea580c", iconBg: "#fed7aa", iconColor: "#ea580c", label: "Set Output"   },
   Tare:         { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Tare Load Cell" },
   ReadLoadCell: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Read Load Cell" },
-  MoveWithForce:{ accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Move with Force" },
+  // Removed from the picker: a stop condition on a normal move replaced it. Still rendered so a
+  // saved step that could not be converted (see programMigrations.ts) shows up and can be replaced.
+  MoveWithForce:{ accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Move with Force (legacy)" },
   StartRecording:{ accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Start Recording" },
   StopRecording: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Stop Recording" },
   ExportData:    { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Export Data" },
@@ -874,7 +876,6 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "SetOutput",    label: "Set Output",    desc: "Turn a digital output ON or OFF" },
   { type: "Tare",         label: "Tare Load Cell", desc: "Zero a load cell (set its current reading to 0)" },
   { type: "ReadLoadCell", label: "Read Load Cell", desc: "Read a load cell's weight into a variable" },
-  { type: "MoveWithForce", label: "Move with Force", desc: "Press in a direction and hold a target contact force (load cell)" },
   { type: "StartRecording", label: "Start Recording", desc: "Record a load cell into a list variable" },
   { type: "StopRecording", label: "Stop Recording", desc: "Stop recording and store the captured samples into its list variable" },
   { type: "ExportData", label: "Export Data", desc: "Write variables to a CSV or JSON file (configurable columns; $variable / $time_ms in the path)" },
@@ -954,7 +955,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "MoveWithForce", "RunHoming", "SetJointPosition", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,

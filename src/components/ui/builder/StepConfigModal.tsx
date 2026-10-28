@@ -60,6 +60,7 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { colors, radii, accents } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
 import { STEP_THEME, fmtMoveStop, newId } from "./stepUtils";
+import { legacyForceMoveToMoveL } from "@/src/models/programMigrations";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
@@ -251,8 +252,12 @@ export function StepConfigModal({
     if (step) {
       // varPointName/varPointIndex were a separate tab before point targets merged into
       // one expression. Fold them into the equivalent pointNameExpr so the merged field
-      // shows them; the rewrite only persists if the user saves.
-      const migrated = step.varPointName
+      // shows them; the rewrite only persists if the user saves. A legacy Move with Force
+      // that the load-time migration could not convert (IO devices not known yet) gets
+      // another go here, for the same reason.
+      const migrated = step.type === "MoveWithForce"
+        ? (legacyForceMoveToMoveL(step, ioDevices) ?? { ...step })
+        : step.varPointName
         ? { ...step,
             pointNameExpr: `$${step.varPointName}[${step.varPointIndex ?? "0"}]`,
             varPointName: undefined,
@@ -1090,90 +1095,20 @@ export function StepConfigModal({
       }
 
       case "MoveWithForce": {
-        const lcIoDevices = ioDevices ?? [];
-        const nid = draft!.loadCellDeviceId
-          ?? lcIoDevices.find(n => (n.pins ?? []).some(p => p.type === "LoadCell"))?.id
-          ?? lcIoDevices[0]?.id;
-        const lcPins = (lcIoDevices.find(n => n.id === nid)?.pins ?? []).filter(p => p.type === "LoadCell");
-        const axis = draft!.forceAxis ?? "Z";
-        const dir = draft!.forceDirection ?? -1;
-        const numField = (label: string, value: number | undefined, onChange: (n: number | undefined) => void, placeholder: string) => (
-          <>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{label}</Text>
-            <TextInput style={ms.input} keyboardType="numeric"
-              value={value != null ? String(value) : ""}
-              onChangeText={v => onChange(v.trim() === "" ? undefined : Number(v))}
-              placeholder={placeholder} placeholderTextColor={colors.textFaint} />
-          </>
-        );
+        // Only reached when the load-time migration could not convert the step: its load cell is
+        // not a named load cell on a named nano (so no expression can read it) or it has no target.
+        const axis = (draft!.forceAxis ?? "Z").toUpperCase();
+        const dir = (draft!.forceDirection ?? -1) < 0 ? "−" : "+";
         return (
-          <>
-            {lcIoDevices.length > 1 && (
-              <>
-                <Text style={ms.fieldLabel}>NANO DEVICE</Text>
-                <View style={ms.segRow}>
-                  {lcIoDevices.map(n => {
-                    const active = nid === n.id;
-                    return (
-                      <TouchableOpacity key={n.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                        onPress={() => set({ loadCellDeviceId: n.id, loadCellPin: undefined })} activeOpacity={0.8}>
-                        <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{n.name || n.id}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </>
-            )}
-            <Text style={lcIoDevices.length > 1 ? [ms.fieldLabel, { marginTop: 12 }] : ms.fieldLabel}>LOAD CELL (FORCE SOURCE)</Text>
-            {lcPins.length === 0 ? (
-              <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No load cells configured on this Nano — add one on the I/O page.</Text>
-            ) : (
-              <View style={ms.segRow}>
-                {lcPins.map(p => {
-                  const active = draft!.loadCellPin === p.pin;
-                  return (
-                    <TouchableOpacity key={p.pin} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                      onPress={() => set({ loadCellDeviceId: nid, loadCellPin: p.pin })} activeOpacity={0.8}>
-                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{p.name || `Pin ${p.pin}`}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>AXIS</Text>
-            <View style={ms.segRow}>
-              {(["X", "Y", "Z", "RX", "RY", "RZ"] as const).map(a => {
-                const active = axis === a;
-                return (
-                  <TouchableOpacity key={a} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ forceAxis: a })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]}>{a}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>DIRECTION</Text>
-            <View style={ms.segRow}>
-              {([{ v: 1, l: `${axis}+` }, { v: -1, l: `${axis}−` }]).map(({ v, l }) => {
-                const active = dir === v;
-                return (
-                  <TouchableOpacity key={v} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
-                    onPress={() => set({ forceDirection: v })} activeOpacity={0.8}>
-                    <Text style={[ms.segText, active && ms.segTextActive]}>{l}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {numField("TARGET FORCE (grams)", draft!.forceTargetGrams, n => set({ forceTargetGrams: n }), "500")}
-            {numField("TOLERANCE (grams)", draft!.forceToleranceGrams, n => set({ forceToleranceGrams: n }), "20")}
-            {numField("MAX TRAVEL (mm)", draft!.forceMaxTravelMm, n => set({ forceMaxTravelMm: n }), "10")}
-            {numField("APPROACH SPEED (mm/s)", draft!.forceApproachSpeed, n => set({ forceApproachSpeed: n }), "5")}
-            {numField("HOLD TIME (ms, 0 = reach then finish)", draft!.forceHoldMs, n => set({ forceHoldMs: n !== undefined ? Math.round(n) : undefined }), "0")}
-            {numField("TIMEOUT (ms)", draft!.forceTimeoutMs, n => set({ forceTimeoutMs: n !== undefined ? Math.round(n) : undefined }), "20000")}
-            <Text style={[ms.hintText, { marginTop: 10 }]}>
-              {`Presses along ${axis}${dir < 0 ? "−" : "+"} until ${draft!.forceTargetGrams ?? 0} g of contact force, then holds it. Stops on max travel or timeout for safety, and backs off if the force runs over. Use 80 SPS on the load cell for smooth holding.`}
+          <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: radii.sm, marginTop: 8 }}>
+            <Text style={{ fontSize: 14, color: "#92400e", fontWeight: "600", marginBottom: 6 }}>
+              Move with Force was replaced
             </Text>
-          </>
+            <Text style={{ fontSize: 13, color: "#78350f", lineHeight: 19 }}>
+              {`A normal move with a Stop on Condition does this now. This step (press ${axis}${dir} until ${draft!.forceTargetGrams ?? 0} g) could not be converted automatically because its load cell is not a named load cell on a named nano, or it has no target force.`}
+              {"\n\n"}{"Name the load cell on the I/O page and reopen this step, or delete it and add a Move Linear from the current position with an offset along the axis and the condition $io.<nano>.<load cell> >= grams. Until then the robot still runs it as before."}
+            </Text>
+          </View>
         );
       }
       case "Tare":
