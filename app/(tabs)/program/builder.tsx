@@ -2,7 +2,7 @@ import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { useBuiltPrograms, useConnected, useIoDevices, usePoints } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, usePoints } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { BuiltProgram, ListElementType, PluginStepContribution, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
@@ -132,8 +132,6 @@ export default function BuilderScreen() {
   // Plugin steps/functions for the picker, config form and step labels; refetched on reconnect.
   usePluginContributions(connected);
   const points        = usePoints();
-  // Lets a loaded program's removed blocks (Move with Force) open as their modern equivalent.
-  const ioDevices     = useIoDevices();
   const paneLayout    = usePaneLayout();
   const isWide        = paneLayout !== "single";
   const isSplit       = paneLayout === "split";
@@ -149,7 +147,7 @@ export default function BuilderScreen() {
   // way to change it, and every one routes through history.commit.
   const history = useDocumentHistory<EditorDoc>(() => {
     const isRoutine = isRoutineParam === "1" || existing?.isRoutine === true;
-    return existing ? docFromProgram(existing, { isRoutine }, ioDevices) : { ...EMPTY_DOC, isRoutine };
+    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine };
   }, { limit: 100 });
   const { doc, commit } = history;
   const {
@@ -196,7 +194,7 @@ export default function BuilderScreen() {
     ]).then(([programs, img]) => {
       const prog = programs.find(p => p.name === editName);
       if (prog) {
-        const loaded = docFromProgram(prog, undefined, ioDevices);
+        const loaded = docFromProgram(prog);
         history.reset(loaded);
         markSaved(loaded);
         if (prog.id) setProgramId(prog.id);
@@ -218,7 +216,7 @@ export default function BuilderScreen() {
   // edit: it replaces the history and becomes the saved state.
   useEffect(() => {
     if (existing) {
-      const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true }, ioDevices);
+      const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true });
       history.reset(loaded);
       markSaved(loaded);
     }
@@ -1026,7 +1024,7 @@ export default function BuilderScreen() {
   // A restore is saved on the robot already, so it becomes the saved state, and
   // it is committed like any edit so Undo brings back what was here before.
   function applyRestoredRevision(program: BuiltProgram) {
-    const restored = docFromProgram(program, { isRoutine: program.isRoutine ?? isRoutineMode }, ioDevices);
+    const restored = docFromProgram(program, { isRoutine: program.isRoutine ?? isRoutineMode });
     exitSelect();
     setScopeStack([]);
     commit(restored);

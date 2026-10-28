@@ -60,7 +60,6 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { colors, radii, accents } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
 import { STEP_THEME, fmtMoveStop, newId } from "./stepUtils";
-import { legacyForceMoveToMoveL } from "@/src/models/programMigrations";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
@@ -257,12 +256,8 @@ export function StepConfigModal({
     if (step) {
       // varPointName/varPointIndex were a separate tab before point targets merged into
       // one expression. Fold them into the equivalent pointNameExpr so the merged field
-      // shows them; the rewrite only persists if the user saves. A legacy Move with Force
-      // that the load-time migration could not convert (IO devices not known yet) gets
-      // another go here, for the same reason.
-      const migrated = step.type === "MoveWithForce"
-        ? (legacyForceMoveToMoveL(step, ioDevices) ?? { ...step })
-        : step.varPointName
+      // shows them; the rewrite only persists if the user saves.
+      const migrated = step.varPointName
         ? { ...step,
             pointNameExpr: `$${step.varPointName}[${step.varPointIndex ?? "0"}]`,
             varPointName: undefined,
@@ -1093,23 +1088,6 @@ export function StepConfigModal({
         );
       }
 
-      case "MoveWithForce": {
-        // Only reached when the load-time migration could not convert the step: its load cell is
-        // not a named load cell on a named nano (so no expression can read it) or it has no target.
-        const axis = (draft!.forceAxis ?? "Z").toUpperCase();
-        const dir = (draft!.forceDirection ?? -1) < 0 ? "−" : "+";
-        return (
-          <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: radii.sm, marginTop: 8 }}>
-            <Text style={{ fontSize: 14, color: "#92400e", fontWeight: "600", marginBottom: 6 }}>
-              Move with Force was replaced
-            </Text>
-            <Text style={{ fontSize: 13, color: "#78350f", lineHeight: 19 }}>
-              {`A normal move with a Stop on Condition does this now. This step (press ${axis}${dir} until ${draft!.forceTargetGrams ?? 0} g) could not be converted automatically because its load cell is not a named load cell on a named nano, or it has no target force.`}
-              {"\n\n"}{"Name the load cell on the I/O page and reopen this step, or delete it and add a Move Linear from the current position with an offset along the axis and the condition $io.<nano>.<load cell> >= grams. Until then the robot still runs it as before."}
-            </Text>
-          </View>
-        );
-      }
       case "Tare":
       case "ReadLoadCell": {
         const lcIoDevices = ioDevices ?? [];

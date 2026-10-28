@@ -527,7 +527,7 @@ export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'MoveWithForce' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -1151,19 +1151,10 @@ export type ProgramStep = {
   outputDeviceId?: string;   // only for nano
   pulseMs?: number;        // >0 = pulse; set to outputValue for pulseMs then flip
   pulseBlocking?: boolean; // when true, block program execution until pulse completes
-  // Load cell (Tare, ReadLoadCell, MoveWithForce)
+  // Load cell (Tare, ReadLoadCell)
   loadCellDeviceId?: string;
   loadCellPin?: number;
   loadCellUnit?: string;   // ReadLoadCell: unit to store (default grams)
-  // Move with force
-  forceAxis?: string;              // X/Y/Z/RX/RY/RZ
-  forceDirection?: number;         // +1 / -1
-  forceTargetGrams?: number;
-  forceToleranceGrams?: number;
-  forceMaxTravelMm?: number;
-  forceApproachSpeed?: number;
-  forceHoldMs?: number;
-  forceTimeoutMs?: number;
   // Stop / record on condition — optional on move steps (MoveL, MoveJ, JumpL, JumpJ, AuxMove,
   // GripperAction). The condition is evaluated every executor tick while the move is in flight;
   // null/empty = feature off. A force limit is just `$io.<nano>.<loadcell> >= <grams>` (load cells

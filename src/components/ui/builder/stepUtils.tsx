@@ -10,7 +10,6 @@ import {
   Clock,
   Cpu,
   Brackets,
-  ArrowDownToLine,
   Gauge,
   Scale,
   Globe,
@@ -155,8 +154,6 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return `Tare Load Cell${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}`;
     case "ReadLoadCell":
       return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `  (${step.loadCellUnit})` : ""}`;
-    case "MoveWithForce":
-      return `Move with Force  ${step.forceAxis ?? "Z"}${(step.forceDirection ?? -1) < 0 ? "−" : "+"}  →  ${step.forceTargetGrams ?? 0} g`;
     case "StartRecording":
       return `Start Recording${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}  →  $${step.recordVariableName ?? "?"}`;
     case "StopRecording":
@@ -300,7 +297,6 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "SetOutput":    return <Zap           size={size} color={color} />;
     case "Tare":         return <Scale         size={size} color={color} />;
     case "ReadLoadCell": return <Gauge         size={size} color={color} />;
-    case "MoveWithForce":return <ArrowDownToLine size={size} color={color} />;
     case "StartRecording": return <Circle      size={size} color={color} />;
     case "StopRecording":  return <Square      size={size} color={color} />;
     case "ExportData":     return <FileDown    size={size} color={color} />;
@@ -355,9 +351,6 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   SetOutput:    { accent: "#ea580c", iconBg: "#fed7aa", iconColor: "#ea580c", label: "Set Output"   },
   Tare:         { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Tare Load Cell" },
   ReadLoadCell: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Read Load Cell" },
-  // Removed from the picker: a stop condition on a normal move replaced it. Still rendered so a
-  // saved step that could not be converted (see programMigrations.ts) shows up and can be replaced.
-  MoveWithForce:{ accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Move with Force (legacy)" },
   StartRecording:{ accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Start Recording" },
   StopRecording: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Stop Recording" },
   ExportData:    { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Export Data" },
@@ -569,12 +562,6 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return `Tare Load Cell${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
     case "ReadLoadCell":
       return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `\nunit: ${step.loadCellUnit}` : ""}`;
-    case "MoveWithForce": {
-      const lines = [`Press ${step.forceAxis ?? "Z"}${(step.forceDirection ?? -1) < 0 ? "−" : "+"}  →  ${step.forceTargetGrams ?? 0} g`];
-      if (step.forceHoldMs) lines.push(`hold ${step.forceHoldMs} ms`);
-      if (step.forceMaxTravelMm) lines.push(`max travel ${step.forceMaxTravelMm} mm`);
-      return lines.join('\n');
-    }
     case "StartRecording":
       return `Start Recording  →  $${step.recordVariableName ?? "?"}${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
     case "StopRecording":
