@@ -67,8 +67,30 @@ const SCENARIOS = [
     },
   },
   {
-    // Move step → "Stop on Condition" add-row → card → one condition row (an ExpressionField).
-    name: "builder — MoveL stop-on-condition card",
+    // Move step → "Blend Into Next Move" add-row → sub-page with the blend radius field.
+    name: "builder — MoveL blend sub-page",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Motion", { exact: false }); await sleep(400);
+      await tap(p, "Move Linear"); await sleep(900);
+      await tap(p, "Blend Into Next Move"); await sleep(400);
+    },
+  },
+  {
+    // Jump step → "Blend Apex Corners" add-row → the same blend sub-page.
+    name: "builder — JumpL blend sub-page",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Motion", { exact: false }); await sleep(400);
+      await tap(p, "Jump Linear"); await sleep(900);
+      await tap(p, "Blend Apex Corners"); await sleep(400);
+    },
+  },
+  {
+    // Move step → "Stop on Condition" add-row → sub-page → one condition row (an ExpressionField).
+    name: "builder — MoveL stop-on-condition sub-page",
     route: "/program/builder",
     open: async p => {
       await tap(p, "Add Step"); await sleep(600);
@@ -79,8 +101,8 @@ const SCENARIOS = [
     },
   },
   {
-    // Same card on an aux move (GripperAction), below its own fields.
-    name: "builder — Gripper stop-on-condition card",
+    // Same sub-page from an aux move (GripperAction), whose main page is an inline body.
+    name: "builder — Gripper stop-on-condition sub-page",
     route: "/program/builder",
     open: async p => {
       await tap(p, "Add Step"); await sleep(600);

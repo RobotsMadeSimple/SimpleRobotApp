@@ -59,7 +59,7 @@ import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { colors, radii, accents } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
-import { STEP_THEME, newId } from "./stepUtils";
+import { STEP_THEME, fmtMoveStop, newId } from "./stepUtils";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
@@ -72,7 +72,7 @@ import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 
-type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight";
+type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight" | "blend" | "moveStop";
 
 // Step types whose config fields read live aux-stepper state. Only these fetch aux state on open;
 // every other step type opens without touching the network (the modal used to fetch robot config,
@@ -277,16 +277,15 @@ export function StepConfigModal({
   useEffect(() => { if (subPage) setEditingName(false); }, [subPage]);
 
   // Snapshot the draft when a sub-page opens so its Cancel can revert just that edit (the whole
-  // modal's Cancel still discards everything). draftRef tracks the latest draft without re-running
-  // the snapshot effect on every keystroke.
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
+  // modal's Cancel still discards everything). The snapshot is taken before any `seed` the opener
+  // applies, so Cancel also undoes a flag the open itself switched on (blend, an empty stop
+  // condition).
   const subPageSnapshot = useRef<ProgramStep | null>(null);
-  const prevSubPage = useRef<SubPage>(null);
-  useEffect(() => {
-    if (prevSubPage.current === null && subPage !== null) subPageSnapshot.current = draftRef.current;
-    prevSubPage.current = subPage;
-  }, [subPage]);
+  const openSubPage = (page: NonNullable<SubPage>, seed?: Partial<ProgramStep>) => {
+    subPageSnapshot.current = draft;
+    if (seed) setDraft(d => d ? { ...d, ...seed } : d);
+    setSubPage(page);
+  };
 
 
   if (!draft) return null;
@@ -334,6 +333,12 @@ export function StepConfigModal({
     return parts.join("  ·  ");
   })();
 
+  // Blend row (MoveL "Blend Into Next Move", JumpL "Blend Apex Corners"): the flag plus an optional
+  // radius override. Clearing the row drops both.
+  const blendKeys = ["blend", "blendRadius"];
+  const blendRadiusText = draft.expressions?.blendRadius ?? (draft.blendRadius != null ? String(draft.blendRadius) : null);
+  const blendSummary = blendRadiusText ? `Radius ${blendRadiusText} mm` : "Program default radius";
+
   // Clear a modifier's direct fields and any expression overrides on those fields.
   const clearFields = (keys: string[]) =>
     setDraft(d => {
@@ -347,10 +352,13 @@ export function StepConfigModal({
   // Move-modifier row. When set: a solid card whose body opens the editor and whose
   // trash button asks for an inline confirmation before clearing. When unset: a
   // dashed grayed-out "Add …" button.
-  const modifierRow = (label: string, isSet: boolean, value: string, page: SubPage, clearKeys: string[]) => {
+  // `seed` is applied when the "Add …" row opens the sub-page (e.g. turning the blend flag on);
+  // the sub-page's Cancel reverts it along with any edits.
+  const modifierRow = (label: string, isSet: boolean, value: string, page: NonNullable<SubPage>, clearKeys: string[], seed?: Partial<ProgramStep>) => {
     if (!isSet) {
       return (
-        <TouchableOpacity style={ms.modRowAdd} onPress={() => setSubPage(page)} activeOpacity={0.7}>
+        <TouchableOpacity style={ms.modRowAdd} onPress={() => openSubPage(page, seed)} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel={label}>
           <Plus size={15} color={colors.textFaint} />
           <Text style={ms.modAddText}>{label}</Text>
         </TouchableOpacity>
@@ -371,7 +379,7 @@ export function StepConfigModal({
     }
     return (
       <View style={ms.modRow}>
-        <TouchableOpacity style={ms.subRowLeft} onPress={() => setSubPage(page)} activeOpacity={0.7}>
+        <TouchableOpacity style={ms.subRowLeft} onPress={() => openSubPage(page)} activeOpacity={0.7}>
           <Text style={ms.subRowLabel}>{label}</Text>
           <Text style={ms.subRowValue} numberOfLines={1}>{value}</Text>
         </TouchableOpacity>
@@ -381,12 +389,14 @@ export function StepConfigModal({
   };
 
   // ── Stop / record on condition (move steps) ───────────────────────────────
-  // Optional on MoveL/MoveJ/JumpL/JumpJ/AuxMove/GripperAction. Unset: a dashed "Add …" row like
-  // the blend row. Set: a card holding the condition editor, the stop/record mode and the two
-  // optional variable targets; its × clears all four wire fields at once. What the position
+  // Optional on MoveL/MoveJ/JumpL/JumpJ/AuxMove/GripperAction. A modifier row like the offsets:
+  // unset it is a dashed "Add …" row that opens the sub-page with an empty condition; set it shows
+  // the condition summary and its trash clears all four wire fields. The sub-page holds the
+  // condition editor, the stop/record mode and the two optional variable targets. What the position
   // variable may be depends on the step: a Points list for a robot move (the live pose, one
   // element), a plain number for an aux move (the axis position).
   const moveStopIsAux = draft.type === "AuxMove" || draft.type === "GripperAction";
+  const moveStopKeys = ["moveStopCondition", "moveStopMode", "moveStopPositionVariableName", "moveStopFlagVariableName"];
   const moveStopPosVars = moveStopIsAux
     ? (variables ?? []).filter(v => !isListVariable(v) && !v.isString && !v.isImage && !v.isBoolean && !v.isStopwatch)
     : (variables ?? []).filter(isPointListVariable);
@@ -395,10 +405,14 @@ export function StepConfigModal({
   const loadCellChips = (ioDevices ?? []).flatMap(n => !n.name ? [] :
     (n.pins ?? []).filter(p => p.type === "LoadCell" && !!p.name)
       .map(p => ({ key: `${n.id}/${p.pin}`, nano: n.name, pin: p.name })));
-  const clearMoveStop = () => set({
-    moveStopCondition: undefined, moveStopMode: undefined,
-    moveStopPositionVariableName: undefined, moveStopFlagVariableName: undefined,
-  });
+  const clearMoveStop = () => clearFields(moveStopKeys);
+
+  // Leaving a sub-page by Done / back / backdrop keeps its edits. A stop condition left without
+  // any rows is no condition at all, so the row goes back to "Add" instead of saving an empty one.
+  const closeSubPageDone = () => {
+    if (subPage === "moveStop" && !(draft.moveStopCondition?.items?.length)) clearMoveStop();
+    setSubPage(null);
+  };
 
   // "$ [name ▾] ×" — the same variable-target row the Wait step's timeout flag uses.
   const varTargetRow = (value: string | undefined, label: string, onOpen: () => void, onClear: () => void) => (
@@ -417,33 +431,25 @@ export function StepConfigModal({
     </View>
   );
 
-  const moveStopCard = () => {
+  // The row on the main page. Set: "Stop on Condition" / "Record on Condition" with the summary line
+  // the step list shows; its trash clears all four fields. Unset: "Add" opens the sub-page seeded with
+  // an empty condition (Cancel there reverts to unset).
+  const moveStopRow = () => {
     const cond = draft.moveStopCondition;
-    if (!cond) {
-      return (
-        <TouchableOpacity style={ms.modRowAdd} activeOpacity={0.7}
-          onPress={() => set({ moveStopCondition: { combinator: "ALL", items: [] } })}
-          accessibilityRole="button" accessibilityLabel="Stop on Condition">
-          <Plus size={15} color={colors.textFaint} />
-          <Text style={ms.modAddText}>Stop on Condition</Text>
-        </TouchableOpacity>
-      );
-    }
+    const label = cond && draft.moveStopMode === "record" ? "Record on Condition" : "Stop on Condition";
+    return modifierRow(label, !!cond, fmtMoveStop(draft) ?? "", "moveStop", moveStopKeys,
+      { moveStopCondition: { combinator: "ALL", items: [] } });
+  };
+
+  // The sub-page body.
+  const moveStopPage = () => {
+    const cond = draft.moveStopCondition ?? { combinator: "ALL" as const, items: [] };
     const mode = draft.moveStopMode ?? "stop";
     const addRow = (expr: string) =>
       set({ moveStopCondition: { ...cond, items: [...(cond.items ?? []), { id: newId(), expr }] } });
     return (
-      <View style={ms.modCard}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <View style={{ flex: 1, marginRight: 12 }}>
-            <Text style={ms.subRowLabel}>Stop or Record on Condition</Text>
-            <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
-              Checked continuously while this move is in flight.
-            </Text>
-          </View>
-          {/* The × clears the condition, mode and both variable targets. */}
-          <DeleteIconButton size={16} style={{ padding: 4 }} onPress={clearMoveStop} />
-        </View>
+      <>
+        <Text style={ms.hintText}>Checked continuously while this move is in flight.</Text>
         {draft.type === "AuxMove" && draft.auxWaitForDone === false && (
           <Text style={[ms.hintText, { color: colors.warning }]}>
             {"Only applies while the step waits for the move — turn \"Wait until move completes\" on."}
@@ -507,7 +513,7 @@ export function StepConfigModal({
           ? <Text style={[ms.hintText, { fontStyle: "italic" }]}>No numeric or boolean variables yet — add one under Variables.</Text>
           : varTargetRow(draft.moveStopFlagVariableName, "Fired flag variable",
               () => setMoveStopFlagVarPicker(true), () => set({ moveStopFlagVariableName: undefined }))}
-      </View>
+      </>
     );
   };
 
@@ -515,6 +521,26 @@ export function StepConfigModal({
 
   function renderSubPage() {
     switch (subPage) {
+      case "blend":
+        return (
+          <>
+            <Text style={ms.hintText}>
+              {draft!.type === "JumpL"
+                ? "Round the lift and lower corners into a smooth arch instead of stopping at the top."
+                : "Round this corner instead of stopping, carrying speed into the next MoveL."}
+            </Text>
+            <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
+            <ExpressionInput style={ms.input} fieldKey="blendRadius"
+              value={draft!.blendRadius} expressions={draft!.expressions}
+              onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables}
+              allowUndefined placeholder="program default" />
+            <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
+          </>
+        );
+
+      case "moveStop":
+        return moveStopPage();
+
       case "point": {
         return (
           <>
@@ -996,7 +1022,7 @@ export function StepConfigModal({
           : (draft!.pointName ?? "Current Position");
         return (
           <>
-            <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
+            <TouchableOpacity style={ms.modRow} onPress={() => openSubPage("point")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
@@ -1008,41 +1034,10 @@ export function StepConfigModal({
             {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride", overrideKeys)}
             {modifierRow("Tool Offset",       hasToolOff,  toolOffSummary,  "toolOffset",  toolOffKeys)}
 
-            {draft!.type === "MoveL" && (
-              !draft!.blend ? (
-                // Like the other modifier rows, but with no sub-page: tapping just turns the flag on.
-                <TouchableOpacity style={ms.modRowAdd} onPress={() => set({ blend: true })} activeOpacity={0.7}>
-                  <Plus size={15} color={colors.textFaint} />
-                  <Text style={ms.modAddText}>Blend Into Next Move</Text>
-                </TouchableOpacity>
-              ) : (
-                <View style={ms.modCard}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                    <View style={{ flex: 1, marginRight: 12 }}>
-                      <Text style={ms.subRowLabel}>Blend Into Next Move</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
-                        Round this corner instead of stopping, carrying speed into the next MoveL.
-                      </Text>
-                    </View>
-                    {/* The × untoggles the flag and clears any radius override. */}
-                    <DeleteIconButton size={16} style={{ padding: 4 }}
-                      onPress={() => setDraft(d => {
-                        if (!d) return d;
-                        const exprs = { ...(d.expressions ?? {}) };
-                        delete exprs.blendRadius;
-                        return { ...d, blend: undefined, blendRadius: undefined,
-                          expressions: Object.keys(exprs).length > 0 ? exprs : undefined };
-                      })} />
-                  </View>
-                  <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
-                  <ExpressionInput style={ms.input} fieldKey="blendRadius"
-                    value={draft!.blendRadius} expressions={draft!.expressions}
-                    onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
-                  <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
-                </View>
-              )
-            )}
-            {moveStopCard()}
+            {/* Opening from the "Add" row turns the flag on; the sub-page edits the radius. */}
+            {draft!.type === "MoveL" &&
+              modifierRow("Blend Into Next Move", !!draft!.blend, blendSummary, "blend", blendKeys, { blend: true })}
+            {moveStopRow()}
           </>
         );
       }
@@ -1068,14 +1063,14 @@ export function StepConfigModal({
         })();
         return (
           <>
-            <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("point")} activeOpacity={0.7}>
+            <TouchableOpacity style={ms.modRow} onPress={() => openSubPage("point")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Point</Text>
                 <Text style={ms.subRowValue}>{pointLabel}</Text>
               </View>
               <ChevronRight size={16} color={colors.borderStrong} />
             </TouchableOpacity>
-            <TouchableOpacity style={ms.modRow} onPress={() => setSubPage("jumpHeight")} activeOpacity={0.7}>
+            <TouchableOpacity style={ms.modRow} onPress={() => openSubPage("jumpHeight")} activeOpacity={0.7}>
               <View style={ms.subRowLeft}>
                 <Text style={ms.subRowLabel}>Jump Height</Text>
                 <Text style={ms.subRowValue}>{jumpHeightLabel}</Text>
@@ -1087,33 +1082,9 @@ export function StepConfigModal({
             {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride", overrideKeys)}
             {modifierRow("Tool Offset",       hasToolOff,  toolOffSummary,  "toolOffset",  toolOffKeys)}
 
-            {draft!.type === "JumpL" && (
-              <View style={[ms.modCard, !draft!.blend && ms.modCardOff]}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <View style={{ flex: 1, marginRight: 12 }}>
-                    <Text style={[ms.subRowLabel, !draft!.blend && ms.modLabelOff]}>Blend Apex Corners</Text>
-                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
-                      Round the lift and lower corners into a smooth arch instead of stopping at the top.
-                    </Text>
-                  </View>
-                  <Switch
-                    value={!!draft!.blend}
-                    onValueChange={v => set({ blend: v || undefined })}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                  />
-                </View>
-                {draft!.blend && (
-                  <>
-                    <Text style={[ms.fieldLabel, { marginTop: 10 }]}>BLEND RADIUS OVERRIDE  (mm)</Text>
-                    <ExpressionInput style={ms.input} fieldKey="blendRadius"
-                      value={draft!.blendRadius} expressions={draft!.expressions}
-                      onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
-                    <Text style={ms.hintText}>Leave blank to use the program's default blend radius (Set Blend Radius step).</Text>
-                  </>
-                )}
-              </View>
-            )}
-            {moveStopCard()}
+            {draft!.type === "JumpL" &&
+              modifierRow("Blend Apex Corners", !!draft!.blend, blendSummary, "blend", blendKeys, { blend: true })}
+            {moveStopRow()}
           </>
         );
       }
@@ -2791,7 +2762,7 @@ export function StepConfigModal({
               When on, the program waits for the aux move to finish before the next step.
               When off, the robot and aux axis can move simultaneously.
             </Text>
-            <View style={{ marginTop: 14 }}>{moveStopCard()}</View>
+            <View style={{ marginTop: 14 }}>{moveStopRow()}</View>
           </>
         );
       }
@@ -3139,7 +3110,7 @@ export function StepConfigModal({
                 Open and Close drive to the configured gap limits; Grip to drives to the gap above.
                 Speed and accel fall back to the gripper's configured open/close time when left blank.
               </Text>
-              <View style={{ marginTop: 14 }}>{moveStopCard()}</View>
+              <View style={{ marginTop: 14 }}>{moveStopRow()}</View>
             </>
           );
         }
@@ -3872,6 +3843,8 @@ export function StepConfigModal({
     point: "Select Point", speed: "Override Speed",
     posOffset: "Position Offset", toolOffset: "Tool Offset",
     posOverride: "Position Override", jumpHeight: "Jump Height",
+    blend: draft.type === "JumpL" ? "Blend Apex Corners" : "Blend Into Next Move",
+    moveStop: "Stop or Record on Condition",
   };
 
   const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ"
@@ -3927,12 +3900,12 @@ export function StepConfigModal({
 
   return (
     <>
-    <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => subPage ? setSubPage(null) : onClose()}>
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => subPage ? closeSubPageDone() : onClose()}>
         <View style={ms.overlay}>
           {/* Backdrop sits BEHIND the card (not wrapping it) so the card's
               ScrollView owns its gestures cleanly — a Pressable wrapping the
               ScrollView blocks scrolling when a drag starts on a focused input. */}
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? setSubPage(null) : onClose()} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? closeSubPageDone() : onClose()} />
           <View style={wide ? ms.wideRow : { width: "100%", maxWidth: cardWidth }}>
           {wide && (
             <ExpressionHelperPanel
@@ -3948,7 +3921,7 @@ export function StepConfigModal({
             {/* Header */}
             <View style={ms.header}>
               {subPage ? (
-                <TouchableOpacity onPress={() => setSubPage(null)} hitSlop={12} activeOpacity={0.7}>
+                <TouchableOpacity onPress={closeSubPageDone} hitSlop={12} activeOpacity={0.7}>
                   <ArrowLeft size={18} color={colors.text} />
                 </TouchableOpacity>
               ) : <View style={{ width: 18 }} />}
@@ -4069,7 +4042,7 @@ export function StepConfigModal({
                   onPress={() => { if (subPageSnapshot.current) setDraft(subPageSnapshot.current); setSubPage(null); }}>
                   <Text style={ms.cancelText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={ms.saveBtn} activeOpacity={0.7} onPress={() => setSubPage(null)}>
+                <TouchableOpacity style={ms.saveBtn} activeOpacity={0.7} onPress={closeSubPageDone}>
                   <Check size={15} color="white" />
                   <Text style={ms.saveText}>Done</Text>
                 </TouchableOpacity>
