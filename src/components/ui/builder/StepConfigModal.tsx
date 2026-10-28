@@ -825,6 +825,8 @@ export function StepConfigModal({
                       placeholder="$target  ·  $pointsList[$index]  ·  {$binPrefix}{$index}"
                       variables={targetVars}
                       insertToken={v => isPointListVariable(v) ? `$${v.name}[0]` : `{$${v.name}}`}
+                      create={{ type: "string" }}
+                      onCreateVariable={onSaveVariable} allVariables={variables}
                     />
 
                     {expr.trim().length > 0 && (
@@ -1288,6 +1290,7 @@ export function StepConfigModal({
               accent={accentEx}
               variables={variables}
               quickTokens={["$time_ms"]}
+              create={{ type: "string" }} onCreateVariable={onSaveVariable} allVariables={variables}
             />
             <Text style={[ms.hintText, { marginTop: 6 }]}>
               Saved on the controller. $variable and $time_ms are filled in; relative paths are under the controller app folder (folders auto-created).
@@ -1833,6 +1836,7 @@ export function StepConfigModal({
               variables={variables}
               autoCapitalize="sentences"
               autoFocus
+              create={{ type: "number" }} onCreateVariable={onSaveVariable} allVariables={variables}
             />
             <Text style={[ms.hintText, { marginTop: 8 }]}>
               {hasVars ? "Use $varName to embed variable values." : "Appears in the monitor while this step runs."}
@@ -3191,6 +3195,7 @@ export function StepConfigModal({
       case "SaveImage":
         return (
           <SaveImageFields
+            onSaveVariable={onSaveVariable}
             draft={draft!}
             variables={variables}
             cameras={cameraDevices}
@@ -3913,6 +3918,7 @@ export function StepConfigModal({
                           placeholder="Shown in monitor while this step runs"
                           variables={variables}
                           autoCapitalize="sentences"
+                          create={{ type: "number" }} onCreateVariable={onSaveVariable} allVariables={variables}
                         />
                       </View>
                     </>

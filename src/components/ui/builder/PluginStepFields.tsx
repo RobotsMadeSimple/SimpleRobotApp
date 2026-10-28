@@ -227,6 +227,7 @@ function ParamField({ def, text, onChange, variables, contextVariables, onSaveVa
             onChange={onChange}
             placeholder={defaultPlaceholder(def, "Text — $var or {expr} insert values")}
             variables={[...(variables ?? []), ...(contextVariables ?? [])]}
+            create={{ type: "string" }} onCreateVariable={onSaveVariable} allVariables={variables}
           />
           <Text style={styles.help}>$name or {"{expression}"} is replaced with its value when the step runs.</Text>
         </>
@@ -234,7 +235,7 @@ function ParamField({ def, text, onChange, variables, contextVariables, onSaveVa
     case "enum":
       return <EnumParam def={def} text={text} onChange={onChange} />;
     case "point":
-      return <PointParam text={text} onChange={onChange} variables={variables} contextVariables={contextVariables} />;
+      return <PointParam text={text} onChange={onChange} variables={variables} contextVariables={contextVariables} onSaveVariable={onSaveVariable} />;
     case "list":
     case "image":
     case "variable":
@@ -381,9 +382,10 @@ type PointMode = PointRef["mode"];
  * The move target choices as text: a saved point, a grid cell, a stack slot, or an
  * expression (`$pts[$i]`, `{$prefix}{$i}`). See pluginSteps.ts for the grid/stack syntax.
  */
-function PointParam({ text, onChange, variables, contextVariables }: {
+function PointParam({ text, onChange, variables, contextVariables, onSaveVariable }: {
   text: string; onChange: (t: string) => void;
   variables?: ProgramVariable[]; contextVariables?: ProgramVariable[];
+  onSaveVariable?: (v: ProgramVariable) => void;
 }) {
   const points = usePoints();
   const grids  = useGrids();
@@ -477,6 +479,8 @@ function PointParam({ text, onChange, variables, contextVariables }: {
             placeholder="$pointsList[$index]  ·  $target  ·  {$binPrefix}{$i}"
             variables={targetVars}
             insertToken={v => isPointListVariable(v) ? `$${v.name}[0]` : `{$${v.name}}`}
+            create={{ type: "string" }}
+            onCreateVariable={onSaveVariable} allVariables={variables}
           />
           <Text style={styles.help}>
             A Points variable indexed on its own gives those coordinates; anything else must resolve to a saved point&apos;s name.

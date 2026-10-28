@@ -115,6 +115,22 @@ const SCENARIOS = [
     },
   },
   {
+    // A text-template field (Select Point → Variable) in a program with no variables yet: its
+    // insert chip offers "+ New string variable", opening the same editor from a 4th layer.
+    name: "builder — new variable from the point expression",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Motion", { exact: false }); await sleep(400);
+      await tap(p, "Move Linear"); await sleep(900);
+      await tap(p, "Point", { exact: false }); await sleep(600);
+      await tap(p, "Variable"); await sleep(400);
+      await p.getByPlaceholder("$target", { exact: false }).first().click(); await sleep(400);
+      await tap(p, "＋ $Variable"); await sleep(500);
+      await p.getByLabel("New string variable").first().click({ force: true }); await sleep(700);
+    },
+  },
+  {
     // Same sub-page from an aux move (GripperAction), whose main page is an inline body.
     name: "builder — Gripper stop-on-condition sub-page",
     route: "/program/builder",

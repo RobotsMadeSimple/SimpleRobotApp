@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { X } from "lucide-react-native";
 import { ProgramVariable } from "@/src/models/robotModels";
-import { VarPickerModal } from "./VarPicker";
+import { VarPickerModal, type VarCreateSpec } from "./VarPicker";
 import { colors, accents } from "@/src/components/ui/kit";
 import { ExpressionField } from "./expressions/ExpressionEditorModal";
 import { isExpressionText } from "./expressions/completions";
@@ -290,6 +290,9 @@ export function TemplateInput({
   autoFocus,
   autoCapitalize = "none",
   insertToken = v => `{$${v.name}}`,
+  create,
+  onCreateVariable,
+  allVariables,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -308,6 +311,14 @@ export function TemplateInput({
    * position; override where a kind needs indexing, e.g. points as `$name[0]`.
    */
   insertToken?: (v: ProgramVariable) => string;
+  /**
+   * With `onCreateVariable`, the picker leads with "+ New <type> variable" and the insert
+   * chip shows even before the program has any variables, so the field is never a dead end.
+   */
+  create?: VarCreateSpec;
+  onCreateVariable?: (v: ProgramVariable) => void;
+  /** Every program variable, for the new-variable duplicate-name check. */
+  allVariables?: ProgramVariable[];
 }) {
   const [varPickerOpen, setVarPickerOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -316,6 +327,7 @@ export function TemplateInput({
   useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
 
   const hasVars  = (variables?.length ?? 0) > 0;
+  const canPick  = hasVars || (!!create && !!onCreateVariable);
   const hasRef   = /[${]/.test(value);
   const warning  = useMemo(() => braceMissingSigil(value), [value]);
   // Insert chips are shown only while editing (or a picker they opened is up), to save room.
@@ -350,9 +362,9 @@ export function TemplateInput({
         )}
       </View>
 
-      {showChips && (hasVars || quickTokens?.length) && (
+      {showChips && (canPick || !!quickTokens?.length) && (
         <View style={{ flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
-          {hasVars && (
+          {canPick && (
             <TouchableOpacity
               onPress={() => setVarPickerOpen(true)}
               activeOpacity={0.7}
@@ -375,14 +387,17 @@ export function TemplateInput({
         </Text>
       )}
 
-      {hasVars && (
+      {canPick && (
         <VarPickerModal
           visible={varPickerOpen}
           onClose={() => setVarPickerOpen(false)}
-          variables={variables!}
+          variables={variables ?? []}
           selected={undefined}
           title="Insert Variable"
           onSelect={v => { if (v) append(insertToken(v)); }}
+          create={create}
+          onCreateVariable={onCreateVariable}
+          allVariables={allVariables}
         />
       )}
     </View>

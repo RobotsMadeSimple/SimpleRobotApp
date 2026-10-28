@@ -16,11 +16,13 @@ export function SaveImageFields({
   variables,
   cameras,
   set,
+  onSaveVariable,
 }: {
   draft: ProgramStep;
   variables: ProgramVariable[] | undefined;
   cameras: CameraState[];
   set: (p: Partial<ProgramStep>) => void;
+  onSaveVariable?: (v: ProgramVariable) => void;
 }) {
   const accent = accents.cyan;
 
@@ -62,6 +64,7 @@ export function SaveImageFields({
         accent={accent}
         variables={variables}
         quickTokens={["$time_ms"]}
+        create={{ type: "string" }} onCreateVariable={onSaveVariable} allVariables={variables}
       />
       <Text style={[ms.hintText, { marginTop: 8 }]}>
         Relative paths are from the app directory. Folders are created automatically.
