@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Keyboard, Platform } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Keyboard, Platform, TextInput, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type ScrollView } from "react-native";
 
 /**
  * One keyboard signal for the whole app. Components that must stay clear of the keyboard
@@ -81,4 +81,66 @@ export function useKeyboardHeight(): number {
     return addKeyboardListener(k => setH(k.visible ? k.height : 0));
   }, []);
   return h;
+}
+
+/**
+ * A centred modal card that keeps its height when the keyboard opens: the card stays pinned to its
+ * keyboard-closed height (its footer never moves; the keyboard simply draws over it), the body
+ * gets bottom padding the size of the keyboard, and the focused field is scrolled clear of the
+ * keyboard's top. Wire it as:
+ *   <View onLayout={k.onCardLayout} style={[card, k.cardStyle]}>
+ *     <ScrollView ref={k.scrollRef} onScroll={k.onScroll} scrollEventThrottle={16}
+ *       style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: k.contentPaddingBottom }}>
+ */
+export function useKeyboardStableCard(active: boolean) {
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY   = useRef(0);
+  const [kbHeight, setKbHeight] = useState(0);
+  const [restHeight, setRestHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const adjust = (kbTop: number) => {
+      // Native exposes currentlyFocusedInput() (a host component with measureInWindow); react-native-web
+      // only has currentlyFocusedField(), which hands back the DOM node — measure that with its rect.
+      const state: any = (TextInput as any).State;
+      const focused: any = state?.currentlyFocusedInput?.() ?? state?.currentlyFocusedField?.();
+      const sv = scrollRef.current;
+      if (!focused || !sv) return;
+      const clear = (y: number, ht: number) => {
+        if (typeof y !== "number") return;
+        // The field plus the live-value line + "＋ Insert" chip a focused field renders beneath itself.
+        const overlap = (y + ht + 72) - kbTop;
+        if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollY.current + overlap), animated: true });
+      };
+      if (typeof focused.measureInWindow === "function") {
+        focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => clear(y, ht));
+      } else if (typeof focused.getBoundingClientRect === "function") {
+        const r = focused.getBoundingClientRect();
+        clear(r.top, r.height);
+      }
+    };
+    return addKeyboardListener(k => {
+      if (!k.visible) { setKbHeight(0); return; }
+      setKbHeight(k.height);
+      // Two frames to let the field settle, then again after the keyboard animation finishes.
+      requestAnimationFrame(() => requestAnimationFrame(() => adjust(k.screenY)));
+      setTimeout(() => adjust(k.screenY), 240);
+    });
+  }, [active]);
+
+  return {
+    kbHeight,
+    scrollRef,
+    onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => { scrollY.current = e.nativeEvent.contentOffset.y; },
+    // Track the card's natural height only while the keyboard is closed; that is what it keeps.
+    onCardLayout: (e: LayoutChangeEvent) => {
+      if (kbHeight > 0) return;
+      const h = Math.round(e.nativeEvent.layout.height);
+      if (h !== restHeight) setRestHeight(h);
+    },
+    cardStyle: kbHeight > 0 && restHeight != null ? { height: restHeight } : null,
+    // Room to scroll a bottom field up above the keyboard (the body extends behind it).
+    contentPaddingBottom: kbHeight > 0 ? kbHeight : 8,
+  };
 }

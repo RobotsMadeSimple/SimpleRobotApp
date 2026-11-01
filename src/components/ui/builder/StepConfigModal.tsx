@@ -14,7 +14,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
-import { addKeyboardListener } from "@/src/platform/keyboard";
+import { useKeyboardStableCard } from "@/src/platform/keyboard";
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -175,51 +175,15 @@ export function StepConfigModal({
   const panelWidth    = Math.min(300, Math.max(220, Math.round((availWidth - 16) * 0.4)));
   const wideCardWidth = Math.min(520, availWidth - panelWidth - 16);
 
-  // Keyboard-aware scrolling: on a phone the soft keyboard covers the lower half of the modal, so
-  // when it opens we scroll the focused input up above it (and pad the bottom so there's room).
-  const bodyScrollRef = useRef<ScrollView>(null);
-  const scrollYRef    = useRef(0);
-  const [kbHeight, setKbHeight] = useState(0);
   // The card keeps a stable height whether or not the keyboard is up, so the pinned Cancel/Save
-  // footer never moves — the keyboard simply draws over it (dismiss it to tap them). windowHeight
-  // shrinks under adjustResize, so snapshot the keyboard-closed height and always size from that.
+  // footer never moves — the keyboard simply draws over it (dismiss it to tap them) — and the
+  // focused field scrolls clear of the keyboard's top. windowHeight shrinks under adjustResize, so
+  // snapshot the keyboard-closed height and always size from that.
+  const { kbHeight, scrollRef: kbScrollRef, onScroll: kbOnScroll, onCardLayout: kbOnCardLayout,
+          cardStyle: kbCardStyle, contentPaddingBottom: kbPadBottom } = useKeyboardStableCard(visible);
   const fullWindowHRef = useRef(windowHeight);
   if (kbHeight === 0) fullWindowHRef.current = windowHeight;
   const cardMaxHeight = Math.round(fullWindowHRef.current * 0.88);
-  useEffect(() => {
-    if (!visible) return;
-    const adjust = (kbTop: number) => {
-      // Native exposes currentlyFocusedInput() (a host component with measureInWindow); react-native-web
-      // only has currentlyFocusedField(), which hands back the DOM node — measure that with its rect.
-      const state: any = (TextInput as any).State;
-      const focused: any = state?.currentlyFocusedInput?.() ?? state?.currentlyFocusedField?.();
-      const sv = bodyScrollRef.current;
-      if (!focused || !sv) return;
-      const clear = (y: number, ht: number) => {
-        if (typeof y !== "number") return;
-        // Scroll the focused field — plus the live-value line + "＋ Insert" chip it renders beneath
-        // itself when focused — clear of the keyboard's top. The footer stays fixed behind the
-        // keyboard, so it is no longer the occluder; only the keyboard is.
-        const overlap = (y + ht + 72) - kbTop;
-        if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollYRef.current + overlap), animated: true });
-      };
-      if (typeof focused.measureInWindow === "function") {
-        focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => clear(y, ht));
-      } else if (typeof focused.getBoundingClientRect === "function") {
-        const r = focused.getBoundingClientRect();
-        clear(r.top, r.height);
-      }
-    };
-    // One keyboard signal for native and the web mock keyboard, so the Playwright keyboard
-    // audit exercises this exact scroll-clear logic.
-    return addKeyboardListener(k => {
-      if (!k.visible) { setKbHeight(0); return; }
-      setKbHeight(k.height);
-      // Two frames to let the field settle, then again after the keyboard animation finishes.
-      requestAnimationFrame(() => requestAnimationFrame(() => adjust(k.screenY)));
-      setTimeout(() => adjust(k.screenY), 240);
-    });
-  }, [visible]);
 
   // Only fetch the data a given step type actually uses. Opening a Move/Wait/Logic/etc. step now
   // makes zero network calls; IO/Vision/Aux steps fetch just their own data. (Previously every open
@@ -3821,9 +3785,9 @@ export function StepConfigModal({
               style={{ width: panelWidth, maxHeight: cardMaxHeight }}
             />
           )}
-          <View style={[ms.card, wide
+          <View onLayout={kbOnCardLayout} style={[ms.card, wide
             ? { width: wideCardWidth, maxWidth: wideCardWidth, maxHeight: cardMaxHeight }
-            : { maxWidth: cardWidth, maxHeight: cardMaxHeight }]}>
+            : { maxWidth: cardWidth, maxHeight: cardMaxHeight }, kbCardStyle]}>
             {/* Header */}
             <View style={ms.header}>
               {subPage ? (
@@ -3866,15 +3830,15 @@ export function StepConfigModal({
               </TouchableOpacity>
             </View>
 
-            <ScrollView ref={bodyScrollRef}
-              onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+            <ScrollView ref={kbScrollRef}
+              onScroll={kbOnScroll}
               scrollEventThrottle={16}
               // flexShrink + minHeight:0 so the body yields to the pinned footer when the card is
               // capped (keyboard up) — the footer then never overlaps the fields, and the body scrolls.
               style={{ flexShrink: 1, minHeight: 0 }}
               showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
               // Room to scroll a bottom field up above the keyboard (the body extends behind it).
-              contentContainerStyle={{ paddingBottom: kbHeight > 0 ? kbHeight : 8 }}>
+              contentContainerStyle={{ paddingBottom: kbPadBottom }}>
               {subPage ? (
                 renderSubPage()
               ) : (

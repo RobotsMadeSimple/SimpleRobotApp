@@ -184,6 +184,18 @@ async function auditFields(p, scenario, report) {
     });
     if (!reachable) continue;
     n++;
+    // The modal card holding the field (a rounded, overflow-hidden box that doesn't reach the
+    // bottom edge — bottom sheets are meant to lift, so they're left out). Its height must not
+    // change when the keyboard opens: the footer stays put and the keyboard draws over it.
+    const cardHeight = () => h.evaluate(el => {
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const cs = getComputedStyle(a), r = a.getBoundingClientRect();
+        if (cs.overflow === "hidden" && parseFloat(cs.borderTopLeftRadius) >= 8 && r.height > 150)
+          return r.bottom < window.innerHeight - 4 ? Math.round(r.height) : null;
+      }
+      return null;
+    });
+    const cardBefore = await cardHeight();
     await h.click({ force: true }).catch(() => {});
     await sleep(600); // let the app lift/scroll in response to the keyboard
 
@@ -203,12 +215,15 @@ async function auditFields(p, scenario, report) {
         covered: !!covered, coveredBy,
       };
     });
-    const pass = result.focused && result.keyboardUp && result.aboveKeyboard && result.inViewport && !result.covered;
+    const cardAfter = cardBefore == null ? null : await cardHeight();
+    const cardMoved = cardBefore != null && cardAfter != null && Math.abs(cardAfter - cardBefore) > 2;
+    const pass = result.focused && result.keyboardUp && result.aboveKeyboard && result.inViewport && !result.covered && !cardMoved;
     const why = !result.focused ? "field did not take focus"
       : !result.keyboardUp ? "mock keyboard did not appear (is it enabled?)"
       : !result.aboveKeyboard ? `field bottom ${result.bottom}px is below keyboard top ${result.keyboardTop}px`
       : !result.inViewport ? `field (${result.top}–${result.bottom}px) is off-screen`
       : result.covered ? `field is covered by ${result.coveredBy}`
+      : cardMoved ? `modal card changed height ${cardBefore}px → ${cardAfter}px when the keyboard opened`
       : "";
     report.push({ scenario: scenario.name, field: label, pass, why });
     if (!pass) {

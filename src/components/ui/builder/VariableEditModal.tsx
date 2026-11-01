@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { Check, ChevronDown, Minus, Plus, X } from "lucide-react-native";
 import { colors, accents } from "@/src/components/ui/kit";
-import { useKeyboardTop } from "@/src/platform/keyboard";
+import { useKeyboardStableCard } from "@/src/platform/keyboard";
 import {
   ListElementType,
   ProgramVariable,
@@ -285,17 +285,16 @@ export function VariableEditModal({
     ? <Text style={ms.hintText}>Stores a camera frame as a base64 JPEG. Populated by a <Text style={{ fontWeight: "600" }}>CaptureImage</Text> step at runtime.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
-  // With the keyboard up, the card ends above it (the overlay anchors the card 52 px from the
-  // top), so the scroll view inside is bounded by the visible area and a field low in the form —
-  // the description under a long type hint — scrolls clear of the keyboard instead of under it.
-  const keyboardTop = useKeyboardTop();
-  const cardMaxHeight = keyboardTop != null ? Math.max(220, keyboardTop - 52 - 12) : undefined;
+  // The card keeps its height when the keyboard opens (the footer stays put and the keyboard draws
+  // over it); the focused field scrolls clear of the keyboard instead.
+  const { scrollRef: kbScrollRef, onScroll: kbOnScroll, onCardLayout: kbOnCardLayout,
+          cardStyle: kbCardStyle, contentPaddingBottom: kbPadBottom } = useKeyboardStableCard(visible);
 
   return (
     <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeAll}>
       <Pressable style={ms.overlay} onPress={closeAll}>
-        <Pressable style={[ms.card, cardMaxHeight != null && { maxHeight: cardMaxHeight }]} onPress={() => {}}>
+        <Pressable onLayout={kbOnCardLayout} style={[ms.card, kbCardStyle]} onPress={() => {}}>
           <View style={ms.header}>
             <View style={{ width: 18 }} />
             <Text style={ms.title}>{isNew ? "New Variable" : "Edit Variable"}</Text>
@@ -303,7 +302,8 @@ export function VariableEditModal({
               <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
-          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <ScrollView ref={kbScrollRef} onScroll={kbOnScroll} scrollEventThrottle={16} style={{ flexShrink: 1, minHeight: 0 }}
+            contentContainerStyle={{ paddingBottom: kbPadBottom }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
           <Text style={ms.fieldLabel}>NAME</Text>
           <TextInput
