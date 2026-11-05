@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Circle, Grid3x3, Hexagon, Minus, Plus, RotateCcw, Square } from "lucide-react-native";
+import { Circle, Grid3x3, Hexagon, LayoutGrid, Minus, Plus, RotateCcw, Square } from "lucide-react-native";
 import { makeZoneDrawHtml } from "@/src/vision/visionHtml";
 import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from "@/src/models/robotModels";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,7 +15,9 @@ import { ves } from "./visionEditorStyles";
  * rectangle carrying a cell lattice. Making it a shape rather than a toggle is deliberate:
  * the grid only ever made sense on a rectangle, and a circle or polygon with a lattice
  * bolted on measured a bounding box that spilled outside the zone. So the lattice now
- * belongs to one shape and cannot be turned on for the others.
+ * belongs to one shape and cannot be turned on for the others. "Skewed" (a Quad) is the
+ * other gridded shape: four free corners for a board seen at an angle, its cells laid out
+ * in perspective.
  */
 type UiShape = VisionZoneShape | 'Grid';
 
@@ -26,10 +28,16 @@ const UI_SHAPES: { shape: UiShape; label: string; Icon: ShapeIcon }[] = [
   { shape: 'Circle',    label: 'Circle',  Icon: Circle },
   { shape: 'Polygon',   label: 'Polygon', Icon: Hexagon },
   { shape: 'Grid',      label: 'Grid',    Icon: Grid3x3 },
+  { shape: 'Quad',      label: 'Skewed',  Icon: LayoutGrid },
 ];
+
+/** Shapes that carry a cell lattice. */
+const isGridded = (s: UiShape) => s === 'Grid' || s === 'Quad';
 
 /** The real geometry a UI shape draws with — "Grid" is a rectangle underneath. */
 const canvasShape = (s: UiShape): VisionZoneShape => (s === 'Grid' ? 'Rectangle' : s);
+
+const cShapeOf = canvasShape;
 
 const MAX_GRID = 16;
 
@@ -73,7 +81,7 @@ export function ZoneDrawModal({
   const initialGridOn  = !!initialGrid && initialGrid.rows * initialGrid.cols > 1;
   const initialUiShape: UiShape =
     initialGridOn && initialShape === 'Rectangle' ? 'Grid' : initialShape;
-  const initialUiGrid  = initialUiShape === 'Grid' ? (initialGrid ?? { rows: 2, cols: 2 }) : undefined;
+  const initialUiGrid  = isGridded(initialUiShape) ? (initialGrid ?? { rows: 2, cols: 2 }) : undefined;
 
   const [uiShape, setUiShape]   = useState<UiShape>(initialUiShape);
   const [geometry, setGeometry] = useState<VisionZoneGeometry | null>(initialGeometry ?? null);
@@ -94,7 +102,7 @@ export function ZoneDrawModal({
     setPendingShape(null);
     // Recomputed from the props rather than the derived object above, so this does not
     // re-run every render on a fresh literal — only when the zone being edited changes.
-    setGrid(initialUiShape === 'Grid' ? (initialGrid ?? { rows: 2, cols: 2 }) : undefined);
+    setGrid(isGridded(initialUiShape) ? (initialGrid ?? { rows: 2, cols: 2 }) : undefined);
   }, [visible, initialUiShape, initialGeometry, initialGrid]);
 
   // One place to push the grid down, so no stepper can forget to redraw. The html already
@@ -108,9 +116,9 @@ export function ZoneDrawModal({
     setGeometry(null);
     setEditing(false);
     setPts(0);
-    // The lattice belongs to Grid and to nothing else, so it turns on with Grid and
-    // off with every other shape.
-    setGrid(s === 'Grid' ? { rows: 2, cols: 2 } : undefined);
+    // The lattice belongs to Grid and Skewed and to nothing else, so it turns on with them
+    // and off with every other shape.
+    setGrid(isGridded(s) ? { rows: 2, cols: 2 } : undefined);
     webviewRef.current?.injectJavaScript(`window.setShape(${JSON.stringify(canvasShape(s))});true;`);
   }
 
@@ -121,6 +129,14 @@ export function ZoneDrawModal({
     if (canvasShape(s) === canvasShape(uiShape)) {
       setUiShape(s);
       setGrid(s === 'Grid' ? (grid ?? { rows: 2, cols: 2 }) : undefined);
+      return;
+    }
+    // A rectangle (or grid) turns into a skewed grid in place — the canvas seeds the four
+    // corners from it — so there is nothing to lose and nothing to confirm.
+    if (s === 'Quad' && cShapeOf(uiShape) === 'Rectangle') {
+      setUiShape(s);
+      setGrid(grid ?? { rows: 2, cols: 2 });
+      webviewRef.current?.injectJavaScript(`window.setShape('Quad');true;`);
       return;
     }
     // A real shape change discards the working geometry — a circle has no meaningful
@@ -170,7 +186,9 @@ export function ZoneDrawModal({
   const drafting = !editing && uiShape === 'Polygon' && pts > 0;
 
   const hint =
-    editing && cShape === 'Rectangle'
+    editing && cShape === 'Quad'
+      ? "Drag each corner onto the board's corners · 1,1 marks row 1, column 1 · drag inside to move"
+    : editing && cShape === 'Rectangle'
       ? 'Drag a corner to resize · the top grip to rotate · inside to move'
     : editing                ? 'Drag a handle to reshape · drag inside to move'
     : uiShape === 'Grid'     ? 'Drag to draw a grid zone'
@@ -224,8 +242,8 @@ export function ZoneDrawModal({
         </View>
       )}
 
-      {/* Cell steppers — only for the Grid shape, once a rectangle exists to divide. */}
-      {uiShape === 'Grid' && geometry && (
+      {/* Cell steppers — only for the gridded shapes, once a shape exists to divide. */}
+      {isGridded(uiShape) && geometry && (
         <View style={isWide ? ves.drawColGroup : ves.drawToolRow}>
           {isWide && <Text style={ves.drawRailLabel}>CELLS</Text>}
           {(['rows', 'cols'] as const).map(axis => (

@@ -380,7 +380,12 @@ export type UsbRelayState = {
 
 // ── Vision ────────────────────────────────────────────────────────────────────
 
-export type VisionZoneShape = 'Rectangle' | 'Circle' | 'Polygon';
+/**
+ * `Quad` is a 4-corner (skewed / perspective) zone: `points` holds exactly 4 corners in order
+ * TL, TR, BR, BL; a grid on it is laid out perspective-correct (see quadCellQuad in
+ * src/vision/homography.ts), so a board seen at an angle still gets one cell per square.
+ */
+export type VisionZoneShape = 'Rectangle' | 'Circle' | 'Polygon' | 'Quad';
 
 export type VisionZoneGeometry = {
   shape: VisionZoneShape;
@@ -397,7 +402,7 @@ export type VisionZoneGeometry = {
   rotation?: number;
   // Circle
   cx: number; cy: number; radius: number;
-  // Polygon
+  // Polygon; Quad = exactly 4 corners TL, TR, BR, BL
   points: [number, number][];
 };
 
@@ -433,6 +438,12 @@ export type VisionZone = {
   name: string;
   geometry: VisionZoneGeometry;
   grid?: VisionZoneGrid;
+  /**
+   * Id of a frame inspection that aligns this zone each frame: the zone is warped by the
+   * homography from the frame's `referenceCorners` to the corners it detects now. If the frame
+   * is not found, inspections on this zone are skipped for that frame. Null/absent = as drawn.
+   */
+  alignTo?: string | null;
 };
 
 export type BlobInspection = {
@@ -483,6 +494,9 @@ export type VisionProgram = {
   arucoInspections?: ArucoInspection[];
   lineInspections?: LineInspection[];
   barcodeInspections?: BarcodeInspection[];
+  frameInspections?: FrameInspection[];
+  cornerInspections?: CornerInspection[];
+  edgeInspections?: EdgeInspection[];
   /**
    * Display order of inspections, as a flat list of inspection ids across all the typed
    * lists above. Lets the user drag inspections into any order regardless of type. Ids
@@ -495,7 +509,180 @@ export type VisionProgram = {
 
 export type BlobResult       = { x: number; y: number; size: number };
 export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[]; timings?: Record<string, number> };
+export type VisionResult     = {
+  programId: string; timestampMs: number; inspections: InspectionResult[];
+  colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[];
+  lineResults?: LineResult[]; barcodeResults?: BarcodeResult[];
+  frameResults?: FrameResult[]; cornerResults?: CornerResult[]; edgeResults?: EdgeResult[];
+  /** The outline each aligned zone actually had this frame (normalized points). */
+  alignedZones?: AlignedZone[];
+  timings?: Record<string, number>;
+  /** Per-inspection error messages from this pass ("{inspectionId}: {message}" or zone alignment notes). */
+  errors?: string[];
+};
+
+// ── Frame / corner / edge inspections ──────────────────────────────────────────
+
+/** A normalized [x, y] point. */
+export type NormPoint = [number, number];
+
+export type FrameMethod = 'contour' | 'lines' | 'corners';
+
+/**
+ * Finds a 4-cornered frame (e.g. a board's outline) and reports its corners TL, TR, BR, BL.
+ * Zones whose `alignTo` names it are warped from `referenceCorners` (the corners as detected
+ * when the zones were drawn) to the corners found in each frame.
+ */
+export type FrameInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Where to search; null = the whole image. */
+  zoneId: string | null;
+  method: FrameMethod;
+  cannyLow: number;
+  cannyHigh: number;
+  /** contour: smallest quad area, % of the search area. */
+  minAreaPct: number;
+  /** contour: ApproxPolyDP epsilon, fraction of the perimeter. */
+  approxEpsilon: number;
+  /** lines: HoughLinesP vote threshold. */
+  houghThreshold: number;
+  /** lines: shortest segment, % of the search area's smaller side. */
+  minLineLengthPct: number;
+  /** lines: largest gap bridged within one segment, px. */
+  maxLineGap: number;
+  /** corners: Shi-Tomasi settings (minCornerDistance in px). */
+  maxCorners: number;
+  cornerQuality: number;
+  minCornerDistance: number;
+  /** The corners TL, TR, BR, BL when the aligned zones were drawn; null = not set yet. */
+  referenceCorners: NormPoint[] | null;
+};
+
+export type FrameResult = {
+  inspectionId: string;
+  name?: string;
+  found: boolean;
+  /** TL, TR, BR, BL — empty when not found. */
+  corners: NormPoint[];
+  /** Angle of the TL→TR edge against +x, degrees. */
+  angle: number;
+  /** Frame area as % of the image. */
+  areaPct: number;
+  method: FrameMethod;
+};
+
+export type AlignedZone = { zoneId: string; points: NormPoint[] };
+
+export type CornerMethod = 'shiTomasi' | 'harris';
+
+export type CornerInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  method: CornerMethod;
+  maxCorners: number;
+  quality: number;
+  /** px */
+  minDistance: number;
+  blockSize: number;
+  /** found = count >= minCount */
+  minCount: number;
+};
+
+export type CornerResult = {
+  inspectionId: string;
+  name?: string;
+  count: number;
+  found: boolean;
+  /** Normalized, strongest first. */
+  points: NormPoint[];
+};
+
+export type EdgeInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  cannyLow: number;
+  cannyHigh: number;
+  /** % of zone pixels that are edges; passed when within [minDensity, maxDensity]. */
+  minDensity: number;
+  maxDensity: number | null;
+};
+
+export type EdgeResult = {
+  inspectionId: string;
+  name?: string;
+  /** 0–100 */
+  density: number;
+  passed: boolean;
+  /** Strongest Hough line in the zone, degrees 0–180; null when none. */
+  dominantAngle: number | null;
+};
+
+export type FrameVisionStepOutput = {
+  inspectionId: string;
+  foundVar?: string;
+  /** Point list, 4 points TL, TR, BR, BL in the step's output frame. */
+  cornersVar?: string;
+  angleVar?: string;
+};
+
+export type CornerVisionStepOutput = {
+  inspectionId: string;
+  countVar?: string;
+  foundVar?: string;
+  /** Point list in the step's output frame. */
+  pointsVar?: string;
+};
+
+export type EdgeVisionStepOutput = {
+  inspectionId: string;
+  densityVar?: string;
+  passedVar?: string;
+  angleVar?: string;
+};
+
+export function defaultFrameInspection(index: number): FrameInspection {
+  return {
+    id: `frameinsp_${Date.now()}`,
+    name: `Frame ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    method: 'contour',
+    cannyLow: 50, cannyHigh: 150,
+    minAreaPct: 10, approxEpsilon: 0.02,
+    houghThreshold: 60, minLineLengthPct: 20, maxLineGap: 10,
+    maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10,
+    referenceCorners: null,
+  };
+}
+
+export function defaultCornerInspection(index: number): CornerInspection {
+  return {
+    id: `cornerinsp_${Date.now()}`,
+    name: `Corners ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    method: 'shiTomasi',
+    maxCorners: 50, quality: 0.01, minDistance: 10, blockSize: 3,
+    minCount: 1,
+  };
+}
+
+export function defaultEdgeInspection(index: number): EdgeInspection {
+  return {
+    id: `edgeinsp_${Date.now()}`,
+    name: `Edges ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    cannyLow: 50, cannyHigh: 150,
+    minDensity: 0, maxDensity: null,
+  };
+}
 
 export type ArucoResult = {
   inspectionId: string;
@@ -1226,6 +1413,9 @@ export type ProgramStep = {
   colorOutputs?: ColorVisionStepOutput[];
   polygonOutputs?: PolygonVisionStepOutput[];
   arucoOutputs?: ArucoVisionStepOutput[];
+  frameOutputs?: FrameVisionStepOutput[];
+  cornerOutputs?: CornerVisionStepOutput[];
+  edgeOutputs?: EdgeVisionStepOutput[];
   /**
    * Superseded by pointNameExpr, which expresses the same thing as "$name[index]".
    * Still read so programs saved before the merge keep running; the builder rewrites

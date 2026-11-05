@@ -15,6 +15,17 @@ import {
 } from "react-native";
 import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import { useKeyboardStableCard } from "@/src/platform/keyboard";
+
+/** RunVision outputs of the frame / corner / edge inspections: [field, label, kind]. */
+type AlignOutList = "frameOutputs" | "cornerOutputs" | "edgeOutputs";
+const ALIGN_OUTPUTS: Record<AlignOutList, { title: string; fields: [string, string, "bool" | "num" | "points"][] }> = {
+  frameOutputs: { title: "FRAME OUTPUTS", fields: [
+    ["foundVar", "FOUND", "bool"], ["cornersVar", "CORNERS (TL, TR, BR, BL)", "points"], ["angleVar", "ANGLE", "num"]] },
+  cornerOutputs: { title: "CORNER OUTPUTS", fields: [
+    ["foundVar", "FOUND", "bool"], ["countVar", "COUNT", "num"], ["pointsVar", "POINTS", "points"]] },
+  edgeOutputs: { title: "EDGE OUTPUTS", fields: [
+    ["passedVar", "PASSED", "bool"], ["densityVar", "EDGE DENSITY %", "num"], ["angleVar", "DOMINANT ANGLE", "num"]] },
+};
 import {
   ArucoVisionStepOutput,
   AuxAxisChannelState,
@@ -146,6 +157,8 @@ export function StepConfigModal({
   const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' | 'cellsVar' | 'cellsPassedVar' } | null>(null);
   const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
   const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
+  // Frame / corner / edge outputs share one picker: which list, which inspection, which field.
+  const [alignOutPicker, setAlignOutPicker] = useState<{ list: AlignOutList; inspId: string; field: string } | null>(null);
   const [threadPresetPickerOpen, setThreadPresetPickerOpen] = useState(false);
   const [waitTimeoutVarPicker,  setWaitTimeoutVarPicker]  = useState(false);
   const [moveStopPosVarPicker,  setMoveStopPosVarPicker]  = useState(false);
@@ -1855,6 +1868,11 @@ export function StepConfigModal({
         const colorInspections   = selectedVP?.colorInspections ?? [];
         const polygonInspections = selectedVP?.polygonInspections ?? [];
         const arucoInspections   = selectedVP?.arucoInspections ?? [];
+        const alignInspections   = {
+          frameOutputs:  (selectedVP?.frameInspections ?? []).filter(i => i.enabled),
+          cornerOutputs: (selectedVP?.cornerInspections ?? []).filter(i => i.enabled),
+          edgeOutputs:   (selectedVP?.edgeInspections ?? []).filter(i => i.enabled),
+        };
 
         function getOutput(inspId: string): VisionStepOutput | undefined {
           return (draft!.visionOutputs ?? []).find(o => o.inspectionId === inspId);
@@ -2136,6 +2154,31 @@ export function StepConfigModal({
                 })}
               </>
             )}
+
+            {(Object.keys(ALIGN_OUTPUTS) as AlignOutList[]).map(list => alignInspections[list].length > 0 && (
+              <React.Fragment key={list}>
+                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>{ALIGN_OUTPUTS[list].title}</Text>
+                {alignInspections[list].map(insp => {
+                  const out = ((draft![list] ?? []) as Record<string, string | undefined>[]).find(o => o.inspectionId === insp.id);
+                  return (
+                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.border }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>{insp.name}</Text>
+                      {ALIGN_OUTPUTS[list].fields.map(([field, label, kind], fi) => (
+                        <VarSelectorButton
+                          key={field}
+                          label={label}
+                          value={out?.[field]}
+                          accent={kind === "bool" ? colors.success : kind === "points" ? accents.purple : colors.accent}
+                          placeholder="None — tap to assign"
+                          marginTop={fi > 0}
+                          onPress={() => setAlignOutPicker({ list, inspId: insp.id, field })}
+                        />
+                      ))}
+                    </View>
+                  );
+                })}
+              </React.Fragment>
+            ))}
           </>
         );
       }
@@ -3752,6 +3795,15 @@ export function StepConfigModal({
     : '';
   const arucoPickerCreate: VarCreateSpec = arucoPicker?.field === 'foundVar' ? { type: "boolean" } : { type: "number" };
 
+  // Frame / corner / edge output picker: point-list fields offer point lists, the rest scalars.
+  const alignOutField = alignOutPicker
+    ? ALIGN_OUTPUTS[alignOutPicker.list].fields.find(f => f[0] === alignOutPicker.field) ?? null
+    : null;
+  const alignOutPickerVars = !alignOutField ? []
+    : alignOutField[2] === "points"
+      ? (variables ?? []).filter(v => isPointListVariable(v))
+      : (variables ?? []).filter(v => !isListVariable(v));
+
   // Derive picker variable list from the active field
   const pickerVars = visionPicker
     ? visionPicker.field === 'pointsVar'
@@ -3953,7 +4005,7 @@ export function StepConfigModal({
               key={vp.id}
               style={[ms.row, i < visionPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
               onPress={() => {
-                set({ visionProgramId: vp.id, visionProgramName: vp.name, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: [], colorOutputs: [], polygonOutputs: [], arucoOutputs: [] });
+                set({ visionProgramId: vp.id, visionProgramName: vp.name, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: [], colorOutputs: [], polygonOutputs: [], arucoOutputs: [], frameOutputs: [], cornerOutputs: [], edgeOutputs: [] });
                 setVisionProgPickerOpen(false);
               }}
               activeOpacity={0.7}
@@ -4146,6 +4198,30 @@ export function StepConfigModal({
           ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
           : [...outputs, { inspectionId: inspId, ...patch }];
         set({ arucoOutputs: next });
+      }}
+    />
+    <VarPickerModal
+      filter={isAssignableVariable}
+      visible={alignOutPicker !== null}
+      onClose={() => setAlignOutPicker(null)}
+      variables={alignOutPickerVars}
+      selected={alignOutPicker
+        ? ((draft?.[alignOutPicker.list] ?? []) as Record<string, string | undefined>[]).find(o => o.inspectionId === alignOutPicker.inspId)?.[alignOutPicker.field]
+        : undefined}
+      title={alignOutField ? `${alignOutField[1].charAt(0)}${alignOutField[1].slice(1).toLowerCase()} Variable` : 'Variable'}
+      showNone
+      create={alignOutField?.[2] === "points" ? { type: "list", elementType: "Point" } : alignOutField?.[2] === "bool" ? { type: "boolean" } : { type: "number" }}
+      onCreateVariable={onSaveVariable} allVariables={variables}
+      onSelect={v => {
+        if (!alignOutPicker || !draft) return;
+        const { list, inspId, field } = alignOutPicker;
+        const outputs = (draft[list] ?? []) as { inspectionId: string }[];
+        const idx = outputs.findIndex(o => o.inspectionId === inspId);
+        const patch = { [field]: v?.name };
+        const next = idx >= 0
+          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
+          : [...outputs, { inspectionId: inspId, ...patch }];
+        set({ [list]: next } as Partial<ProgramStep>);
       }}
     />
     <VarPickerModal

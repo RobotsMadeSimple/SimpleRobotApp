@@ -23,6 +23,9 @@ import {
   BlobInspection,
   ColorCoverageInspection,
   ColorEntry,
+  CornerInspection,
+  EdgeInspection,
+  FrameInspection,
   LineInspection,
   PolygonInspection,
   VisionResult,
@@ -40,7 +43,8 @@ import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { ZonePickerModal } from "./ZonePickerModal";
 import { DictionaryPickerModal } from "./DictionaryPickerModal";
 import { ColorEditModal } from "./ColorEditModal";
-import { FormatPickerSheet } from "./InspectionTypePicker";
+import { ALIGN_KIND_META, FormatPickerSheet, InspKind } from "./InspectionTypePicker";
+import { CornerPanel, EdgePanel, FramePanel } from "./AlignInspectionPanels";
 
 // ── Tap-to-select zone hit-testing ──────────────────────────────────────────────
 //
@@ -102,7 +106,7 @@ function pointInPolygonNorm(points: [number, number][], nx: number, ny: number):
 function zoneArea(g: VisionZoneGeometry): number {
   if (g.shape === 'Rectangle') return g.width * g.height;
   if (g.shape === 'Circle') return Math.PI * g.radius * g.radius;
-  if (g.shape === 'Polygon' && g.points.length >= 3) {
+  if ((g.shape === 'Polygon' || g.shape === 'Quad') && g.points.length >= 3) {
     let sum = 0;
     for (let i = 0, j = g.points.length - 1; i < g.points.length; j = i++) {
       sum += g.points[j][0] * g.points[i][1] - g.points[i][0] * g.points[j][1];
@@ -122,7 +126,7 @@ function hitTestZones(zones: VisionZone[], nx: number, ny: number): VisionZone |
     let hit = false;
     if (g.shape === 'Rectangle') hit = pointInRectPx(g, FEED_ASPECT_GUESS, px, py);
     else if (g.shape === 'Circle') hit = pointInCirclePx(g, FEED_ASPECT_GUESS, px, py);
-    else if (g.shape === 'Polygon' && g.points.length >= 3) hit = pointInPolygonNorm(g.points, nx, ny);
+    else if ((g.shape === 'Polygon' || g.shape === 'Quad') && g.points.length >= 3) hit = pointInPolygonNorm(g.points, nx, ny);
     if (!hit) continue;
     const area = zoneArea(g);
     if (area < bestArea) { bestArea = area; best = z; }
@@ -131,19 +135,25 @@ function hitTestZones(zones: VisionZone[], nx: number, ny: number): VisionZone |
 }
 
 export function InspectionConfigModal({
-  visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode, zones,
-  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onSaveLine, onSaveBarcode, onClose,
+  visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode,
+  initialFrame, initialCorner, initialEdge, zones,
+  snapshotUri, onFetchSnapshot, onSaveBlob, onSaveColor, onSavePolygon, onSaveAruco, onSaveLine, onSaveBarcode,
+  onSaveFrame, onSaveCorner, onSaveEdge, onClose,
   feedUrl, isRunning, transitioning, onToggleRunning, visionResult,
   onLiveUpdate, onLiveUpdateBlob, onLiveUpdateColor, onLiveUpdateAruco, onLiveUpdateLine,
+  onLiveUpdateFrame, onLiveUpdateCorner, onLiveUpdateEdge,
 }: {
   visible: boolean;
-  kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line' | 'barcode' | null;
+  kind: InspKind | null;
   initialBlob: BlobInspection | null;
   initialColor: ColorCoverageInspection | null;
   initialPolygon: PolygonInspection | null;
   initialAruco: ArucoInspection | null;
   initialLine: LineInspection | null;
   initialBarcode: BarcodeInspection | null;
+  initialFrame?: FrameInspection | null;
+  initialCorner?: CornerInspection | null;
+  initialEdge?: EdgeInspection | null;
   zones: VisionZone[];
   snapshotUri: string | null;
   onFetchSnapshot: () => Promise<void>;
@@ -153,6 +163,9 @@ export function InspectionConfigModal({
   onSaveAruco: (insp: ArucoInspection) => void;
   onSaveLine: (insp: LineInspection) => void;
   onSaveBarcode: (insp: BarcodeInspection) => void;
+  onSaveFrame?: (insp: FrameInspection) => void;
+  onSaveCorner?: (insp: CornerInspection) => void;
+  onSaveEdge?: (insp: EdgeInspection) => void;
   onClose: () => void;
   // Same live feed the main editor view uses: annotated stream while running,
   // raw camera stream otherwise (ws:// URL), plus the Start/Stop Vision control.
@@ -166,6 +179,9 @@ export function InspectionConfigModal({
   onLiveUpdateColor?: (insp: ColorCoverageInspection) => void;
   onLiveUpdateAruco?: (insp: ArucoInspection) => void;
   onLiveUpdateLine?: (insp: LineInspection) => void;
+  onLiveUpdateFrame?: (insp: FrameInspection) => void;
+  onLiveUpdateCorner?: (insp: CornerInspection) => void;
+  onLiveUpdateEdge?: (insp: EdgeInspection) => void;
 }) {
   const paneLayout = usePaneLayout();
   const isWide  = paneLayout !== "single";
@@ -249,6 +265,12 @@ export function InspectionConfigModal({
   const [lineFilterByAngle, setLineFilterByAngle] = useState(false);
   const [lineMinAngle,      setLineMinAngle]      = useState(0);
   const [lineMaxAngle,      setLineMaxAngle]      = useState(180);
+
+  // Frame / corner / edge: the whole inspection is the draft (name/enabled/zone stay in
+  // the shared fields above and are merged in on save).
+  const [frameDraft,  setFrameDraft]  = useState<FrameInspection | null>(null);
+  const [cornerDraft, setCornerDraft] = useState<CornerInspection | null>(null);
+  const [edgeDraft,   setEdgeDraft]   = useState<EdgeInspection | null>(null);
 
   // Barcode-specific state
   const [barcodeFormats,    setBarcodeFormats]   = useState<string[]>([]);
@@ -370,6 +392,26 @@ export function InspectionConfigModal({
   }, [lineCannyT1, lineCannyT2, lineHoughThresh, lineMinLineLen, lineMaxLineGap,
       lineFilterByAngle, lineMinAngle, lineMaxAngle, name, enabled, zoneId]);
 
+  // Latest live-update callbacks, refreshed after each render (not during it), so the debounced
+  // effect below doesn't re-run — and re-fire — every time the parent passes new closures.
+  const alignLiveRef = useRef({ onLiveUpdateFrame, onLiveUpdateCorner, onLiveUpdateEdge });
+  useEffect(() => { alignLiveRef.current = { onLiveUpdateFrame, onLiveUpdateCorner, onLiveUpdateEdge }; });
+  useEffect(() => {
+    if (!visible) return;
+    const t = setTimeout(() => {
+      const common = { name, enabled, zoneId };
+      // Only push a real change — opening the page must not save anything.
+      const changed = (next: object, init: object | null | undefined) => !!init && JSON.stringify(next) !== JSON.stringify(init);
+      if (kind === 'frame' && frameDraft && changed({ ...frameDraft, ...common }, initialFrame))
+        alignLiveRef.current.onLiveUpdateFrame?.({ ...frameDraft, ...common });
+      if (kind === 'corner' && cornerDraft && changed({ ...cornerDraft, ...common }, initialCorner))
+        alignLiveRef.current.onLiveUpdateCorner?.({ ...cornerDraft, ...common });
+      if (kind === 'edge' && edgeDraft && changed({ ...edgeDraft, ...common }, initialEdge))
+        alignLiveRef.current.onLiveUpdateEdge?.({ ...edgeDraft, ...common });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [frameDraft, cornerDraft, edgeDraft, name, enabled, zoneId]);
+
   useEffect(() => {
     if (!visible) return;
     if (kind === 'blob' && initialBlob) {
@@ -421,8 +463,19 @@ export function InspectionConfigModal({
       setEnabled(initialBarcode.enabled);
       setZoneId(initialBarcode.zoneId);
       setBarcodeFormats([...initialBarcode.formats]);
+    } else {
+      const init = kind === 'frame' ? initialFrame : kind === 'corner' ? initialCorner : kind === 'edge' ? initialEdge : null;
+      if (init) {
+        setName(init.name);
+        setEnabled(init.enabled);
+        setZoneId(init.zoneId);
+      }
+      setFrameDraft(kind === 'frame' && initialFrame ? { ...initialFrame } : null);
+      setCornerDraft(kind === 'corner' && initialCorner ? { ...initialCorner } : null);
+      setEdgeDraft(kind === 'edge' && initialEdge ? { ...initialEdge } : null);
     }
-  }, [visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode]);
+  }, [visible, kind, initialBlob, initialColor, initialPolygon, initialAruco, initialLine, initialBarcode,
+      initialFrame, initialCorner, initialEdge]);
 
   // Rendered as an in-place subpage (not a Modal), so the Android hardware back
   // button must close-and-save instead of popping the vision-editor route.
@@ -457,6 +510,12 @@ export function InspectionConfigModal({
         filterByAngle: lineFilterByAngle, minAngle: lineMinAngle, maxAngle: lineMaxAngle });
     } else if (kind === 'barcode' && initialBarcode) {
       onSaveBarcode({ ...initialBarcode, name, enabled, zoneId, formats: barcodeFormats });
+    } else if (kind === 'frame' && frameDraft) {
+      onSaveFrame?.({ ...frameDraft, name, enabled, zoneId });
+    } else if (kind === 'corner' && cornerDraft) {
+      onSaveCorner?.({ ...cornerDraft, name, enabled, zoneId });
+    } else if (kind === 'edge' && edgeDraft) {
+      onSaveEdge?.({ ...edgeDraft, name, enabled, zoneId });
     }
     onClose();
   }
@@ -466,8 +525,13 @@ export function InspectionConfigModal({
   if (!visible) return null;
 
   const linkedZone = zones.find(z => z.id === zoneId);
-  const accent     = kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
-  const configTitle = kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage';
+  const alignKind  = kind === 'frame' || kind === 'corner' || kind === 'edge' ? kind : null;
+  const accent     = alignKind ? ALIGN_KIND_META[alignKind].accent : kind === 'blob' ? '#0891b2' : kind === 'polygon' ? '#d97706' : kind === 'aruco' ? '#16a34a' : kind === 'line' ? '#7c3aed' : kind === 'barcode' ? '#2563eb' : '#d946ef';
+  const configTitle = kind === 'frame' ? 'Frame (Alignment)' : kind === 'corner' ? 'Corner Detection' : kind === 'edge' ? 'Edge Detection'
+    : kind === 'blob' ? 'Blob Detection' : kind === 'polygon' ? 'Polygon Detection' : kind === 'aruco' ? 'ArUco Marker' : kind === 'line' ? 'Line Detection' : kind === 'barcode' ? 'Barcode / QR Code' : 'Color Coverage';
+  const editingId = initialBlob?.id ?? initialColor?.id ?? initialPolygon?.id ?? initialAruco?.id ?? initialLine?.id ?? initialBarcode?.id
+    ?? initialFrame?.id ?? initialCorner?.id ?? initialEdge?.id;
+  const latestFrame = kind === 'frame' ? (visionResult?.frameResults ?? []).find(f => f.inspectionId === editingId) ?? null : null;
 
   // Live feed — mirrors the main editor view: annotated stream while running,
   // raw camera stream otherwise, with the same Start/Stop control. Rendered
@@ -478,6 +542,7 @@ export function InspectionConfigModal({
         <VisionFeedViewer
           feedUrl={feedUrl ?? null}
           zones={zones}
+          alignedZones={isRunning ? visionResult?.alignedZones : undefined}
           isWide={isWide}
           placeholder="No camera feed"
           onTapImagePoint={handleZoneTap}
@@ -514,7 +579,7 @@ export function InspectionConfigModal({
           <View>
             <VisionResults
               result={visionResult ?? null}
-              only={initialBlob?.id ?? initialColor?.id ?? initialPolygon?.id ?? initialAruco?.id ?? initialLine?.id ?? initialBarcode?.id}
+              only={editingId}
               // Feed the thresholds being edited so the coverage bar tracks them live.
               colorInspections={initialColor ? [{ ...initialColor, minCoverage, maxCoverage }] : undefined}
             />
@@ -581,13 +646,25 @@ export function InspectionConfigModal({
               onPress={() => setZonePickerOpen(true)}
               activeOpacity={0.75}
             >
-              <Text style={ves.configFieldLabel}>Zone</Text>
+              <Text style={ves.configFieldLabel}>{kind === 'frame' ? 'Search in' : 'Zone'}</Text>
               <Text style={{ flex: 1, fontSize: 14, color: kitColors.text }}>
                 {linkedZone?.name ?? 'Full image'}
               </Text>
               <ChevronDown size={15} color={kitColors.textFaint} />
             </TouchableOpacity>
           </View>
+
+          {kind === 'frame' && frameDraft && (
+            <FramePanel
+              draft={frameDraft}
+              onChange={setFrameDraft}
+              latest={latestFrame}
+              isRunning={!!isRunning}
+              zones={zones}
+            />
+          )}
+          {kind === 'corner' && cornerDraft && <CornerPanel draft={cornerDraft} onChange={setCornerDraft} />}
+          {kind === 'edge' && edgeDraft && <EdgePanel draft={edgeDraft} onChange={setEdgeDraft} />}
 
           {/* Blob params */}
           {kind === 'blob' && (

@@ -51,6 +51,21 @@ function buildRows(r: VisionResult, colorInspections?: ColorCoverageInspection[]
     if (!keep(b.inspectionId)) continue;
     rows.push({ id: b.inspectionId, name: b.name, value: b.found ? b.codes.map(c => c.value).join(", ") : "none", status: b.found ? "found" : "none" });
   }
+  for (const f of r.frameResults ?? []) {
+    if (!keep(f.inspectionId)) continue;
+    rows.push({ id: f.inspectionId, name: f.name ?? "Frame", status: f.found ? "found" : "none",
+      value: f.found ? `found · ${f.angle.toFixed(1)}° · ${f.areaPct.toFixed(0)}% of image` : "not found" });
+  }
+  for (const c of r.cornerResults ?? []) {
+    if (!keep(c.inspectionId)) continue;
+    rows.push({ id: c.inspectionId, name: c.name ?? "Corners", status: c.found ? "found" : "none",
+      value: `${c.count} corner${c.count !== 1 ? "s" : ""}` });
+  }
+  for (const e of r.edgeResults ?? []) {
+    if (!keep(e.inspectionId)) continue;
+    rows.push({ id: e.inspectionId, name: e.name ?? "Edges", status: e.passed ? "pass" : "fail",
+      value: `${e.density.toFixed(1)}% edges${e.dominantAngle != null ? ` · ${e.dominantAngle.toFixed(0)}°` : ""}` });
+  }
   // How long each inspection took this frame, keyed by id.
   return rows.map(row => ({ ...row, ms: r.timings?.[row.id] }));
 }

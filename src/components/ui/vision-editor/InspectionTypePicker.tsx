@@ -3,10 +3,13 @@ import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import {
   Barcode,
   Check,
+  Crosshair,
+  Frame,
   Hexagon,
   Minus,
   Palette,
   QrCode,
+  ScanLine,
   ScanSearch,
 } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
@@ -16,6 +19,9 @@ import {
   BarcodeInspection,
   BlobInspection,
   ColorCoverageInspection,
+  CornerInspection,
+  EdgeInspection,
+  FrameInspection,
   LineInspection,
   PolygonInspection,
 } from "@/src/models/robotModels";
@@ -30,7 +36,24 @@ export type InspItem =
   | { kind: 'polygon'; insp: PolygonInspection }
   | { kind: 'aruco';   insp: ArucoInspection }
   | { kind: 'line';    insp: LineInspection }
-  | { kind: 'barcode'; insp: BarcodeInspection };
+  | { kind: 'barcode'; insp: BarcodeInspection }
+  | { kind: 'frame';   insp: FrameInspection }
+  | { kind: 'corner';  insp: CornerInspection }
+  | { kind: 'edge';    insp: EdgeInspection };
+
+export type InspKind = InspItem['kind'];
+
+/** Identity of the frame / corner / edge kinds (the older kinds keep their inline styling). */
+export const ALIGN_KIND_META: Record<'frame' | 'corner' | 'edge', { label: string; accent: string; soft: string }> = {
+  frame:  { label: 'FRAME (ALIGNMENT)',  accent: '#0d9488', soft: '#ccfbf1' },
+  corner: { label: 'CORNER DETECTION',   accent: '#ea580c', soft: '#ffedd5' },
+  edge:   { label: 'EDGE DETECTION',     accent: '#475569', soft: '#f1f5f9' },
+};
+
+export function AlignKindIcon({ kind, size = 18, color }: { kind: 'frame' | 'corner' | 'edge'; size?: number; color?: string }) {
+  const c = color ?? ALIGN_KIND_META[kind].accent;
+  return kind === 'frame' ? <Frame size={size} color={c} /> : kind === 'corner' ? <Crosshair size={size} color={c} /> : <ScanLine size={size} color={c} />;
+}
 
 // ── Barcode format multi-select sheet ────────────────────────────────────────
 
@@ -70,11 +93,12 @@ export function FormatPickerSheet({ visible, selected, onToggle, onClose }: {
 
 export function InspectionTypePicker({ visible, onSelect, onClose }: {
   visible: boolean;
-  onSelect: (kind: 'blob' | 'color' | 'polygon' | 'aruco' | 'line' | 'barcode') => void;
+  onSelect: (kind: InspKind) => void;
   onClose: () => void;
 }) {
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Add Inspection">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.xs }}>
       <TouchableOpacity style={ves.sheetRow} onPress={() => { onSelect('blob'); onClose(); }} activeOpacity={0.75}>
         <View style={ves.typePickerIcon}><ScanSearch size={18} color="#0891b2" /></View>
         <View style={{ flex: 1 }}>
@@ -117,6 +141,20 @@ export function InspectionTypePicker({ visible, onSelect, onClose }: {
           <Text style={ves.sheetRowSub}>Read QR codes, Code 128, EAN, Data Matrix and more</Text>
         </View>
       </TouchableOpacity>
+      {([
+        ['frame',  'Frame (alignment)', "Find a 4-cornered frame — e.g. the board's edge — and align zones to it each frame"],
+        ['corner', 'Corner Detection',  'Find corner points (Shi-Tomasi or Harris) and count them'],
+        ['edge',   'Edge Detection',    'Measure how much of a zone is edges (Canny) and its dominant direction'],
+      ] as const).map(([k, title, sub]) => (
+        <TouchableOpacity key={k} style={ves.sheetRow} onPress={() => { onSelect(k); onClose(); }} activeOpacity={0.75}>
+          <View style={[ves.typePickerIcon, { backgroundColor: ALIGN_KIND_META[k].soft }]}><AlignKindIcon kind={k} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={ves.sheetRowName}>{title}</Text>
+            <Text style={ves.sheetRowSub}>{sub}</Text>
+          </View>
+        </TouchableOpacity>
+      ))}
+      </ScrollView>
     </BottomSheet>
   );
 }

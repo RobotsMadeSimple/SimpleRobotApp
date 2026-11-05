@@ -1,4 +1,5 @@
 import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from "@/src/models/robotModels";
+import { HOMOGRAPHY_JS } from "./homography";
 
 /**
  * Zone draw/edit canvas.
@@ -14,6 +15,10 @@ import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from 
  *
  * Pointer events rather than touch events: the app also runs on web and Electron,
  * where touch events never fire and the editor would otherwise be dead to a mouse.
+ *
+ * A `Quad` (skewed grid) has no draw phase: choosing it seeds four corners — from the
+ * rectangle being edited if there is one, else an inset box — and the user drags each
+ * corner onto the board's. Its grid is drawn perspective-correct (src/vision/homography.ts).
  */
 export function makeZoneDrawHtml(
   imageUri: string,
@@ -35,6 +40,7 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch
 <body>
 <canvas id="c"></canvas>
 <script>
+${HOMOGRAPHY_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
 var zones=${JSON.stringify(zones)};
 var editingId=${JSON.stringify(editingZoneId)};
@@ -67,7 +73,23 @@ function post(){
 
 function reset(){polyPts=[];drag=null;geom=null;editing=false;}
 
-window.setShape=function(s){drawShape=s;reset();render();post();};
+window.setShape=function(s){
+  var prev=geom;drawShape=s;reset();
+  if(s==='Quad'){geom=quadFrom(prev);editing=true;}
+  render();post();
+};
+
+// Four corners TL, TR, BR, BL to start a skewed grid from: the rectangle (or quad) that was
+// on the canvas, so switching shape keeps the user's placement, else an inset box.
+function quadFrom(prev){
+  var pts=[[0.2,0.2],[0.8,0.2],[0.8,0.8],[0.2,0.8]];
+  if(prev&&prev.shape==='Quad'&&prev.points&&prev.points.length===4) pts=prev.points.map(function(p){return[p[0],p[1]];});
+  else if(prev&&prev.shape==='Rectangle') pts=rectCorners(prev).map(function(p){var n=toNorm(p.x,p.y);return[clamp01(n.x),clamp01(n.y)];});
+  return{shape:'Quad',x:0,y:0,width:1,height:1,rotation:0,cx:0.5,cy:0.5,radius:0.25,points:pts};
+}
+function isQuad(g){return g&&g.shape==='Quad'&&g.points&&g.points.length===4;}
+// A quad's corners in screen space, as [x,y] pairs for the homography helpers.
+function quadScr(g){var r=imgRect();return g.points.map(function(p){return[r.x+p[0]*r.w,r.y+p[1]*r.h];});}
 window.clearShape=function(){reset();render();post();};
 window.undoPoint=function(){if(polyPts.length){polyPts.pop();render();post();}};
 
@@ -183,7 +205,7 @@ function handles(){
     var p=toScr(geom.cx,geom.cy),rad=geom.radius*Math.min(r.w,r.h);
     return[{id:'center',x:p.x,y:p.y},{id:'radius',x:p.x+rad,y:p.y}];
   }
-  if(geom.shape==='Polygon'){
+  if(geom.shape==='Polygon'||geom.shape==='Quad'){
     return geom.points.map(function(p,i){return{id:i,x:r.x+p[0]*r.w,y:r.y+p[1]*r.h};});
   }
   return[];
@@ -226,7 +248,7 @@ function inside(x,y){
     var p=toScr(geom.cx,geom.cy),rad=geom.radius*Math.min(r.w,r.h);
     return (x-p.x)*(x-p.x)+(y-p.y)*(y-p.y)<=rad*rad;
   }
-  if(geom.shape==='Polygon'&&geom.points.length>=3){
+  if((geom.shape==='Polygon'||geom.shape==='Quad')&&geom.points.length>=3){
     var pts=geom.points.map(function(q){return[r.x+q[0]*r.w,r.y+q[1]*r.h];});
     var hit=false;
     for(var i=0,j=pts.length-1;i<pts.length;j=i++){
@@ -339,13 +361,23 @@ function drawZone(g,label,color,grid){
     ctx.beginPath();ctx.arc(px,py,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
     ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
     ctx.fillText(label,px+4,py-rad-4);
-  }else if(g.shape==='Polygon'&&g.points.length>=2){
+  }else if((g.shape==='Polygon'||g.shape==='Quad')&&g.points.length>=2){
     ctx.beginPath();
     ctx.moveTo(r.x+g.points[0][0]*r.w,r.y+g.points[0][1]*r.h);
     for(var i=1;i<g.points.length;i++) ctx.lineTo(r.x+g.points[i][0]*r.w,r.y+g.points[i][1]*r.h);
     ctx.closePath();ctx.fill();ctx.stroke();
     ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
     ctx.fillText(label,r.x+g.points[0][0]*r.w+4,r.y+g.points[0][1]*r.h-4);
+    // Mark which corner is row 1 / column 1 and which way the rows run, since a skewed grid
+    // can be dragged into any orientation.
+    if(isQuad(g)){
+      var tl=toScr(g.points[0][0],g.points[0][1]),tr=toScr(g.points[1][0],g.points[1][1]);
+      ctx.font='bold 11px sans-serif';ctx.fillStyle=color;
+      ctx.fillText('1,1',tl.x+6,tl.y+14);
+      ctx.beginPath();ctx.setLineDash([]);ctx.lineWidth=3;
+      var mx=tl.x+(tr.x-tl.x)*0.25,my=tl.y+(tr.y-tl.y)*0.25;
+      ctx.moveTo(tl.x,tl.y);ctx.lineTo(mx,my);ctx.strokeStyle=color;ctx.stroke();
+    }
   }
   if(grid&&grid.rows*grid.cols>1) drawGrid(g,grid,color);
   ctx.restore();
@@ -360,7 +392,7 @@ function zoneBounds(g){
     var rad=g.radius*Math.min(r.w,r.h);
     return{x:r.x+g.cx*r.w-rad,y:r.y+g.cy*r.h-rad,w:rad*2,h:rad*2};
   }
-  if(g.shape==='Polygon'&&g.points.length>=3){
+  if((g.shape==='Polygon'||g.shape==='Quad')&&g.points.length>=3){
     var xs=g.points.map(function(p){return p[0];}),ys=g.points.map(function(p){return p[1];});
     var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs);
     var y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
@@ -372,6 +404,19 @@ function zoneBounds(g){
 function drawGrid(g,grid,color){
   ctx.save();
   ctx.strokeStyle=color;ctx.globalAlpha=0.6;ctx.lineWidth=1;ctx.setLineDash([4,3]);
+
+  if(isQuad(g)){
+    // Perspective-correct: the unit-square lattice pushed through the quad's homography,
+    // so far rows come out shorter than near ones, as the board's squares do.
+    var qs=quadScr(g);
+    for(var qr=0;qr<grid.rows;qr++)
+      for(var qc=0;qc<grid.cols;qc++){
+        var cq=quadCellQuad(qs,grid.rows,grid.cols,qr,qc);
+        traceQuad(cq.map(function(p){return{x:p[0],y:p[1]};}));
+        ctx.stroke();
+      }
+    ctx.restore();return;
+  }
 
   if(g.shape==='Rectangle'&&rot(g)){
     // Cell by cell, because the lattice turns with the rectangle. The straight-line
@@ -580,29 +625,53 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 <body>
 <canvas id="c"></canvas>
 <script>
+${HOMOGRAPHY_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
 var _ws=null,_timer=null,_lastUrl=null,_gen=0;
 
 // Zone outlines drawn over every frame, so every declared zone is visible whether or
 // not an inspection uses it. The host pushes the zones in and toggles them; the canvas
 // is the image at natural size, so normalized zone coords map straight to it.
-var _zones=[],_zonesVisible=true;
+var _zones=[],_zonesVisible=true,_aligned=[];
 window.setZones=function(z){_zones=z||[];};
 window.setZonesVisible=function(v){_zonesVisible=!!v;};
+// The outline each frame-aligned zone actually had on the last result (normalized points),
+// drawn over the drawn zone so you can see the alignment follow the board.
+window.setAlignedZones=function(a){_aligned=a||[];};
+function quadGrid(pts,grid,W,H){
+  if(!grid||grid.rows*grid.cols<=1||!pts||pts.length!==4)return;
+  var q=pts.map(function(p){return[p[0]*W,p[1]*H];});
+  ctx.save();ctx.globalAlpha=0.6;ctx.lineWidth=Math.max(1,ctx.lineWidth/2);
+  for(var r=0;r<grid.rows;r++)for(var k=0;k<grid.cols;k++){
+    var cq=quadCellQuad(q,grid.rows,grid.cols,r,k);
+    ctx.beginPath();ctx.moveTo(cq[0][0],cq[0][1]);for(var t=1;t<4;t++)ctx.lineTo(cq[t][0],cq[t][1]);ctx.closePath();ctx.stroke();
+  }
+  ctx.restore();
+}
 function drawZones(){
-  if(!_zonesVisible||!_zones.length||!c.width||!c.height)return;
+  if(!_zonesVisible||!c.width||!c.height)return;
   var W=c.width,H=c.height,m=Math.min(W,H);
   ctx.save();
   ctx.lineWidth=Math.max(2,Math.round(m*0.005));
+  for(var a=0;a<_aligned.length;a++){
+    var al=_aligned[a];if(!al||!al.points||al.points.length<2)continue;
+    ctx.strokeStyle='#e879f9';
+    ctx.beginPath();ctx.moveTo(al.points[0][0]*W,al.points[0][1]*H);
+    for(var b=1;b<al.points.length;b++)ctx.lineTo(al.points[b][0]*W,al.points[b][1]*H);
+    ctx.closePath();ctx.stroke();
+    var zz=null;for(var zi=0;zi<_zones.length;zi++)if(_zones[zi].id===al.zoneId)zz=_zones[zi];
+    if(zz&&zz.grid)quadGrid(al.points,zz.grid,W,H);
+  }
   ctx.strokeStyle='#22d3ee';
   for(var i=0;i<_zones.length;i++){
     var g=_zones[i].geometry;if(!g)continue;
     if(g.shape==='Circle'){
       ctx.beginPath();ctx.arc(g.cx*W,g.cy*H,g.radius*m,0,2*Math.PI);ctx.stroke();
-    }else if(g.shape==='Polygon'&&g.points&&g.points.length>=2){
+    }else if((g.shape==='Polygon'||g.shape==='Quad')&&g.points&&g.points.length>=2){
       ctx.beginPath();ctx.moveTo(g.points[0][0]*W,g.points[0][1]*H);
       for(var j=1;j<g.points.length;j++)ctx.lineTo(g.points[j][0]*W,g.points[j][1]*H);
       ctx.closePath();ctx.stroke();
+      if(g.shape==='Quad'&&!_zones[i].alignTo)quadGrid(g.points,_zones[i].grid,W,H);
     }else{
       var x=g.x*W,y=g.y*H,w=g.width*W,h=g.height*H,rot=(g.rotation||0)*Math.PI/180;
       if(rot){ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate(rot);ctx.strokeRect(-w/2,-h/2,w,h);ctx.restore();}

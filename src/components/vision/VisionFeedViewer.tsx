@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
 import { FEED_HTML } from "@/src/vision/visionHtml";
-import type { VisionZone } from "@/src/models/robotModels";
+import type { AlignedZone, VisionZone } from "@/src/models/robotModels";
 import { colors, radii, shadows } from "@/src/components/ui/kit";
 
 export type VisionFeedHandle = VisionCanvasHandle;
@@ -21,6 +21,8 @@ export type VisionFeedHandle = VisionCanvasHandle;
 export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   feedUrl: string | null;
   zones?: VisionZone[];
+  /** Outlines of frame-aligned zones from the latest result, drawn over the drawn zones. */
+  alignedZones?: AlignedZone[];
   isWide: boolean;
   /** width/height for the wide-layout aspect box (defaults to 4:3). */
   aspect?: number;
@@ -36,7 +38,7 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
    */
   onTapImagePoint?: (x: number, y: number) => void;
 }>(function VisionFeedViewer(
-  { feedUrl, zones, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint },
+  { feedUrl, zones, alignedZones, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint },
   ref,
 ) {
   const webRef = useRef<VisionCanvasHandle>(null);
@@ -45,17 +47,21 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   }), []);
 
   // Stringify once so the inject effect fires on real geometry changes, not every render.
+  // id/grid/alignTo let the canvas draw a skewed zone's perspective grid, and the grid of an
+  // aligned zone on its live outline instead.
   const zonesJson = useMemo(
-    () => JSON.stringify((zones ?? []).map(z => ({ geometry: z.geometry }))),
+    () => JSON.stringify((zones ?? []).map(z => ({ id: z.id, geometry: z.geometry, grid: z.grid ?? null, alignTo: z.alignTo ?? null }))),
     [zones],
   );
+  const alignedJson = useMemo(() => JSON.stringify(alignedZones ?? []), [alignedZones]);
 
   const injectFeed = useCallback(() => {
     webRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
   }, [feedUrl]);
   const injectZones = useCallback(() => {
-    webRef.current?.injectJavaScript(`window.setZones(${zonesJson});window.setZonesVisible(true);true;`);
-  }, [zonesJson]);
+    webRef.current?.injectJavaScript(
+      `window.setZones(${zonesJson});window.setAlignedZones&&window.setAlignedZones(${alignedJson});window.setZonesVisible(true);true;`);
+  }, [zonesJson, alignedJson]);
 
   useEffect(() => { injectFeed(); }, [injectFeed]);
   useEffect(() => { injectZones(); }, [injectZones]);
