@@ -1473,6 +1473,7 @@ export type KnownValidationCode =
   | "unknownProperty" | "expressionSyntax" | "emptyLoop" | "emptyBranch" | "missingField"
   | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable"
   | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict"
+  | "untaughtGrid"
   // Plugins (docs/plugins.md §6)
   | "unknownPlugin" | "unknownPluginStep" | "pluginNotRunning" | "pluginParamMissing"
   | "pluginParamEnum" | "pluginOutputType" | "unknownPluginFunction";
