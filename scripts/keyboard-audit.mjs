@@ -153,6 +153,11 @@ const SCENARIOS = [
     open: async () => {},
   },
   {
+    name: "space — grid teaching wizard setup (page)",
+    route: "/space/grid-teach",
+    open: async () => {},
+  },
+  {
     name: "IO configure (page)",
     route: "/io/configure?deviceId=ROBOT_NANO_001",
     open: async () => {},

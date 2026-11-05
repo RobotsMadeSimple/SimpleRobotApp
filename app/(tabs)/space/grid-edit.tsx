@@ -152,7 +152,18 @@ export default function GridEditPage() {
         ]}
         backTo="/space/grids"
         right={
-          <Button label="Save" size="sm" onPress={handleSave} disabled={!canSave} />
+          <View style={s.headerButtons}>
+            {/* Re-teach this grid by jogging to its corners (a wizard of its own). */}
+            {!isNew && (
+              <Button
+                label="Teach with wizard"
+                size="sm"
+                variant="secondary"
+                onPress={() => router.push(`/space/grid-teach?id=${encodeURIComponent(draft.id)}`)}
+              />
+            )}
+            <Button label="Save" size="sm" onPress={handleSave} disabled={!canSave} />
+          </View>
         }
       />
 
@@ -348,6 +359,7 @@ export default function GridEditPage() {
 
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
+  headerButtons: { flexDirection: "row", gap: spacing.sm },
 
   // Wide: two columns instead of one long stack of cards. Each column keeps
   // its own vertical rhythm since Screen's `gap` only spaces its direct child.
