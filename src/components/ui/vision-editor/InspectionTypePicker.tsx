@@ -11,6 +11,7 @@ import {
   QrCode,
   ScanLine,
   ScanSearch,
+  Sparkles,
 } from "lucide-react-native";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import {
@@ -24,6 +25,7 @@ import {
   FrameInspection,
   LineInspection,
   PolygonInspection,
+  TextureInspection,
 } from "@/src/models/robotModels";
 import { colors, spacing } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
@@ -39,20 +41,28 @@ export type InspItem =
   | { kind: 'barcode'; insp: BarcodeInspection }
   | { kind: 'frame';   insp: FrameInspection }
   | { kind: 'corner';  insp: CornerInspection }
-  | { kind: 'edge';    insp: EdgeInspection };
+  | { kind: 'edge';    insp: EdgeInspection }
+  | { kind: 'texture'; insp: TextureInspection };
 
 export type InspKind = InspItem['kind'];
 
-/** Identity of the frame / corner / edge kinds (the older kinds keep their inline styling). */
-export const ALIGN_KIND_META: Record<'frame' | 'corner' | 'edge', { label: string; accent: string; soft: string }> = {
-  frame:  { label: 'FRAME (ALIGNMENT)',  accent: '#0d9488', soft: '#ccfbf1' },
-  corner: { label: 'CORNER DETECTION',   accent: '#ea580c', soft: '#ffedd5' },
-  edge:   { label: 'EDGE DETECTION',     accent: '#475569', soft: '#f1f5f9' },
+/** The frame / corner / edge / texture kinds share one edit path (the older kinds keep their inline styling). */
+export type AlignKind = 'frame' | 'corner' | 'edge' | 'texture';
+export const isAlignKind = (k: InspKind | null | undefined): k is AlignKind =>
+  k === 'frame' || k === 'corner' || k === 'edge' || k === 'texture';
+
+/** Identity of the frame / corner / edge / texture kinds. */
+export const ALIGN_KIND_META: Record<AlignKind, { label: string; accent: string; soft: string }> = {
+  frame:   { label: 'FRAME (ALIGNMENT)',  accent: '#0d9488', soft: '#ccfbf1' },
+  corner:  { label: 'CORNER DETECTION',   accent: '#ea580c', soft: '#ffedd5' },
+  edge:    { label: 'EDGE DETECTION',     accent: '#475569', soft: '#f1f5f9' },
+  texture: { label: 'TEXTURE',            accent: '#9333ea', soft: '#f3e8ff' },
 };
 
-export function AlignKindIcon({ kind, size = 18, color }: { kind: 'frame' | 'corner' | 'edge'; size?: number; color?: string }) {
+export function AlignKindIcon({ kind, size = 18, color }: { kind: AlignKind; size?: number; color?: string }) {
   const c = color ?? ALIGN_KIND_META[kind].accent;
-  return kind === 'frame' ? <Frame size={size} color={c} /> : kind === 'corner' ? <Crosshair size={size} color={c} /> : <ScanLine size={size} color={c} />;
+  return kind === 'frame' ? <Frame size={size} color={c} /> : kind === 'corner' ? <Crosshair size={size} color={c} />
+    : kind === 'texture' ? <Sparkles size={size} color={c} /> : <ScanLine size={size} color={c} />;
 }
 
 // ── Barcode format multi-select sheet ────────────────────────────────────────
@@ -145,6 +155,7 @@ export function InspectionTypePicker({ visible, onSelect, onClose }: {
         ['frame',  'Frame (alignment)', "Find a 4-cornered frame — e.g. the board's edge — and align zones to it each frame"],
         ['corner', 'Corner Detection',  'Find corner points (Shi-Tomasi or Harris) and count them'],
         ['edge',   'Edge Detection',    'Measure how much of a zone is edges (Canny) and its dominant direction'],
+        ['texture', 'Texture',          'Fine detail per cell — tells a ringed or patterned object from a plain surface of the same colour, e.g. black checkers on black squares. Ignores glare and shadows.'],
       ] as const).map(([k, title, sub]) => (
         <TouchableOpacity key={k} style={ves.sheetRow} onPress={() => { onSelect(k); onClose(); }} activeOpacity={0.75}>
           <View style={[ves.typePickerIcon, { backgroundColor: ALIGN_KIND_META[k].soft }]}><AlignKindIcon kind={k} /></View>

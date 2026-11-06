@@ -16,15 +16,18 @@ import {
 import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import { useKeyboardStableCard } from "@/src/platform/keyboard";
 
-/** RunVision outputs of the frame / corner / edge inspections: [field, label, kind]. */
-type AlignOutList = "frameOutputs" | "cornerOutputs" | "edgeOutputs";
-const ALIGN_OUTPUTS: Record<AlignOutList, { title: string; fields: [string, string, "bool" | "num" | "points"][] }> = {
+/** RunVision outputs of the frame / corner / edge / texture inspections: [field, label, kind]. */
+type AlignOutList = "frameOutputs" | "cornerOutputs" | "edgeOutputs" | "textureOutputs";
+const ALIGN_OUTPUTS: Record<AlignOutList, { title: string; fields: [string, string, "bool" | "num" | "points" | "records"][] }> = {
   frameOutputs: { title: "FRAME OUTPUTS", fields: [
     ["foundVar", "FOUND", "bool"], ["cornersVar", "CORNERS (TL, TR, BR, BL)", "points"], ["angleVar", "ANGLE", "num"]] },
   cornerOutputs: { title: "CORNER OUTPUTS", fields: [
     ["foundVar", "FOUND", "bool"], ["countVar", "COUNT", "num"], ["pointsVar", "POINTS", "points"]] },
   edgeOutputs: { title: "EDGE OUTPUTS", fields: [
     ["passedVar", "PASSED", "bool"], ["densityVar", "EDGE DENSITY %", "num"], ["angleVar", "DOMINANT ANGLE", "num"]] },
+  textureOutputs: { title: "TEXTURE OUTPUTS", fields: [
+    ["passedVar", "PASSED", "bool"], ["scoreVar", "SCORE (HIGHEST CELL)", "num"],
+    ["cellsVar", "CELLS (ROW, COL, INDEX, SCORE, PASSED)", "records"], ["cellsPassedVar", "CELLS PASSED", "num"]] },
 };
 import {
   ArucoVisionStepOutput,
@@ -1872,6 +1875,7 @@ export function StepConfigModal({
           frameOutputs:  (selectedVP?.frameInspections ?? []).filter(i => i.enabled),
           cornerOutputs: (selectedVP?.cornerInspections ?? []).filter(i => i.enabled),
           edgeOutputs:   (selectedVP?.edgeInspections ?? []).filter(i => i.enabled),
+          textureOutputs: (selectedVP?.textureInspections ?? []).filter(i => i.enabled),
         };
 
         function getOutput(inspId: string): VisionStepOutput | undefined {
@@ -2168,7 +2172,7 @@ export function StepConfigModal({
                           key={field}
                           label={label}
                           value={out?.[field]}
-                          accent={kind === "bool" ? colors.success : kind === "points" ? accents.purple : colors.accent}
+                          accent={kind === "bool" ? colors.success : kind === "points" || kind === "records" ? accents.purple : colors.accent}
                           placeholder="None — tap to assign"
                           marginTop={fi > 0}
                           onPress={() => setAlignOutPicker({ list, inspId: insp.id, field })}
@@ -3795,14 +3799,17 @@ export function StepConfigModal({
     : '';
   const arucoPickerCreate: VarCreateSpec = arucoPicker?.field === 'foundVar' ? { type: "boolean" } : { type: "number" };
 
-  // Frame / corner / edge output picker: point-list fields offer point lists, the rest scalars.
+  // Frame / corner / edge / texture output picker: point-list and record-list fields offer
+  // those lists, the rest scalars.
   const alignOutField = alignOutPicker
     ? ALIGN_OUTPUTS[alignOutPicker.list].fields.find(f => f[0] === alignOutPicker.field) ?? null
     : null;
   const alignOutPickerVars = !alignOutField ? []
     : alignOutField[2] === "points"
       ? (variables ?? []).filter(v => isPointListVariable(v))
-      : (variables ?? []).filter(v => !isListVariable(v));
+      : alignOutField[2] === "records"
+        ? (variables ?? []).filter(v => isRecordListVariable(v))
+        : (variables ?? []).filter(v => !isListVariable(v));
 
   // Derive picker variable list from the active field
   const pickerVars = visionPicker
@@ -4005,7 +4012,7 @@ export function StepConfigModal({
               key={vp.id}
               style={[ms.row, i < visionPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
               onPress={() => {
-                set({ visionProgramId: vp.id, visionProgramName: vp.name, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: [], colorOutputs: [], polygonOutputs: [], arucoOutputs: [], frameOutputs: [], cornerOutputs: [], edgeOutputs: [] });
+                set({ visionProgramId: vp.id, visionProgramName: vp.name, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: [], colorOutputs: [], polygonOutputs: [], arucoOutputs: [], frameOutputs: [], cornerOutputs: [], edgeOutputs: [], textureOutputs: [] });
                 setVisionProgPickerOpen(false);
               }}
               activeOpacity={0.7}
@@ -4210,7 +4217,9 @@ export function StepConfigModal({
         : undefined}
       title={alignOutField ? `${alignOutField[1].charAt(0)}${alignOutField[1].slice(1).toLowerCase()} Variable` : 'Variable'}
       showNone
-      create={alignOutField?.[2] === "points" ? { type: "list", elementType: "Point" } : alignOutField?.[2] === "bool" ? { type: "boolean" } : { type: "number" }}
+      create={alignOutField?.[2] === "points" ? { type: "list", elementType: "Point" }
+        : alignOutField?.[2] === "records" ? { type: "list", elementType: "Record" }
+        : alignOutField?.[2] === "bool" ? { type: "boolean" } : { type: "number" }}
       onCreateVariable={onSaveVariable} allVariables={variables}
       onSelect={v => {
         if (!alignOutPicker || !draft) return;

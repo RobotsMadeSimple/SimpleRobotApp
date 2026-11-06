@@ -33,19 +33,27 @@ const tap = async (p, t, { exact = true, nth = 0, last = false } = {}) => {
   await (last ? e.last() : e.nth(nth)).click({ force: true });
 };
 
-// A vision program with a skewed board zone aligned to a frame, plus corner and edge inspections.
+// A vision program with a skewed board zone aligned to a frame, plus corner, edge and texture
+// inspections, and a second board zone snapped by a checker-grid frame on itself.
 const AUDIT_VISION_PROGRAM = {
   id: "", name: "zz keyboard audit", description: "", cameraId: "", lastUpdatedUnixMs: 0, inspectionOrder: [],
   zones: [{ id: "z1", name: "Board", alignTo: "f1", grid: { rows: 8, cols: 8 },
     geometry: { shape: "Quad", x: 0, y: 0, width: 1, height: 1, rotation: 0, cx: 0.5, cy: 0.5, radius: 0.25,
-      points: [[0.35, 0.2], [0.65, 0.2], [0.9, 0.85], [0.1, 0.85]] } }],
+      points: [[0.35, 0.2], [0.65, 0.2], [0.9, 0.85], [0.1, 0.85]] } },
+    { id: "z2", name: "Squares", alignTo: "f2", grid: { rows: 8, cols: 8 },
+    geometry: { shape: "Quad", x: 0, y: 0, width: 1, height: 1, rotation: 0, cx: 0.5, cy: 0.5, radius: 0.25,
+      points: [[0.36, 0.4], [0.66, 0.4], [0.94, 0.86], [0.12, 0.86]] } }],
   inspections: [],
   frameInspections: [{ id: "f1", name: "Frame 1", enabled: true, zoneId: null, method: "lines", cannyLow: 50, cannyHigh: 150,
     minAreaPct: 10, approxEpsilon: 0.02, houghThreshold: 60, minLineLengthPct: 20, maxLineGap: 10,
-    maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10, referenceCorners: null }],
+    maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10, referenceCorners: null },
+    { id: "f2", name: "Checker 1", enabled: true, zoneId: "z2", method: "checker", cannyLow: 50, cannyHigh: 150,
+    minAreaPct: 10, approxEpsilon: 0.02, houghThreshold: 60, minLineLengthPct: 20, maxLineGap: 10,
+    maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10, gridRows: 8, gridCols: 8, minEdgeRatio: 4, referenceCorners: null }],
   cornerInspections: [{ id: "c1", name: "Corners 1", enabled: true, zoneId: "z1", method: "shiTomasi",
     maxCorners: 50, quality: 0.01, minDistance: 10, blockSize: 3, minCount: 1 }],
   edgeInspections: [{ id: "e1", name: "Edges 1", enabled: true, zoneId: "z1", cannyLow: 50, cannyHigh: 150, minDensity: 0, maxDensity: 30 }],
+  textureInspections: [{ id: "t1", name: "Texture 1", enabled: true, zoneId: "z2", cellInset: 25, minScore: 4, maxScore: 20 }],
 };
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -173,7 +181,7 @@ const SCENARIOS = [
     open: async () => {},
   },
   // Vision editor on an inline, never-saved program (no id; opening an inspection saves nothing).
-  ...[["frame", "Frame 1"], ["corner", "Corners 1"], ["edge", "Edges 1"]].map(([kind, label]) => ({
+  ...[["frame", "Frame 1"], ["checker frame", "Checker 1"], ["corner", "Corners 1"], ["edge", "Edges 1"], ["texture", "Texture 1"]].map(([kind, label]) => ({
     name: `vision — ${kind} inspection settings (page)`,
     route: "/program/vision-editor?program=" + encodeURIComponent(JSON.stringify(AUDIT_VISION_PROGRAM)),
     open: async p => { await tap(p, label); await sleep(900); },

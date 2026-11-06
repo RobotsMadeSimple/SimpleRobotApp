@@ -497,6 +497,7 @@ export type VisionProgram = {
   frameInspections?: FrameInspection[];
   cornerInspections?: CornerInspection[];
   edgeInspections?: EdgeInspection[];
+  textureInspections?: TextureInspection[];
   /**
    * Display order of inspections, as a flat list of inspection ids across all the typed
    * lists above. Lets the user drag inspections into any order regardless of type. Ids
@@ -514,6 +515,7 @@ export type VisionResult     = {
   colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[];
   lineResults?: LineResult[]; barcodeResults?: BarcodeResult[];
   frameResults?: FrameResult[]; cornerResults?: CornerResult[]; edgeResults?: EdgeResult[];
+  textureResults?: TextureResult[];
   /** The outline each aligned zone actually had this frame (normalized points). */
   alignedZones?: AlignedZone[];
   timings?: Record<string, number>;
@@ -526,7 +528,8 @@ export type VisionResult     = {
 /** A normalized [x, y] point. */
 export type NormPoint = [number, number];
 
-export type FrameMethod = 'contour' | 'lines' | 'corners';
+/** `checker` fits a gridRows × gridCols checkerboard to the squares themselves (no board frame needed). */
+export type FrameMethod = 'checker' | 'contour' | 'lines' | 'corners';
 
 /**
  * Finds a 4-cornered frame (e.g. a board's outline) and reports its corners TL, TR, BR, BL.
@@ -556,6 +559,11 @@ export type FrameInspection = {
   maxCorners: number;
   cornerQuality: number;
   minCornerDistance: number;
+  /** checker: squares down / across the board. */
+  gridRows?: number;
+  gridCols?: number;
+  /** checker: found when grid-line edge strength ≥ this × square-centre edge strength (fitted ≈ 8–18). */
+  minEdgeRatio?: number;
   /** The corners TL, TR, BR, BL when the aligned zones were drawn; null = not set yet. */
   referenceCorners: NormPoint[] | null;
 };
@@ -571,6 +579,8 @@ export type FrameResult = {
   /** Frame area as % of the image. */
   areaPct: number;
   method: FrameMethod;
+  /** checker: the fit's edge ratio; null for other methods. */
+  score?: number | null;
 };
 
 export type AlignedZone = { zoneId: string; points: NormPoint[] };
@@ -623,6 +633,44 @@ export type EdgeResult = {
   dominantAngle: number | null;
 };
 
+/**
+ * Fine detail per cell (or the zone): std of the gray image minus a blurred copy of itself, so
+ * glare and shadows don't count but rings/print do. Tells black checkers from black squares.
+ */
+export type TextureInspection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  zoneId: string | null;
+  /** % trimmed off each side of a cell before scoring (0–45). */
+  cellInset: number;
+  /** passed when score is within [minScore, maxScore]; null = no bound. */
+  minScore: number | null;
+  maxScore: number | null;
+};
+
+export type TextureCellResult = { row: number; col: number; index: number; score: number; passed: boolean };
+
+export type TextureResult = {
+  inspectionId: string;
+  name?: string;
+  /** Zone score, or the highest cell score on a grid. */
+  score: number;
+  /** On a grid: at least one cell passed. */
+  passed: boolean;
+  cells?: TextureCellResult[] | null;
+  cellsPassed?: number | null;
+};
+
+export type TextureVisionStepOutput = {
+  inspectionId: string;
+  scoreVar?: string;
+  passedVar?: string;
+  /** Record list { row, col, index, score, passed } per cell. */
+  cellsVar?: string;
+  cellsPassedVar?: string;
+};
+
 export type FrameVisionStepOutput = {
   inspectionId: string;
   foundVar?: string;
@@ -657,6 +705,7 @@ export function defaultFrameInspection(index: number): FrameInspection {
     minAreaPct: 10, approxEpsilon: 0.02,
     houghThreshold: 60, minLineLengthPct: 20, maxLineGap: 10,
     maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10,
+    gridRows: 8, gridCols: 8, minEdgeRatio: 4,
     referenceCorners: null,
   };
 }
@@ -670,6 +719,17 @@ export function defaultCornerInspection(index: number): CornerInspection {
     method: 'shiTomasi',
     maxCorners: 50, quality: 0.01, minDistance: 10, blockSize: 3,
     minCount: 1,
+  };
+}
+
+export function defaultTextureInspection(index: number): TextureInspection {
+  return {
+    id: `textureinsp_${Date.now()}`,
+    name: `Texture ${index + 1}`,
+    enabled: true,
+    zoneId: null,
+    cellInset: 25,
+    minScore: 4, maxScore: null,
   };
 }
 
@@ -1416,6 +1476,7 @@ export type ProgramStep = {
   frameOutputs?: FrameVisionStepOutput[];
   cornerOutputs?: CornerVisionStepOutput[];
   edgeOutputs?: EdgeVisionStepOutput[];
+  textureOutputs?: TextureVisionStepOutput[];
   /**
    * Superseded by pointNameExpr, which expresses the same thing as "$name[index]".
    * Still read so programs saved before the merge keep running; the builder rewrites

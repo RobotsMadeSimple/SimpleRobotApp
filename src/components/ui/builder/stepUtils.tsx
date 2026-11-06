@@ -610,7 +610,9 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.visionZoneVar) lines.push(`zone → $${step.visionZoneVar}`);
       else if (step.visionZoneId) lines.push(`zone override`);
       const outN = (step.visionOutputs?.length ?? 0) + (step.colorOutputs?.length ?? 0)
-        + (step.polygonOutputs?.length ?? 0) + (step.arucoOutputs?.length ?? 0);
+        + (step.polygonOutputs?.length ?? 0) + (step.arucoOutputs?.length ?? 0)
+        + (step.frameOutputs?.length ?? 0) + (step.cornerOutputs?.length ?? 0)
+        + (step.edgeOutputs?.length ?? 0) + (step.textureOutputs?.length ?? 0);
       if (outN > 0) lines.push(`${outN} output${outN !== 1 ? "s" : ""} → variables`);
       return lines.length ? lines.join("\n") : null;
     }

@@ -9,6 +9,8 @@ import {
   ColorCoverageInspection,
   CornerInspection,
   EdgeInspection,
+  NormPoint,
+  TextureInspection,
   FrameInspection,
   LineInspection,
   PolygonInspection,
@@ -23,6 +25,7 @@ import {
   defaultColorCoverageInspection,
   defaultCornerInspection,
   defaultEdgeInspection,
+  defaultTextureInspection,
   defaultFrameInspection,
   defaultLineInspection,
   defaultPolygonInspection,
@@ -71,7 +74,7 @@ import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
 import { CameraCalibrationBadge } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { ZoneDrawModal } from "@/src/components/ui/vision-editor/ZoneDrawModal";
-import { ALIGN_KIND_META, AlignKindIcon, InspectionTypePicker, InspItem } from "@/src/components/ui/vision-editor/InspectionTypePicker";
+import { ALIGN_KIND_META, AlignKind, AlignKindIcon, InspectionTypePicker, InspItem, isAlignKind } from "@/src/components/ui/vision-editor/InspectionTypePicker";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { InspectionConfigModal } from "@/src/components/ui/vision-editor/InspectionConfigModal";
 
@@ -302,19 +305,20 @@ export default function VisionEditorScreen() {
       frameInspections:    (prev.frameInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
       cornerInspections:   (prev.cornerInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
       edgeInspections:     (prev.edgeInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
+      textureInspections:  (prev.textureInspections ?? []).map(i => i.zoneId === id ? { ...i, zoneId: null } : i),
     }));
   }
 
-  // Frame / corner / edge share one update/delete path, keyed by their list.
-  type AlignList = 'frameInspections' | 'cornerInspections' | 'edgeInspections';
-  const ALIGN_LIST: Record<'frame' | 'corner' | 'edge', AlignList> = {
-    frame: 'frameInspections', corner: 'cornerInspections', edge: 'edgeInspections',
+  // Frame / corner / edge / texture share one update/delete path, keyed by their list.
+  type AlignList = 'frameInspections' | 'cornerInspections' | 'edgeInspections' | 'textureInspections';
+  const ALIGN_LIST: Record<AlignKind, AlignList> = {
+    frame: 'frameInspections', corner: 'cornerInspections', edge: 'edgeInspections', texture: 'textureInspections',
   };
-  function updateAlignInspection(kind: 'frame' | 'corner' | 'edge', updated: FrameInspection | CornerInspection | EdgeInspection) {
+  function updateAlignInspection(kind: AlignKind, updated: FrameInspection | CornerInspection | EdgeInspection | TextureInspection) {
     const key = ALIGN_LIST[kind];
     setProgram(prev => ({ ...prev, [key]: ((prev[key] ?? []) as { id: string }[]).map(i => i.id === updated.id ? updated : i) }));
   }
-  function deleteAlignInspection(kind: 'frame' | 'corner' | 'edge', id: string) {
+  function deleteAlignInspection(kind: AlignKind, id: string) {
     const key = ALIGN_LIST[kind];
     setProgram(prev => ({
       ...prev,
@@ -322,6 +326,15 @@ export default function VisionEditorScreen() {
       // A zone aligned to a deleted frame goes back to being used as drawn.
       zones: kind === 'frame' ? prev.zones.map(z => z.alignTo === id ? { ...z, alignTo: null } : z) : prev.zones,
     }));
+  }
+
+  /** Checker frame "Snap zone to squares": the found corners become the zone (a Skewed quad). */
+  function snapZoneToCorners(zoneId: string, corners: NormPoint[]) {
+    const zones = program.zones.map(z => z.id === zoneId
+      ? { ...z, geometry: { ...z.geometry, shape: 'Quad' as const, points: corners.map(p => [p[0], p[1]] as [number, number]) } }
+      : z);
+    setProgram(prev => ({ ...prev, zones }));
+    autoSave({ ...program, name, zones });
   }
 
   function updateInspection(updated: BlobInspection) {
@@ -410,6 +423,7 @@ export default function VisionEditorScreen() {
     ...(program.frameInspections ?? []).map(insp => ({ kind: 'frame' as const, insp })),
     ...(program.cornerInspections ?? []).map(insp => ({ kind: 'corner' as const, insp })),
     ...(program.edgeInspections ?? []).map(insp => ({ kind: 'edge' as const, insp })),
+    ...(program.textureInspections ?? []).map(insp => ({ kind: 'texture' as const, insp })),
   ];
   // Apply the user's drag order. Stable sort: ids missing from inspectionOrder (a
   // freshly added inspection) keep their type-grouped position at the end.
@@ -432,7 +446,8 @@ export default function VisionEditorScreen() {
     (visionResult.barcodeResults  ?? []).some(b => b.inspectionId === id) ||
     (visionResult.frameResults    ?? []).some(f => f.inspectionId === id) ||
     (visionResult.cornerResults   ?? []).some(c => c.inspectionId === id) ||
-    (visionResult.edgeResults     ?? []).some(e => e.inspectionId === id)
+    (visionResult.edgeResults     ?? []).some(e => e.inspectionId === id) ||
+    (visionResult.textureResults  ?? []).some(t => t.inspectionId === id)
   );
 
   // ── Drag-to-reorder (zones + inspections) ──────────────────────────────────
@@ -722,9 +737,9 @@ export default function VisionEditorScreen() {
       {/* ── Inspections ──────────────────────────────────────────────────── */}
       <View style={[styles.sectionLabelRow, { marginTop: 8 }]}>
         <Text style={styles.sectionLabel}>INSPECTIONS</Text>
-        <Text style={styles.sectionCount}>{program.inspections.length}</Text>
+        <Text style={styles.sectionCount}>{allInspections.length}</Text>
         <View style={{ flex: 1 }} />
-        <InfoTip text="An inspection is one measurement — blob count, colour coverage, a barcode, an ArUco tag, a line, a polygon match, corners, edges or a frame. A frame inspection finds the board's outline and keeps zones aligned to it; frames always run first. Its result is what a Run Vision step reads back into program variables." />
+        <InfoTip text="An inspection is one measurement — blob count, colour coverage, a barcode, an ArUco tag, a line, a polygon match, corners, edges, texture or a frame. A frame inspection finds the board's outline and keeps zones aligned to it; frames always run first. Its result is what a Run Vision step reads back into program variables." />
       </View>
 
       {allInspections.length === 0 && (
@@ -739,7 +754,7 @@ export default function VisionEditorScreen() {
         // Per-kind identity colors: polygon/aruco/barcode/blob/line happen to match kit
         // status/accent tokens exactly, so those are tokenized; color-coverage's fuchsia
         // has no kit equivalent hue and stays literal (see report).
-        const alignMeta  = kind === 'frame' || kind === 'corner' || kind === 'edge' ? ALIGN_KIND_META[kind] : null;
+        const alignMeta  = isAlignKind(kind) ? ALIGN_KIND_META[kind] : null;
         const accent     = alignMeta ? alignMeta.accent : kind === 'blob' ? accents.cyan : kind === 'polygon' ? colors.warning : kind === 'aruco' ? colors.success : kind === 'line' ? accents.purple : kind === 'barcode' ? colors.accent : '#d946ef';
         const iconBg     = alignMeta ? alignMeta.soft : kind === 'blob' ? accents.cyanSoft : kind === 'polygon' ? '#fef3c7' : kind === 'aruco' ? colors.successSoft : kind === 'line' ? accents.purpleSoft : kind === 'barcode' ? colors.accentSoft : '#fdf4ff';
         const typeLabel  = alignMeta ? alignMeta.label : kind === 'blob' ? 'BLOB DETECTION' : kind === 'polygon' ? 'POLYGON DETECTION' : kind === 'aruco' ? 'ARUCO MARKER' : kind === 'line' ? 'LINE DETECTION' : kind === 'barcode' ? 'BARCODE / QR CODE' : 'COLOR COVERAGE';
@@ -769,7 +784,7 @@ export default function VisionEditorScreen() {
                 activeOpacity={0.75}
               >
                 <View style={[styles.inspStepIcon, { backgroundColor: iconBg }]}>
-                  {alignMeta          ? <AlignKindIcon kind={kind as 'frame' | 'corner' | 'edge'} /> :
+                  {alignMeta          ? <AlignKindIcon kind={kind as AlignKind} /> :
                    kind === 'blob'    ? <ScanSearch size={18} color={accent} /> :
                    kind === 'polygon' ? <Hexagon    size={18} color={accent} /> :
                    kind === 'aruco'   ? <QrCode     size={18} color={accent} /> :
@@ -789,7 +804,8 @@ export default function VisionEditorScreen() {
                     {kind === 'barcode' && (insp as BarcodeInspection).formats.length > 0
                       ? ` · ${(insp as BarcodeInspection).formats.length} format(s)` : ''}
                     {kind === 'frame'
-                      ? ` · ${(insp as FrameInspection).method}${(insp as FrameInspection).referenceCorners ? ' · reference set' : ' · no reference'}` : ''}
+                      ? ` · ${(insp as FrameInspection).method}${(insp as FrameInspection).method === 'checker' ? '' : (insp as FrameInspection).referenceCorners ? ' · reference set' : ' · no reference'}` : ''}
+                    {kind === 'texture' && (insp as TextureInspection).minScore != null ? ` · min ${(insp as TextureInspection).minScore}` : ''}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -801,7 +817,7 @@ export default function VisionEditorScreen() {
                   else if (kind === 'aruco')   updateArucoInspection({ ...(insp as ArucoInspection), enabled: v });
                   else if (kind === 'line')    updateLineInspection({ ...(insp as LineInspection), enabled: v });
                   else if (kind === 'barcode') updateBarcodeInspection({ ...(insp as BarcodeInspection), enabled: v });
-                  else if (alignMeta)          updateAlignInspection(kind as 'frame' | 'corner' | 'edge', { ...(insp as FrameInspection), enabled: v });
+                  else if (alignMeta)          updateAlignInspection(kind as AlignKind, { ...(insp as FrameInspection), enabled: v });
                   else                         updateColorInspection({ ...(insp as ColorCoverageInspection), enabled: v });
                 }}
                 trackColor={{ true: accent }}
@@ -821,7 +837,7 @@ export default function VisionEditorScreen() {
                     else if (kind === 'aruco')   deleteArucoInspection(insp.id);
                     else if (kind === 'line')    deleteLineInspection(insp.id);
                     else if (kind === 'barcode') deleteBarcodeInspection(insp.id);
-                    else if (alignMeta)          deleteAlignInspection(kind as 'frame' | 'corner' | 'edge', insp.id);
+                    else if (alignMeta)          deleteAlignInspection(kind as AlignKind, insp.id);
                     else                         deleteColorInspection(insp.id);
                   }},
                 ])}
@@ -963,10 +979,12 @@ export default function VisionEditorScreen() {
             (program.barcodeInspections ?? []).length +
             (program.frameInspections ?? []).length +
             (program.cornerInspections ?? []).length +
-            (program.edgeInspections ?? []).length;
-          if (kind === 'frame' || kind === 'corner' || kind === 'edge') {
+            (program.edgeInspections ?? []).length +
+            (program.textureInspections ?? []).length;
+          if (isAlignKind(kind)) {
             const newInsp = kind === 'frame' ? defaultFrameInspection(totalCount)
-              : kind === 'corner' ? defaultCornerInspection(totalCount) : defaultEdgeInspection(totalCount);
+              : kind === 'corner' ? defaultCornerInspection(totalCount)
+              : kind === 'texture' ? defaultTextureInspection(totalCount) : defaultEdgeInspection(totalCount);
             const key = ALIGN_LIST[kind];
             setProgram(prev => ({ ...prev, [key]: [...((prev[key] ?? []) as object[]), newInsp] }));
             setConfigModal({ kind, insp: newInsp } as InspItem);
@@ -1017,6 +1035,7 @@ export default function VisionEditorScreen() {
         initialFrame={configModal?.kind === 'frame' ? configModal.insp : null}
         initialCorner={configModal?.kind === 'corner' ? configModal.insp : null}
         initialEdge={configModal?.kind === 'edge' ? configModal.insp : null}
+        initialTexture={configModal?.kind === 'texture' ? configModal.insp : null}
         zones={program.zones}
         snapshotUri={snapshotUri}
         onFetchSnapshot={fetchSnapshot}
@@ -1059,6 +1078,12 @@ export default function VisionEditorScreen() {
         onLiveUpdateFrame={insp => updateAlignInspection('frame', insp)}
         onLiveUpdateCorner={insp => updateAlignInspection('corner', insp)}
         onLiveUpdateEdge={insp => updateAlignInspection('edge', insp)}
+        onSaveTexture={insp => {
+          updateAlignInspection('texture', insp);
+          autoSave({ ...program, name, textureInspections: (program.textureInspections ?? []).map(i => i.id === insp.id ? insp : i) });
+        }}
+        onLiveUpdateTexture={insp => updateAlignInspection('texture', insp)}
+        onSnapZone={snapZoneToCorners}
         feedUrl={feedSourceUrl}
         isRunning={isRunning}
         transitioning={transitioning}
@@ -1099,7 +1124,9 @@ export default function VisionEditorScreen() {
                   <Text style={styles.alignSheetName}>{f ? f.name : 'None — use the zone as drawn'}</Text>
                   {f && (
                     <Text style={styles.alignSheetSub}>
-                      {f.method} · {f.referenceCorners ? 'reference set' : 'no reference yet — set one in the frame inspection'}
+                      {f.method === 'checker' && f.zoneId === alignPickZoneId
+                        ? 'checker grid on this zone — snaps it onto the squares, no reference needed'
+                        : `${f.method} · ${f.referenceCorners ? 'reference set' : 'no reference yet — set one in the frame inspection'}`}
                     </Text>
                   )}
                 </View>

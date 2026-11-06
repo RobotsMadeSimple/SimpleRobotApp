@@ -1,6 +1,6 @@
 import React from "react";
 import { Text, View } from "react-native";
-import { Crosshair, X } from "lucide-react-native";
+import { Crosshair, Grid3x3, X } from "lucide-react-native";
 import { ParamRow, SliderParamRow, ToggleRow } from "@/src/components/vision/VisionParams";
 import {
   CornerInspection,
@@ -8,41 +8,51 @@ import {
   FrameInspection,
   FrameResult,
   NormPoint,
+  TextureInspection,
   VisionZone,
 } from "@/src/models/robotModels";
 import { Button, buttonTextColor, colors, SegmentedControl, spacing } from "@/src/components/ui/kit";
 import { ves } from "./visionEditorStyles";
 
 /**
- * Parameter panels for the frame (alignment), corner and edge inspections. Each edits a
+ * Parameter panels for the frame (alignment), corner, edge and texture inspections. Each edits a
  * whole draft object; the config modal owns name/enabled/zone and merges them on save.
  */
 
 const fmtPt = (p: NormPoint) => `${(p[0] * 100).toFixed(1)}%, ${(p[1] * 100).toFixed(1)}%`;
 const CORNER_NAMES = ["TL", "TR", "BR", "BL"];
 
-export function FramePanel({ draft, onChange, latest, isRunning, zones }: {
+export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZoneId, onSnapZone }: {
   draft: FrameInspection;
   onChange: (next: FrameInspection) => void;
   /** This inspection's FrameResult from the live result stream, if any. */
   latest: FrameResult | null;
   isRunning: boolean;
   zones: VisionZone[];
+  /** The zone it searches (the modal's current pick — the draft's own zoneId may be stale). */
+  searchZoneId: string | null;
+  /** Copy the found corners into that zone as a Skewed zone (checker frames). */
+  onSnapZone?: (zoneId: string, corners: NormPoint[]) => void;
 }) {
   const set = (patch: Partial<FrameInspection>) => onChange({ ...draft, ...patch });
   const aligned = zones.filter(z => z.alignTo === draft.id);
   const canCapture = !!latest?.found && latest.corners.length === 4;
+  const isChecker = draft.method === "checker";
+  // A checker frame on a zone that is aligned to it: the controller snaps that zone onto the
+  // squares directly — there is no reference to capture, only the drawn zone to tidy up.
+  const selfZone = isChecker && searchZoneId ? aligned.find(z => z.id === searchZoneId) ?? null : null;
   return (
     <>
       <View style={ves.blobPanel}>
         <Text style={ves.blobPanelTitle}>Frame Detection</Text>
         <Text style={ves.paramDesc}>
-          Finds the four corners of a frame — e.g. the board&apos;s outer edge — and reports them TL, TR, BR, BL.
-          Zones set to &quot;Align to&quot; this frame follow it every frame.
+          Finds the four corners of a frame — e.g. the board&apos;s outer edge, or a checkerboard&apos;s squares — and
+          reports them TL, TR, BR, BL. Zones set to &quot;Align to&quot; this frame follow it every frame.
         </Text>
         <SegmentedControl
           size="sm"
           options={[
+            { label: "Checker grid", value: "checker" },
             { label: "Outline", value: "contour" },
             { label: "Edges", value: "lines" },
             { label: "Corners", value: "corners" },
@@ -52,14 +62,29 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones }: {
           style={{ marginVertical: spacing.sm }}
         />
         <Text style={ves.paramDesc}>
-          {draft.method === "contour"
-            ? "Outline: the largest 4-sided outline in the search area (Canny edges → contour → polygon). Best when the frame contrasts with its surroundings."
+          {isChecker
+            ? "Checker grid (recommended for a checkerboard): fits the grid to the board's squares. Draw the zone roughly over the 64 squares (within about a fifth of a square of each corner) and align that same zone to this frame — it then snaps onto the squares each frame and follows a nudged camera; no reference needed."
+            : draft.method === "contour"
+            ? "Outline: the largest 4-sided outline in the search area (Canny edges → contour → polygon). Needs the whole frame in view, contrasting with its surroundings and with nothing touching it."
             : draft.method === "lines"
-            ? "Edges: the two outermost straight edges in each of the two main directions (Hough lines), intersected. Still works when a corner is hidden — by a hand reaching in or a piece on it — or rounded, so it's the most robust choice during play."
-            : "Corners: the four outermost strong corner points (Shi-Tomasi). For a frame drawn by its corners, e.g. corner marks or posts."}
+            ? "Edges: straight edge lines in the two main directions (Hough lines), intersected. Tolerates one hidden corner (a hand or a piece over it), but long straight edges near the board — a table edge, wood grain — can mislead it."
+            : "Corners: the outermost strong corner points (Shi-Tomasi). The steadiest choice for an outlined board (a frame on a plain surface): draw the search area snugly around the board."}
         </Text>
 
-        {draft.method !== "corners" && (
+        {isChecker && (
+          <>
+            <ParamRow label="Rows" value={draft.gridRows ?? 8} min={2} max={32}
+              onChange={v => set({ gridRows: Math.round(v) })}
+              desc="Squares down the board" />
+            <ParamRow label="Cols" value={draft.gridCols ?? 8} min={2} max={32}
+              onChange={v => set({ gridCols: Math.round(v) })}
+              desc="Squares across the board" />
+            <ParamRow label="Min Edge Ratio" value={draft.minEdgeRatio ?? 4} min={1} max={50}
+              onChange={v => set({ minEdgeRatio: v })}
+              desc="Found when the grid lines carry this many times the edge strength of the square centres. A fitted board is about 8–18; a grid a quarter square off, or a hand over the board, is under 4." />
+          </>
+        )}
+        {(draft.method === "contour" || draft.method === "lines") && (
           <>
             <SliderParamRow label="Canny Min" value={draft.cannyLow} min={0} max={255}
               onChange={v => set({ cannyLow: Math.round(v) })}
@@ -107,6 +132,37 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones }: {
         )}
       </View>
 
+      {latest?.score != null && (
+        <Text style={[ves.paramDesc, { paddingHorizontal: spacing.md }]}>
+          {latest.found ? "Found" : "Not found"} · edge ratio {latest.score.toFixed(1)}
+        </Text>
+      )}
+
+      {selfZone ? (
+      <View style={ves.groupCard}>
+        <Text style={ves.groupTitle}>SNAP TO SQUARES</Text>
+        <Text style={[ves.paramDesc, { paddingHorizontal: spacing.md }]}>
+          &quot;{selfZone.name}&quot; is searched and aligned by this frame, so it is used exactly where the squares are
+          found — no reference needed. Snap copies the found corners into the zone, so your rough drawing becomes
+          the exact board and every frame starts from there.
+        </Text>
+        <View style={{ flexDirection: "row", gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm }}>
+          <Button
+            label="Snap zone to squares"
+            size="sm"
+            icon={<Grid3x3 size={14} color={buttonTextColor("primary")} />}
+            disabled={!canCapture || !onSnapZone}
+            onPress={() => latest && onSnapZone?.(selfZone.id, latest.corners.map(p => [p[0], p[1]] as NormPoint))}
+            style={{ flex: 1 }}
+          />
+        </View>
+        {!canCapture && (
+          <Text style={[ves.paramDesc, { paddingHorizontal: spacing.md, paddingBottom: spacing.md }]}>
+            {!isRunning ? "Start Vision to find the squares, then snap the zone here." : "The squares aren't being found yet — redraw the zone closer to the board's corners."}
+          </Text>
+        )}
+      </View>
+      ) : (
       <View style={ves.groupCard}>
         <Text style={ves.groupTitle}>ALIGNMENT REFERENCE</Text>
         <Text style={[ves.paramDesc, { paddingHorizontal: spacing.md }]}>
@@ -156,6 +212,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones }: {
             : `Aligns: ${aligned.map(z => z.name).join(", ")}`}
         </Text>
       </View>
+      )}
     </>
   );
 }
@@ -215,6 +272,44 @@ export function EdgePanel({ draft, onChange }: { draft: EdgeInspection; onChange
         <SliderParamRow label="Max Density (%)" value={draft.maxDensity} min={0} max={100}
           onChange={v => set({ maxDensity: Math.round(v * 10) / 10 })}
           desc="…and at most this % (e.g. to tell a clear area from a cluttered one)" />
+      )}
+    </View>
+  );
+}
+
+export function TexturePanel({ draft, onChange }: { draft: TextureInspection; onChange: (next: TextureInspection) => void }) {
+  const set = (patch: Partial<TextureInspection>) => onChange({ ...draft, ...patch });
+  return (
+    <View style={ves.blobPanel}>
+      <Text style={ves.blobPanelTitle}>Texture</Text>
+      <Text style={ves.paramDesc}>
+        Scores fine detail — on a grid zone, per cell. Each cell is scored on its centre only. On real photos black
+        checkers scored 6.5+, empty squares under 3.
+      </Text>
+      <SliderParamRow label="Cell Inset (%)" value={draft.cellInset} min={0} max={45}
+        onChange={v => set({ cellInset: Math.round(v) })}
+        desc="Trimmed off each side of a cell before scoring, so its borders and a slightly-off grid don't count" />
+      <ToggleRow
+        label="Min Score"
+        value={draft.minScore !== null}
+        onChange={on => set({ minScore: on ? 4 : null })}
+        desc="Pass when the detail is at least this much"
+      />
+      {draft.minScore !== null && (
+        <ParamRow label="Min Score" value={draft.minScore} min={0} max={255}
+          onChange={v => set({ minScore: v })}
+          desc="e.g. 4 for checkers: a ringed piece scores well above, a plain square well below" />
+      )}
+      <ToggleRow
+        label="Max Score"
+        value={draft.maxScore !== null}
+        onChange={on => set({ maxScore: on ? 20 : null })}
+        desc="Also fail when the detail is too high"
+      />
+      {draft.maxScore !== null && (
+        <ParamRow label="Max Score" value={draft.maxScore} min={0} max={255}
+          onChange={v => set({ maxScore: v })}
+          desc="…and at most this (e.g. to pass only plain, empty cells)" />
       )}
     </View>
   );
