@@ -85,6 +85,14 @@ export function manualRobot(ip: string): RobotInfo {
   return { robotName: "Manual", robotType: "", ipAddress: ip, port: 9000, serialNumber: "", controlEndpoint: "control" };
 }
 
+/** Addresses this robot (by serial) was reached at before — candidates when mDNS offers a bad one. */
+export async function knownAddresses(serialNumber: string): Promise<string[]> {
+  const serial = serialNumber.trim();
+  if (!serial) return [];
+  await ensureLoaded();
+  return [...recents, ...saved].filter(r => r.serialNumber?.trim() === serial).map(r => r.ipAddress);
+}
+
 export function getRecents(): RobotInfo[] { return recents; }
 export function getSaved():   RobotInfo[] { return saved; }
 

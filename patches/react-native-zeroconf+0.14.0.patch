@@ -1,0 +1,17 @@
+diff --git a/node_modules/react-native-zeroconf/android/src/main/java/com/balthazargronon/RCTZeroconf/nsd/NsdServiceImpl.java b/node_modules/react-native-zeroconf/android/src/main/java/com/balthazargronon/RCTZeroconf/nsd/NsdServiceImpl.java
+--- a/node_modules/react-native-zeroconf/android/src/main/java/com/balthazargronon/RCTZeroconf/nsd/NsdServiceImpl.java
++++ b/node_modules/react-native-zeroconf/android/src/main/java/com/balthazargronon/RCTZeroconf/nsd/NsdServiceImpl.java
+@@ -224,6 +224,13 @@ public class NsdServiceImpl implements Zeroconf {
+ 
+             WritableArray addresses = new WritableNativeArray();
+             addresses.pushString(host.getHostAddress());
++            // Android 14+ resolves every address the service publishes (a host with Wi-Fi, VPN and
++            // virtual adapters has several); getHost() is only the first. Pass them all on.
++            if (Build.VERSION.SDK_INT >= 34) {
++                for (InetAddress a : serviceInfo.getHostAddresses()) {
++                    if (a != null && !a.equals(host)) addresses.pushString(a.getHostAddress());
++                }
++            }
+ 
+             service.putArray(ZeroconfModule.KEY_SERVICE_ADDRESSES, addresses);
+         }

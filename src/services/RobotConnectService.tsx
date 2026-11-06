@@ -1,5 +1,6 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { enrichByAddress } from "./connectionStore";
+import { robotDiscovery } from "./RobotDiscoveryService";
 import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
@@ -126,6 +127,18 @@ export class RobotConnectService {
     this.connect();
   }
 
+  /** While reconnecting: if discovery now lists the selected robot (same serial) at another address —
+   *  it moved networks, or the address it was picked at isn't reachable from here — switch to that one. */
+  private followDiscoveredAddress() {
+    const selected = getSelectedRobot();
+    if (!selected?.serialNumber) return;
+    const found = robotDiscovery.find(selected.serialNumber);
+    if (!found || (found.ipAddress === selected.ipAddress && found.port === selected.port)) return;
+    console.log("[RobotWS] Robot found at", `${found.ipAddress}:${found.port}`, "— switching");
+    this.url = `ws://${found.ipAddress}:${found.port}/control`;
+    setSelectedRobot({ ...selected, ipAddress: found.ipAddress, port: found.port });
+  }
+
   connect() {
     // Validate there is a url
     if (!this.url) return;
@@ -192,6 +205,7 @@ export class RobotConnectService {
       this.cleanup();
 
       if (this.reconnect) {
+        this.followDiscoveredAddress();
         setTimeout(() => this.connect(), this.reconnectIntervalMs);
       }
     };
