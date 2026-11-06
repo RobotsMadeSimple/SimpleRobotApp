@@ -1,8 +1,9 @@
 import { useCameraPermissions } from "expo-camera";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import { router, useFocusEffect, useNavigation } from "expo-router";
 import { Moon, RotateCw, Router } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { BackHandler, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import {
@@ -99,6 +100,20 @@ export function PhoneProvider({
     providerEngine.setCamOn(on);
   }, [camPerm?.granted, requestCamPerm, st.assignedHere]);
 
+  // Back always lands on the I/O page. A phone set up as a device opens straight onto this screen at
+  // launch, so there's often no I/O page under it and a plain "go back" would leave the I/O tab.
+  const navigation = useNavigation();
+  const backToIo = useCallback(() => {
+    const nav = navigation.getState();
+    const below = nav?.routes?.[(nav.index ?? 0) - 1];
+    if (below?.name === "index") router.back();
+    else router.replace("/io");
+  }, [navigation]);
+  useFocusEffect(useCallback(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => { backToIo(); return true; });
+    return () => sub.remove();
+  }, [backToIo]));
+
   // ── Render ────────────────────────────────────────────────────────────────
   const crumbs = [{ label: "I/O", href: "/io" }, { label: name }];
   const lenses = st.lenses;
@@ -116,6 +131,8 @@ export function PhoneProvider({
         title={name}
         subtitle="Stream this phone's camera & sensors to this device"
         crumbs={crumbs}
+        onBack={backToIo}
+        onNavigate={(href) => (href === "/io" ? backToIo() : router.navigate(href as never))}
         right={pill}
       />
       <Screen>
