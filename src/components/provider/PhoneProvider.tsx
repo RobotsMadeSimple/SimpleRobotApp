@@ -1,7 +1,7 @@
 import { useCameraPermissions } from "expo-camera";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { router, useFocusEffect, useNavigation } from "expo-router";
-import { Moon, RotateCw, Router } from "lucide-react-native";
+import { router, useFocusEffect } from "expo-router";
+import { Moon, RotateCw } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { BackHandler, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
@@ -103,13 +103,7 @@ export function PhoneProvider({
 
   // Back always lands on the I/O page. A phone set up as a device opens straight onto this screen at
   // launch, so there's often no I/O page under it and a plain "go back" would leave the I/O tab.
-  const navigation = useNavigation();
-  const backToIo = useCallback(() => {
-    const nav = navigation.getState();
-    const below = nav?.routes?.[(nav.index ?? 0) - 1];
-    if (below?.name === "index") router.back();
-    else router.replace("/io");
-  }, [navigation]);
+  const backToIo = useCallback(() => router.dismissTo("/io"), []);
   useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => { backToIo(); return true; });
     return () => sub.remove();
@@ -132,8 +126,6 @@ export function PhoneProvider({
         title={name}
         subtitle="Stream this phone's camera & sensors to this device"
         crumbs={crumbs}
-        onBack={backToIo}
-        onNavigate={(href) => (href === "/io" ? backToIo() : router.navigate(href as never))}
       />
       <Screen>
         <DeviceStatusBar status={pill} />
@@ -159,24 +151,6 @@ export function PhoneProvider({
               />
             </Card>
             )}
-
-            {/* Which robot this phone is serving + its live connection status (clear + reconnect-aware). */}
-            {st.assignedHere && <Card style={[styles.stack, styles.connCard]}>
-              <View style={styles.connRow}>
-                <View style={[styles.connIcon, { backgroundColor: connected ? colors.successSoft : colors.dangerSoft }]}>
-                  <Router size={20} color={connected ? colors.success : colors.danger} />
-                </View>
-                <View style={styles.connText}>
-                  <Text style={styles.connTitle} numberOfLines={1}>{robot?.robotName || robot?.ipAddress || "No robot selected"}</Text>
-                  <Text style={type.caption} numberOfLines={1}>
-                    {robot
-                      ? (connected ? `Connected · ${robot.ipAddress}:${robot.port}` : `Reconnecting… · ${robot.ipAddress}:${robot.port}`)
-                      : "Open the Robot tab to connect"}
-                  </Text>
-                </View>
-                <StatusPill label={connected ? "Online" : "Offline"} tone={connected ? "success" : "danger"} dot={connected} />
-              </View>
-            </Card>}
 
             <SectionHeader title="Camera" />
             <Card style={styles.stack}>
@@ -355,13 +329,6 @@ const styles = StyleSheet.create({
   valueKey: { ...type.body, color: colors.text },
   valueVal: { ...type.mono, color: colors.textSecondary },
   note: { marginTop: spacing.sm },
-
-  // Robot connection header
-  connCard: { backgroundColor: colors.surface },
-  connRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  connIcon: { width: 40, height: 40, borderRadius: radii.md, alignItems: "center", justifyContent: "center" },
-  connText: { flex: 1 },
-  connTitle: { ...type.body, fontWeight: "700", color: colors.text },
 
   // Dim (kiosk) overlay
   dimOverlay: {
