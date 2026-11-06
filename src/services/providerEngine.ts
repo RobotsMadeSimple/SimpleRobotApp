@@ -1,7 +1,6 @@
 import * as Battery from "expo-battery";
 import * as Location from "expo-location";
 import { Accelerometer, Gyroscope, LightSensor, Magnetometer } from "expo-sensors";
-import * as ScreenOrientation from "expo-screen-orientation";
 import { Platform } from "react-native";
 import {
   mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription,
@@ -55,33 +54,19 @@ export const ASPECT_OPTIONS: { label: string; value: FrameAspect }[] = [
   { label: "16:9", value: "16:9" },
 ];
 
-// Which way up the stream is. WebRTC rotates each frame to match the screen, so the stream follows the
-// phone ("auto", the screen free to rotate) or stays the way the screen is locked. The four fixed values are the quarter
-// turns the rotate button steps through, clockwise.
-export type StreamOrientation = "auto" | "portrait" | "landscape" | "portrait-flipped" | "landscape-flipped";
-export const ORIENT_TURNS: Exclude<StreamOrientation, "auto">[] = ["portrait", "landscape", "portrait-flipped", "landscape-flipped"];
-export const ORIENT_OPTIONS: { label: string; value: "auto" | "portrait" | "landscape" }[] = [
-  { label: "Follow phone", value: "auto" },
+// Which way up the stream is, as a clockwise turn of the camera's picture (portrait = as the app shows
+// it). The phone turns each frame itself before encoding, so this is independent of how the phone or
+// its screen is turned. The rotate button steps through the four, a quarter turn at a time.
+export type StreamOrientation = "portrait" | "landscape" | "portrait-flipped" | "landscape-flipped";
+export const ORIENT_TURNS: StreamOrientation[] = ["portrait", "landscape", "portrait-flipped", "landscape-flipped"];
+export const ORIENT_OPTIONS: { label: string; value: "portrait" | "landscape" }[] = [
   { label: "Portrait", value: "portrait" },
   { label: "Landscape", value: "landscape" },
 ];
-/** The orientation one quarter turn clockwise from `o` (from "auto", the first fixed turn after `current`). */
-export function nextOrientation(o: StreamOrientation, current: Exclude<StreamOrientation, "auto"> = "portrait"): StreamOrientation {
-  const from = o === "auto" ? current : o;
-  return ORIENT_TURNS[(ORIENT_TURNS.indexOf(from) + 1) % ORIENT_TURNS.length];
+/** The orientation a quarter turn clockwise from `o`. */
+export function nextOrientation(o: StreamOrientation): StreamOrientation {
+  return ORIENT_TURNS[(ORIENT_TURNS.indexOf(o) + 1) % ORIENT_TURNS.length];
 }
-const ORIENT_LOCKS: Record<Exclude<StreamOrientation, "auto">, ScreenOrientation.OrientationLock> = {
-  "portrait":          ScreenOrientation.OrientationLock.PORTRAIT_UP,
-  "landscape":         ScreenOrientation.OrientationLock.LANDSCAPE_LEFT,
-  "portrait-flipped":  ScreenOrientation.OrientationLock.PORTRAIT_DOWN,
-  "landscape-flipped": ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
-};
-const ORIENT_OF: Partial<Record<ScreenOrientation.Orientation, Exclude<StreamOrientation, "auto">>> = {
-  [ScreenOrientation.Orientation.PORTRAIT_UP]:     "portrait",
-  [ScreenOrientation.Orientation.LANDSCAPE_LEFT]:  "landscape",
-  [ScreenOrientation.Orientation.PORTRAIT_DOWN]:   "portrait-flipped",
-  [ScreenOrientation.Orientation.LANDSCAPE_RIGHT]: "landscape-flipped",
-};
 
 // Target capture/encode frame rates (string values for SegmentedControl).
 export const RTC_FPS_OPTIONS: { label: string; value: string }[] = [
@@ -120,7 +105,7 @@ export type ProviderConfig = {
   /** Preferred camera lens (getUserMedia deviceId). Phone-specific, applied best-effort — a phone
    *  without this exact lens falls back to the rear camera. */
   lensId: string | null;
-  /** Which way up the stream is: follow the phone, or lock the screen (and so the stream) to one way. */
+  /** Which way up the stream is (a turn of the picture, independent of how the phone is held). */
   orientation: StreamOrientation;
   motionOn: boolean;
   lightOn: boolean;
@@ -134,7 +119,7 @@ export type ProviderConfig = {
 };
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
-  resTier: "med", aspect: "4:3", rtcFps: "30", bitrate: 12_000_000, camOn: false, lensId: null, orientation: "auto",
+  resTier: "med", aspect: "4:3", rtcFps: "30", bitrate: 12_000_000, camOn: false, lensId: null, orientation: "portrait",
   motionOn: false, lightOn: false, locationOn: false, batteryOn: false,
   assignedPhoneId: null, assignedPhoneName: null,
 };
@@ -261,9 +246,6 @@ class ProviderEngine {
   private sensorGen = 0;
 
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
-  private orientLocked = false;
-  /** The app's own orientation setting, captured before the first lock so it can be put back. */
-  private appOrientation: ScreenOrientation.PlatformOrientationInfo | null = null;
 
   private get active(): boolean {
     if (!this.assignedHere) return false; // only the assigned phone streams / holds the service
@@ -352,7 +334,6 @@ class ProviderEngine {
     if (on) this.rebuildCamera();
     else this.teardownCamera();
     this.syncForeground();
-    this.applyOrientation();
     this.publish();
   }
 
@@ -366,12 +347,11 @@ class ProviderEngine {
       (patch.resTier !== undefined && patch.resTier !== prev.resTier) ||
       (patch.aspect  !== undefined && patch.aspect  !== prev.aspect)  ||
       (patch.rtcFps  !== undefined && patch.rtcFps  !== prev.rtcFps)  ||
-      (patch.lensId  !== undefined && patch.lensId  !== prev.lensId);
+      (patch.lensId  !== undefined && patch.lensId  !== prev.lensId)  ||
+      (patch.orientation !== undefined && patch.orientation !== prev.orientation);
     if (camChanged && this.camOn) this.rebuildCamera();
     // Bitrate changes apply live on the running sender — no capture restart needed.
     else if (patch.bitrate !== undefined && patch.bitrate !== prev.bitrate && this.camOn) this.applyEncodingLive();
-
-    if (patch.orientation !== undefined && patch.orientation !== prev.orientation) this.applyOrientation();
 
     const sensorKeys: (keyof ProviderConfig)[] = ["motionOn", "lightOn", "locationOn", "batteryOn"];
     if (sensorKeys.some(k => patch[k] !== undefined && patch[k] !== prev[k])) this.rebuildSensors();
@@ -434,7 +414,7 @@ class ProviderEngine {
     if (typeof p.bitrate === "number" && isFinite(p.bitrate)) c.bitrate = Math.min(MAX_BITRATE, Math.max(MIN_BITRATE, p.bitrate));
     if (typeof p.camOn === "boolean") c.camOn = p.camOn;
     if (typeof p.lensId === "string" || p.lensId === null) c.lensId = p.lensId ?? null;
-    if (p.orientation === "auto" || ORIENT_TURNS.includes(p.orientation as never)) c.orientation = p.orientation!;
+    if (p.orientation && ORIENT_TURNS.includes(p.orientation)) c.orientation = p.orientation;
     if (typeof p.motionOn === "boolean") c.motionOn = p.motionOn;
     if (typeof p.lightOn === "boolean") c.lightOn = p.lightOn;
     if (typeof p.locationOn === "boolean") c.locationOn = p.locationOn;
@@ -489,8 +469,7 @@ class ProviderEngine {
       // Start whatever the saved config activates. Only the assigned phone streams.
       if (this.camOn) this.rebuildCamera();
       this.rebuildSensors();
-      this.applyOrientation();
-      this.syncForeground();
+        this.syncForeground();
     } else {
       // Not our device to provide — make sure nothing is streaming here.
       this.stopInternal();
@@ -513,7 +492,6 @@ class ProviderEngine {
     this.configLoaded = true;
     this.persistConfigNow();
     setAssignedDeviceId(deviceId, this.deviceName);
-    this.applyOrientation();
     this.syncForeground();
     this.publish();
   }
@@ -577,38 +555,9 @@ class ProviderEngine {
     startForegroundStreaming(this.deviceName || "Phone", text, types);
   }
 
-  // ── Orientation lock ────────────────────────────────────────────────────────
-  // The camera stream is rotated to match the screen, so locking the screen fixes the stream's way up.
-  // The app itself is portrait-only, so "Follow phone" has to free the screen to rotate. Held only while
-  // this phone is streaming; afterwards the app's own orientation setting is put back.
-  private applyOrientation() {
-    const o = this.config.orientation;
-    if (this.active) this.lockOrientation(o === "auto" ? ScreenOrientation.OrientationLock.ALL : ORIENT_LOCKS[o]);
-    else this.unlockOrientation();
-  }
-
-  private async lockOrientation(lock: ScreenOrientation.OrientationLock) {
-    try {
-      if (this.appOrientation === null) this.appOrientation = await ScreenOrientation.getPlatformOrientationLockAsync();
-      this.orientLocked = true;
-      await ScreenOrientation.lockAsync(lock);
-    } catch { /* orientation lock unsupported */ }
-  }
-
-  private unlockOrientation() {
-    if (!this.orientLocked) return;
-    this.orientLocked = false;
-    const restore = this.appOrientation;
-    (restore ? ScreenOrientation.lockPlatformAsync(restore) : ScreenOrientation.unlockAsync()).catch(() => {});
-  }
-
-  /** Turn the stream a quarter turn clockwise (locks it; from "Follow phone" it starts at the current way up). */
-  async rotate() {
-    let cur: Exclude<StreamOrientation, "auto"> = "portrait";
-    if (this.config.orientation === "auto") {
-      try { cur = ORIENT_OF[await ScreenOrientation.getOrientationAsync()] ?? cur; } catch { /* keep portrait */ }
-    }
-    this.updateConfig({ orientation: nextOrientation(this.config.orientation, cur) });
+  /** Turn the stream a quarter turn clockwise. */
+  rotate() {
+    this.updateConfig({ orientation: nextOrientation(this.config.orientation) });
   }
 
   // ── Camera (WebRTC) pipeline ────────────────────────────────────────────────
@@ -669,7 +618,9 @@ class ProviderEngine {
     const lensId = this.config.lensId;
 
     // react-native-webrtc's normalizer reads {ideal} width/height/frameRate, so these apply.
-    const baseVideo = { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: targetFps } };
+    // `rotation` (our react-native-webrtc patch) turns every frame on the phone before encoding.
+    const rotation = ORIENT_TURNS.indexOf(this.config.orientation) * 90;
+    const baseVideo = { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: targetFps }, rotation };
     const videoFor = (lens: string | null) =>
       lens ? { ...baseVideo, deviceId: lens } : { ...baseVideo, facingMode: "environment" as const };
 
@@ -861,7 +812,6 @@ class ProviderEngine {
   private stopInternal() {
     this.teardownCamera();
     this.teardownSensors();
-    this.unlockOrientation();
     this.camId = null;
     this.values = {};
     stopForegroundStreaming();

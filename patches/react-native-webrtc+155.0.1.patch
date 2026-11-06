@@ -1,5 +1,23 @@
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java
+index 9095537..d6578f8 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java
+@@ -29,6 +29,13 @@ public abstract class AbstractVideoCaptureController {
+ 
+     protected CapturerEventsListener capturerEventsListener;
+ 
++    /** Extra clockwise turn (0/90/180/270) added to every captured frame, independent of the screen. */
++    protected volatile int extraRotation;
++
++    public int getExtraRotation() {
++        return extraRotation;
++    }
++
+     public AbstractVideoCaptureController(int width, int height, int fps) {
+         this.targetWidth = width;
+         this.targetHeight = height;
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
-index 1980f6c..dfb3711 100644
+index 1980f6c..55063ec 100644
 --- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
 @@ -54,6 +54,13 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
@@ -16,6 +34,14 @@ index 1980f6c..dfb3711 100644
      };
  
      public CameraCaptureController(Context context, CameraEnumerator cameraEnumerator, ReadableMap constraints) {
+@@ -62,6 +69,7 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
+         this.context = context;
+         this.cameraEnumerator = cameraEnumerator;
+         this.constraints = constraints;
++        if (constraints.hasKey("rotation")) this.extraRotation = ((constraints.getInt("rotation") % 360) + 360) % 360 / 90 * 90;
+     }
+ 
+     @Nullable
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java
 new file mode 100644
 index 0000000..6577710
@@ -111,3 +137,83 @@ index 0000000..6577710
 +        return f;
 +    }
 +}
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
+index a2e5098..4a9a7b7 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
+@@ -488,7 +488,7 @@ class GetUserMediaImpl {
+         videoCaptureController.setCapturerEventsListener(eventsEmitter);
+ 
+         VideoSource videoSource = pcFactory.createVideoSource(videoCapturer.isScreencast());
+-        videoCapturer.initialize(surfaceTextureHelper, reactContext, videoSource.getCapturerObserver());
++        videoCapturer.initialize(surfaceTextureHelper, reactContext, new RotatingCapturerObserver(videoSource.getCapturerObserver(), videoCaptureController));
+ 
+         VideoTrack track = pcFactory.createVideoTrack(id, videoSource);
+ 
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/RotatingCapturerObserver.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/RotatingCapturerObserver.java
+new file mode 100644
+index 0000000..b4e8f8b
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/RotatingCapturerObserver.java
+@@ -0,0 +1,40 @@
++package com.oney.WebRTCModule;
++
++import org.webrtc.CapturerObserver;
++import org.webrtc.VideoFrame;
++
++/**
++ * Adds the controller's extra rotation to every captured frame. WebRTC already turns each frame to
++ * match the screen; this turns it further, so the stream can face any way without rotating the app.
++ * The rotation is metadata: the encoder pipeline applies it (it does for the screen turn too).
++ */
++final class RotatingCapturerObserver implements CapturerObserver {
++    private final CapturerObserver inner;
++    private final AbstractVideoCaptureController controller;
++
++    RotatingCapturerObserver(CapturerObserver inner, AbstractVideoCaptureController controller) {
++        this.inner = inner;
++        this.controller = controller;
++    }
++
++    @Override
++    public void onCapturerStarted(boolean success) {
++        inner.onCapturerStarted(success);
++    }
++
++    @Override
++    public void onCapturerStopped() {
++        inner.onCapturerStopped();
++    }
++
++    @Override
++    public void onFrameCaptured(VideoFrame frame) {
++        int extra = controller.getExtraRotation();
++        if (extra == 0) {
++            inner.onFrameCaptured(frame);
++            return;
++        }
++        // Same buffer (the caller releases it after this returns), new rotation.
++        inner.onFrameCaptured(new VideoFrame(frame.getBuffer(), (frame.getRotation() + extra) % 360, frame.getTimestampNs()));
++    }
++}
+diff --git a/node_modules/react-native-webrtc/src/RTCUtil.ts b/node_modules/react-native-webrtc/src/RTCUtil.ts
+index 10e8499..77bb0f5 100644
+--- a/node_modules/react-native-webrtc/src/RTCUtil.ts
++++ b/node_modules/react-native-webrtc/src/RTCUtil.ts
+@@ -85,9 +85,15 @@ function normalizeMediaConstraints(constraints, mediaType) {
+                 facingMode: extractString(constraints, 'facingMode'),
+                 frameRate: extractNumber(constraints, 'frameRate'),
+                 height: extractNumber(constraints, 'height'),
+-                width: extractNumber(constraints, 'width')
++                width: extractNumber(constraints, 'width'),
++                // Extra clockwise turn (0/90/180/270) applied to every frame before encoding (Android).
++                rotation: extractNumber(constraints, 'rotation')
+             };
+ 
++            if (!c.rotation) {
++                delete c.rotation;
++            }
++
+             if (!c.deviceId) {
+                 delete c.deviceId;
+             }

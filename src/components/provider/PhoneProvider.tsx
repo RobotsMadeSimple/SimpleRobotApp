@@ -193,12 +193,12 @@ export function PhoneProvider({
                     </>
                   )}
                   <Divider />
-                  <FormRow label="Orientation" hint="Portrait or Landscape keeps the stream that way up however the phone is turned. Rotate turns it a quarter turn.">
+                  <FormRow label="Orientation" hint="Turns the stream itself, whatever way the phone or its screen is turned. Rotate turns it a quarter turn clockwise.">
                     <View style={styles.orientRow}>
                       <View style={styles.orientSeg}>
                         <SegmentedControl
                           options={ORIENT_OPTIONS}
-                          value={cfg.orientation === "auto" ? "auto" : cfg.orientation.startsWith("portrait") ? "portrait" : "landscape"}
+                          value={cfg.orientation.startsWith("portrait") ? "portrait" : "landscape"}
                           onChange={v => providerEngine.updateConfig({ orientation: v })}
                         />
                       </View>
