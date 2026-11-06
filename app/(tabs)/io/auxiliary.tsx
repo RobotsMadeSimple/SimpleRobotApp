@@ -1,6 +1,6 @@
 import { JogButton } from "@/src/components/ui/JogButton";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { FirmwareChip, ios, IORow } from "@/src/components/ui/io/ioShared";
+import { DeviceStatusBar, FirmwareChip, ios, IORow } from "@/src/components/ui/io/ioShared";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -52,7 +52,6 @@ import {
   shadows,
   spacing,
   StatTile,
-  StatusPill,
   type,
 } from "@/src/components/ui/kit";
 
@@ -734,22 +733,11 @@ export default function AuxPage() {
       <PageHeader
         title={device ? device.deviceName : "Aux Stepper"}
         subtitle={device ? "External stepper driver" : "Device not found"}
-        right={
-          device ? (
-            <View style={styles.headerActions}>
-              <FirmwareChip device={device} />
-              <StatusPill
-                label={device.connected ? "Connected" : "Offline"}
-                tone={device.connected ? "success" : "danger"}
-                dot
-              />
-            </View>
-          ) : undefined
-        }
       />
       <Screen>
         {device ? (
           <>
+            <DeviceStatusBar connected={device.connected} chips={<FirmwareChip device={device} />} />
             <View style={styles.statRow}>
               <StatTile label="Axes" value={device.axes.length} icon={Gauge}
                         tint={[AUX_TINT, AUX_TINT_SOFT]} style={styles.statTile} />
@@ -853,7 +841,6 @@ const styles = StyleSheet.create({
   axisGrid:     { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   axisGridItem: { flexBasis: "48%", flexGrow: 1, minWidth: 320 },
 
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   statRow:       { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   statTile:      { flex: 1, minWidth: 130 },
 

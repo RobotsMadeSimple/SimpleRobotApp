@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BackHandler, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { DeviceStatusBar } from "@/src/components/ui/io/ioShared";
 import {
   Button, buttonTextColor, Card, colors, Divider, FormRow, PageHeader, radii, Screen, SectionHeader,
   SegmentedControl, spacing, StatusPill, type,
@@ -133,9 +134,9 @@ export function PhoneProvider({
         crumbs={crumbs}
         onBack={backToIo}
         onNavigate={(href) => (href === "/io" ? backToIo() : router.navigate(href as never))}
-        right={pill}
       />
       <Screen>
+        <DeviceStatusBar status={pill} />
         {!ready ? (
           <Card style={styles.stack}><Text style={type.caption}>Loading…</Text></Card>
         ) : (

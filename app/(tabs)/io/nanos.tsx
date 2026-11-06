@@ -1,4 +1,4 @@
-import { FirmwareChip, IORow } from "@/src/components/ui/io/ioShared";
+import { DeviceStatusBar, FirmwareChip, IORow } from "@/src/components/ui/io/ioShared";
 import { IoSparkline } from "@/src/components/ui/io/IoHistoryGraph";
 import { formatLoadCell } from "@/src/components/ui/loadcell";
 import { useIsWide } from "@/src/components/ui/responsive";
@@ -23,7 +23,6 @@ import {
   SectionHeader,
   spacing,
   StatTile,
-  StatusPill,
   type,
 } from "@/src/components/ui/kit";
 
@@ -137,31 +136,25 @@ export default function IoDevicesPage() {
       <PageHeader
         title={nano ? nano.name : "Arduino Nano"}
         subtitle={nano ? "Serial-connected microcontroller" : "Device not found"}
-        right={
-          nano ? (
-            <View style={styles.headerActions}>
-              <FirmwareChip device={nano} />
-              <StatusPill
-                label={nano.connected ? "Connected" : "Offline"}
-                tone={nano.connected ? "success" : "danger"}
-                dot
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                label="Configure"
-                icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
-                onPress={() =>
-                  router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: nano.id } })
-                }
-              />
-            </View>
-          ) : undefined
-        }
       />
       <Screen>
         {nano ? (
           <>
+            <DeviceStatusBar
+              connected={nano.connected}
+              chips={<FirmwareChip device={nano} />}
+              actions={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  label="Configure"
+                  icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
+                  onPress={() =>
+                    router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: nano.id } })
+                  }
+                />
+              }
+            />
             <View style={styles.statRow}>
               <StatTile label="Inputs" value={inputCount} icon={LogIn} style={styles.statTile} />
               <StatTile label="Outputs" value={outputCount} icon={LogOut}
@@ -180,7 +173,6 @@ export default function IoDevicesPage() {
 }
 
 const styles = StyleSheet.create({
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   statRow:       { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   statTile:      { flex: 1, minWidth: 130 },
   wideGroupsRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },

@@ -37,6 +37,39 @@ const fwStyles = StyleSheet.create({
   pill: { paddingVertical: 2, paddingHorizontal: spacing.xs + 2 },
 });
 
+// ── DeviceStatusBar ───────────────────────────────────────────────────────────
+// A device detail page's own status (connected / streaming, firmware, tags) and its page actions.
+// It sits at the top of the page body: the page header's right edge is kept for the robot's
+// connection status, so a device's status never stands in for it.
+
+export function DeviceStatusBar({ connected, status, chips, actions }: {
+  /** Shorthand for the usual Connected / Offline pill. */
+  connected?: boolean;
+  /** A custom status pill, used instead of `connected`. */
+  status?: React.ReactNode;
+  /** Extra chips after the status (firmware, tags). */
+  chips?: React.ReactNode;
+  /** Page actions on the right (Configure etc.). */
+  actions?: React.ReactNode;
+}) {
+  return (
+    <View style={dsStyles.bar}>
+      <View style={dsStyles.group}>
+        {status ?? (
+          <StatusPill label={connected ? "Connected" : "Offline"} tone={connected ? "success" : "danger"} dot />
+        )}
+        {chips}
+      </View>
+      {actions != null && <View style={dsStyles.group}>{actions}</View>}
+    </View>
+  );
+}
+
+const dsStyles = StyleSheet.create({
+  bar:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.sm },
+  group: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
+});
+
 // ── Type helpers ──────────────────────────────────────────────────────────────
 //
 // Input/Neopixel map onto kit tokens exactly. Output keeps its purple —

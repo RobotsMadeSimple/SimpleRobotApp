@@ -12,6 +12,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import { CameraLiveFeed, makeCameraHtml } from "@/src/components/vision/CameraLiveFeed";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
+import { DeviceStatusBar } from "@/src/components/ui/io/ioShared";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Camera,
@@ -358,17 +359,6 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
       <PageHeader
         title={camera.name}
         subtitle={cameraSourceSummary(camera)}
-        right={
-          <View style={styles.headerRight}>
-            {tag && <StatusPill label={tag} tone="accent" />}
-            <CameraCalibrationControls camera={camera} layout="inline" />
-            <StatusPill
-              label={camera.connected ? "Connected" : "Offline"}
-              tone={camera.connected ? "success" : "danger"}
-              dot
-            />
-          </View>
-        }
       />
       {(() => {
         const feed = camera.connected
@@ -383,6 +373,13 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
           <View style={styles.feedBlock}>
             {feed}
           </View>
+        );
+        const statusBar = (
+          <DeviceStatusBar
+            connected={camera.connected}
+            chips={tag ? <StatusPill label={tag} tone="accent" /> : undefined}
+            actions={<CameraCalibrationControls camera={camera} layout="inline" />}
+          />
         );
         const editables = (
           <>
@@ -417,6 +414,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
+                {statusBar}
                 {editables}
               </ScrollView>
               <View style={styles.camFeedPane}>{feedBlock}</View>
@@ -428,6 +426,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
             contentContainerStyle={[styles.scrollContent, wideContent]}
             showsVerticalScrollIndicator={false}
           >
+            {statusBar}
             {feedBlock}
             {editables}
           </ScrollView>
@@ -565,7 +564,6 @@ export default function CamerasPage() {
 const styles = StyleSheet.create({
   scrollContent: { paddingTop: spacing.lg + 8, paddingBottom: spacing.xxl + 8, paddingHorizontal: spacing.lg, gap: spacing.xl },
   fieldGap: { marginTop: spacing.md + 2 },
-  headerRight: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: spacing.sm },
 
   dropdownRow: {
     flexDirection: "row",
