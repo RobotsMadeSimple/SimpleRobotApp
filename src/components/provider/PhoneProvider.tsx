@@ -1,6 +1,6 @@
 import { useCameraPermissions } from "expo-camera";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { Moon, Router } from "lucide-react-native";
+import { Moon, RotateCw, Router } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
@@ -12,7 +12,7 @@ import {
 import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
 import {
-  ASPECT_OPTIONS, lensLabel, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS, RTC_FPS_OPTIONS,
+  ASPECT_OPTIONS, lensLabel, ORIENT_OPTIONS, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS, RTC_FPS_OPTIONS,
   type ProviderEngineState,
 } from "@/src/services/providerEngine";
 import { DEFAULT_PHONE_DEVICE_NAME } from "./providerUtil";
@@ -67,6 +67,8 @@ export function PhoneProvider({
   const cfg = st.config;
   const streaming = st.rtcState === "connected";
   const ready = st.identityReady && st.configLoaded;
+  // Preview shape follows the stream (portrait frames are taller than wide).
+  const previewAspect = st.rtcStats?.w && st.rtcStats.h ? st.rtcStats.w / st.rtcStats.h : 4 / 3;
 
   // Point the engine at this device. If `autostart`, secure camera permission first so the engine can
   // open the camera without a prompt it can't show from outside React.
@@ -191,11 +193,25 @@ export function PhoneProvider({
                     </>
                   )}
                   <Divider />
-                  <FormRow label="Lock orientation" hint="Keep the stream fixed to the current orientation when the phone rotates." inline>
-                    <Switch value={cfg.lockOrient} onValueChange={v => providerEngine.updateConfig({ lockOrient: v })} trackColor={{ false: colors.border, true: colors.success }} />
+                  <FormRow label="Orientation" hint="Portrait or Landscape keeps the stream that way up however the phone is turned. Rotate turns it a quarter turn.">
+                    <View style={styles.orientRow}>
+                      <View style={styles.orientSeg}>
+                        <SegmentedControl
+                          options={ORIENT_OPTIONS}
+                          value={cfg.orientation === "auto" ? "auto" : cfg.orientation.startsWith("portrait") ? "portrait" : "landscape"}
+                          onChange={v => providerEngine.updateConfig({ orientation: v })}
+                        />
+                      </View>
+                      <Button
+                        label="Rotate"
+                        variant="secondary"
+                        icon={<RotateCw size={16} color={buttonTextColor("secondary")} />}
+                        onPress={() => providerEngine.rotate()}
+                      />
+                    </View>
                   </FormRow>
                   {st.camId
-                    ? <CameraLiveFeed cameraId={st.camId} aspectRatio={4 / 3} />
+                    ? <CameraLiveFeed cameraId={st.camId} aspectRatio={previewAspect} />
                     : <View style={[styles.preview, styles.previewEmpty]}><Text style={type.caption}>Connecting…</Text></View>}
                   <Text style={type.caption}>
                     {`WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · ${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
@@ -306,6 +322,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
   },
   previewEmpty: { alignItems: "center", justifyContent: "center" },
+  orientRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  orientSeg: { flex: 1 },
   valueRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 3 },
   valueKey: { ...type.body, color: colors.text },
   valueVal: { ...type.mono, color: colors.textSecondary },
