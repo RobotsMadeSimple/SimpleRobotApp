@@ -47,6 +47,14 @@ export const RES_TIERS: Record<ResTier, { label: string; height: number }> = {
 export const RES_OPTIONS = (Object.keys(RES_TIERS) as ResTier[]).map(v => ({ label: RES_TIERS[v].label, value: v }));
 export const RES_TIER_VALUES = RES_OPTIONS.map(o => o.value);
 
+// Frame shape requested from the camera. Phone sensors are 4:3: a 16:9 frame is cut from the
+// middle of it (top and bottom lost), so 4:3 gives the whole field of view the lens has.
+export type FrameAspect = "4:3" | "16:9";
+export const ASPECT_OPTIONS: { label: string; value: FrameAspect }[] = [
+  { label: "4:3 (full view)", value: "4:3" },
+  { label: "16:9", value: "16:9" },
+];
+
 // Target capture/encode frame rates (string values for SegmentedControl).
 export const RTC_FPS_OPTIONS: { label: string; value: string }[] = [
   { label: "15", value: "15" },
@@ -73,6 +81,8 @@ const MAX_BITRATE = 60_000_000;
 // whichever phone provides for the device. Camera on/off is deliberately NOT part of this.
 export type ProviderConfig = {
   resTier: ResTier;
+  /** Frame shape: 4:3 = the sensor's full view, 16:9 = cropped top and bottom. */
+  aspect: FrameAspect;
   rtcFps: string;
   /** Sender bitrate cap in bits/sec (the quality ceiling; applied live). */
   bitrate: number;
@@ -95,7 +105,7 @@ export type ProviderConfig = {
 };
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
-  resTier: "med", rtcFps: "30", bitrate: 12_000_000, camOn: false, lensId: null, lockOrient: false,
+  resTier: "med", aspect: "4:3", rtcFps: "30", bitrate: 12_000_000, camOn: false, lensId: null, lockOrient: false,
   motionOn: false, lightOn: false, locationOn: false, batteryOn: false,
   assignedPhoneId: null, assignedPhoneName: null,
 };
@@ -323,6 +333,7 @@ class ProviderEngine {
 
     const camChanged =
       (patch.resTier !== undefined && patch.resTier !== prev.resTier) ||
+      (patch.aspect  !== undefined && patch.aspect  !== prev.aspect)  ||
       (patch.rtcFps  !== undefined && patch.rtcFps  !== prev.rtcFps)  ||
       (patch.lensId  !== undefined && patch.lensId  !== prev.lensId);
     if (camChanged && this.camOn) this.rebuildCamera();
@@ -387,6 +398,7 @@ class ProviderEngine {
   private sanitizeConfig(p: Partial<ProviderConfig>): ProviderConfig {
     const c = { ...DEFAULT_PROVIDER_CONFIG };
     if (p.resTier && (RES_TIER_VALUES as string[]).includes(p.resTier)) c.resTier = p.resTier;
+    if (p.aspect === "4:3" || p.aspect === "16:9") c.aspect = p.aspect;
     if (p.rtcFps && RTC_FPS_OPTIONS.some(o => o.value === String(p.rtcFps))) c.rtcFps = String(p.rtcFps);
     if (typeof p.bitrate === "number" && isFinite(p.bitrate)) c.bitrate = Math.min(MAX_BITRATE, Math.max(MIN_BITRATE, p.bitrate));
     if (typeof p.camOn === "boolean") c.camOn = p.camOn;
@@ -613,7 +625,7 @@ class ProviderEngine {
 
     const tier = RES_TIERS[this.config.resTier];
     const h = tier.height;
-    const w = Math.round((h * 16) / 9);        // request a 16:9 frame at the chosen height
+    const w = Math.round(this.config.aspect === "16:9" ? (h * 16) / 9 : (h * 4) / 3);   // frame shape at the chosen height
     const targetFps = Number(this.config.rtcFps);
     const lensId = this.config.lensId;
 

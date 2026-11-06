@@ -1,0 +1,113 @@
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
+index 1980f6c..dfb3711 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
+@@ -54,6 +54,13 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
+             updateActualSize(cameraIndex, cameraName, videoCapturer);
+             CameraCaptureController.this.currentDeviceId = cameraIndex == -1 ? null : String.valueOf(cameraIndex);
+         }
++
++        // Every (re)opened session starts with WebRTC's stabilization choice; take EIS off.
++        @Override
++        public void onFirstFrameAvailable() {
++            super.onFirstFrameAvailable();
++            if (videoCapturer != null) CameraStabilization.disableVideoStabilization(videoCapturer);
++        }
+     };
+ 
+     public CameraCaptureController(Context context, CameraEnumerator cameraEnumerator, ReadableMap constraints) {
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java
+new file mode 100644
+index 0000000..6577710
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java
+@@ -0,0 +1,89 @@
++package com.oney.WebRTCModule;
++
++import android.hardware.camera2.CameraCaptureSession;
++import android.hardware.camera2.CameraCharacteristics;
++import android.hardware.camera2.CameraDevice;
++import android.hardware.camera2.CameraMetadata;
++import android.hardware.camera2.CaptureRequest;
++import android.os.Handler;
++import android.util.Log;
++import android.util.Range;
++import android.view.Surface;
++
++import org.webrtc.VideoCapturer;
++
++import java.lang.reflect.Field;
++
++/**
++ * Turns electronic (video) stabilization off on a running Camera2 capture.
++ *
++ * WebRTC's Camera2Session enables EIS whenever a lens has no optical stabilization. EIS crops
++ * the frame (on Samsung ultrawides noticeably — the picture looks zoomed in next to the
++ * system camera app) and makes the image drift as it compensates, which is wrong for a fixed
++ * camera used for machine vision. The session's request is private, so once the first frame
++ * arrives we reach into the session and re-issue the same repeating request with EIS off
++ * (OIS stays on where the lens has it). Best-effort: any failure leaves capture as it was.
++ */
++final class CameraStabilization {
++    private static final String TAG = WebRTCModule.TAG;
++
++    private CameraStabilization() {}
++
++    static void disableVideoStabilization(VideoCapturer capturer) {
++        try {
++            Object session = field(findClass(capturer.getClass(), "org.webrtc.CameraCapturer"), "currentSession").get(capturer);
++            if (session == null || !"org.webrtc.Camera2Session".equals(session.getClass().getName())) return;
++            Class<?> sc = session.getClass();
++            Handler handler = (Handler) field(sc, "cameraThreadHandler").get(session);
++            handler.post(() -> {
++                try {
++                    CameraDevice device = (CameraDevice) field(sc, "cameraDevice").get(session);
++                    CameraCaptureSession captureSession = (CameraCaptureSession) field(sc, "captureSession").get(session);
++                    Surface surface = (Surface) field(sc, "surface").get(session);
++                    CameraCharacteristics chars = (CameraCharacteristics) field(sc, "cameraCharacteristics").get(session);
++                    Object format = field(sc, "captureFormat").get(session);
++                    int fpsUnit = field(sc, "fpsUnitFactor").getInt(session);
++                    if (device == null || captureSession == null || surface == null || chars == null || format == null) return;
++                    Object fr = field(format.getClass(), "framerate").get(format);
++                    int min = field(fr.getClass(), "min").getInt(fr), max = field(fr.getClass(), "max").getInt(fr);
++
++                    // Same request Camera2Session builds, except the stabilization choice.
++                    CaptureRequest.Builder b = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
++                    b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(min / fpsUnit, max / fpsUnit));
++                    b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
++                    b.set(CaptureRequest.CONTROL_AE_LOCK, false);
++                    b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF);
++                    b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
++                          has(chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION), CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
++                              ? CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON : CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF);
++                    if (has(chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES), CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO))
++                        b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
++                    b.addTarget(surface);
++                    captureSession.setRepeatingRequest(b.build(), null, handler);
++                    Log.d(TAG, "CameraStabilization: video stabilization off");
++                } catch (Throwable t) {
++                    Log.w(TAG, "CameraStabilization: could not re-issue the capture request", t);
++                }
++            });
++        } catch (Throwable t) {
++            Log.w(TAG, "CameraStabilization: capture session not reachable", t);
++        }
++    }
++
++    private static boolean has(int[] modes, int mode) {
++        if (modes == null) return false;
++        for (int m : modes) if (m == mode) return true;
++        return false;
++    }
++
++    private static Class<?> findClass(Class<?> c, String name) throws ClassNotFoundException {
++        for (Class<?> k = c; k != null; k = k.getSuperclass()) if (k.getName().equals(name)) return k;
++        throw new ClassNotFoundException(name);
++    }
++
++    private static Field field(Class<?> c, String name) throws NoSuchFieldException {
++        Field f = c.getDeclaredField(name);
++        f.setAccessible(true);
++        return f;
++    }
++}

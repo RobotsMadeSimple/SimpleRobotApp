@@ -12,7 +12,7 @@ import {
 import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
 import {
-  lensLabel, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS, RTC_FPS_OPTIONS,
+  ASPECT_OPTIONS, lensLabel, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS, RTC_FPS_OPTIONS,
   type ProviderEngineState,
 } from "@/src/services/providerEngine";
 import { DEFAULT_PHONE_DEVICE_NAME } from "./providerUtil";
@@ -165,6 +165,10 @@ export function PhoneProvider({
                   <Divider />
                   <FormRow label="Resolution" hint="Capture size requested from the camera.">
                     <SegmentedControl options={RES_OPTIONS} value={cfg.resTier} onChange={v => providerEngine.updateConfig({ resTier: v })} />
+                  </FormRow>
+                  <Divider />
+                  <FormRow label="Frame shape" hint="4:3 streams the camera's whole view; 16:9 cuts off the top and bottom of it.">
+                    <SegmentedControl options={ASPECT_OPTIONS} value={cfg.aspect} onChange={v => providerEngine.updateConfig({ aspect: v })} />
                   </FormRow>
                   <Divider />
                   <FormRow label="Frame rate" hint="Target capture/encode rate for the stream.">
