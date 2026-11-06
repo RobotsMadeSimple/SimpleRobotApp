@@ -18,11 +18,6 @@ export default function ScanStation() {
   const [error, setError]   = useState<string | null>(null);
   const handled = useRef(false);
 
-  useEffect(() => {
-    nfcIsSupported().then(setNfcOk).catch(() => setNfcOk(false));
-    return () => cancelNfc();
-  }, []);
-
   // Route any resolved payload through the shared station landing so behaviour is identical to a
   // cold tap/scan from outside the app (connect → navigate → optional run, with confirm if asked).
   const resolve = useCallback((raw: string | null | undefined, badMsg: string) => {
@@ -42,8 +37,10 @@ export default function ScanStation() {
     resolve(data, "That QR code isn't a Simple Robot station tag.");
   }, [resolve]);
 
-  async function scanNfc() {
-    if (reading) return;
+  const readingRef = useRef(false);
+  const scanNfc = useCallback(async () => {
+    if (readingRef.current) return;
+    readingRef.current = true;
     setError(null);
     setReading(true);
     try {
@@ -53,9 +50,19 @@ export default function ScanStation() {
     } catch {
       setError("NFC read was cancelled or failed.");
     } finally {
+      readingRef.current = false;
       setReading(false);
     }
-  }
+  }, [resolve]);
+
+  // Listen for a tag as soon as the screen opens, so holding one to the phone just works (and the
+  // app, not Android's Tags app, gets it) without pressing "Scan tag" first.
+  useEffect(() => {
+    nfcIsSupported()
+      .then(ok => { setNfcOk(ok); if (ok) scanNfc(); })
+      .catch(() => setNfcOk(false));
+    return () => cancelNfc();
+  }, [scanNfc]);
 
   const cameraReady = !!perm?.granted;
 
@@ -99,7 +106,7 @@ export default function ScanStation() {
               <View style={styles.nfcRow}>
                 <Nfc size={22} color={colors.accent} />
                 <Text style={styles.nfcText}>
-                  {reading ? "Hold your phone to the station tag…" : "Tap to read a station tag."}
+                  {reading ? "Hold your phone to the station tag…" : "Tap to read a station tag again."}
                 </Text>
                 {reading
                   ? <ActivityIndicator color={colors.accent} />

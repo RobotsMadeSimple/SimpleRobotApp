@@ -96,6 +96,7 @@
           "nfcPermission": "Simple Robot reads station NFC tags to connect to a controller and start a cycle."
         }
       ],
+      "./plugins/withNfcStationIntent",
       [
         "@config-plugins/react-native-webrtc",
         {
