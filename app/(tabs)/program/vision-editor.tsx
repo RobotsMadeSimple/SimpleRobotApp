@@ -641,7 +641,7 @@ export default function VisionEditorScreen() {
         <Text style={styles.sectionLabel}>ZONES</Text>
         <Text style={styles.sectionCount}>{program.zones.length}</Text>
         <View style={{ flex: 1 }} />
-        <InfoTip text="A zone is a shape drawn over the camera image — rectangle, circle, polygon, grid or skewed grid (a board seen at an angle). Inspections only look inside the zone they are attached to. A zone can be aligned to a Frame inspection so it follows the board when it moves." />
+        <InfoTip text="A zone is a shape drawn over the camera image — rectangle, circle, polygon, grid or skewed grid (a grid seen at an angle). Inspections only look inside the zone they are attached to. A zone can be aligned to a Frame inspection so it follows the object when it moves." />
       </View>
 
       {program.zones.length === 0 && (
@@ -739,7 +739,7 @@ export default function VisionEditorScreen() {
         <Text style={styles.sectionLabel}>INSPECTIONS</Text>
         <Text style={styles.sectionCount}>{allInspections.length}</Text>
         <View style={{ flex: 1 }} />
-        <InfoTip text="An inspection is one measurement — blob count, colour coverage, a barcode, an ArUco tag, a line, a polygon match, corners, edges, texture or a frame. A frame inspection finds the board's outline and keeps zones aligned to it; frames always run first. Its result is what a Run Vision step reads back into program variables." />
+        <InfoTip text="An inspection is one measurement — blob count, colour coverage, a barcode, an ArUco tag, a line, a polygon match, corners, edges, texture or a frame. A frame inspection finds an outline (or a checkerboard-pattern grid) and keeps zones aligned to it; frames always run first. Its result is what a Run Vision step reads back into program variables." />
       </View>
 
       {allInspections.length === 0 && (
@@ -1125,7 +1125,7 @@ export default function VisionEditorScreen() {
                   {f && (
                     <Text style={styles.alignSheetSub}>
                       {f.method === 'checker' && f.zoneId === alignPickZoneId
-                        ? 'checker grid on this zone — snaps it onto the squares, no reference needed'
+                        ? 'checker grid on this zone — snaps it onto the grid, no reference needed'
                         : `${f.method} · ${f.referenceCorners ? 'reference set' : 'no reference yet — set one in the frame inspection'}`}
                     </Text>
                   )}

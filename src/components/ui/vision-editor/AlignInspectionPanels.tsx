@@ -31,7 +31,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
   zones: VisionZone[];
   /** The zone it searches (the modal's current pick — the draft's own zoneId may be stale). */
   searchZoneId: string | null;
-  /** Copy the found corners into that zone as a Skewed zone (checker frames). */
+  /** Copy the found corners into that zone as a Skewed zone (checker-grid frames). */
   onSnapZone?: (zoneId: string, corners: NormPoint[]) => void;
 }) {
   const set = (patch: Partial<FrameInspection>) => onChange({ ...draft, ...patch });
@@ -46,7 +46,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
       <View style={ves.blobPanel}>
         <Text style={ves.blobPanelTitle}>Frame Detection</Text>
         <Text style={ves.paramDesc}>
-          Finds the four corners of a frame — e.g. the board&apos;s outer edge, or a checkerboard&apos;s squares — and
+          Finds the four corners of a frame — e.g. a tray&apos;s or fixture&apos;s outer edge, or a grid of alternating squares — and
           reports them TL, TR, BR, BL. Zones set to &quot;Align to&quot; this frame follow it every frame.
         </Text>
         <SegmentedControl
@@ -63,25 +63,25 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
         />
         <Text style={ves.paramDesc}>
           {isChecker
-            ? "Checker grid (recommended for a checkerboard): fits the grid to the board's squares. Draw the zone roughly over the 64 squares (within about a fifth of a square of each corner) and align that same zone to this frame — it then snaps onto the squares each frame and follows a nudged camera; no reference needed."
+            ? "Checker grid: fits a grid of alternating light/dark squares (a checkerboard pattern) to the image. Draw the zone roughly over the grid (within about a fifth of a square of each corner) and align that same zone to this frame — it then snaps onto the squares each frame and follows a nudged camera; no reference needed."
             : draft.method === "contour"
             ? "Outline: the largest 4-sided outline in the search area (Canny edges → contour → polygon). Needs the whole frame in view, contrasting with its surroundings and with nothing touching it."
             : draft.method === "lines"
-            ? "Edges: straight edge lines in the two main directions (Hough lines), intersected. Tolerates one hidden corner (a hand or a piece over it), but long straight edges near the board — a table edge, wood grain — can mislead it."
-            : "Corners: the outermost strong corner points (Shi-Tomasi). The steadiest choice for an outlined board (a frame on a plain surface): draw the search area snugly around the board."}
+            ? "Edges: straight edge lines in the two main directions (Hough lines), intersected. Tolerates one hidden corner (a hand or a part over it), but long straight edges nearby — a table edge, wood grain — can mislead it."
+            : "Corners: the outermost strong corner points (Shi-Tomasi). The steadiest choice for an outlined object (a frame on a plain surface): draw the search area snugly around it."}
         </Text>
 
         {isChecker && (
           <>
             <ParamRow label="Rows" value={draft.gridRows ?? 8} min={2} max={32}
               onChange={v => set({ gridRows: Math.round(v) })}
-              desc="Squares down the board" />
+              desc="Squares down the grid" />
             <ParamRow label="Cols" value={draft.gridCols ?? 8} min={2} max={32}
               onChange={v => set({ gridCols: Math.round(v) })}
-              desc="Squares across the board" />
+              desc="Squares across the grid" />
             <ParamRow label="Min Edge Ratio" value={draft.minEdgeRatio ?? 4} min={1} max={50}
               onChange={v => set({ minEdgeRatio: v })}
-              desc="Found when the grid lines carry this many times the edge strength of the square centres. A fitted board is about 8–18; a grid a quarter square off, or a hand over the board, is under 4." />
+              desc="Found when the grid lines carry this many times the edge strength of the square centres. A well-fitted grid is about 8–18; a grid a quarter square off, or a hand over it, is under 4." />
           </>
         )}
         {(draft.method === "contour" || draft.method === "lines") && (
@@ -98,7 +98,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
           <>
             <SliderParamRow label="Min Area (%)" value={draft.minAreaPct} min={0} max={100}
               onChange={v => set({ minAreaPct: Math.round(v * 10) / 10 })}
-              desc="Smallest frame, as % of the search area — raise it to ignore squares inside the board" />
+              desc="Smallest frame, as % of the search area — raise it to ignore smaller shapes inside the frame" />
             <SliderParamRow label="Epsilon" value={draft.approxEpsilon} min={0.001} max={0.2}
               onChange={v => set({ approxEpsilon: v })}
               desc="How loosely the outline may match 4 straight sides (fraction of the perimeter)" />
@@ -114,7 +114,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
               desc="Shortest edge, as % of the search area's smaller side" />
             <ParamRow label="Max Gap (px)" value={draft.maxLineGap} min={0} max={9999}
               onChange={v => set({ maxLineGap: v })}
-              desc="Largest break bridged within one edge (e.g. where a piece covers it)" />
+              desc="Largest break bridged within one edge (e.g. where something covers it)" />
           </>
         )}
         {draft.method === "corners" && (
@@ -144,7 +144,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
         <Text style={[ves.paramDesc, { paddingHorizontal: spacing.md }]}>
           &quot;{selfZone.name}&quot; is searched and aligned by this frame, so it is used exactly where the squares are
           found — no reference needed. Snap copies the found corners into the zone, so your rough drawing becomes
-          the exact board and every frame starts from there.
+          the exact grid and every frame starts from there.
         </Text>
         <View style={{ flexDirection: "row", gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm }}>
           <Button
@@ -158,7 +158,7 @@ export function FramePanel({ draft, onChange, latest, isRunning, zones, searchZo
         </View>
         {!canCapture && (
           <Text style={[ves.paramDesc, { paddingHorizontal: spacing.md, paddingBottom: spacing.md }]}>
-            {!isRunning ? "Start Vision to find the squares, then snap the zone here." : "The squares aren't being found yet — redraw the zone closer to the board's corners."}
+            {!isRunning ? "Start Vision to find the squares, then snap the zone here." : "The squares aren't being found yet — redraw the zone closer to the grid's corners."}
           </Text>
         )}
       </View>
@@ -283,8 +283,8 @@ export function TexturePanel({ draft, onChange }: { draft: TextureInspection; on
     <View style={ves.blobPanel}>
       <Text style={ves.blobPanelTitle}>Texture</Text>
       <Text style={ves.paramDesc}>
-        Scores fine detail — on a grid zone, per cell. Each cell is scored on its centre only. On real photos black
-        checkers scored 6.5+, empty squares under 3.
+        Scores fine detail — on a grid zone, per cell. Each cell is scored on its centre only. A textured or patterned
+        object scores well above a plain surface, even in the same colour.
       </Text>
       <SliderParamRow label="Cell Inset (%)" value={draft.cellInset} min={0} max={45}
         onChange={v => set({ cellInset: Math.round(v) })}
@@ -298,7 +298,7 @@ export function TexturePanel({ draft, onChange }: { draft: TextureInspection; on
       {draft.minScore !== null && (
         <ParamRow label="Min Score" value={draft.minScore} min={0} max={255}
           onChange={v => set({ minScore: v })}
-          desc="e.g. 4 for checkers: a ringed piece scores well above, a plain square well below" />
+          desc="Plain surfaces usually score under 3; start around 4 and check the cell scores" />
       )}
       <ToggleRow
         label="Max Score"

@@ -16,7 +16,7 @@ import { ves } from "./visionEditorStyles";
  * the grid only ever made sense on a rectangle, and a circle or polygon with a lattice
  * bolted on measured a bounding box that spilled outside the zone. So the lattice now
  * belongs to one shape and cannot be turned on for the others. "Skewed" (a Quad) is the
- * other gridded shape: four free corners for a board seen at an angle, its cells laid out
+ * other gridded shape: four free corners for a grid seen at an angle, its cells laid out
  * in perspective.
  */
 type UiShape = VisionZoneShape | 'Grid';
@@ -187,7 +187,7 @@ export function ZoneDrawModal({
 
   const hint =
     editing && cShape === 'Quad'
-      ? "Drag each corner onto the board's corners · 1,1 marks row 1, column 1 · drag inside to move"
+      ? "Drag each corner onto the grid's corners · 1,1 marks row 1, column 1 · drag inside to move"
     : editing && cShape === 'Rectangle'
       ? 'Drag a corner to resize · the top grip to rotate · inside to move'
     : editing                ? 'Drag a handle to reshape · drag inside to move'

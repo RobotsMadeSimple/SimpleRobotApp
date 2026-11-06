@@ -152,10 +152,10 @@ export function InspectionTypePicker({ visible, onSelect, onClose }: {
         </View>
       </TouchableOpacity>
       {([
-        ['frame',  'Frame (alignment)', "Find a 4-cornered frame — e.g. the board's edge — and align zones to it each frame"],
+        ['frame',  'Frame (alignment)', "Find a 4-cornered frame — e.g. a tray's or fixture's edge — and align zones to it each frame"],
         ['corner', 'Corner Detection',  'Find corner points (Shi-Tomasi or Harris) and count them'],
         ['edge',   'Edge Detection',    'Measure how much of a zone is edges (Canny) and its dominant direction'],
-        ['texture', 'Texture',          'Fine detail per cell — tells a ringed or patterned object from a plain surface of the same colour, e.g. black checkers on black squares. Ignores glare and shadows.'],
+        ['texture', 'Texture',          'Fine detail per cell — tells a patterned or textured object from a plain surface of the same colour. Ignores glare and soft shadows.'],
       ] as const).map(([k, title, sub]) => (
         <TouchableOpacity key={k} style={ves.sheetRow} onPress={() => { onSelect(k); onClose(); }} activeOpacity={0.75}>
           <View style={[ves.typePickerIcon, { backgroundColor: ALIGN_KIND_META[k].soft }]}><AlignKindIcon kind={k} /></View>

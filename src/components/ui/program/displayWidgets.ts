@@ -170,7 +170,7 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
   plugin: {
     type: "plugin",
     label: "Plugin",
-    hint: "Embed a live plugin UI (e.g. the checkers board).",
+    hint: "Embed a live plugin's UI panel.",
     defaultSize: { w: 6, h: 6 },
     defaultConfig: { pluginId: "", entry: "", title: "", pluginName: "" },
     fields: [{ key: "pluginId", label: "Plugin", kind: "plugin" }],

@@ -528,7 +528,7 @@ export type VisionResult     = {
 /** A normalized [x, y] point. */
 export type NormPoint = [number, number];
 
-/** `checker` fits a gridRows × gridCols checkerboard to the squares themselves (no board frame needed). */
+/** `checker` fits a gridRows × gridCols checkerboard-pattern grid to its squares (no outer frame needed). */
 export type FrameMethod = 'checker' | 'contour' | 'lines' | 'corners';
 
 /**
@@ -559,7 +559,7 @@ export type FrameInspection = {
   maxCorners: number;
   cornerQuality: number;
   minCornerDistance: number;
-  /** checker: squares down / across the board. */
+  /** checker: squares down / across the grid. */
   gridRows?: number;
   gridCols?: number;
   /** checker: found when grid-line edge strength ≥ this × square-centre edge strength (fitted ≈ 8–18). */
@@ -635,7 +635,7 @@ export type EdgeResult = {
 
 /**
  * Fine detail per cell (or the zone): std of the gray image minus a blurred copy of itself, so
- * glare and shadows don't count but rings/print do. Tells black checkers from black squares.
+ * glare and shadows don't count but texture/print do. Tells a patterned object from a plain surface of the same colour.
  */
 export type TextureInspection = {
   id: string;
@@ -1662,7 +1662,7 @@ export type DisplayWidgetType =
   | "image"    // a display-image variable
   | "button"   // run / stop / seed-inputs action
   | "text"     // static heading / caption
-  | "plugin";  // an embedded live plugin UI (e.g. the checkers board)
+  | "plugin";  // an embedded live plugin UI
 
 /**
  * One widget on a display page. `x`/`y`/`w`/`h` are in grid cells (columns × auto rows); the

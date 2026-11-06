@@ -54,7 +54,7 @@ export function GridSetupStep({
     <View style={cs.step}>
       <Card style={cs.cardGap}>
         <FormRow label="Grid name" hint={`Its base point is saved as "${name.trim() || "<name>"} origin".`}>
-          <Input value={name} onChangeText={onName} placeholder="e.g. Checkers Board" autoCapitalize="words" returnKeyType="next" />
+          <Input value={name} onChangeText={onName} placeholder="e.g. Parts Tray" autoCapitalize="words" returnKeyType="next" />
         </FormRow>
         <View style={cs.row}>
           <FormRow label="Rows" style={cs.grow}>
@@ -65,7 +65,7 @@ export function GridSetupStep({
           </FormRow>
         </View>
         <Text style={cs.caption}>
-          Count cells, not lines: a checkerboard is 8 × 8. Rows run down from the first cell, columns across.
+          Count cells, not lines: a 4 × 6 tray has 4 rows of 6. Rows run down from the first cell, columns across.
         </Text>
       </Card>
 
