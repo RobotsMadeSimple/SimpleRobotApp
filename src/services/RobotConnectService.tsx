@@ -1819,6 +1819,11 @@ export class RobotConnectService {
     return [...after].reverse().find(c => c.name === name && c.sourceType === "phone")?.id ?? "";
   }
 
+  /** The id of the "phone" camera with this name, or "" — a read-only lookup (never creates one). */
+  public async findPhoneCamera(name: string): Promise<string> {
+    return (await this.listCameraStates()).find(c => c.name === name && c.sourceType === "phone")?.id ?? "";
+  }
+
   private async listCameraStates(): Promise<CameraState[]> {
     const data: any = await this.sendCommand("GetCameras");
     try { return JSON.parse(data?.cameras ?? "[]") as CameraState[]; } catch { return []; }

@@ -196,6 +196,30 @@ index 0000000..b4e8f8b
 +        inner.onFrameCaptured(new VideoFrame(frame.getBuffer(), (frame.getRotation() + extra) % 360, frame.getTimestampNs()));
 +    }
 +}
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
+index d3bfe07..914c0ec 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
+@@ -979,7 +979,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
+     public void peerConnectionCreateOffer(int id, ReadableMap options, Promise promise) {
+         ThreadUtils.runOnExecutor(() -> {
+             PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+-            PeerConnection peerConnection = pco.getPeerConnection();
++            // The connection may already be closed (e.g. the stream restarted mid-offer).
++            PeerConnection peerConnection = pco == null ? null : pco.getPeerConnection();
+ 
+             if (peerConnection == null) {
+                 Log.d(TAG, "peerConnectionCreateOffer() peerConnection is null");
+@@ -1141,7 +1142,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
+     public void peerConnectionSetRemoteDescription(int id, ReadableMap desc, Promise promise) {
+         ThreadUtils.runOnExecutor(() -> {
+             PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+-            PeerConnection peerConnection = pco.getPeerConnection();
++            // The connection may already be closed (e.g. the stream restarted mid-offer).
++            PeerConnection peerConnection = pco == null ? null : pco.getPeerConnection();
+ 
+             if (peerConnection == null) {
+                 Log.d(TAG, "peerConnectionSetRemoteDescription() peerConnection is null");
 diff --git a/node_modules/react-native-webrtc/src/RTCUtil.ts b/node_modules/react-native-webrtc/src/RTCUtil.ts
 index 10e8499..77bb0f5 100644
 --- a/node_modules/react-native-webrtc/src/RTCUtil.ts

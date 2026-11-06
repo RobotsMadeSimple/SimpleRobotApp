@@ -33,6 +33,8 @@ import { robotClient } from "@/src/services/RobotConnectService";
 const SENSOR_MS = 100;   // sensor sampling interval
 const FLUSH_MS  = 200;   // how often batched channel values are pushed
 const PERSIST_MS = 600;  // debounce for saving config back to the controller
+const SYNC_MS = 2000;    // how often the saved config (and, on other phones, the live values) is re-read
+const LOCAL_EDIT_HOLD_MS = 2500;   // ignore the saved config this long after a local edit (it's still being written)
 
 export type ResTier = "low" | "med" | "high";
 
@@ -111,8 +113,10 @@ export type ProviderConfig = {
   lightOn: boolean;
   locationOn: boolean;
   batteryOn: boolean;
+  /** The assigned phone's cameras, published by it so other phones can offer the lens picker. */
+  lenses: Lens[];
   /** Which phone (its stable id) is assigned to provide for this device. Only that phone streams;
-   *  everyone else sees "Assign this phone". Stored in the controller blob so the setup phone sees it. */
+   *  any phone can view and change these settings, and the assigned phone picks the changes up. */
   assignedPhoneId: string | null;
   /** The assigned phone's friendly name, for display on other phones / the I/O list. */
   assignedPhoneName: string | null;
@@ -120,9 +124,13 @@ export type ProviderConfig = {
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
   resTier: "med", aspect: "4:3", rtcFps: "30", bitrate: 12_000_000, camOn: false, lensId: null, orientation: "portrait",
-  motionOn: false, lightOn: false, locationOn: false, batteryOn: false,
+  motionOn: false, lightOn: false, locationOn: false, batteryOn: false, lenses: [],
   assignedPhoneId: null, assignedPhoneName: null,
 };
+
+const CAM_KEYS: (keyof ProviderConfig)[] = ["resTier", "aspect", "rtcFps", "lensId", "orientation"];
+const SENSOR_KEYS: (keyof ProviderConfig)[] = ["motionOn", "lightOn", "locationOn", "batteryOn"];
+const changed = (a: ProviderConfig, b: ProviderConfig, keys: (keyof ProviderConfig)[]) => keys.some(k => a[k] !== b[k]);
 
 /** One selectable camera on the phone, from enumerateDevices(). */
 export type Lens = { id: string; label: string; facing?: string };
@@ -246,6 +254,9 @@ class ProviderEngine {
   private sensorGen = 0;
 
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private syncBusy = false;
+  private lastLocalEdit = 0;
 
   private get active(): boolean {
     if (!this.assignedHere) return false; // only the assigned phone streams / holds the service
@@ -270,13 +281,13 @@ class ProviderEngine {
       active: this.active,
       deviceId: this.deviceId,
       deviceName: this.deviceName,
-      camOn: this.camOn,
+      camOn: this.assignedHere ? this.camOn : this.config.camOn,
       camId: this.camId,
       rtcState: this.rtcState,
       rtcStats: this.rtcStats,
       devLive: this.devLive,
       values: this.values,
-      lenses: this.lenses,
+      lenses: this.assignedHere ? this.lenses : this.config.lenses,
       config: this.config,
       configLoaded: this.configLoaded,
       identityReady: this.identityReady,
@@ -299,6 +310,7 @@ class ProviderEngine {
    */
   open(opts: { deviceId?: string; deviceName?: string; autostart?: boolean }) {
     this.ensureConnSub();
+    this.ensureSync();
     const deviceId = opts.deviceId ?? null;
     const sameDevice = this.deviceId === deviceId;
 
@@ -326,7 +338,8 @@ class ProviderEngine {
 
   /** Turn the camera stream on/off. */
   setCamOn(on: boolean) {
-    if (on && !this.assignedHere) return; // only the assigned phone may stream
+    // Another phone only saves the intent; the assigned phone picks it up and streams.
+    if (!this.assignedHere) { if (this.config.camOn !== on) this.updateConfig({ camOn: on }); return; }
     if (this.camOn === on) return;
     this.camOn = on;
     this.config = { ...this.config, camOn: on };   // persist so it auto-resumes after reconnect
@@ -341,23 +354,73 @@ class ProviderEngine {
   updateConfig(patch: Partial<ProviderConfig>) {
     const prev = this.config;
     this.config = { ...prev, ...patch };
+    this.lastLocalEdit = Date.now();
     this.persistConfig();
-
-    const camChanged =
-      (patch.resTier !== undefined && patch.resTier !== prev.resTier) ||
-      (patch.aspect  !== undefined && patch.aspect  !== prev.aspect)  ||
-      (patch.rtcFps  !== undefined && patch.rtcFps  !== prev.rtcFps)  ||
-      (patch.lensId  !== undefined && patch.lensId  !== prev.lensId)  ||
-      (patch.orientation !== undefined && patch.orientation !== prev.orientation);
-    if (camChanged && this.camOn) this.rebuildCamera();
-    // Bitrate changes apply live on the running sender — no capture restart needed.
-    else if (patch.bitrate !== undefined && patch.bitrate !== prev.bitrate && this.camOn) this.applyEncodingLive();
-
-    const sensorKeys: (keyof ProviderConfig)[] = ["motionOn", "lightOn", "locationOn", "batteryOn"];
-    if (sensorKeys.some(k => patch[k] !== undefined && patch[k] !== prev[k])) this.rebuildSensors();
-
-    this.syncForeground();
+    this.applyChanges(prev);
     this.publish();
+  }
+
+  /** Restart whatever a settings change affects on the assigned phone (other phones stream nothing). */
+  private applyChanges(prev: ProviderConfig) {
+    if (!this.assignedHere) return;
+    const c = this.config;
+    if (changed(prev, c, CAM_KEYS) && this.camOn) this.rebuildCamera();
+    // Bitrate changes apply live on the running sender — no capture restart needed.
+    else if (prev.bitrate !== c.bitrate && this.camOn) this.applyEncodingLive();
+    if (changed(prev, c, SENSOR_KEYS)) this.rebuildSensors();
+    this.syncForeground();
+  }
+
+  // ── Sync with the saved config (edits made on other phones) ─────────────────
+  private ensureSync() {
+    if (this.syncTimer) return;
+    this.syncTimer = setInterval(() => { this.syncOnce(); }, SYNC_MS);
+  }
+
+  private async syncOnce() {
+    const deviceId = this.deviceId;
+    if (!deviceId || !this.configLoaded || !robotClient.connected || this.syncBusy) return;
+    this.syncBusy = true;
+    try {
+      const dev = (await robotClient.getDevices()).find(d => d.id === deviceId);
+      if (!dev || this.deviceId !== deviceId) return;
+
+      // Another phone shows the assigned phone's live values and stream as the controller has them.
+      if (!this.assignedHere) {
+        this.values = Object.fromEntries((dev.channels ?? []).map(ch => [ch.key, ch.value]));
+        this.devLive = dev.connected;
+        if (!this.camId) this.camId = (await robotClient.findPhoneCamera(this.deviceName)) || null;
+      }
+
+      const raw = dev.providerConfig;
+      if (raw && Date.now() - this.lastLocalEdit > LOCAL_EDIT_HOLD_MS && !this.persistTimer) {
+        const next = this.sanitizeConfig(JSON.parse(raw));
+        if (JSON.stringify(next) !== JSON.stringify(this.config)) this.applyRemote(next);
+      }
+      this.publish();
+    } catch { /* try again next tick */ } finally { this.syncBusy = false; }
+  }
+
+  /** Take on settings saved by another phone. */
+  private applyRemote(next: ProviderConfig) {
+    const wasHere = this.assignedHere;
+    const prev = this.config;
+    this.config = next;
+    if (wasHere && !this.assignedHere) {
+      // Another phone took over this device — stop streaming from this one.
+      this.stopInternal();
+      this.camOn = false;
+      return;
+    }
+    if (!this.assignedHere) return;
+    if (next.camOn !== this.camOn) {
+      this.camOn = next.camOn;
+      if (this.camOn) this.rebuildCamera(); else this.teardownCamera();
+      // The camera is already rebuilt with the new settings; apply only the rest.
+      this.applyChanges({ ...prev, resTier: next.resTier, aspect: next.aspect, rtcFps: next.rtcFps, lensId: next.lensId, orientation: next.orientation, bitrate: next.bitrate });
+    } else {
+      this.applyChanges(prev);
+    }
   }
 
   /** Stop everything and turn all switches off (persisted). The explicit "stop streaming" action. */
@@ -376,8 +439,13 @@ class ProviderEngine {
         enumerateDevices: () => Promise<{ deviceId: string; kind: string; label?: string; facing?: string }[]>;
       }).enumerateDevices();
       this.lenses = devices.filter(d => d.kind === "videoinput").map((d, i) => ({
-        id: d.deviceId, label: d.label || `Camera ${i + 1}`, facing: d.facing,
+        id: d.deviceId, label: d.label || `Camera ${i + 1}`, ...(d.facing ? { facing: d.facing } : {}),
       }));
+      // Share this phone's cameras so other phones can offer the same lens picker.
+      if (this.assignedHere && this.configLoaded && JSON.stringify(this.lenses) !== JSON.stringify(this.config.lenses)) {
+        this.config = { ...this.config, lenses: this.lenses };
+        this.persistConfig();
+      }
       this.publish();
     } catch { /* enumerate unsupported — the picker just won't show */ }
   }
@@ -419,6 +487,10 @@ class ProviderEngine {
     if (typeof p.lightOn === "boolean") c.lightOn = p.lightOn;
     if (typeof p.locationOn === "boolean") c.locationOn = p.locationOn;
     if (typeof p.batteryOn === "boolean") c.batteryOn = p.batteryOn;
+    if (Array.isArray(p.lenses)) {
+      c.lenses = p.lenses.filter(l => l && typeof l.id === "string")
+        .map(l => ({ id: l.id, label: String(l.label ?? ""), ...(l.facing ? { facing: String(l.facing) } : {}) }));
+    }
     if (typeof p.assignedPhoneId === "string" || p.assignedPhoneId === null) c.assignedPhoneId = p.assignedPhoneId ?? null;
     if (typeof p.assignedPhoneName === "string" || p.assignedPhoneName === null) c.assignedPhoneName = p.assignedPhoneName ?? null;
     return c;
@@ -529,6 +601,7 @@ class ProviderEngine {
     if (!deviceId || !this.configLoaded) return;
     const cfg = JSON.stringify(this.config);
     this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
       if (!robotClient.connected || this.deviceId !== deviceId) return;
       robotClient.setDeviceConfig(deviceId, { providerConfig: cfg }).catch(() => {});
     }, PERSIST_MS);
@@ -691,8 +764,11 @@ class ProviderEngine {
     const ws = new WebSocket(url);
     this.camWs = ws;
     ws.onopen = async () => {
+      // A stream restarted meanwhile (e.g. Rotate) has closed this connection — offering on it crashes.
+      if (gen !== this.camGen) return;
       try {
         const offer = await pc.createOffer({});
+        if (gen !== this.camGen) return;
         // Force start/min bitrate in the SDP. maxBitrate (setParameters) is only a ceiling; the actual
         // rate is driven by WebRTC's bandwidth estimator, which starves to ~500 kbps when the receiver
         // (SIPSorcery) sends no proper bandwidth feedback. x-google-start/min-bitrate overrides that.

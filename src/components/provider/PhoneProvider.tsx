@@ -67,8 +67,12 @@ export function PhoneProvider({
   const cfg = st.config;
   const streaming = st.rtcState === "connected";
   const ready = st.identityReady && st.configLoaded;
-  // Preview shape follows the stream (portrait frames are taller than wide).
-  const previewAspect = st.rtcStats?.w && st.rtcStats.h ? st.rtcStats.w / st.rtcStats.h : 4 / 3;
+  // Preview shape follows the stream (portrait frames are taller than wide). Other phones have no
+  // sender stats, so they work it out from the settings.
+  const wide = cfg.aspect === "16:9" ? 16 / 9 : 4 / 3;
+  const previewAspect = st.rtcStats?.w && st.rtcStats.h
+    ? st.rtcStats.w / st.rtcStats.h
+    : cfg.orientation.startsWith("portrait") ? 1 / wide : wide;
 
   // Point the engine at this device. If `autostart`, secure camera permission first so the engine can
   // open the camera without a prompt it can't show from outside React.
@@ -87,18 +91,19 @@ export function PhoneProvider({
   useEffect(() => { if (camPerm?.granted && st.assignedHere) providerEngine.refreshLenses(); }, [camPerm?.granted, st.assignedHere]);
 
   const onCamToggle = useCallback(async (on: boolean) => {
-    if (on) {
+    // Only the phone that streams needs camera permission; other phones just change the setting.
+    if (on && st.assignedHere) {
       const granted = camPerm?.granted || (await requestCamPerm()).granted;
       if (!granted) return;
     }
     providerEngine.setCamOn(on);
-  }, [camPerm?.granted, requestCamPerm]);
+  }, [camPerm?.granted, requestCamPerm, st.assignedHere]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   const crumbs = [{ label: "I/O", href: "/io" }, { label: name }];
   const lenses = st.lenses;
 
-  const pill = !ready || !st.assignedHere
+  const pill = !ready || (!st.assignedHere && !st.assignedPhoneId)
     ? <StatusPill label={st.assignedHere ? "Idle" : "Not linked"} tone="neutral" />
     : (streaming || st.devLive)
       ? <StatusPill label="Streaming" tone="success" dot />
@@ -116,10 +121,10 @@ export function PhoneProvider({
       <Screen>
         {!ready ? (
           <Card style={styles.stack}><Text style={type.caption}>Loading…</Text></Card>
-        ) : !st.assignedHere ? (
-          // ── Not this phone's device: the only action is to claim it ──
+        ) : (
+          // Every phone sees and can change the settings; only the assigned phone streams them.
           <>
-            <SectionHeader title="Link this phone" />
+            {!st.assignedHere && (
             <Card style={styles.stack}>
               <Text style={type.body}>
                 {st.assignedPhoneId
@@ -135,12 +140,10 @@ export function PhoneProvider({
                 onPress={() => providerEngine.assignHere()}
               />
             </Card>
-          </>
-        ) : (
-          // ── This phone is the provider: full streaming UI ──
-          <>
+            )}
+
             {/* Which robot this phone is serving + its live connection status (clear + reconnect-aware). */}
-            <Card style={[styles.stack, styles.connCard]}>
+            {st.assignedHere && <Card style={[styles.stack, styles.connCard]}>
               <View style={styles.connRow}>
                 <View style={[styles.connIcon, { backgroundColor: connected ? colors.successSoft : colors.dangerSoft }]}>
                   <Router size={20} color={connected ? colors.success : colors.danger} />
@@ -155,11 +158,11 @@ export function PhoneProvider({
                 </View>
                 <StatusPill label={connected ? "Online" : "Offline"} tone={connected ? "success" : "danger"} dot={connected} />
               </View>
-            </Card>
+            </Card>}
 
             <SectionHeader title="Camera" />
             <Card style={styles.stack}>
-              <FormRow label="Stream camera" hint="Feeds this phone's camera to the controller to preview, calibrate and run vision on. Hardware H.264 (WebRTC)." inline>
+              <FormRow label="Stream camera" hint="Feeds the linked phone's camera to the controller to preview, calibrate and run vision on. Hardware H.264 (WebRTC)." inline>
                 <Switch value={st.camOn} onValueChange={onCamToggle} trackColor={{ false: colors.border, true: colors.success }} />
               </FormRow>
               {st.camOn && (
@@ -183,7 +186,7 @@ export function PhoneProvider({
                   {lenses.length > 1 && (
                     <>
                       <Divider />
-                      <FormRow label="Lens" hint="Which camera to stream from (this phone's cameras).">
+                      <FormRow label="Lens" hint="Which of the linked phone's cameras to stream from.">
                         <SegmentedControl
                           options={[{ label: "Default", value: "" }, ...lenses.map((l, i) => ({ label: lensLabel(l, i), value: l.id }))]}
                           value={cfg.lensId ?? ""}
@@ -214,7 +217,9 @@ export function PhoneProvider({
                     ? <CameraLiveFeed cameraId={st.camId} aspectRatio={previewAspect} />
                     : <View style={[styles.preview, styles.previewEmpty]}><Text style={type.caption}>Connecting…</Text></View>}
                   <Text style={type.caption}>
-                    {`WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · ${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
+                    {!st.assignedHere
+                      ? `Streamed by ${st.assignedPhoneName || "the linked phone"} · controller view of “${name}”.`
+                      : `WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · ${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
                   </Text>
                 </>
               )}
@@ -263,6 +268,7 @@ export function PhoneProvider({
               </>
             )}
 
+            {st.assignedHere && <>
             <SectionHeader title="This phone" />
             <Card style={styles.stack}>
               <Text style={type.caption}>
@@ -279,9 +285,12 @@ export function PhoneProvider({
               {st.active && <Button label="Stop streaming" variant="destructive" onPress={() => providerEngine.stop()} />}
               <Button label="Unlink this phone" variant="secondary" onPress={() => providerEngine.unassignHere()} />
             </Card>
+            </>}
 
             <Text style={[type.caption, styles.note]}>
-              {connected
+              {!st.assignedHere
+                ? `Changes here are saved on the controller and picked up by ${st.assignedPhoneName || "the linked phone"}, which does the streaming.`
+                : connected
                 ? "Streaming runs in a foreground service, so it continues when the app is in the background or the screen is off."
                 : "Not connected — streaming will resume automatically when this phone reconnects to the controller."}
             </Text>
