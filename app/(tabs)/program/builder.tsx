@@ -880,13 +880,16 @@ export default function BuilderScreen() {
   // scope is handled by the scope header above the steps pane instead.
   function exitBuilder() {
     if (selectMode) { exitSelect(); return; }
-    if (!isDirty) { router.back(); return; }
+    // Always back to the program list this program belongs to, not one step back in history.
+    const listHref = headerCrumbs[headerCrumbs.length - 2].href as string;
+    const leaveBuilder = () => router.dismissTo(listHref as never);
+    if (!isDirty) { leaveBuilder(); return; }
     appAlert(
       "Unsaved Changes",
       "You have unsaved changes. Exit without saving?",
       [
-        { text: "Save & Exit", onPress: async () => { if (await save()) router.back(); } },
-        { text: "Discard",     style: "destructive", onPress: () => router.back() },
+        { text: "Save & Exit", onPress: async () => { if (await save()) leaveBuilder(); } },
+        { text: "Discard",     style: "destructive", onPress: leaveBuilder },
         { text: "Cancel",      style: "cancel" },
       ]
     );

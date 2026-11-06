@@ -81,7 +81,7 @@ export default function CameraCalibrateScreen() {
       { text: "Leave", style: "destructive", onPress: navigate },
     ]);
   };
-  const exit = () => leave(() => (router.canGoBack() ? router.back() : router.replace("/io")));
+  const exit = () => leave(() => router.dismissTo(`/(tabs)/io/cameras?cameraId=${encodeURIComponent(cameraId)}` as never));
 
   const setTool = (name: string) => { robotClient.setActiveTool(name); };
 

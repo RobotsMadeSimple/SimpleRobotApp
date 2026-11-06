@@ -122,7 +122,7 @@ function GridTeachWizard({ existing }: { existing: Grid | null }) {
       { text: "Leave", style: "destructive", onPress: navigate },
     ]);
   };
-  const exit = () => leave(() => (router.canGoBack() ? router.back() : router.replace("/space/grids")));
+  const exit = () => leave(() => router.dismissTo("/space/grids"));
 
   let body: React.ReactNode;
   if (step === 0) {

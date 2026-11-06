@@ -237,7 +237,8 @@ export default function ConnectedRobot() {
         title={robot.robotName || "Connected Robot"}
         subtitle={`${robot.robotType || "Robot"} · ${robot.ipAddress}:${robot.port}`}
         crumbs={[{ label: "Robot", href: "/robot" }, { label: "Connected Robot" }]}
-        backTo="/robot"
+        onBack={changeRobot}
+        onNavigate={changeRobot}
       />
       <ScrollView
         style={styles.scroll}

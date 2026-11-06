@@ -211,7 +211,7 @@ export default function TeachTcpScreen() {
       ],
     );
   };
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(tabs)/space/tools"));
+  const goBack = () => router.dismissTo("/(tabs)/space/tools");
   const exit = () => leave(goBack);
 
   const captureTouch = () => {

@@ -249,7 +249,6 @@ export default function AuxAxisConfigPage() {
           { label: device?.deviceName ?? "Aux", href: deviceId ? `/io/auxiliary?deviceId=${deviceId}` : "/io/auxiliary" },
           { label: `Axis ${axisIndex}` },
         ]}
-        onBack={() => router.back()}
       />
       <Screen>
         {/* ── Identity ───────────────────────────────────────────────────── */}

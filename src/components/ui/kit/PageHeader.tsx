@@ -28,8 +28,8 @@ type Props = {
    */
   crumbs?: Crumb[];
   /**
-   * Narrow-screen fallback target for the back affordance when there is no
-   * navigation history (deep link). Defaults to the parent crumb's href.
+   * Narrow-screen target for the back affordance. Defaults to the parent
+   * crumb's href.
    */
   backTo?: string;
   /** Show the connection status on narrow screens (wide shows it in the rail). Default true. */
@@ -71,10 +71,12 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
   const trail = crumbs ?? crumbsFromPath(pathname, title);
   const parent = trail.length > 1 ? trail[trail.length - 2] : undefined;
 
+  // Back is absolute: it always lands on the parent page, never "one step back" in history (which
+  // could be another tab or a page you came from sideways). dismissTo pops to the parent when it's
+  // already under this page, else replaces this page with it.
   const goBack = () => {
     if (onBack) return onBack();
-    if (router.canGoBack()) router.back();
-    else router.navigate((backTo ?? parent?.href ?? "/") as never);
+    router.dismissTo((backTo ?? parent?.href ?? "/") as never);
   };
 
   const goCrumb = (href: string) => {
