@@ -2,18 +2,21 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
 import { BuiltProgram, ProgramSummary, imageDataUri } from "@/src/models/robotModels";
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
-import { robotClient } from "@/src/services/RobotConnectService";
+import { isNotImplementedCommand, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Clock, Cpu, Layers, PlayCircle } from "lucide-react-native";
+import { Box, Clock, Cpu, FileDown, FileUp, Layers, PlayCircle } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   Image,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { Card, IconTile, InfoTip, SectionHeader, StatTile, StatusPill, colors, spacing } from "@/src/components/ui/kit";
+import { ImportProgramTextSheet } from "@/src/components/ui/program/ImportProgramTextSheet";
+import { pickSrsFile, programToSrsFile, shareSrsFile } from "@/src/services/srsFile";
 
 // ── Program Row ────────────────────────────────────────────────────────────────
 
@@ -28,6 +31,7 @@ function ProgramRow({
   isRunning,
   onPress,
   onDelete,
+  onExport,
 }: {
   name: string;
   description: string;
@@ -39,6 +43,8 @@ function ProgramRow({
   isRunning?: boolean;
   onPress: () => void;
   onDelete?: () => void;
+  /** Export as a Simple Robot Script (.srs) file. */
+  onExport?: () => void;
 }) {
   const metaParts: string[] = [];
   if (stepCount !== null) metaParts.push(`${stepCount} step${stepCount !== 1 ? "s" : ""}`);
@@ -74,6 +80,12 @@ function ProgramRow({
         {metaParts.length > 0 && <Text style={s.cardMeta}>{metaParts.join("  ·  ")}</Text>}
       </View>
 
+      {onExport && (
+        <TouchableOpacity onPress={onExport} style={s.exportBtn} hitSlop={6} activeOpacity={0.6}
+          accessibilityRole="button" accessibilityLabel={`Export ${name} as text (.srs)`}>
+          <FileDown size={17} color={colors.textMuted} />
+        </TouchableOpacity>
+      )}
       {onDelete && <DeleteIconButton onPress={onDelete} style={s.deleteBtn} />}
     </Card>
   );
@@ -127,6 +139,7 @@ export default function RobotProgramsScreen() {
   const [images, setImages] = useState<Record<string, string | null>>({});
   const [search, setSearch] = useState("");
   const [sort, setSort]     = useState<SortState>(defaultSort());
+  const [importFile, setImportFile] = useState<{ fileName: string; text: string } | null>(null);
 
   useEffect(() => robotClient.onProgramImages(setImages), []);
 
@@ -175,6 +188,26 @@ export default function RobotProgramsScreen() {
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}) },
     ]);
+  }
+
+  // Simple Robot Script (.srs) export / import (controller docs/program-language.md §6.12).
+  async function handleExport(bp: BuiltProgram) {
+    try {
+      await shareSrsFile(bp.name, await programToSrsFile(bp));
+    } catch (e) {
+      appAlert("Export Failed", isNotImplementedCommand(e) || isUnsupportedCommand(e)
+        ? "This controller cannot turn programs into text yet."
+        : e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleImport() {
+    try {
+      const file = await pickSrsFile();
+      if (file) setImportFile(file);
+    } catch (e) {
+      appAlert("Import Failed", e instanceof Error ? e.message : String(e));
+    }
   }
 
   // Summary numbers, all from state already held by the provider.
@@ -234,7 +267,16 @@ export default function RobotProgramsScreen() {
     >
       <SectionHeader
         title="Programs"
-        right={<InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller." />}
+        right={
+          <View style={s.sectionHeaderRight}>
+            <TouchableOpacity onPress={handleImport} style={s.importBtn} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel="Import a program from a text file (.srs)">
+              <FileUp size={14} color={colors.accent} />
+              <Text style={s.importText}>Import .srs</Text>
+            </TouchableOpacity>
+            <InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller. Export a program as text (.srs) with its file icon; Import .srs adds one from a text file." />
+          </View>
+        }
       />
       {allRegularCards.map(c => (
         <ProgramRow
@@ -247,6 +289,7 @@ export default function RobotProgramsScreen() {
           isBuilt={c.isBuilt}
           onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(c.summary.name)}`)}
           onDelete={c.isBuilt ? () => handleDelete(c.summary.name) : undefined}
+          onExport={c.isBuilt ? () => handleExport(c.bp) : undefined}
         />
       ))}
 
@@ -275,10 +318,20 @@ export default function RobotProgramsScreen() {
               isRunning={runningBackgroundNames.has(bp.name)}
               onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(bp.name)}`)}
               onDelete={() => handleDeleteBackground(bp.name)}
+              onExport={() => handleExport(bp)}
             />
           ))}
         </>
       )}
+      <ImportProgramTextSheet
+        file={importFile}
+        existingNames={builtPrograms.map(p => p.name)}
+        onClose={() => setImportFile(null)}
+        onImported={name => {
+          setImportFile(null);
+          appAlert("Program Imported", `"${name}" was saved to the robot.`);
+        }}
+      />
     </ProgramListLayout>
   );
 }
@@ -300,4 +353,11 @@ const s = StyleSheet.create({
   cardMeta:   { fontSize: 11, color: colors.textFaint, marginTop: 2 },
 
   deleteBtn: { padding: 4 },
+  exportBtn: { padding: 4 },
+  importBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8,
+    borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft,
+  },
+  importText: { fontSize: 12, fontWeight: "700", color: colors.accent },
 });

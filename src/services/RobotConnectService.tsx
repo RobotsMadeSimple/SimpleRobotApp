@@ -245,7 +245,10 @@ export class RobotConnectService {
     // A failed command must reject its caller — the server reports handler
     // errors as ok:false + error. Resolving these silently made failures
     // (e.g. configuring pins on a disconnected Nano) look like successes.
-    if (data.ok === false) {
+    // ParseProgramText's result has its own `ok` (false = the text has parse errors), which the
+    // server merges over the ack's. That is a normal answer, not a failure: it has no `error`.
+    const resultOk = data.command === "ParseProgramText" && data.error == null && Array.isArray(data.problems);
+    if (data.ok === false && !resultOk) {
       this.pendingAcks.delete(data.id);
       // badConfig-style failures name the offending field; keep it in the text so
       // callers can highlight it (see toPluginConfigError).
@@ -1150,8 +1153,13 @@ export class RobotConnectService {
   }
 
   /** A program (possibly unsaved) as SRS text, with the step → line map. */
-  public async formatProgramText(program: BuiltProgram, opts: { includeIds?: boolean } = {}): Promise<FormatProgramTextResult> {
-    const ack = await this.request("FormatProgramText", { program: this.builtProgramParams(program), includeIds: opts.includeIds ?? false });
+  public async formatProgramText(program: BuiltProgram, opts: { includeIds?: boolean; includeHeader?: boolean } = {}): Promise<FormatProgramTextResult> {
+    // includeHeader adds the `@program {…}` line (name, kind) that a .srs file carries.
+    const ack = await this.request("FormatProgramText", {
+      program: this.builtProgramParams(program),
+      includeIds: opts.includeIds ?? false,
+      ...(opts.includeHeader ? { includeHeader: true } : {}),
+    });
     return {
       text:            str(ack.text),
       languageVersion: num(ack.languageVersion, 0),
@@ -1165,11 +1173,18 @@ export class RobotConnectService {
    * problems mapped to lines. A parse error is a normal result (`ok: false`).
    */
   public async parseProgramText(text: string, opts: { base?: BuiltProgram; validate?: boolean } = {}): Promise<ParseProgramTextResult> {
-    const ack = await this.request("ParseProgramText", {
-      text,
-      ...(opts.base ? { base: this.builtProgramParams(opts.base) } : {}),
-      validate: opts.validate ?? true,
-    });
+    // Not `request`: its ok:false check would treat "the text has errors" as a failed command.
+    let data: unknown;
+    try {
+      data = await this.sendCommand("ParseProgramText", {
+        text,
+        ...(opts.base ? { base: this.builtProgramParams(opts.base) } : {}),
+        validate: opts.validate ?? true,
+      });
+    } catch (e) {
+      throw toCommandError("ParseProgramText", e);
+    }
+    const ack = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
     return {
       ok:       ack.ok !== false,
       program:  ack.program ? wireProgram(ack.program, opts.base?.name ?? "") : undefined,
