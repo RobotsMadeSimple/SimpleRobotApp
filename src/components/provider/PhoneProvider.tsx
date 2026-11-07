@@ -180,7 +180,7 @@ export function PhoneProvider({
                       <Divider />
                       <FormRow label="Lens" hint="Which of the linked phone's cameras to stream from.">
                         <SegmentedControl
-                          options={[{ label: "Default", value: "" }, ...lenses.map((l, i) => ({ label: lensLabel(l, i), value: l.id }))]}
+                          options={[{ label: "Default", value: "" }, ...lenses.map((l, i) => ({ label: lensLabel(l, i, lenses), value: l.id }))]}
                           value={cfg.lensId ?? ""}
                           onChange={(v: string) => providerEngine.updateConfig({ lensId: v || null })}
                         />

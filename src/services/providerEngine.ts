@@ -1,7 +1,7 @@
 import * as Battery from "expo-battery";
 import * as Location from "expo-location";
 import { Accelerometer, Gyroscope, LightSensor, Magnetometer } from "expo-sensors";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import {
   mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription,
 } from "react-native-webrtc";
@@ -35,6 +35,15 @@ const FLUSH_MS  = 200;   // how often batched channel values are pushed
 const PERSIST_MS = 600;  // debounce for saving config back to the controller
 const SYNC_MS = 2000;    // how often the saved config (and, on other phones, the live values) is re-read
 const LOCAL_EDIT_HOLD_MS = 2500;   // ignore the saved config this long after a local edit (it's still being written)
+
+// Camera stream watchdog. The peer connection can keep reporting "connected" while no video flows —
+// e.g. Android hands the camera to another app (it never gives it back to us on its own), the encoder
+// stalls, or the controller ends its side. So "is it working" is judged by frames actually going out.
+const STALL_MS = 4000;             // no new frame encoded/sent for this long → restart the stream
+const FIRST_FRAME_MS = 12000;      // a new stream gets this long to start sending frames
+const RESTART_BASE_MS = 1000;      // first restart delay; doubles per failed attempt…
+const RESTART_MAX_MS = 15000;      // …up to this
+const CAMERA_OPEN_MS = 8000;       // give up on a camera open that hasn't finished by then
 
 export type ResTier = "low" | "med" | "high";
 
@@ -172,11 +181,18 @@ function forceBitrateSdp(sdp: string, bps: number): string {
   return out.join("\r\n");
 }
 
-/** Short label for a lens in the picker: the front camera, else a numbered lens (labels vary by OEM). */
-export function lensLabel(l: Lens, i: number): string {
-  const f = (l.facing || "").toLowerCase();
-  if (f === "front" || f === "user") return "Front";
-  return `Lens ${i + 1}`;
+const isFront = (l: Lens) => { const f = (l.facing || "").toLowerCase(); return f === "front" || f === "user"; };
+
+/** Short label for a lens in the picker: the front camera, else a numbered lens (labels vary by OEM).
+ *  Pass the whole list so phones with several front cameras get "Front 1", "Front 2"… */
+export function lensLabel(l: Lens, i: number, all?: Lens[]): string {
+  if (isFront(l)) {
+    const fronts = (all ?? []).filter(isFront);
+    if (fronts.length > 1) return `Front ${fronts.findIndex(x => x.id === l.id) + 1}`;
+    return "Front";
+  }
+  const k = all ? all.filter(x => !isFront(x)).findIndex(x => x.id === l.id) : -1;
+  return `Lens ${(k >= 0 ? k : i) + 1}`;
 }
 
 /** The engine's observable state — what the provider screen renders. */
@@ -206,7 +222,7 @@ export type ProviderEngineState = {
 // The subset of WebRTC getStats() report fields we read for the live fps/resolution/bitrate readout.
 type RtcReport = {
   type?: string; kind?: string; mediaType?: string;
-  bytesSent?: number; timestamp?: number; framesPerSecond?: number;
+  bytesSent?: number; timestamp?: number; framesPerSecond?: number; framesEncoded?: number; framesSent?: number;
   frameWidth?: number; frameHeight?: number; width?: number; height?: number;
 };
 
@@ -244,6 +260,12 @@ class ProviderEngine {
   private stream: MediaStream | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private camGen = 0;   // bumped to invalidate in-flight camera builds
+  // Watchdog / recovery
+  private camStartedAt = 0;      // when the current stream build began
+  private lastFlowAt = 0;        // last time the sender's frame count went up (0 = no frame yet)
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private restartAttempts = 0;   // consecutive restarts without frames flowing (drives the backoff)
+  private appStateSub: { remove: () => void } | null = null;
 
   // Sensor pipeline
   private devWs: WebSocket | null = null;
@@ -342,6 +364,7 @@ class ProviderEngine {
     if (!this.assignedHere) { if (this.config.camOn !== on) this.updateConfig({ camOn: on }); return; }
     if (this.camOn === on) return;
     this.camOn = on;
+    this.restartAttempts = 0;
     this.config = { ...this.config, camOn: on };   // persist so it auto-resumes after reconnect
     this.persistConfig();
     if (on) this.rebuildCamera();
@@ -454,6 +477,39 @@ class ProviderEngine {
   private ensureConnSub() {
     if (this.connSub) return;
     this.connSub = robotClient.onStatus(s => this.onConnChange(!!s.connected));
+    // Coming back to the app (e.g. after another app borrowed the camera): if the stream isn't
+    // flowing, restart it now rather than waiting out the restart backoff.
+    if (!this.appStateSub) {
+      this.appStateSub = AppState.addEventListener("change", s => { if (s === "active") this.onAppActive(); });
+    }
+  }
+
+  private onAppActive() {
+    if (!this.camOn || !this.assignedHere || !robotClient.connected) return;
+    const stalled = this.restartTimer !== null || (this.lastFlowAt > 0 && Date.now() - this.lastFlowAt > STALL_MS / 2);
+    if (!stalled) return;
+    console.warn("[Provider] camera stream restarting: app returned to the foreground with no video flowing");
+    this.restartAttempts = 0;
+    this.rebuildCamera();
+  }
+
+  /**
+   * The current camera stream stopped (reason says why): log it, tear it down and rebuild it after a
+   * backoff (1 s, 2 s, 4 s … 15 s; reset once frames flow again). `gen` ties the call to the stream
+   * build that noticed it, so a late callback from an old stream can't restart a newer one.
+   */
+  private scheduleRestart(gen: number, reason: string) {
+    if (gen !== this.camGen || !this.camOn || !this.assignedHere) return;
+    const delay = Math.min(RESTART_MAX_MS, RESTART_BASE_MS * 2 ** this.restartAttempts);
+    this.restartAttempts++;
+    console.warn(`[Provider] camera stream stopped: ${reason} — restarting in ${Math.round(delay / 1000)} s (attempt ${this.restartAttempts})`);
+    this.teardownCamera();   // bumps camGen: every callback of the stopped stream goes quiet
+    this.rtcState = `restarting (${reason})`;
+    this.publish();
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.camOn && this.assignedHere && robotClient.connected) this.rebuildCamera();
+    }, delay);
   }
 
   private onConnChange(connected: boolean) {
@@ -636,6 +692,7 @@ class ProviderEngine {
   // ── Camera (WebRTC) pipeline ────────────────────────────────────────────────
   private teardownCamera() {
     this.camGen++;
+    if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; }
     if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
     try { this.camWs?.close(); } catch { /* noop */ }
     try { this.stream?.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
@@ -672,17 +729,19 @@ class ProviderEngine {
     this.teardownCamera();
     if (!this.camOn || !robotClient.connected || !this.assignedHere) { this.publish(); return; }
     const gen = ++this.camGen;
+    this.camStartedAt = Date.now();
+    this.lastFlowAt = 0;
 
     // Ensure the controller has a "phone" camera for this device; the WebRTC feed fills it.
     if (!this.camId) {
       let id = "";
       try { id = await robotClient.addPhoneCamera(this.deviceName); } catch { id = ""; }
       if (gen !== this.camGen) return;
-      if (!id) { this.rtcState = "camera error"; this.publish(); return; }
+      if (!id) { this.scheduleRestart(gen, "the controller didn't create the phone camera"); return; }
       this.camId = id;
     }
     const url = robotClient.cameraWebrtcUrl(this.camId);
-    if (!url) { this.rtcState = "camera error"; this.publish(); return; }
+    if (!url) { this.scheduleRestart(gen, "no controller address"); return; }
 
     const tier = RES_TIERS[this.config.resTier];
     const h = tier.height;
@@ -700,20 +759,40 @@ class ProviderEngine {
     this.rtcState = "connecting";
     this.publish();
 
+    // Opening the camera can hang while another app holds it; give up after a while and retry.
+    const openCamera = (lens: string | null) => new Promise<MediaStream>((resolve, reject) => {
+      let settled = false;
+      const t = setTimeout(() => { settled = true; reject(new Error("camera open timed out")); }, CAMERA_OPEN_MS);
+      mediaDevices.getUserMedia({ video: videoFor(lens), audio: false }).then(s => {
+        clearTimeout(t);
+        if (settled) s.getTracks().forEach(tr => tr.stop()); else { settled = true; resolve(s); }
+      }, err => { clearTimeout(t); if (!settled) { settled = true; reject(err); } });
+    });
+
     let stream: MediaStream;
     try {
-      stream = await mediaDevices.getUserMedia({ video: videoFor(lensId), audio: false });
+      stream = await openCamera(lensId);
     } catch {
       // The saved lens may belong to a different phone — retry with the rear camera and clear it.
-      if (!lensId) { if (gen === this.camGen) { this.rtcState = "camera error"; this.publish(); } return; }
+      // But if this phone does have that lens, the camera is just busy (another app holds it, or
+      // the open timed out): keep the lens and retry later instead of switching cameras.
+      const lensKnownHere = !!lensId && this.lenses.some(l => l.id === lensId);
+      if (!lensId || lensKnownHere) { this.scheduleRestart(gen, "the camera couldn't be opened (in use or unavailable)"); return; }
       try {
-        stream = await mediaDevices.getUserMedia({ video: videoFor(null), audio: false });
+        stream = await openCamera(null);
         if (gen === this.camGen) this.config.lensId = null;
-      } catch { if (gen === this.camGen) { this.rtcState = "camera error"; this.publish(); } return; }
+      } catch { this.scheduleRestart(gen, "the camera couldn't be opened"); return; }
     }
     if (gen !== this.camGen) { stream.getTracks().forEach(t => t.stop()); return; }
     this.stream = stream;
     this.refreshLenses(); // labels are available now that the camera is open
+    // Android ends the track when it takes the camera away (another app opened it, the camera failed).
+    stream.getVideoTracks().forEach(t => {
+      try {
+        (t as unknown as { addEventListener: (type: string, cb: () => void) => void })
+          .addEventListener("ended", () => this.scheduleRestart(gen, "the camera was closed"));
+      } catch { /* no track events in this build — the frame watchdog still catches it */ }
+    });
 
     const pc = new RTCPeerConnection({ iceServers: [] }); // tailnet: direct host candidates, no STUN/TURN
     this.pc = pc;
@@ -723,15 +802,30 @@ class ProviderEngine {
     // using the live config — reused by applyEncodingLive() so bitrate changes apply without a restart.
     const pinEncoding = () => this.applyEncodingLive();
 
-    // Live fps / resolution / bitrate from the sender's own WebRTC stats.
-    let prevBytes = 0, prevTs = 0;
+    // Live fps / resolution / bitrate from the sender's own WebRTC stats — and the stall watchdog,
+    // which goes by the sender's frame count (the connection state stays "connected" with no video).
+    let prevBytes = 0, prevTs = 0, prevFrames = -1, statsBusy = false;
     this.statsTimer = setInterval(async () => {
+      if (gen !== this.camGen) return;
+      // Watchdog first, so a getStats call that never settles can't hide a stall.
+      const now = Date.now();
+      if (this.lastFlowAt === 0 && now - this.camStartedAt > FIRST_FRAME_MS) {
+        this.scheduleRestart(gen, `no video sent within ${FIRST_FRAME_MS / 1000} s (${this.rtcState || "connecting"})`);
+        return;
+      }
+      if (this.lastFlowAt > 0 && now - this.lastFlowAt > STALL_MS) {
+        this.scheduleRestart(gen, `no frames sent for ${STALL_MS / 1000} s`);
+        return;
+      }
+      if (statsBusy) return;
+      statsBusy = true;
       try {
         const rep = await (pc as unknown as { getStats: () => Promise<Map<string, RtcReport>> }).getStats();
-        let fw = 0, fh = 0, fps = 0, bytes = 0, ts = 0;
+        let fw = 0, fh = 0, fps = 0, bytes = 0, ts = 0, frames = -1;
         rep.forEach(r => {
           if (r.type === "outbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
             bytes = r.bytesSent ?? bytes; ts = r.timestamp ?? ts;
+            frames = r.framesEncoded ?? r.framesSent ?? frames;
             if (r.framesPerSecond) fps = r.framesPerSecond;
             if (r.frameWidth) { fw = r.frameWidth; fh = r.frameHeight ?? 0; }
           } else if (r.type === "media-source") {
@@ -740,9 +834,16 @@ class ProviderEngine {
           }
         });
         const kbps = prevTs && ts > prevTs ? Math.round(((bytes - prevBytes) * 8) / (ts - prevTs)) : 0;
+        // Progress = new frames encoded (bytes only if this build reports no frame count: padding
+        // can keep bytes moving with no video).
+        const progressed = frames >= 0 ? frames > prevFrames && prevFrames >= 0 : bytes > prevBytes && prevBytes > 0;
         prevBytes = bytes; prevTs = ts;
-        if (gen === this.camGen) { this.rtcStats = { fps: Math.round(fps), w: fw, h: fh, kbps }; this.publish(); }
-      } catch { /* stats unavailable this tick */ }
+        if (frames >= 0) prevFrames = frames;
+        if (gen !== this.camGen) return;
+        if (progressed) { this.lastFlowAt = Date.now(); this.restartAttempts = 0; }
+        this.rtcStats = { fps: Math.round(fps), w: fw, h: fh, kbps };
+        this.publish();
+      } catch { /* stats unavailable this tick */ } finally { statsBusy = false; }
     }, 1000);
 
     // addEventListener (not on* setters) — more reliable across react-native-webrtc versions.
@@ -756,7 +857,13 @@ class ProviderEngine {
         this.camWs.send(JSON.stringify({ type: "ice", candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex } }));
       }
     });
-    ev.addEventListener("connectionstatechange", () => { if (gen === this.camGen) { this.rtcState = ev.connectionState ?? ""; this.publish(); } });
+    ev.addEventListener("connectionstatechange", () => {
+      if (gen !== this.camGen) return;
+      this.rtcState = ev.connectionState ?? "";
+      this.publish();
+      // "disconnected" can heal by itself; the frame watchdog restarts it if it doesn't.
+      if (ev.connectionState === "failed" || ev.connectionState === "closed") this.scheduleRestart(gen, `connection ${ev.connectionState}`);
+    });
     ev.addEventListener("iceconnectionstatechange", () => {
       if (gen === this.camGen && ev.connectionState !== "connected") { this.rtcState = "ice " + (ev.iceConnectionState ?? ""); this.publish(); }
     });
@@ -776,7 +883,7 @@ class ProviderEngine {
         await pc.setLocalDescription(new RTCSessionDescription({ type: "offer", sdp }));
         await pinEncoding(); // keep the requested resolution (no bandwidth downscale)
         ws.send(JSON.stringify({ type: "offer", sdp }));
-      } catch { if (gen === this.camGen) { this.rtcState = "offer error"; this.publish(); } }
+      } catch { this.scheduleRestart(gen, "couldn't start the connection (offer failed)"); }
     };
     ws.onmessage = async e => {
       try {
@@ -789,7 +896,12 @@ class ProviderEngine {
       } catch { /* ignore a malformed signal */ }
     };
     ws.onerror = () => { if (gen === this.camGen) { this.rtcState = "signal error"; this.publish(); } };
-    ws.onclose = () => { if (gen === this.camGen) { this.rtcState = "closed"; this.publish(); } };
+    // The controller closes this socket when its side of the stream stops (with the reason), and it
+    // owns the receiving end — so a closed socket always means "start over".
+    ws.onclose = e => {
+      const why = (e as { reason?: string } | undefined)?.reason;
+      this.scheduleRestart(gen, why ? `the controller ended the stream: ${why}` : "the controller connection closed");
+    };
   }
 
   // ── Sensor pipeline (batched channel values over the device ingest socket) ──
