@@ -197,6 +197,7 @@ export function createSrsEditor(parent: HTMLElement, opts: SrsEditorOptions): Ed
   let readOnly = !!opts.readOnly;
   let applyingExternal = false;
   const emit = (e: EditorEvent) => { try { opts.onEvent(e); } catch { /* host gone */ } };
+  let tapStart: { x: number; y: number } | null = null;
 
   const languageConf = new Compartment();
   const editableConf = new Compartment();
@@ -267,9 +268,18 @@ export function createSrsEditor(parent: HTMLElement, opts: SrsEditorOptions): Ed
       }
       if (u.focusChanged) emit({ type: "focus", focused: u.view.hasFocus });
     }),
+    // A tap on a read-only editor (pointer down and up without moving): `click` is not reliable here
+    // (no click reaches a read-only CodeMirror in some browsers), and a swipe that scrolls must not count.
     EditorView.domEventHandlers({
-      click(event, view) {
-        if (!readOnly) return false;
+      pointerdown(event) {
+        tapStart = readOnly && event.isPrimary ? { x: event.clientX, y: event.clientY } : null;
+        return false;
+      },
+      pointercancel() { tapStart = null; return false; },
+      pointerup(event, view) {
+        const start = tapStart; tapStart = null;
+        if (!readOnly || !start || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) return false;
+        if (!view.contentDOM.contains(event.target as Node)) return false; // gutter taps toggle breakpoints
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (pos != null) emit({ type: "tapLine", line: view.state.doc.lineAt(pos).number });
         return false;
@@ -283,6 +293,19 @@ export function createSrsEditor(parent: HTMLElement, opts: SrsEditorOptions): Ed
     parent,
     state: EditorState.create({ doc: opts.text ?? "", extensions }),
   });
+
+  // Report the top visible line as the user scrolls (once per frame), so a phone's full-screen
+  // editor can open at the place the read-only preview was showing.
+  let lastTop = 0, scrollFrame = 0;
+  view.scrollDOM.addEventListener("scroll", () => {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      const block = view.lineBlockAtHeight(view.scrollDOM.scrollTop - view.documentPadding.top);
+      const top = view.state.doc.lineAt(block.from).number;
+      if (top !== lastTop) { lastTop = top; emit({ type: "viewport", topLine: top }); }
+    });
+  }, { passive: true });
 
   const applyInset = (px: number) => {
     bottomInset = Math.max(0, Math.round(px));
@@ -375,7 +398,11 @@ export function createSrsEditor(parent: HTMLElement, opts: SrsEditorOptions): Ed
         const doc = view.state.doc;
         const l = doc.line(Math.min(Math.max(1, cmd.line), doc.lines));
         const pos = Math.min(l.from + Math.max(0, (cmd.col ?? 1) - 1), l.to);
-        view.dispatch({ selection: EditorSelection.cursor(pos), effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+        // One transaction: CodeMirror keeps only the last scroll request before it measures.
+        const scroll = cmd.topLine != null
+          ? EditorView.scrollIntoView(doc.line(Math.min(Math.max(1, cmd.topLine), doc.lines)).from, { y: "start" })
+          : EditorView.scrollIntoView(pos, { y: "center" });
+        view.dispatch({ selection: EditorSelection.cursor(pos), effects: scroll });
         if (cmd.focus) view.focus();
         return;
       }

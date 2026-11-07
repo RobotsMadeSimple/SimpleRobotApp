@@ -25,7 +25,8 @@ export type EditorCommand =
   | { type: "insertText"; text: string }
   /** Insert a CodeMirror snippet template at the cursor, on its own line when `asLine`. */
   | { type: "insertSnippet"; template: string; asLine?: boolean }
-  | { type: "jumpTo"; line: number; col?: number; focus?: boolean }
+  /** Put the cursor on a line (centred), or with `topLine` keep `topLine` as the top visible line. */
+  | { type: "jumpTo"; line: number; col?: number; focus?: boolean; topLine?: number }
   | { type: "scrollCursorIntoView" }
   | { type: "toggleComment" }
   | { type: "indent" }
@@ -44,6 +45,8 @@ export type EditorEvent =
   | { type: "toggleBreakpoint"; line: number }
   /** A tap on a read-only editor (phones open the full-screen editor at that line). */
   | { type: "tapLine"; line: number }
+  /** The top visible line changed (the user scrolled). */
+  | { type: "viewport"; topLine: number }
   | { type: "error"; message: string };
 
 /** What the WebView/web editor exposes. */

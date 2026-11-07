@@ -50,6 +50,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
       case "focus": p.onFocusChange?.(ev.focused); break;
       case "toggleBreakpoint": p.onToggleBreakpoint?.(ev.line); break;
       case "tapLine": p.onTapLine?.(ev.line); break;
+      case "viewport": p.onViewport?.(ev.topLine); break;
       case "error": console.warn("[CodeEditor]", ev.message); break;
     }
   }, []);
@@ -63,6 +64,9 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
       javaScriptEnabled
       // The editor scrolls itself; the WebView must not.
       scrollEnabled={false}
+      // Android: inside the builder's page ScrollView the parent would take every vertical swipe,
+      // so the editor (even a read-only preview) could never scroll. Let it scroll first.
+      nestedScrollEnabled
       overScrollMode="never"
       hideKeyboardAccessoryView
       keyboardDisplayRequiresUserAction={false}

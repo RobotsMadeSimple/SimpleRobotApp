@@ -27,6 +27,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         case "focus": p.onFocusChange?.(ev.focused); break;
         case "toggleBreakpoint": p.onToggleBreakpoint?.(ev.line); break;
         case "tapLine": p.onTapLine?.(ev.line); break;
+        case "viewport": p.onViewport?.(ev.topLine); break;
         case "error": console.warn("[CodeEditor]", ev.message); break;
       }
     };

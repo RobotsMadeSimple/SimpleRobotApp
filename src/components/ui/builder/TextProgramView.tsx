@@ -223,6 +223,9 @@ export function TextProgramView({
   const programRef = useLatest(program);
   const onApplyRef = useLatest(onApply);
   const pendingJump = useRef<number | null>(null);
+  // The read-only preview's top visible line, so the full-screen editor opens showing the same place.
+  const previewTop = useRef(1);
+  const pendingTop = useRef<number | null>(null);
   const initialTextRefSet = useRef(false);
   const phaseRef = useLatest(phase);
   const [fullInitial, setFullInitial] = useState("");
@@ -408,7 +411,9 @@ export function TextProgramView({
   };
 
   const openFullscreen = (line?: number) => {
-    pendingJump.current = line ?? cursor.line;
+    // A tap opens on the tapped line; the Edit button on the top line the preview shows.
+    pendingJump.current = line ?? previewTop.current;
+    pendingTop.current = previewTop.current;
     setFullInitial(textRef.current);
     setFullscreen(true);
   };
@@ -529,6 +534,7 @@ export function TextProgramView({
           {...editorProps}
           readOnly={modalEditing ? true : readOnly}
           onTapLine={modalEditing && !readOnly ? line => openFullscreen(line) : undefined}
+          onViewport={line => { previewTop.current = line; }}
         />
       </View>
 
@@ -571,9 +577,11 @@ export function TextProgramView({
                   style={StyleSheet.absoluteFill}
                   {...editorProps}
                   onReady={() => {
-                    const line = pendingJump.current;
-                    pendingJump.current = null;
-                    setTimeout(() => fullRef.current?.jumpTo(line ?? 1, undefined, true), 60);
+                    const line = pendingJump.current ?? 1, top = pendingTop.current;
+                    pendingJump.current = null; pendingTop.current = null;
+                    // Open showing what the preview showed, cursor on the tapped line (the keyboard
+                    // effect above then scrolls only if the keyboard would cover it).
+                    setTimeout(() => fullRef.current?.send({ type: "jumpTo", line, focus: true, topLine: top ?? undefined }), 60);
                   }}
                 />
               )}

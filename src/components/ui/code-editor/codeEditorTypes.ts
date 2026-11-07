@@ -28,6 +28,8 @@ export type CodeEditorProps = {
   onToggleBreakpoint?: (line: number) => void;
   /** A tap on a read-only editor. */
   onTapLine?: (line: number) => void;
+  /** The top visible line, as the user scrolls. */
+  onViewport?: (topLine: number) => void;
   onReady?: () => void;
 };
 
