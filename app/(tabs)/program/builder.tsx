@@ -1697,7 +1697,7 @@ export default function BuilderScreen() {
                   problems={problemIndex.get(step.id)}
                   points={points}
                   breakpoint={breakpoints.has(step.id)}
-                  running={runningStepId === step.id}
+                  running={runningStepId === step.id && (runSummary?.pausedAtStepId === step.id ? "paused" : true)}
                   searchHit={hitSet.has(step.id)}
                   expanded={r.expanded}
                   onToggleExpand={r.expandable ? () => toggleIn(setExpanded, step.id) : undefined}

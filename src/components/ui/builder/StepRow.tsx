@@ -205,8 +205,8 @@ export function StepRow({
   points?: Point[];
   /** The program pauses before this step (a red dot on the rail). */
   breakpoint?: boolean;
-  /** The step the running program is on. */
-  running?: boolean;
+  /** The step the running program is on ("running"), or paused before ("paused"). */
+  running?: boolean | "paused";
   /** Matches the step search. */
   searchHit?: boolean;
   /** Its body is shown inline below the row (block steps only). */
@@ -379,7 +379,7 @@ export function StepRow({
           <View style={sharedStyles.stepCardText}>
             <View style={sharedStyles.stepCardTypeRow}>
               <Text style={[sharedStyles.stepCardType, { color: theme.accent }]}>
-                {index + 1} · {theme.label.toUpperCase()}{disabled ? " · DISABLED" : ""}{running ? " · RUNNING" : ""}
+                {index + 1} · {theme.label.toUpperCase()}{disabled ? " · DISABLED" : ""}{running === "paused" ? " · PAUSED HERE" : running ? " · RUNNING" : ""}
               </Text>
             </View>
             {showName && (

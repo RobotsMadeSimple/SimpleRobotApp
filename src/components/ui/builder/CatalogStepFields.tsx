@@ -107,7 +107,9 @@ export function CatalogStepFields(props: CatalogStepFieldsProps) {
             <Text style={[ms.fieldLabel, { color: accents.purple, marginBottom: 2 }]}>{g.name.toUpperCase()}</Text>
           )}
           {g.fields.map((f, fi) => (
-            <CatalogField key={f.key} field={f} first={fi === 0 && !showCaptions} {...props} />
+            <CatalogField key={f.key} field={f} first={fi === 0 && !showCaptions}
+              // A field named like its group (Input in Input) needs no second caption.
+              noCaption={showCaptions && f.label.toLowerCase() === g.name.toLowerCase()} {...props} />
           ))}
         </View>
       ))}
@@ -115,8 +117,8 @@ export function CatalogStepFields(props: CatalogStepFieldsProps) {
   );
 }
 
-function CatalogField({ field: f, first, step, set, setExpr, variables, contextVariables, onSaveVariable, problems, special }:
-  CatalogStepFieldsProps & { field: FieldSpec; first: boolean }) {
+function CatalogField({ field: f, first, noCaption, step, set, setExpr, variables, contextVariables, onSaveVariable, problems, special }:
+  CatalogStepFieldsProps & { field: FieldSpec; first: boolean; noCaption?: boolean }) {
   const raw = step as unknown as Record<string, unknown>;
   const claims = fieldClaims(f);
   const mine = problems?.filter(p => p.field && claims.includes(p.field));
@@ -139,7 +141,7 @@ function CatalogField({ field: f, first, step, set, setExpr, variables, contextV
   if (control === null) return null;
   return (
     <View>
-      <FieldCaption field={f} first={first} />
+      {noCaption ? <View style={{ height: 4 }} /> : <FieldCaption field={f} first={first} />}
       {control}
       <FieldHelp text={f.help} />
       <FieldProblems problems={mine} />
