@@ -407,7 +407,10 @@ export function defaultColorEntry(): ColorEntry {
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown'
+  // Program editor v2 (controller docs/program-language.md §4). Order mirrors the controller enum.
+  | 'Note' | 'LoopControl' | 'Return' | 'EndProgram' | 'RaiseError' | 'Switch' | 'Try' | 'SavePosition'
+  | 'SetSpeedFactor' | 'ListOp' | 'Prompt' | 'MoveC';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -483,6 +486,35 @@ export type ElseIfBranch = {
   condition: ConditionGroup;
   steps: ProgramStep[];
 };
+
+/**
+ * One case of a Switch step: runs when the switch value equals any of `values` (each an
+ * expression, compared with == within 1e-9). First match wins; no fall-through.
+ */
+export type SwitchCase = {
+  id: string;
+  values: string[];
+  steps: ProgramStep[];
+};
+
+/** A routine out / in-out parameter (`key`) copied into a caller variable when the routine returns. */
+export type RoutineOutputMapping = { key: string; variableName: string };
+
+/** Note step style: a free note, or a section header that can collapse the steps up to the next one. */
+export type NoteStyle = 'note' | 'section';
+export type LoopControlAction = 'break' | 'continue';
+export type WaitTimeoutAction = 'continue' | 'error';
+export type OutputAction = 'set' | 'toggle';
+export type SavePositionTo = 'variable' | 'point';
+export type SavePositionMode = 'replace' | 'append' | 'insert' | 'set';
+export type SavePositionSource = 'actual' | 'target';
+export type ListAction =
+  | 'append' | 'insert' | 'removeAt' | 'clear' | 'set' | 'setField' | 'sort' | 'reverse' | 'copyFrom';
+export type PromptInput = 'none' | 'number' | 'text';
+/** A routine variable's parameter role. Absent = not a parameter. */
+export type ParamMode = 'in' | 'out' | 'inOut';
+/** A program's preferred editor view (app-owned). */
+export type EditorMode = 'blocks' | 'text';
 
 /**
  * One record in an object-list variable: named numeric fields. Numbers only — booleans are
@@ -609,6 +641,12 @@ export type ProgramVariable = {
    * See docs/expressions-and-variables.md section 7 in the controller.
    */
   isComputed?: boolean;
+  /**
+   * On a routine's variables: makes it a parameter. `in` is set from the caller's argument
+   * before the routine runs, `out` is copied to the caller's mapped variable when it returns,
+   * `inOut` both. Parameters share the caller's scope, so name them distinctly.
+   */
+  paramMode?: ParamMode;
 };
 
 /** True for a computed variable — readable in expressions, never a write target. */
@@ -708,8 +746,13 @@ export type ProgramStep = {
   id: string;
   type: StepType;
   name?: string;
-  /** Free text shown under the step in the editor. Never executed. */
+  /** Free text shown under the step in the editor. Never executed. A Note step's text. */
   comment?: string;
+  /**
+   * `false` skips the step — and a block's whole body — at run time (it still counts as a
+   * step). Absent means enabled. Read through `isStepEnabled()`.
+   */
+  enabled?: boolean;
   pointName?: string;
   /**
    * Stable id of the referenced saved point (preferred over pointName). Lets a move
@@ -932,7 +975,76 @@ export type ProgramStep = {
   pluginTimeoutMs?: number;
   // Unknown — preserved original type name for display and recovery
   unknownStepType?: string;
+
+  // ── Program editor v2 (controller docs/program-language.md §4.1–4.3) ────────
+  // Note — text in `comment`.
+  noteStyle?: NoteStyle;
+  // LoopControl — leave the loop, or skip to its next iteration. Default "break".
+  loopControl?: LoopControlAction;
+  // RaiseError — message template (required) and an identifier code (default "userError").
+  // EndProgram uses `statusMessage` for its optional message.
+  errorMessage?: string;
+  errorCode?: string;
+  // Switch — `switchExpr` evaluated once; first equal case runs, else `switchDefault`.
+  switchExpr?: string;
+  switchCases?: SwitchCase[];
+  switchDefault?: ProgramStep[];
+  // Try — retry `trySteps` `tryRetries` times (`tryRetryDelayMs` apart), then run `catchSteps`.
+  // `catchCodes` empty = every catchable code. The error variables are text variables.
+  trySteps?: ProgramStep[];
+  catchSteps?: ProgramStep[];
+  tryRetries?: number;
+  tryRetryDelayMs?: number;
+  catchCodes?: string[];
+  errorVariableName?: string;
+  errorCodeVariableName?: string;
+  // Wait — what a condition wait does on timeout (default "continue").
+  waitTimeoutAction?: WaitTimeoutAction;
+  // CallRoutine parameters — param → expression (template for a text param); outputs back.
+  routineArgs?: Record<string, string>;
+  routineOutputs?: RoutineOutputMapping[];
+  // SetOutput — "toggle" flips the output; "set" (default) uses outputValue or expressions.outputValue.
+  outputAction?: OutputAction;
+  // SavePosition — into a Points list (`variableName`) or a saved point (`pointId`/`pointName`).
+  // `savePositionIndex` may be an expression under expressions.savePositionIndex.
+  savePositionTo?: SavePositionTo;
+  savePositionMode?: SavePositionMode;
+  savePositionIndex?: number;
+  savePositionSource?: SavePositionSource;
+  // SetSpeedFactor — percent 1–100 (expression key speedFactor).
+  speedFactor?: number;
+  // MoveC — the via point; the end target uses the normal target fields. arcTolerance in mm.
+  viaPointId?: string;
+  viaPointName?: string;
+  viaPointNameExpr?: string;
+  arcTolerance?: number;
+  // ListOp — mutates the list in `variableName`. listIndex may be an expression (expressions.listIndex).
+  listAction?: ListAction;
+  listIndex?: number;
+  listValueExpr?: string;
+  listFields?: Record<string, string>;
+  listSourceVariable?: string;
+  listSortField?: string;
+  listSortDescending?: boolean;
+  // Prompt — an operator dialog published in the program status, answered with AnswerPrompt.
+  promptTitle?: string;
+  promptMessage?: string;
+  promptButtons?: string[];
+  promptInput?: PromptInput;
+  promptDefault?: string;
+  promptMin?: number;
+  promptMax?: number;
+  /** A number variable receives the button index (from 0); a text variable its label. */
+  promptResultVariableName?: string;
+  promptInputVariableName?: string;
+  /** 0 / absent = wait forever. */
+  promptTimeoutMs?: number;
+  /** Button index chosen on timeout; absent = fail with promptTimeout. */
+  promptTimeoutButton?: number;
 };
+
+/** True unless the step is explicitly disabled (`enabled: false`). */
+export const isStepEnabled = (s: ProgramStep): boolean => s.enabled !== false;
 
 /** One output mapping of a Plugin step: manifest output `key` → program variable. */
 export type PluginStepOutput = { key: string; variableName: string };
@@ -1059,6 +1171,8 @@ export type BuiltProgram = {
   isBackground?: boolean;
   /** When true, all running background programs are stopped when this program finishes. */
   killBackgroundOnStop?: boolean;
+  /** The program's preferred editor view, remembered per program. Absent = the app default. */
+  editorMode?: EditorMode;
 };
 
 // ── Program-editor services (docs/expressions-and-variables.md) ──────────────
@@ -1075,7 +1189,10 @@ export type KnownValidationCode =
   | "untaughtGrid"
   // Plugins (docs/plugins.md §6)
   | "unknownPlugin" | "unknownPluginStep" | "pluginNotRunning" | "pluginParamMissing"
-  | "pluginParamEnum" | "pluginOutputType" | "unknownPluginFunction";
+  | "pluginParamEnum" | "pluginOutputType" | "unknownPluginFunction"
+  // Program editor v2 (docs/program-language.md §4.2–4.3)
+  | "loopControlOutsideLoop" | "unknownParam" | "paramMissing" | "paramOutputType"
+  | "duplicateCaseValue" | "unsupportedOnStep" | "pointWriteInBackground";
 
 /** One problem reported by `ValidateBuiltProgram`. */
 export type ValidationProblem = {
@@ -1183,11 +1300,166 @@ export type ProgramSummary = {
   currentOffsetRX?: number; currentOffsetRY?: number; currentOffsetRZ?: number;
   currentToolOffsetX?: number;  currentToolOffsetY?: number;  currentToolOffsetZ?: number;
   currentToolOffsetRX?: number; currentToolOffsetRY?: number; currentToolOffsetRZ?: number;
+  /** Id of the step most recently started (built programs). Newer controllers only. */
+  currentStepId?: string | null;
+  /** Why a Stopped program is paused; null while running or once finished. */
+  pauseReason?: PauseReason | null;
+  /** The step the program runs next on Continue (breakpoint / step mode). */
+  pausedAtStepId?: string | null;
+  /** The operator prompt this program waits on; null when none. */
+  prompt?: ProgramPrompt | null;
   /** Flag set by mobile app — external program reads and consumes this */
   start: boolean;
   stop: boolean;
   reset: boolean;
   abort: boolean;
+};
+
+export type PauseReason = 'breakpoint' | 'step' | 'pauseStep' | 'user';
+
+/** An operator prompt in the program status. Answer with `answerPrompt(id, button, value?)`. */
+export type ProgramPrompt = {
+  id: string;
+  stepId: string;
+  programName: string;
+  title?: string | null;
+  message: string;
+  /** 1–4 labels; the answer's `button` is an index into this. */
+  buttons: string[];
+  input: PromptInput;
+  /** Evaluated default input, as text. */
+  default?: string | null;
+  min?: number | null;
+  max?: number | null;
+  /** 0 = no timeout. */
+  timeoutMs: number;
+  /** Unix ms the prompt was shown (for the countdown). */
+  shownUnixMs: number;
+};
+
+/** Options for `executeBuiltProgram` (debugging; refused by a controller without package B). */
+export type ExecuteOptions = {
+  /** Run from this step (enclosing loops start at iteration 0). */
+  startAtStepId?: string;
+  /** Pause before these steps. */
+  breakpoints?: string[];
+  /** Pause before every step. */
+  stepMode?: boolean;
+};
+
+// ── Step catalog (GetStepCatalog — docs/program-language.md §5.2) ────────────
+
+export type StepCategoryKey =
+  | "motion" | "motionSettings" | "flow" | "variables"
+  | "io" | "vision" | "background" | "comms" | "plugins";
+
+export type FieldKind =
+  | "number" | "integer" | "bool" | "enum" | "text" | "template" | "expr" | "condition"
+  | "varWrite" | "varRead" | "listVar"
+  | "pointRef" | "toolRef" | "localRef" | "gridRef" | "stackRef" | "routineRef" | "programRef"
+  | "visionRef" | "deviceRef" | "cameraRef" | "labelRef" | "pluginRef"
+  | "target" | "axes6" | "mappingOut" | "rows" | "exprMap" | "textList"
+  | "steps" | "branches" | "cases" | "json";
+
+export type FieldOption = { value: string | number; label: string };
+
+/** Show a field only when another field's value (as text; absent = its default) is one of `in`. */
+export type FieldShowIf = { field: string; in: string[] };
+
+export type FieldSpec = {
+  /** A ProgramStep property, or a composite: target, via, offset, override, toolOffset. */
+  key: string;
+  /** Text named-argument name; "" = positional only. */
+  arg: string;
+  /** 0-based positional slot in text, or null. */
+  position: number | null;
+  label: string;
+  /** UI section (GroupCard). */
+  group: string;
+  kind: FieldKind | (string & {});
+  unit?: string;
+  /** Placeholder default; null = program default / none. */
+  default: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: FieldOption[];
+  /** `step.expressions` key when an expression may replace the literal. */
+  exprKey: string | null;
+  /** Composite fields: every expressions key their parts may use. */
+  exprKeys?: string[];
+  required: boolean;
+  showIf?: FieldShowIf;
+  help?: string;
+  /** The ProgramStep properties this field stores into; absent = just `key`. */
+  props?: string[];
+  /** Variable pickers: number, boolean, string, image, stopwatch, list, list:<ElementType>. */
+  varKinds?: string[];
+  /** Not rendered by the generic editor. */
+  hidden?: boolean;
+};
+
+export type StepBodyKind = "steps" | "branches" | "cases" | "tryCatch" | "mapping";
+
+export type StepSpec = {
+  type: StepType;
+  category: StepCategoryKey;
+  label: string;
+  description: string;
+  keyword: string;
+  aliases: string[];
+  /** Runs in a background program (false = skipped there). */
+  background: boolean;
+  body: StepBodyKind | null;
+  syntax: string;
+  /** Row summary template with {fieldKey} placeholders; empty parts dropped. */
+  summary: string;
+  fields: FieldSpec[];
+};
+
+export type StepCategorySpec = { key: StepCategoryKey; label: string; description: string };
+export type ErrorCodeSpec = { code: string; label: string; catchable: boolean };
+
+export type StepCatalog = {
+  catalogVersion: number;
+  languageVersion: number;
+  categories: StepCategorySpec[];
+  errorCodes: ErrorCodeSpec[];
+  steps: StepSpec[];
+  /** Properties every step has (not repeated per step). */
+  commonFields: string[];
+  /** Legacy properties no editor writes. */
+  legacyFields: string[];
+};
+
+// ── Text language (SRS — docs/program-language.md §6.9) ──────────────────────
+
+/** 1-based lines and columns; columns are UTF-16 code units (JS indexing); endCol exclusive. */
+export type TextProblem = {
+  line: number;
+  col: number;
+  endLine: number;
+  endCol: number;
+  severity: ValidationSeverity;
+  code: string;
+  message: string;
+  stepId?: string;
+  field?: string;
+  source: "parse" | "validate";
+};
+
+/** Where a step sits in the text: lines [line, endLine], 1-based inclusive. */
+export type ProgramTextMapEntry = { stepId: string; stepPath: string; line: number; endLine: number };
+
+export type FormatProgramTextResult = { text: string; languageVersion: number; map: ProgramTextMapEntry[] };
+
+export type ParseProgramTextResult = {
+  /** False when any error-severity parse problem exists. */
+  ok: boolean;
+  /** The base program's metadata + parsed variables/steps, ids reconciled. */
+  program?: BuiltProgram;
+  problems: TextProblem[];
+  map: ProgramTextMapEntry[];
 };
 
 // ── Robot info / status ───────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { enrichByAddress } from "./connectionStore";
 import { robotDiscovery } from "./RobotDiscoveryService";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 import { normalizeVisionProgram, type Pose } from "../models/visionTools";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
@@ -1035,6 +1035,8 @@ export class RobotConnectService {
       isRoutine:           program.isRoutine           ?? false,
       isBackground:        program.isBackground        ?? false,
       killBackgroundOnStop: program.killBackgroundOnStop ?? true,
+      // Omitted (undefined) when unset, so the controller keeps the stored view.
+      editorMode:          program.editorMode,
     };
   }
 
@@ -1124,6 +1126,71 @@ export class RobotConnectService {
           };
         }),
     };
+  }
+
+  // ── Program editor v2 (controller docs/program-language.md) ────────────────
+  //
+  // GetStepCatalog is real on a current controller. The text-language, prompt and debugger
+  // commands are registered but answer "notImplemented" until their packages land, which
+  // surfaces as NotImplementedCommandError; an older controller gives UnsupportedCommandError.
+  // Either way a caller can fall back (built-in step tables, no text view, no debugger).
+
+  /** Every step type's metadata (category, label, typed fields, text syntax) and the error codes. */
+  public async getStepCatalog(): Promise<StepCatalog> {
+    const ack = await this.request("GetStepCatalog", {});
+    return {
+      catalogVersion:  num(ack.catalogVersion, 0),
+      languageVersion: num(ack.languageVersion, 0),
+      categories:      wireArray(ack.categories) as unknown as StepCatalog["categories"],
+      errorCodes:      wireArray(ack.errorCodes) as unknown as StepCatalog["errorCodes"],
+      steps:           wireArray(ack.steps) as unknown as StepCatalog["steps"],
+      commonFields:    strArray(ack.commonFields),
+      legacyFields:    strArray(ack.legacyFields),
+    };
+  }
+
+  /** A program (possibly unsaved) as SRS text, with the step → line map. */
+  public async formatProgramText(program: BuiltProgram, opts: { includeIds?: boolean } = {}): Promise<FormatProgramTextResult> {
+    const ack = await this.request("FormatProgramText", { program: this.builtProgramParams(program), includeIds: opts.includeIds ?? false });
+    return {
+      text:            str(ack.text),
+      languageVersion: num(ack.languageVersion, 0),
+      map:             wireArray(ack.map) as unknown as ProgramTextMapEntry[],
+    };
+  }
+
+  /**
+   * Parse SRS text. With `base` (the current document) the result keeps base's metadata and
+   * reconciles step ids against it. `validate` (default true) adds ValidateBuiltProgram
+   * problems mapped to lines. A parse error is a normal result (`ok: false`).
+   */
+  public async parseProgramText(text: string, opts: { base?: BuiltProgram; validate?: boolean } = {}): Promise<ParseProgramTextResult> {
+    const ack = await this.request("ParseProgramText", {
+      text,
+      ...(opts.base ? { base: this.builtProgramParams(opts.base) } : {}),
+      validate: opts.validate ?? true,
+    });
+    return {
+      ok:       ack.ok !== false,
+      program:  ack.program ? wireProgram(ack.program, opts.base?.name ?? "") : undefined,
+      problems: wireArray(ack.problems) as unknown as TextProblem[],
+      map:      wireArray(ack.map) as unknown as ProgramTextMapEntry[],
+    };
+  }
+
+  /** Answer an operator prompt: the pressed button's index and, for an input prompt, the typed value. */
+  public async answerPrompt(promptId: string, button: number, value?: string | number): Promise<void> {
+    await this.request("AnswerPrompt", value === undefined ? { promptId, button } : { promptId, button, value: String(value) });
+  }
+
+  /** Run the paused foreground program's next step, then pause again. */
+  public async stepBuiltProgram(): Promise<void> {
+    await this.request("StepBuiltProgram", {});
+  }
+
+  /** Replace the running foreground program's breakpoints (step ids). */
+  public async setBreakpoints(stepIds: string[]): Promise<void> {
+    await this.request("SetBreakpoints", { stepIds });
   }
 
   /** Stored revisions of a program, newest first. */
@@ -1288,8 +1355,19 @@ export class RobotConnectService {
       .then(() => this.getProgramImages().catch(() => {}));
   }
 
-  public executeBuiltProgram(name: string) {
-    return this.sendCommand("ExecuteBuiltProgram", { name });
+  /**
+   * Run a built program. The debug options (run from a step, breakpoints, step mode) are sent
+   * only when given; a controller without the debugger refuses them (NotImplementedCommandError
+   * through `executeBuiltProgramDebug`) rather than running from the top.
+   */
+  public executeBuiltProgram(name: string, options?: ExecuteOptions) {
+    const debug = debugParams(options);
+    return this.sendCommand("ExecuteBuiltProgram", debug ? { name, ...debug } : { name });
+  }
+
+  /** executeBuiltProgram with debug options, rejecting with a typed error when refused. */
+  public async executeBuiltProgramDebug(name: string, options: ExecuteOptions): Promise<void> {
+    await this.request("ExecuteBuiltProgram", { name, ...(debugParams(options) ?? {}) });
   }
 
   /**
@@ -2316,6 +2394,31 @@ export class CommandFailedError extends Error {
   }
 }
 
+/**
+ * The controller knows the command but its behaviour has not landed yet (`notImplemented: …`).
+ * A subclass of CommandFailedError, so existing catch sites still treat it as a failure.
+ */
+export class NotImplementedCommandError extends CommandFailedError {
+  constructor(command: string, message: string) {
+    super(command, message);
+    this.name = "NotImplementedCommandError";
+  }
+}
+
+export function isNotImplementedCommand(e: unknown): e is NotImplementedCommandError {
+  return e instanceof NotImplementedCommandError;
+}
+
+/** The ExecuteBuiltProgram debug params, or null when none are set. */
+function debugParams(o: ExecuteOptions | undefined): Record<string, unknown> | null {
+  if (!o) return null;
+  const p: Record<string, unknown> = {};
+  if (o.startAtStepId) p.startAtStepId = o.startAtStepId;
+  if (o.breakpoints && o.breakpoints.length > 0) p.breakpoints = o.breakpoints;
+  if (o.stepMode) p.stepMode = true;
+  return Object.keys(p).length > 0 ? p : null;
+}
+
 export function isUnsupportedCommand(e: unknown): e is UnsupportedCommandError {
   return e instanceof UnsupportedCommandError;
 }
@@ -2328,6 +2431,7 @@ function toCommandError(command: string, reason: unknown): Error {
   if (reason instanceof Error) return reason;
   const text = typeof reason === "string" ? reason : reason == null ? "" : String(reason);
   if (/unknown\s*command/i.test(text)) return new UnsupportedCommandError(command);
+  if (/^notImplemented\b/.test(text)) return new NotImplementedCommandError(command, text);
   if (TRANSPORT_FAILURE.test(text)) return new Error(text);
   return new CommandFailedError(command, text || `${command} failed`);
 }
