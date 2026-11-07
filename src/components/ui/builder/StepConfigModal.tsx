@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Modal,
   Platform,
@@ -13,7 +14,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { ArrowLeft, ArrowRight, Camera, Check, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
+import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, ChevronRight, CircuitBoard, Cpu, Crosshair, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import { useKeyboardStableCard } from "@/src/platform/keyboard";
 
 import {
@@ -27,6 +28,8 @@ import {
   ProgramStep,
   ProgramVariable,
   RobotStack,
+  ValidationProblem,
+  variableList,
   StackPoint,
   THREAD_PRESETS,
   auxStepsPerUnit,
@@ -42,6 +45,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import {
   useBuiltPrograms,
   useCameras,
+  useConnected,
   useGrids,
   useLocals,
   useIoDevices,
@@ -55,7 +59,12 @@ import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { colors, radii, accents, CautionNote } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
-import { STEP_THEME, fmtMoveStop, newId } from "./stepUtils";
+import { STEP_THEME, fmtMoveStop, movePointName, newId } from "./stepUtils";
+import { CatalogStepFields, fieldClaims, isFieldShown } from "./CatalogStepFields";
+import { Axes6Fields, CatalogVarField, ExprMapField, TargetRefField } from "./catalogFieldControls";
+import { ExpressionField } from "./expressions/ExpressionEditorModal";
+import { useStepCatalog } from "./useStepCatalog";
+import { appAlert } from "@/src/components/ui/AppAlert";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
@@ -74,6 +83,14 @@ type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverr
 // Step types whose config fields read live aux-stepper state. Only these fetch aux state on open;
 // every other step type opens without touching the network (the modal used to fetch robot config,
 // vision programs AND aux state on every open — slow over WiFi on a real robot).
+// Step types whose editor is rendered from the controller's step catalog (CatalogStepFields).
+const CATALOG_TYPES = new Set<string>([
+  "Note", "LoopControl", "Return", "EndProgram", "RaiseError", "Switch", "Try",
+  "SavePosition", "SetSpeedFactor", "ListOp", "Prompt",
+  "SetSpeedL", "SetSpeedJ", "SetBlendRadius", "StopwatchControl",
+  "StartBackground", "StopBackground", "WaitForBackground",
+]);
+
 const AUX_STEP_TYPES = new Set<string>([
   "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable",
   "GripperAction", "ConveyorAction", "RotaryIndex",
@@ -92,6 +109,7 @@ export function StepConfigModal({
   onCreateVariable,
   onSaveVariable,
   onCreateRoutine,
+  problems,
 }: {
   visible: boolean;
   step: ProgramStep | null;
@@ -99,14 +117,23 @@ export function StepConfigModal({
   contextVariables?: ProgramVariable[];
   scopeSteps?: ProgramStep[];
   stepIndex?: number;
-  onSave: (updated: ProgramStep) => void;
+  /**
+   * Commits the edited step. On phones the editor is a full page whose edits go into the
+   * program as they are made (`live`, debounced and undoable); on wide screens the centred
+   * modal commits on Save.
+   */
+  onSave: (updated: ProgramStep, opts?: { live?: boolean }) => void;
   onClose: () => void;
   onEnterRoutine?: (routineName: string) => void;
   onCreateVariable?: (defaultType?: VarType) => void;
   onSaveVariable?: (v: ProgramVariable) => void;
   onCreateRoutine?: () => void;
+  /** The controller's validation problems on this step (shown under their fields). */
+  problems?: ValidationProblem[];
 }) {
   const points        = usePoints();
+  const catalog       = useStepCatalog();
+  const insets        = useSafeAreaInsets();
   const grids         = useGrids();
   const stacks        = useStacks();
   const tools         = useTools();
@@ -151,7 +178,6 @@ export function StepConfigModal({
   // now goes through the shared picker, which also offers "+ New <type> variable".
   const [loadCellVarPicker,  setLoadCellVarPicker]  = useState(false);
   const [recordVarPicker,    setRecordVarPicker]    = useState(false);
-  const [stopwatchVarPicker, setStopwatchVarPicker] = useState(false);
   const [captureVarPicker,   setCaptureVarPicker]   = useState(false);
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -161,6 +187,9 @@ export function StepConfigModal({
   // tablets, unfolded foldables like the Z Fold, desktop) gets it. The two panes size to fit the
   // available width so they never overflow on the narrower wide screens.
   const wide = useIsWide();
+  // Phones get a full-page editor (like the vision tool page) whose edits go straight into the
+  // program; wide screens keep the centred modal with Save / Cancel.
+  const pageMode = !wide;
   const availWidth    = windowWidth - 48; // overlay side padding (2 * spacing.xl)
   const panelWidth    = Math.min(300, Math.max(220, Math.round((availWidth - 16) * 0.4)));
   const wideCardWidth = Math.min(520, availWidth - panelWidth - 16);
@@ -202,6 +231,10 @@ export function StepConfigModal({
     }
   }, [visible, draftType]);
 
+  const liveBaseline = useRef("");
+  const draftRef = useRef<ProgramStep | null>(null);
+  const onSaveRef = useRef(onSave);
+
   // Rebuild the draft from the step on every open, not just when the step object changes: Cancel
   // only hides the modal and the builder hands back the same step object next time, so without
   // `visible` here a cancelled edit (e.g. a deleted condition) would still be sitting in the draft.
@@ -230,7 +263,30 @@ export function StepConfigModal({
     setEditingName(false);
     setShowComment(false);
     setShowStatus(false);
+    liveBaseline.current = step ? JSON.stringify(step.varPointName
+      ? { ...step, pointNameExpr: `$${step.varPointName}[${step.varPointIndex ?? "0"}]`, varPointName: undefined, varPointIndex: undefined }
+      : step) : "";
   }, [step, visible]);
+
+  // Live edits (phone page): each change is committed 400 ms after the last one, coalesced into
+  // one undo step by the builder; closing flushes whatever is pending. Nothing is committed until
+  // the draft actually differs from what was opened (liveBaseline, set when the editor opens).
+  useEffect(() => { draftRef.current = draft; onSaveRef.current = onSave; });
+  const flushLive = () => {
+    const d = draftRef.current;
+    if (!pageMode || !d) return;
+    const json = JSON.stringify(d);
+    if (json === liveBaseline.current) return;
+    liveBaseline.current = json;
+    onSaveRef.current(d, { live: true });
+  };
+  useEffect(() => {
+    if (!pageMode || !visible || !draft) return;
+    const t = setTimeout(flushLive, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, pageMode, visible]);
+  const closePage = () => { flushLive(); onClose(); };
 
   // Leaving the main page (into a sub-page) always drops name-edit mode.
   useEffect(() => { if (subPage) setEditingName(false); }, [subPage]);
@@ -470,6 +526,32 @@ export function StepConfigModal({
     );
   };
 
+  // The move target as the Point row shows it (the live point name by id, so a rename shows).
+  const pointLabel = draft.gridPoint
+    ? `Grid → ${grids.find(g => g.id === draft.gridPoint!.gridId)?.name ?? 'Unknown'}`
+    : draft.stackPoint
+    ? `Stack → ${stacks.find(s => s.id === draft.stackPoint!.stackId)?.name ?? 'Unknown'}`
+    : draft.varPointName
+    ? `$${draft.varPointName}[${draft.varPointIndex ?? "0"}]`
+    : draft.pointNameExpr
+    ? `→ ${draft.pointNameExpr}`
+    : movePointName(draft, points, "Current Position");
+
+  // Generic catalog fields for this draft (CatalogStepFields with the modal's wiring).
+  const catalogFields = (extra?: { only?: string[]; skip?: string[]; grouped?: boolean; special?: Record<string, () => React.ReactNode> }) => (
+    <CatalogStepFields
+      key={draft.id}
+      step={draft}
+      set={set}
+      setExpr={setExpr}
+      variables={variables}
+      contextVariables={contextVariables}
+      onSaveVariable={onSaveVariable}
+      problems={problems}
+      {...extra}
+    />
+  );
+
   // ── Sub-page content ──────────────────────────────────────────────────────
 
   function renderSubPage() {
@@ -568,6 +650,11 @@ export function StepConfigModal({
                     </TouchableOpacity>
                   );
                 })}
+                <TeachHere
+                  points={points}
+                  selected={draft!.pointId ? points.find(p => p.id === draft!.pointId) : points.find(p => p.name === draft!.pointName)}
+                  onTaught={name => set({ pointName: name, pointId: points.find(p => p.name === name)?.id || undefined })}
+                />
               </>
             ) : gridPointMode === 'gridPoint' ? (
               <>
@@ -870,56 +957,14 @@ export function StepConfigModal({
 
       case "posOffset":
         return (
-          <>
-            {(["offsetX","offsetY","offsetZ"] as const).map(k => (
-              <View key={k} style={{ marginBottom: 10 }}>
-                <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (mm)</Text>
-                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k]} expressions={draft!.expressions}
-                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-              </View>
-            ))}
-            {(rzOnly ? ["offsetRZ"] : ["offsetRX","offsetRY","offsetRZ"] as const).map(k => (
-              <View key={k} style={{ marginBottom: 10 }}>
-                <Text style={ms.fieldLabel}>{k.replace("offset","").toUpperCase()}  (°)</Text>
-                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k as keyof typeof draft]} expressions={draft!.expressions}
-                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-              </View>
-            ))}
-            <TouchableOpacity
-              onPress={() => set({ offsetX:undefined,offsetY:undefined,offsetZ:undefined,offsetRX:undefined,offsetRY:undefined,offsetRZ:undefined })}
-              style={{ marginTop: 4 }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 12, color: colors.textFaint }}>Clear offset</Text>
-            </TouchableOpacity>
-          </>
+          <Axes6Fields prefix="offset" step={draft!} set={set} setExpr={setExpr} variables={variables}
+            rzOnly={rzOnly} clearLabel="Clear offset" />
         );
 
       case "toolOffset":
         return (
-          <>
-            {(["toolOffsetX","toolOffsetY","toolOffsetZ"] as const).map(k => (
-              <View key={k} style={{ marginBottom: 10 }}>
-                <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (mm)</Text>
-                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k]} expressions={draft!.expressions}
-                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-              </View>
-            ))}
-            {(rzOnly ? ["toolOffsetRZ"] : ["toolOffsetRX","toolOffsetRY","toolOffsetRZ"] as const).map(k => (
-              <View key={k} style={{ marginBottom: 10 }}>
-                <Text style={ms.fieldLabel}>{k.replace("toolOffset","").toUpperCase()}  (°)</Text>
-                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k as keyof typeof draft]} expressions={draft!.expressions}
-                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr} variables={variables} />
-              </View>
-            ))}
-            <TouchableOpacity
-              onPress={() => set({ toolOffsetX:undefined,toolOffsetY:undefined,toolOffsetZ:undefined,toolOffsetRX:undefined,toolOffsetRY:undefined,toolOffsetRZ:undefined })}
-              style={{ marginTop: 4 }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 12, color: colors.textFaint }}>Clear offset</Text>
-            </TouchableOpacity>
-          </>
+          <Axes6Fields prefix="toolOffset" step={draft!} set={set} setExpr={setExpr} variables={variables}
+            rzOnly={rzOnly} clearLabel="Clear offset" />
         );
 
       case "posOverride":
@@ -929,29 +974,8 @@ export function StepConfigModal({
               When set, locks that axis to the exact value regardless of the target point or offsets.
               Leave blank to use the calculated value.
             </Text>
-            {(["overrideX","overrideY","overrideZ"] as const).map(k => (
-              <View key={k} style={{ marginBottom: 10 }}>
-                <Text style={ms.fieldLabel}>{k.replace("override","").toUpperCase()}  (mm)</Text>
-                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k]} expressions={draft!.expressions}
-                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr}
-                  variables={variables} allowUndefined placeholder="not set" />
-              </View>
-            ))}
-            {(rzOnly ? ["overrideRZ"] : ["overrideRX","overrideRY","overrideRZ"] as const).map(k => (
-              <View key={k} style={{ marginBottom: 10 }}>
-                <Text style={ms.fieldLabel}>{k.replace("override","").toUpperCase()}  (°)</Text>
-                <ExpressionInput key={draft!.id + k} style={ms.input} fieldKey={k}
-                  value={draft![k as keyof typeof draft]} expressions={draft!.expressions}
-                  onChangeValue={n => set({ [k]: n })} onChangeExpr={setExpr}
-                  variables={variables} allowUndefined placeholder="not set" />
-              </View>
-            ))}
-            <TouchableOpacity
-              onPress={() => set({ overrideX:undefined,overrideY:undefined,overrideZ:undefined,overrideRX:undefined,overrideRY:undefined,overrideRZ:undefined })}
-              style={{ marginTop: 4 }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 12, color: colors.textFaint }}>Clear all overrides</Text>
-            </TouchableOpacity>
+            <Axes6Fields prefix="override" step={draft!} set={set} setExpr={setExpr} variables={variables}
+              rzOnly={rzOnly} allowUndefined placeholder="not set" clearLabel="Clear all overrides" />
           </>
         );
 
@@ -966,15 +990,6 @@ export function StepConfigModal({
     switch (draft!.type) {
       case "MoveL":
       case "MoveJ": {
-        const pointLabel = draft!.gridPoint
-          ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
-          : draft!.stackPoint
-          ? `Stack → ${stacks.find(s => s.id === draft!.stackPoint!.stackId)?.name ?? 'Unknown'}`
-          : draft!.varPointName
-          ? `$${draft!.varPointName}[${draft!.varPointIndex ?? "0"}]`
-          : draft!.pointNameExpr
-          ? `→ ${draft!.pointNameExpr}`
-          : (draft!.pointName ?? "Current Position");
         return (
           <>
             <TouchableOpacity style={ms.modRow} onPress={() => openSubPage("point")} activeOpacity={0.7}>
@@ -999,15 +1014,6 @@ export function StepConfigModal({
 
       case "JumpL":
       case "JumpJ": {
-        const pointLabel = draft!.gridPoint
-          ? `Grid → ${grids.find(g => g.id === draft!.gridPoint!.gridId)?.name ?? 'Unknown'}`
-          : draft!.stackPoint
-          ? `Stack → ${stacks.find(s => s.id === draft!.stackPoint!.stackId)?.name ?? 'Unknown'}`
-          : draft!.varPointName
-          ? `$${draft!.varPointName}[${draft!.varPointIndex ?? "0"}]`
-          : draft!.pointNameExpr
-          ? `→ ${draft!.pointNameExpr}`
-          : (draft!.pointName ?? "Current Position");
         const jumpHeightLabel = (() => {
           if (draft!.jumpZStart != null || draft!.jumpZEnd != null) {
             const s = draft!.jumpZStart != null ? `Start: ${draft!.jumpZStart} mm` : null;
@@ -1434,12 +1440,50 @@ export function StepConfigModal({
               </>
             )}
 
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE</Text>
-            <View style={ms.switchRow}>
-              <Text style={ms.switchLabel}>{draft!.outputValue ? "ON" : "OFF"}</Text>
-              <Switch value={draft!.outputValue ?? false} onValueChange={v => set({ outputValue: v })}
-                trackColor={{ false: colors.border, true: colors.accent }} />
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ACTION</Text>
+            <View style={ms.segRow}>
+              {(["set", "toggle"] as const).map(a => {
+                const active = (draft!.outputAction ?? "set") === a;
+                return (
+                  <TouchableOpacity key={a} style={[ms.seg, active && ms.segActive, { flex: 1 }]} activeOpacity={0.8}
+                    onPress={() => set({ outputAction: a === "set" ? undefined : a, ...(a === "toggle" ? { pulseMs: undefined, pulseBlocking: undefined } : {}) })}
+                    accessibilityRole="button" accessibilityLabel={a === "set" ? "Set the output" : "Toggle the output"}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{a === "set" ? "Set" : "Toggle"}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
+            {draft!.outputAction === "toggle" ? (
+              <Text style={ms.hintText}>Flips the output: on becomes off, off becomes on.</Text>
+            ) : (
+            <>
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>VALUE</Text>
+            {draft!.expressions?.outputValue != null ? (
+              <>
+                <ExpressionField
+                  value={draft!.expressions.outputValue}
+                  onChange={t => setExpr("outputValue", t.trim() ? t : undefined)}
+                  title="Output value"
+                  placeholder="$count > 3"
+                  variables={variables}
+                  contextVariables={contextVariables}
+                  style={ms.input}
+                />
+                <Text style={ms.hintText}>On when the expression is non-zero (true), off when it is 0. Clear it to pick on or off.</Text>
+              </>
+            ) : (
+              <>
+                <View style={ms.switchRow}>
+                  <Text style={ms.switchLabel}>{draft!.outputValue ? "ON" : "OFF"}</Text>
+                  <Switch value={draft!.outputValue ?? false} onValueChange={v => set({ outputValue: v })}
+                    trackColor={{ false: colors.border, true: colors.accent }} />
+                </View>
+                <TouchableOpacity onPress={() => setExpr("outputValue", draft!.outputValue ? "1" : "0")} activeOpacity={0.7}
+                  style={{ marginTop: 6 }} accessibilityRole="button" accessibilityLabel="Use an expression for the value">
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: accents.purple }}>fx  Use an expression</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
             <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PULSE</Text>
             <View style={ms.switchRow}>
@@ -1490,6 +1534,8 @@ export function StepConfigModal({
                   {draft!.pulseBlocking ? "Program waits for the pulse to complete before continuing." : "Program continues without waiting."}
                 </Text>
               </>
+            )}
+            </>
             )}
           </>
         );
@@ -1565,6 +1611,12 @@ export function StepConfigModal({
                   create={{ type: "boolean" }}
                   onCreateVariable={onSaveVariable} allVariables={variables}
                 />
+                {catalogFields({ only: ["waitTimeoutAction"], grouped: false })}
+                <Text style={ms.hintText}>
+                  {draft!.waitTimeoutAction === "error"
+                    ? "A timeout is an error (code waitTimeout): an enclosing Try can catch it, otherwise the program stops."
+                    : "On a timeout the program carries on with the next step."}
+                </Text>
               </>
             )}
           </>
@@ -1836,6 +1888,14 @@ export function StepConfigModal({
                 <Text style={{ fontSize: 14, fontWeight: "600", color: "#7c3aed" }}>Create New Routine…</Text>
               </TouchableOpacity>
             )}
+            <RoutineParamsSection
+              step={draft!}
+              routine={routines.find(r => draft!.routineId ? r.id === draft!.routineId : r.name === draft!.routineName)}
+              set={set}
+              variables={variables}
+              contextVariables={contextVariables}
+              onSaveVariable={onSaveVariable}
+            />
           </>
         );
 
@@ -1853,48 +1913,25 @@ export function StepConfigModal({
         );
 
       case "SetSpeedL":
-      case "SetSpeedJ": {
-        const isLinear = draft!.type === "SetSpeedL";
+      case "SetSpeedJ":
         return (
           <>
-            <Text style={ms.hintText}>
-              {isLinear
-                ? "Sets the linear (MoveL) speed for all subsequent moves until changed again."
-                : "Sets the joint (MoveJ) speed for all subsequent moves until changed again."}
+            <Text style={[ms.hintText, { marginTop: 0, marginBottom: 4 }]}>
+              {draft!.type === "SetSpeedL"
+                ? "Applies to every later linear (MoveL) move until it is changed again."
+                : "Applies to every later joint (MoveJ) move until it is changed again."}
             </Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>SPEED  (mm/s)</Text>
-            <ExpressionInput style={ms.input} fieldKey="speed"
-              value={draft!.speed} expressions={draft!.expressions}
-              onChangeValue={v => set({ speed: v })} onChangeExpr={setExpr} variables={variables} />
-            <View style={ms.twoCol}>
-              <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>ACCEL  (mm/s²)</Text>
-                <ExpressionInput style={ms.input} fieldKey="accel"
-                  value={draft!.accel} expressions={draft!.expressions}
-                  onChangeValue={v => set({ accel: v })} onChangeExpr={setExpr} variables={variables} />
-              </View>
-              <View style={ms.twoColItem}>
-                <Text style={[ms.fieldLabel, { marginTop: 10 }]}>DECEL  (mm/s²)</Text>
-                <ExpressionInput style={ms.input} fieldKey="decel"
-                  value={draft!.decel} expressions={draft!.expressions}
-                  onChangeValue={v => set({ decel: v })} onChangeExpr={setExpr} variables={variables} />
-              </View>
-            </View>
+            {catalogFields()}
           </>
         );
-      }
 
       case "SetBlendRadius":
         return (
           <>
-            <Text style={ms.hintText}>
-              Sets the default corner blend radius for subsequent MoveL steps that have blending turned on.
-              An individual move can override this with its own radius.
+            <Text style={[ms.hintText, { marginTop: 0, marginBottom: 4 }]}>
+              The corner radius later blended MoveL steps use. A move can still set its own radius.
             </Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>BLEND RADIUS  (mm)</Text>
-            <ExpressionInput style={ms.input} fieldKey="blendRadius"
-              value={draft!.blendRadius} expressions={draft!.expressions}
-              onChangeValue={v => set({ blendRadius: v })} onChangeExpr={setExpr} variables={variables} />
+            {catalogFields()}
           </>
         );
 
@@ -2774,99 +2811,33 @@ export function StepConfigModal({
 
       case "StartBackground":
       case "StopBackground":
-      case "WaitForBackground": {
-        const bgPrograms = allPrograms.filter(p => p.isBackground && !p.isRoutine);
-        const label = draft!.type === "StartBackground" ? "BACKGROUND PROGRAM TO START"
-          : draft!.type === "StopBackground" ? "BACKGROUND PROGRAM TO STOP"
-          : "BACKGROUND PROGRAM TO WAIT FOR";
-        const hint = draft!.type === "StartBackground"
-          ? "Starts the selected background program in parallel. No-op if it is already running."
-          : draft!.type === "StopBackground"
-          ? "Stops the selected background program. No-op if it is not running."
-          : "Blocks this program until the selected background program finishes. Continues immediately if it is not running.";
+      case "WaitForBackground":
         return (
           <>
-            <Text style={ms.hintText}>{hint}</Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{label}</Text>
-            {bgPrograms.length === 0 ? (
+            <Text style={[ms.hintText, { marginTop: 0, marginBottom: 4 }]}>
+              {draft!.type === "StartBackground"
+                ? "Starts it in parallel; does nothing if it is already running."
+                : draft!.type === "StopBackground"
+                ? "Stops it; does nothing if it is not running."
+                : "Blocks until it finishes; continues at once if it is not running."}
+            </Text>
+            {allPrograms.some(p => p.isBackground) ? catalogFields() : (
               <Text style={[ms.emptyHint, { marginTop: 4 }]}>
-                No background programs found. Mark a program as "Background" in its settings.
+                No background programs yet. Turn on &quot;Background Program&quot; in a program&apos;s settings.
               </Text>
-            ) : (
-              bgPrograms.map((p, i) => {
-                const active = p.id && draft!.backgroundProgramId
-                  ? draft!.backgroundProgramId === p.id
-                  : draft!.backgroundProgramName === p.name;
-                return (
-                  <TouchableOpacity
-                    key={p.id ?? p.name}
-                    style={[ms.row, i < bgPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                    onPress={() => set({ backgroundProgramName: p.name, backgroundProgramId: p.id })}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                      {active && <View style={ms.radioDot} />}
-                    </View>
-                    <View style={ms.rowText}>
-                      <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
-                      {p.description ? <Text style={ms.rowDesc}>{p.description}</Text> : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
             )}
           </>
         );
-      }
 
-      case "StopwatchControl": {
-        const swVars = (variables ?? []).filter(v => v.isStopwatch);
-        const swActions = ["Start", "Stop", "Reset"] as const;
+      case "StopwatchControl":
         return (
           <>
-            <Text style={ms.hintText}>Control a stopwatch variable. The value holds elapsed milliseconds and can be read in expressions.</Text>
-            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ACTION</Text>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-              {swActions.map(a => {
-                const active = draft!.stopwatchAction === a;
-                const color  = a === "Start" ? colors.success : a === "Stop" ? colors.danger : colors.warning;
-                const bg     = a === "Start" ? colors.successSoft : a === "Stop" ? colors.dangerSoft : colors.warningSoft;
-                const border = a === "Start" ? colors.successBorder : a === "Stop" ? colors.dangerBorder : colors.warningBorder;
-                return (
-                  <TouchableOpacity
-                    key={a}
-                    style={[{ flex: 1, paddingVertical: 10, borderRadius: radii.sm, alignItems: "center", borderWidth: 1.5,
-                      borderColor: active ? color : colors.border,
-                      backgroundColor: active ? bg : colors.surfaceMuted }]}
-                    onPress={() => set({ stopwatchAction: a })}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={{ fontSize: 14, fontWeight: "700", color: active ? color : colors.textMuted }}>{a}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <VarSelectorButton
-              label="STOPWATCH VARIABLE"
-              value={draft!.stopwatchVariableName}
-              accent={accents.purple}
-              placeholder="None — tap to select"
-              onPress={() => setStopwatchVarPicker(true)}
-            />
-            <VarPickerModal
-              filter={isAssignableVariable}
-              visible={stopwatchVarPicker}
-              onClose={() => setStopwatchVarPicker(false)}
-              variables={swVars}
-              selected={draft!.stopwatchVariableName}
-              onSelect={v => { if (v) set({ stopwatchVariableName: v.name }); setStopwatchVarPicker(false); }}
-              title="Stopwatch Variable"
-              create={{ type: "stopwatch" }}
-              onCreateVariable={onSaveVariable} allVariables={variables}
-            />
+            <Text style={[ms.hintText, { marginTop: 0, marginBottom: 4 }]}>
+              A stopwatch variable holds elapsed milliseconds; read it in any expression.
+            </Text>
+            {catalogFields()}
           </>
         );
-      }
 
       case "SaveImage":
         return (
@@ -3397,6 +3368,97 @@ export function StepConfigModal({
           />
         );
 
+      case "MoveC":
+        return (
+          <>
+            <TouchableOpacity style={ms.modRow} onPress={() => openSubPage("point")} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel="End point">
+              <View style={ms.subRowLeft}>
+                <Text style={ms.subRowLabel}>End Point</Text>
+                <Text style={ms.subRowValue}>{pointLabel}</Text>
+              </View>
+              <ChevronRight size={16} color={colors.borderStrong} />
+            </TouchableOpacity>
+            <View style={[ms.modRow, { flexDirection: "column", alignItems: "stretch" }]}>
+              <Text style={ms.subRowLabel}>Via Point</Text>
+              <Text style={[ms.hintText, { marginTop: 2 }]}>The arc passes through this point on its way from here to the end point.</Text>
+              <TargetRefField
+                label="Via point"
+                pointId={draft!.viaPointId}
+                pointName={draft!.viaPointName}
+                expr={draft!.viaPointNameExpr}
+                points={points}
+                variables={variables}
+                onSaveVariable={onSaveVariable}
+                onPoint={p => set({ viaPointId: p?.id || undefined, viaPointName: p?.name, viaPointNameExpr: undefined })}
+                onExpr={e => set({ viaPointNameExpr: e, ...(e ? { viaPointId: undefined, viaPointName: undefined } : {}) })}
+              />
+            </View>
+            {modifierRow("Override Speed",    speedSet,    speedSummary,    "speed",       speedKeys)}
+            {modifierRow("Position Offset",   hasOffset,   offsetSummary,   "posOffset",   offsetKeys)}
+            {modifierRow("Position Override", hasOverride, overrideSummary, "posOverride", overrideKeys)}
+            <View style={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+              {catalogFields({ only: ["arcTolerance"] })}
+            </View>
+          </>
+        );
+
+      case "Note":
+        return (
+          <>
+            {catalogFields()}
+            <Text style={ms.hintText}>
+              {draft!.noteStyle === "section"
+                ? "A section header: tap its chevron in the step list to fold the steps up to the next section."
+                : "A note for whoever reads the program. It is never run."}
+            </Text>
+          </>
+        );
+
+      case "Switch":
+        return (
+          <>
+            {catalogFields()}
+            <Text style={ms.hintText}>
+              Cases and their values are edited on the block in the step list. The first case with an
+              equal value runs, otherwise Default; there is no fall-through.
+            </Text>
+          </>
+        );
+
+      case "Try":
+        return (
+          <>
+            {catalogFields()}
+            <Text style={ms.hintText}>
+              Runtime failures (timeouts, vision, HTTP, plugins, prompts, Raise Error) are caught; motion
+              faults and expression mistakes always stop the program. With no codes ticked, every
+              catchable error is caught. An empty Catch ignores the error.
+            </Text>
+          </>
+        );
+
+      case "ListOp": {
+        const list = (variables ?? []).find(v => v.name === draft!.variableName);
+        const el = list ? variableList(list)?.elementType : undefined;
+        const structured = el === "Point" || el === "Record";
+        return (
+          <>
+            {catalogFields({
+              skip: structured ? ["listValueExpr"] : el ? ["listFields", "listSortField"] : [],
+              special: {
+                listFields: () => (
+                  <ListFieldsEditor step={draft!} set={set} elementType={el} variables={variables} contextVariables={contextVariables} />
+                ),
+              },
+            })}
+            {draft!.listAction === "append" && el === "Point" && !Object.keys(draft!.listFields ?? {}).length && (
+              <Text style={ms.hintText}>With no fields set, Append adds the robot&apos;s current position.</Text>
+            )}
+          </>
+        );
+      }
+
       case "Unknown":
         return (
           <View style={{ padding: 16, backgroundColor: "#fef9c3", borderRadius: radii.sm, marginTop: 8 }}>
@@ -3413,7 +3475,8 @@ export function StepConfigModal({
         );
 
       default:
-        return null;
+        // Every other catalogued step (the v2 blocks and anything without a bespoke editor).
+        return catalog.spec(draft!.type) ? catalogFields() : null;
     }
   }
 
@@ -3426,18 +3489,187 @@ export function StepConfigModal({
   };
 
   const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ"
-                  || draft.type === "JumpL"    || draft.type === "JumpJ";
-  const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable"
-                  || draft.type === "Label"      || draft.type === "GoToLabel";
+                  || draft.type === "JumpL"    || draft.type === "JumpJ"   || draft.type === "MoveC";
+  // A Note's text is its comment, and it never runs — no separate description or status line.
+  const isNote     = draft.type === "Note";
+
+  // Problems the fields below do not show themselves (bespoke editors, program-level fields).
+  const spec = catalog.spec(draft.type);
+  const genericKeys = CATALOG_TYPES.has(draft.type)
+    ? new Set((spec?.fields ?? []).filter(f => !f.hidden && isFieldShown(f, draft, spec)).flatMap(fieldClaims))
+    : new Set<string>();
+  const ownProblems = problems ?? [];
+  const looseProblems = ownProblems.filter(p => !p.field || !genericKeys.has(p.field));
+
+  const titleText = draft.name?.trim() || STEP_THEME[draft.type]?.label || "Configure Step";
+
+  // ── Header: sub-page back + title, or the step name (tap to rename) ───────
+  const titleNode = subPage ? (
+    <Text style={[ms.title, { flex: 1, textAlign: "center", marginHorizontal: 8 }]} numberOfLines={1}>{subPageTitle[subPage]}</Text>
+  ) : editingName ? (
+    <TextInput
+      style={[ms.title, { flex: 1, textAlign: "center", marginHorizontal: 8, paddingVertical: 2 }]}
+      value={draft.name ?? ""}
+      onChangeText={v => set({ name: v || undefined })}
+      placeholder={STEP_THEME[draft.type]?.label ?? "Step name"}
+      placeholderTextColor={colors.textFaint}
+      autoFocus
+      selectTextOnFocus
+      returnKeyType="done"
+      onSubmitEditing={() => setEditingName(false)}
+      onBlur={() => setEditingName(false)}
+    />
+  ) : (
+    <TouchableOpacity
+      style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: 8 }}
+      onPress={() => setEditingName(true)}
+      activeOpacity={0.7}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="Rename step"
+    >
+      <Text style={ms.title} numberOfLines={1}>{titleText}</Text>
+      <Pencil size={14} color={colors.textFaint} />
+    </TouchableOpacity>
+  );
+
+  // ── Body (shared by the centred modal and the phone page) ──────────────────
+  const mainPage = (
+    <>
+      {/* Plugin steps open with what they are: plugin · step and its description. */}
+      {draft.type === "Plugin" && <PluginStepHeader step={draft} />}
+
+      {/* What this block does, from the catalog — one line, so every block explains itself. */}
+      {!!spec?.description && draft.type !== "Plugin" && (
+        <Text style={[ms.hintText, { marginTop: 0, marginBottom: 12 }]}>{spec.description}.</Text>
+      )}
+
+      {/* The controller's problems that no field below shows itself. */}
+      {looseProblems.length > 0 && (
+        <View style={sc.problemBox}>
+          {looseProblems.map((p, i) => (
+            <View key={i} style={{ flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+              <AlertTriangle size={13} color={p.severity === "error" ? colors.danger : colors.warning} style={{ marginTop: 2 }} />
+              <Text style={[sc.problemText, p.severity !== "error" && { color: colors.warning }]}>{p.message}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Description (a note for editors, never executed) — at the very top, collapsed to
+          an "Add" button until it has content so it takes no room when unused. */}
+      {!isNote && ((draft.comment || showComment) ? (
+        <>
+          <Text style={ms.fieldLabel}>DESCRIPTION  (optional)</Text>
+          <TextInput
+            style={[ms.input, { marginBottom: 14, minHeight: 56 }]}
+            value={draft.comment ?? ""}
+            onChangeText={v => set({ comment: v.trim() ? v : undefined })}
+            placeholder="What this step does — a note for whoever edits next. Never executed."
+            placeholderTextColor={colors.textFaint}
+            multiline
+            textAlignVertical="top"
+            autoFocus={showComment && !draft.comment}
+          />
+        </>
+      ) : (
+        <TouchableOpacity style={[ms.modRowAdd, { marginBottom: 12 }]} onPress={() => setShowComment(true)} activeOpacity={0.7}>
+          <Plus size={15} color={colors.textFaint} />
+          <Text style={ms.modAddText}>Add description</Text>
+        </TouchableOpacity>
+      ))}
+
+      {/* Status description — the optional runtime message shown in the monitor while this
+          step runs. Same collapse-when-empty treatment. */}
+      {draft.type !== "StatusUpdate" && draft.type !== "EndProgram" && !isNote && ((draft.statusMessage || showStatus) ? (
+        <>
+          <Text style={ms.fieldLabel}>STATUS DESCRIPTION  (optional)</Text>
+          <View style={{ marginBottom: 14 }}>
+            <TemplateInput
+              style={ms.input}
+              value={draft.statusMessage ?? ""}
+              onChange={v => set({ statusMessage: v || undefined })}
+              placeholder="Shown in monitor while this step runs"
+              variables={variables}
+              autoCapitalize="sentences"
+              create={{ type: "number" }} onCreateVariable={onSaveVariable} allVariables={variables}
+            />
+          </View>
+        </>
+      ) : (
+        <TouchableOpacity style={[ms.modRowAdd, { marginBottom: 12 }]} onPress={() => setShowStatus(true)} activeOpacity={0.7}>
+          <Plus size={15} color={colors.textFaint} />
+          <Text style={ms.modAddText}>Add status description</Text>
+        </TouchableOpacity>
+      ))}
+
+      {/* Sub-row buttons for moves, inline body for everything else */}
+      {isMove ? <View style={ms.subRowCard}>{renderMainBody()}</View> : renderMainBody()}
+    </>
+  );
+
+  const scrollBody = (
+    <ScrollView ref={kbScrollRef}
+      onScroll={kbOnScroll}
+      scrollEventThrottle={16}
+      // flexShrink + minHeight:0 so the body yields to the pinned footer when the card is
+      // capped (keyboard up) — the footer then never overlaps the fields, and the body scrolls.
+      style={pageMode ? { flex: 1 } : { flexShrink: 1, minHeight: 0 }}
+      showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+      // Room to scroll a bottom field up above the keyboard (the body extends behind it).
+      contentContainerStyle={pageMode
+        ? { padding: 16, paddingBottom: Math.max(kbPadBottom, insets.bottom + 24) }
+        : { paddingBottom: kbPadBottom }}>
+      {subPage ? renderSubPage() : mainPage}
+    </ScrollView>
+  );
+
+  // A sub-page confirms/cancels just its own edit. On the centred modal the main page saves or
+  // cancels everything; the phone page has no footer — its edits are already in the program.
+  const subPageFooter = (
+    <View style={[ms.actions, pageMode && { paddingHorizontal: 16, paddingBottom: insets.bottom + 12 }]}>
+      <TouchableOpacity style={ms.cancelBtn} activeOpacity={0.7}
+        onPress={() => { if (subPageSnapshot.current) setDraft(subPageSnapshot.current); setSubPage(null); }}>
+        <Text style={ms.cancelText}>Cancel</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={ms.saveBtn} activeOpacity={0.7} onPress={closeSubPageDone}>
+        <Check size={15} color="white" />
+        <Text style={ms.saveText}>Done</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const back = () => (subPage ? closeSubPageDone() : pageMode ? closePage() : onClose());
 
   return (
     <>
-    <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => subPage ? closeSubPageDone() : onClose()}>
+    {pageMode ? (
+      <Modal visible={visible} animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={back}>
+        <View onLayout={kbOnCardLayout} style={[sc.page, { paddingTop: insets.top }, kbCardStyle]}>
+          <View style={sc.pageHeader}>
+            <TouchableOpacity onPress={back} hitSlop={12} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel={subPage ? "Back to the step" : "Close step"}>
+              <ArrowLeft size={20} color={colors.text} />
+            </TouchableOpacity>
+            {titleNode}
+            {subPage ? <View style={{ width: 52 }} /> : (
+              <TouchableOpacity onPress={closePage} hitSlop={8} activeOpacity={0.7} style={sc.doneBtn}
+                accessibilityRole="button" accessibilityLabel="Done">
+                <Text style={sc.doneText}>Done</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {scrollBody}
+          {subPage && subPageFooter}
+        </View>
+      </Modal>
+    ) : (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={back}>
         <View style={ms.overlay}>
           {/* Backdrop sits BEHIND the card (not wrapping it) so the card's
               ScrollView owns its gestures cleanly — a Pressable wrapping the
               ScrollView blocks scrolling when a drag starts on a focused input. */}
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => subPage ? closeSubPageDone() : onClose()} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={back} />
           <View style={wide ? ms.wideRow : { width: "100%", maxWidth: cardWidth }}>
           {wide && (
             <ExpressionHelperPanel
@@ -3457,130 +3689,15 @@ export function StepConfigModal({
                   <ArrowLeft size={18} color={colors.text} />
                 </TouchableOpacity>
               ) : <View style={{ width: 18 }} />}
-
-              {subPage ? (
-                <Text style={ms.title}>{subPageTitle[subPage]}</Text>
-              ) : editingName ? (
-                <TextInput
-                  style={[ms.title, { flex: 1, textAlign: "center", marginHorizontal: 8, paddingVertical: 2 }]}
-                  value={draft!.name ?? ""}
-                  onChangeText={v => set({ name: v || undefined })}
-                  placeholder={STEP_THEME[draft!.type]?.label ?? "Step name"}
-                  placeholderTextColor={colors.textFaint}
-                  autoFocus
-                  selectTextOnFocus
-                  returnKeyType="done"
-                  onSubmitEditing={() => setEditingName(false)}
-                  onBlur={() => setEditingName(false)}
-                />
-              ) : (
-                <TouchableOpacity
-                  style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: 8 }}
-                  onPress={() => setEditingName(true)}
-                  activeOpacity={0.7}
-                  hitSlop={8}
-                >
-                  <Text style={ms.title} numberOfLines={1}>
-                    {draft!.name?.trim() || STEP_THEME[draft!.type]?.label || "Configure Step"}
-                  </Text>
-                  <Pencil size={14} color={colors.textFaint} />
-                </TouchableOpacity>
-              )}
-
+              {titleNode}
               <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
                 <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView ref={kbScrollRef}
-              onScroll={kbOnScroll}
-              scrollEventThrottle={16}
-              // flexShrink + minHeight:0 so the body yields to the pinned footer when the card is
-              // capped (keyboard up) — the footer then never overlaps the fields, and the body scrolls.
-              style={{ flexShrink: 1, minHeight: 0 }}
-              showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              // Room to scroll a bottom field up above the keyboard (the body extends behind it).
-              contentContainerStyle={{ paddingBottom: kbPadBottom }}>
-              {subPage ? (
-                renderSubPage()
-              ) : (
-                <>
-                  {/* Plugin steps open with what they are: plugin · step and its description. */}
-                  {draft!.type === "Plugin" && <PluginStepHeader step={draft!} />}
+            {scrollBody}
 
-                  {/* Description (a note for editors, never executed) — at the very top, collapsed to
-                      an "Add" button until it has content so it takes no room when unused. */}
-                  {(draft!.comment || showComment) ? (
-                    <>
-                      <Text style={ms.fieldLabel}>DESCRIPTION  (optional)</Text>
-                      <TextInput
-                        style={[ms.input, { marginBottom: 14, minHeight: 56 }]}
-                        value={draft!.comment ?? ""}
-                        onChangeText={v => set({ comment: v.trim() ? v : undefined })}
-                        placeholder="What this step does — a note for whoever edits next. Never executed."
-                        placeholderTextColor={colors.textFaint}
-                        multiline
-                        textAlignVertical="top"
-                        autoFocus={showComment && !draft!.comment}
-                      />
-                    </>
-                  ) : (
-                    <TouchableOpacity style={[ms.modRowAdd, { marginBottom: 12 }]} onPress={() => setShowComment(true)} activeOpacity={0.7}>
-                      <Plus size={15} color={colors.textFaint} />
-                      <Text style={ms.modAddText}>Add description</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {/* Status description — the optional runtime message shown in the monitor while this
-                      step runs. Same collapse-when-empty treatment. */}
-                  {draft!.type !== "StatusUpdate" && ((draft!.statusMessage || showStatus) ? (
-                    <>
-                      <Text style={ms.fieldLabel}>STATUS DESCRIPTION  (optional)</Text>
-                      <View style={{ marginBottom: 14 }}>
-                        <TemplateInput
-                          style={ms.input}
-                          value={draft!.statusMessage ?? ""}
-                          onChange={v => set({ statusMessage: v || undefined })}
-                          placeholder="Shown in monitor while this step runs"
-                          variables={variables}
-                          autoCapitalize="sentences"
-                          create={{ type: "number" }} onCreateVariable={onSaveVariable} allVariables={variables}
-                        />
-                      </View>
-                    </>
-                  ) : (
-                    <TouchableOpacity style={[ms.modRowAdd, { marginBottom: 12 }]} onPress={() => setShowStatus(true)} activeOpacity={0.7}>
-                      <Plus size={15} color={colors.textFaint} />
-                      <Text style={ms.modAddText}>Add status description</Text>
-                    </TouchableOpacity>
-                  ))}
-
-                  {/* Sub-row buttons for moves, inline body for everything else */}
-                  {isMove ? (
-                    <View style={ms.subRowCard}>{renderMainBody()}</View>
-                  ) : isSetSpeed ? (
-                    renderMainBody()
-                  ) : (
-                    renderMainBody()
-                  )}
-
-                </>
-              )}
-            </ScrollView>
-
-            {/* Actions — a sub-page confirms/cancels just its own edit; the main page saves/cancels all. */}
-            {subPage ? (
-              <View style={ms.actions}>
-                <TouchableOpacity style={ms.cancelBtn} activeOpacity={0.7}
-                  onPress={() => { if (subPageSnapshot.current) setDraft(subPageSnapshot.current); setSubPage(null); }}>
-                  <Text style={ms.cancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={ms.saveBtn} activeOpacity={0.7} onPress={closeSubPageDone}>
-                  <Check size={15} color="white" />
-                  <Text style={ms.saveText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
+            {subPage ? subPageFooter : (
               <View style={ms.actions}>
                 <TouchableOpacity style={ms.cancelBtn} onPress={onClose} activeOpacity={0.7}>
                   <Text style={ms.cancelText}>Cancel</Text>
@@ -3588,7 +3705,7 @@ export function StepConfigModal({
                 <TouchableOpacity
                   style={ms.saveBtn}
                   onPress={() => {
-                    onSave(draft!);
+                    onSave(draft);
                     onClose();
                   }}
                   activeOpacity={0.7}
@@ -3602,6 +3719,7 @@ export function StepConfigModal({
           </View>
         </View>
     </Modal>
+    )}
     {/* Thread preset picker */}
     <BottomSheet visible={threadPresetPickerOpen} onClose={() => setThreadPresetPickerOpen(false)} title="Select Thread Size">
       <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
@@ -3670,3 +3788,227 @@ const stopCond = StyleSheet.create({
   },
   chipText: { fontSize: 12, fontWeight: "600", color: accents.cyan },
 });
+
+// The phone full-page editor and the problems box.
+const sc = StyleSheet.create({
+  page: { flex: 1, backgroundColor: colors.surface },
+  pageHeader: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  doneBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.sm, backgroundColor: colors.accent },
+  doneText: { fontSize: 14, fontWeight: "700", color: colors.onAccent },
+  problemBox: {
+    gap: 4, padding: 10, marginBottom: 12, borderRadius: radii.sm,
+    backgroundColor: colors.dangerSoft, borderWidth: 1, borderColor: colors.dangerBorder,
+  },
+  problemText: { flex: 1, fontSize: 12, color: colors.danger, lineHeight: 16 },
+  paramCard: {
+    marginTop: 10, padding: 10, borderRadius: radii.sm,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted,
+  },
+  modeChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: accents.purpleSoft },
+  modeChipText: { fontSize: 10, fontWeight: "800", color: accents.purple, letterSpacing: 0.4 },
+});
+
+// ── Routine parameters (CallRoutine) ─────────────────────────────────────────
+
+const PARAM_MODE_LABEL: Record<NonNullable<ProgramVariable["paramMode"]>, string> = { in: "IN", out: "OUT", inOut: "IN-OUT" };
+
+/** The caller variables a parameter's result may be copied into. */
+const paramVarKinds = (p: ProgramVariable): string[] =>
+  p.isString ? ["string"] : p.isBoolean ? ["boolean", "number"] : isListVariable(p) ? ["list"] : ["number"];
+
+/**
+ * One row per parameter of the called routine: an argument for `in` / `in-out` parameters
+ * (worked out in the caller before the routine starts) and a target variable for `out` /
+ * `in-out` ones (filled when it returns). Parameters are routine variables marked In, Out or
+ * In-Out in the routine's variable editor.
+ */
+function RoutineParamsSection({ step, routine, set, variables, contextVariables, onSaveVariable }: {
+  step: ProgramStep;
+  routine: { variables?: ProgramVariable[] } | undefined;
+  set: (fields: Partial<ProgramStep>) => void;
+  variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
+  onSaveVariable?: (v: ProgramVariable) => void;
+}) {
+  if (!routine) return null;
+  const params = (routine.variables ?? []).filter(v => !!v.paramMode);
+  if (params.length === 0) {
+    return (
+      <Text style={[ms.hintText, { marginTop: 12 }]}>
+        This routine takes no parameters. To pass values in or out, open the routine and mark a
+        variable as an In, Out or In-Out parameter.
+      </Text>
+    );
+  }
+  const args = step.routineArgs ?? {};
+  const outs = step.routineOutputs ?? [];
+  const setArg = (name: string, value: string) => {
+    const next = { ...args };
+    if (value.trim()) next[name] = value; else delete next[name];
+    set({ routineArgs: Object.keys(next).length ? next : undefined });
+  };
+  const setOut = (name: string, variableName: string | undefined) => {
+    const next = outs.filter(o => o.key !== name);
+    if (variableName) next.push({ key: name, variableName });
+    set({ routineOutputs: next.length ? next : undefined });
+  };
+  return (
+    <View style={{ marginTop: 16 }}>
+      <Text style={ms.fieldLabel}>PARAMETERS</Text>
+      <Text style={ms.hintText}>Arguments are worked out here before the routine starts; results are copied back when it returns.</Text>
+      {params.map(p => {
+        const mode = p.paramMode!;
+        const takesIn = mode === "in" || mode === "inOut";
+        const givesOut = mode === "out" || mode === "inOut";
+        const fallback = p.isString ? (p.stringValue ?? "") : (p.valueExpression?.trim() || String(p.value ?? 0));
+        return (
+          <View key={p.id} style={sc.paramCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: accents.purple, flex: 1 }}>${p.name}</Text>
+              <View style={sc.modeChip}><Text style={sc.modeChipText}>{PARAM_MODE_LABEL[mode]}</Text></View>
+            </View>
+            {!!p.description && <Text style={[ms.hintText, { marginTop: 2 }]}>{p.description}</Text>}
+            {takesIn && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 8 }]}>VALUE</Text>
+                {p.isString ? (
+                  <TemplateInput style={ms.input} value={args[p.name] ?? ""} onChange={v => setArg(p.name, v)}
+                    placeholder={fallback ? `"${fallback}" (routine default)` : "text"} variables={variables}
+                    create={{ type: "string" }} onCreateVariable={onSaveVariable} allVariables={variables} />
+                ) : (
+                  <ExpressionField value={args[p.name] ?? ""} onChange={v => setArg(p.name, v)}
+                    title={`${p.name} argument`} placeholder={`${fallback} (routine default)`}
+                    variables={variables} contextVariables={contextVariables} style={ms.input} />
+                )}
+              </>
+            )}
+            {givesOut && (
+              <>
+                <Text style={[ms.fieldLabel, { marginTop: 8 }]}>COPY RESULT TO</Text>
+                <CatalogVarField field={{ label: `${p.name} result`, varKinds: paramVarKinds(p) }}
+                  value={outs.find(o => o.key === p.name)?.variableName} onChange={v => setOut(p.name, v)}
+                  variables={variables} onSaveVariable={onSaveVariable} write />
+              </>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ── Teach here (move target) ─────────────────────────────────────────────────
+
+/**
+ * Teach the move's target from where the robot is now: save the live position as a new point
+ * (the step then links to it by id), or move the selected point to here after a confirm.
+ */
+function TeachHere({ points, selected, onTaught }: {
+  points: { id: string; name: string }[];
+  selected: { id: string; name: string } | undefined;
+  onTaught: (name: string) => void;
+}) {
+  const connected = useConnected();
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!connected) return null;
+  const trimmed = name.trim();
+  const taken = !!trimmed && points.some(p => p.name.toLowerCase() === trimmed.toLowerCase());
+  const saveNew = async () => {
+    if (!trimmed || taken || busy) return;
+    setBusy(true);
+    try {
+      await robotClient.sendCommand("TeachPoint", { name: trimmed });
+      onTaught(trimmed);
+      setNaming(false);
+      setName("");
+    } catch {
+      appAlert("Point not saved", "The robot did not accept the new point. Check the connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const update = () => {
+    if (!selected) return;
+    appAlert(`Move "${selected.name}" here?`,
+      "Its stored position is replaced with where the robot is now, so every step that uses this point goes there. The old position stays in the point's history.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Update Point", onPress: () => { robotClient.sendCommand("TeachPoint", { name: selected.name }).catch(() =>
+          appAlert("Point not updated", "The robot did not accept the change. Check the connection and try again.")); } },
+      ]);
+  };
+  return (
+    <View style={{ marginTop: 14, gap: 8 }}>
+      <Text style={ms.fieldLabel}>TEACH FROM THE ROBOT</Text>
+      {naming ? (
+        <>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <TextInput
+              style={[ms.input, { flex: 1, marginTop: 0 }]}
+              value={name}
+              onChangeText={setName}
+              placeholder="New point name"
+              placeholderTextColor={colors.textFaint}
+              autoFocus
+              autoCapitalize="none"
+              returnKeyType="done"
+              onSubmitEditing={saveNew}
+              aria-label="New point name"
+            />
+            <TouchableOpacity style={[ms.saveBtn, { flex: 0, paddingHorizontal: 14 }, (!trimmed || taken || busy) && { opacity: 0.4 }]}
+              onPress={saveNew} disabled={!trimmed || taken || busy} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel="Save point here">
+              <Check size={15} color="white" />
+              <Text style={ms.saveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+          {taken && <Text style={ms.fieldError}>A point with this name already exists — pick it above, or use another name.</Text>}
+        </>
+      ) : (
+        <TouchableOpacity style={ms.modRowAdd} onPress={() => setNaming(true)} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel="Save current position as new point">
+          <Crosshair size={15} color={colors.accent} />
+          <Text style={[ms.modAddText, { color: colors.accent }]}>Save current position as a new point…</Text>
+        </TouchableOpacity>
+      )}
+      {selected && (
+        <TouchableOpacity style={ms.modRowAdd} onPress={update} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel={`Update ${selected.name} to here`}>
+          <RotateCcw size={15} color={colors.textMuted} />
+          <Text style={ms.modAddText}>Update &quot;{selected.name}&quot; to the current position</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ── List element fields (ListOp) ─────────────────────────────────────────────
+
+/** The fields a ListOp writes on a Point / Record element (`set field` writes just one). */
+function ListFieldsEditor({ step, set, elementType, variables, contextVariables }: {
+  step: ProgramStep;
+  set: (fields: Partial<ProgramStep>) => void;
+  elementType: string | undefined;
+  variables?: ProgramVariable[];
+  contextVariables?: ProgramVariable[];
+}) {
+  const suggest = elementType === "Point" ? ["x", "y", "z", "rz"] : [];
+  return (
+    <View>
+      <Text style={[ms.fieldLabel, { marginTop: 12 }]}>{step.listAction === "setField" ? "FIELD" : "FIELDS"}</Text>
+      <ExprMapField label="Field" value={step.listFields} onChange={v => set({ listFields: v })}
+        variables={variables} contextVariables={contextVariables} suggest={suggest} keyPlaceholder="field" />
+      <Text style={ms.hintText}>
+        {step.listAction === "setField"
+          ? "The one field of the element at the index to change, and its new value."
+          : "Each field of the new element and the expression it gets."}
+      </Text>
+    </View>
+  );
+}

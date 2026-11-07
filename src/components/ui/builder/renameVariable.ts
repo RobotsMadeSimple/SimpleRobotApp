@@ -1,4 +1,5 @@
 import { ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { STEP_LIST_ROLES, mapStepTree } from "@/src/models/stepTree";
 
 // ── Variable rename-refactor ──────────────────────────────────────────────────
 //
@@ -38,7 +39,16 @@ const BARE_NAME_KEYS = new Set<string>([
   "recordVariableName",
   // RunVision: the overall pass target and each toolOutputs row's target
   "passVariable", "variable",
+  // Program editor v2: Try's error targets, Prompt's answer targets, ListOp copyFrom's source.
+  // routineOutputs[i].variableName is reached through "variableName" above.
+  "errorVariableName", "errorCodeVariableName",
+  "promptResultVariableName", "promptInputVariableName",
+  "listSourceVariable",
 ]);
+
+// The child step lists of a step (stepTree's roles). Steps walk them through mapStepTree, so the
+// field walk below skips them and a new body kind is covered without touching this file.
+const BODY_KEYS = new Set<string>(STEP_LIST_ROLES);
 
 /** The bare name a list/image/variable plugin param stores, or the text as typed otherwise. */
 function renameParamValue(text: string, oldName: string, newName: string): string {
@@ -83,10 +93,26 @@ function walk<T>(node: T, oldName: string, newName: string): T {
   return node;
 }
 
+/** One step's own fields renamed (its bodies are left for mapStepTree). */
+function renameStepFields(step: ProgramStep, oldName: string, newName: string): ProgramStep {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(step as unknown as Record<string, unknown>)) {
+    if (BODY_KEYS.has(k)) {
+      // Branch objects (else-if conditions, switch case values) carry fields of their own.
+      out[k] = k === "elseIfBranches" || k === "switchCases"
+        ? (v as Record<string, unknown>[] | undefined)?.map(b => { const { steps, ...rest } = b; return { ...walk(rest, oldName, newName), steps }; })
+        : v;
+    } else {
+      out[k] = walk({ [k]: v }, oldName, newName)[k];
+    }
+  }
+  return out as unknown as ProgramStep;
+}
+
 /** A new step tree with every reference to `oldName` rewritten to `newName`. */
 export function renameVariableInSteps(steps: ProgramStep[], oldName: string, newName: string): ProgramStep[] {
   if (!oldName || oldName === newName) return steps;
-  return steps.map(s => walk(s, oldName, newName));
+  return steps.map(root => mapStepTree(root, s => renameStepFields(s, oldName, newName)));
 }
 
 /**

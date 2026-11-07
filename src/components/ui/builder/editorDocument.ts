@@ -1,5 +1,5 @@
 import { BuiltProgram, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
-import { ScopeFrame, newId } from "./stepUtils";
+import { ScopeFrame, bodyOf, frameResolves, newId } from "./stepUtils";
 import { mapStepTree } from "@/src/models/stepTree";
 
 /**
@@ -84,17 +84,10 @@ export function validScopeDepth(steps: ProgramStep[], stack: ScopeFrame[]): numb
     const frame = stack[i];
     const parent = current.find(s => s.id === frame.stepId);
     if (!parent) return i;
-    // A branch list that is still absent is fine (the first step added creates it);
-    // only a missing parent step or else-if branch means the scope is gone.
-    if (frame.kind === "elseIf") {
-      const branch = parent.elseIfBranches?.find(b => b.id === frame.branchId);
-      if (!branch) return i;
-      current = branch.steps ?? [];
-    } else {
-      current = (frame.kind === "loop" ? parent.loopSteps
-        : frame.kind === "ifTrue" ? parent.ifSteps
-        : parent.elseSteps) ?? [];
-    }
+    // A body that is still absent is fine (the first step added creates it); only a missing
+    // parent step or a removed else-if branch / switch case means the scope is gone.
+    if (!frameResolves(parent, frame)) return i;
+    current = bodyOf(parent, frame) ?? [];
   }
   return stack.length;
 }

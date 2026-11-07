@@ -54,11 +54,12 @@ import {
   Spline,
 } from "lucide-react-native";
 import React from "react";
-import { ConditionGroup, ElseIfBranch, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
+import { ConditionGroup, FieldSpec, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS } from "@/src/models/robotModels";
 import { accents, colors } from "@/src/components/ui/kit";
 import { findPluginStep, pluginDisplayName } from "./usePluginContributions";
 import { outputsSummary, paramsSummary } from "./pluginSteps";
-import { mapStepTree } from "@/src/models/stepTree";
+import { mapStepTree, type StepListRole } from "@/src/models/stepTree";
+import { stepSpecFor } from "./useStepCatalog";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return pluginStepTitle(step);
     case "Unknown":
       return step.unknownStepType ? `Unknown (${step.unknownStepType})` : "Unknown Step";
-    // Program editor v2 — minimal labels until the catalog-driven summaries (package E).
+    // Program editor v2
     case "Note":
       return (step.comment ?? "").split("\n")[0].trim() || (step.noteStyle === "section" ? "Section" : "Note");
     case "LoopControl":
@@ -305,8 +306,18 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return step.variableName ? `$${step.variableName}.${step.listAction ?? "append"}` : "List";
     case "Prompt":
       return step.promptMessage ? `Prompt: ${step.promptMessage}` : "Prompt";
-    case "Return": case "Try": case "SavePosition": case "SetSpeedFactor": case "MoveC":
-      return STEP_THEME[step.type]?.label ?? step.type;
+    case "Try":
+      return step.tryRetries ? `Try  (retry ×${step.tryRetries})` : "Try";
+    case "SetSpeedFactor":
+      return `Speed Factor  →  ${step.expressions?.speedFactor ?? `${step.speedFactor ?? 100} %`}`;
+    case "SavePosition":
+      return step.savePositionTo === "point"
+        ? `Save Position  →  ${movePointName(step, points, "?")}`
+        : `Save Position  →  ${step.variableName ? `$${step.variableName}` : "?"}`;
+    case "MoveC":
+      return `MoveC  →  ${movePointName(step, points, "?")}`;
+    case "Return":
+      return "Return";
     default:              return step.type;
   }
 }
@@ -883,8 +894,46 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.unknownStepType
         ? `Original type: "${step.unknownStepType}" — delete this step to fix the program`
         : "Unrecognized step — delete this step to fix the program";
+    // Program editor v2 — the catalog's summary template, with a plain line where it is empty.
+    case "LoopControl":
+      return step.loopControl === "continue" ? "Skips the rest of this pass" : "Leaves the enclosing loop";
+    case "Return":
+      return "Back to the caller (ends a main program)";
+    case "EndProgram":
+      return step.statusMessage ? `"${step.statusMessage}"` : "Finishes the program here";
+    case "RaiseError":
+      return `${step.errorCode || "userError"}: ${step.errorMessage || "(no message)"}`;
+    case "Switch":
+      return step.switchExpr?.trim() ? `on ${step.switchExpr}` : "No value set";
+    case "Try": {
+      const parts: string[] = [];
+      if (step.tryRetries) parts.push(`retry ×${step.tryRetries}${step.tryRetryDelayMs ? ` every ${step.tryRetryDelayMs} ms` : ""}`);
+      parts.push(step.catchCodes?.length ? `catches ${step.catchCodes.join(", ")}` : "catches any runtime error");
+      if (step.errorVariableName) parts.push(`message → $${step.errorVariableName}`);
+      return parts.join("  ·  ");
+    }
+    case "MoveC": {
+      const via = step.viaPointNameExpr || step.viaPointName || "?";
+      const lines = [`→ ${movePointName(step, points, "?")}  via ${via}`];
+      const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
+      if (spd) lines.push(spd);
+      lines.push(...fmtMoveModifiers(step));
+      return lines.join("\n");
+    }
+    case "Prompt": {
+      const lines = [step.promptMessage ? `"${step.promptMessage}"` : "(no message)"];
+      const buttons = (step.promptButtons ?? []).filter(Boolean);
+      const extra: string[] = [];
+      if (buttons.length) extra.push(buttons.join(" / "));
+      if (step.promptInput && step.promptInput !== "none") extra.push(`${step.promptInput} input`);
+      if (step.promptTimeoutMs) extra.push(`timeout ${step.promptTimeoutMs} ms`);
+      if (extra.length) lines.push(extra.join("  ·  "));
+      return lines.join("\n");
+    }
+    case "Note":
+      return step.comment ?? null;
     default:
-      return null;
+      return catalogSummary(step, points);
   }
 }
 
@@ -1092,26 +1141,107 @@ export type DragInfo = {
   toIndex: number;
 };
 
-// ── Scope navigation ──────────────────────────────────────────────────────────
+/// ── Scope navigation ──────────────────────────────────────────────────────────
+
+/**
+ * Which body of a block step a scope frame points at. Each kind maps onto one stepTree role, so
+ * every body (loop, if / else-if / else, switch case / default, try / catch) is entered, read and
+ * written the same way.
+ */
+export type ScopeKind = 'loop' | 'ifTrue' | 'elseIf' | 'else' | 'switchCase' | 'switchDefault' | 'try' | 'catch';
 
 export type ScopeFrame = {
-  kind: 'loop' | 'ifTrue' | 'elseIf' | 'else';
+  kind: ScopeKind;
   stepId: string;
   label: string;
+  /** The else-if branch / switch case id, for the branch kinds. */
   branchId?: string;
 };
+
+export const SCOPE_ROLE: Record<ScopeKind, StepListRole> = {
+  loop: "loopSteps", ifTrue: "ifSteps", elseIf: "elseIfBranches", else: "elseSteps",
+  switchCase: "switchCases", switchDefault: "switchDefault", try: "trySteps", catch: "catchSteps",
+};
+
+/** The step list a frame points at inside `parent`, or undefined when that body is absent. */
+export function bodyOf(parent: ProgramStep, frame: Pick<ScopeFrame, "kind" | "branchId">): ProgramStep[] | undefined {
+  switch (frame.kind) {
+    case "loop":          return parent.loopSteps;
+    case "ifTrue":        return parent.ifSteps;
+    case "else":          return parent.elseSteps ?? undefined;
+    case "elseIf":        return parent.elseIfBranches?.find(b => b.id === frame.branchId)?.steps;
+    case "switchCase":    return parent.switchCases?.find(c => c.id === frame.branchId)?.steps;
+    case "switchDefault": return parent.switchDefault;
+    case "try":           return parent.trySteps;
+    case "catch":         return parent.catchSteps;
+  }
+}
+
+/** True when the frame's branch (else-if branch / switch case) still exists on `parent`. */
+export function frameResolves(parent: ProgramStep, frame: Pick<ScopeFrame, "kind" | "branchId">): boolean {
+  if (frame.kind === "elseIf")     return !!parent.elseIfBranches?.some(b => b.id === frame.branchId);
+  if (frame.kind === "switchCase") return !!parent.switchCases?.some(c => c.id === frame.branchId);
+  return true;
+}
+
+/** A copy of `parent` with the frame's body replaced by `steps` (an absent body is created). */
+export function withBody(parent: ProgramStep, frame: Pick<ScopeFrame, "kind" | "branchId">, steps: ProgramStep[]): ProgramStep {
+  switch (frame.kind) {
+    case "loop":          return { ...parent, loopSteps: steps };
+    case "ifTrue":        return { ...parent, ifSteps: steps };
+    case "else":          return { ...parent, elseSteps: steps };
+    case "elseIf":        return { ...parent, elseIfBranches: (parent.elseIfBranches ?? []).map(b => b.id === frame.branchId ? { ...b, steps } : b) };
+    case "switchCase":    return { ...parent, switchCases: (parent.switchCases ?? []).map(c => c.id === frame.branchId ? { ...c, steps } : c) };
+    case "switchDefault": return { ...parent, switchDefault: steps };
+    case "try":           return { ...parent, trySteps: steps };
+    case "catch":         return { ...parent, catchSteps: steps };
+  }
+}
+
+/** A switch case's chip text: its values, or "no value". */
+export function caseValuesText(values: string[] | undefined): string {
+  const v = (values ?? []).map(x => x.trim()).filter(Boolean);
+  return v.length ? v.join(", ") : "no value";
+}
+
+/**
+ * Every body a block step shows (as a frame without its stepId), in stepTree role order: a Loop's
+ * body; If's IF, each ELSE IF and an ELSE when present; each Switch CASE and a DEFAULT when
+ * present; Try's TRY and CATCH. Other steps have none (a CNC program's baked steps are not edited
+ * here).
+ */
+export function bodyFrames(step: ProgramStep, points?: Point[]): Omit<ScopeFrame, "stepId">[] {
+  switch (step.type) {
+    case "Loop":
+      return [{ kind: "loop", label: stepLabel(step, points) }];
+    case "IfCondition":
+      return [
+        { kind: "ifTrue", label: "IF" },
+        ...(step.elseIfBranches ?? []).map((b, i) => ({ kind: "elseIf" as const, label: `ELSE IF ${i + 1}`, branchId: b.id })),
+        ...(step.elseSteps != null ? [{ kind: "else" as const, label: "ELSE" }] : []),
+      ];
+    case "Switch":
+      return [
+        ...(step.switchCases ?? []).map(c => ({ kind: "switchCase" as const, label: `CASE ${caseValuesText(c.values)}`, branchId: c.id })),
+        ...(step.switchDefault != null ? [{ kind: "switchDefault" as const, label: "DEFAULT" }] : []),
+      ];
+    case "Try":
+      return [{ kind: "try", label: "TRY" }, { kind: "catch", label: "CATCH" }];
+    default:
+      return [];
+  }
+}
+
+/** True for the steps that hold other steps (and so can be expanded inline or entered). */
+export const isBlockStep = (step: ProgramStep): boolean =>
+  step.type === "Loop" || step.type === "IfCondition" || step.type === "Switch" || step.type === "Try";
 
 export function getStepsAtScope(rootSteps: ProgramStep[], stack: ScopeFrame[]): ProgramStep[] {
   let current = rootSteps;
   for (const frame of stack) {
     const parent = current.find(s => s.id === frame.stepId);
     if (!parent) break;
-    switch (frame.kind) {
-      case 'loop':   current = parent.loopSteps ?? []; break;
-      case 'ifTrue': current = parent.ifSteps ?? []; break;
-      case 'else':   current = parent.elseSteps ?? []; break;
-      case 'elseIf': current = parent.elseIfBranches?.find(b => b.id === frame.branchId)?.steps ?? []; break;
-    }
+    current = bodyOf(parent, frame) ?? [];
   }
   return current;
 }
@@ -1125,22 +1255,135 @@ export function setStepsAtScope(
   const [head, ...tail] = stack;
   return rootSteps.map(s => {
     if (s.id !== head.stepId) return s;
-    switch (head.kind) {
-      case 'loop':
-        return { ...s, loopSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.loopSteps ?? [], tail, newSteps) };
-      case 'ifTrue':
-        return { ...s, ifSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.ifSteps ?? [], tail, newSteps) };
-      case 'else':
-        return { ...s, elseSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.elseSteps ?? [], tail, newSteps) };
-      case 'elseIf':
-        return {
-          ...s,
-          elseIfBranches: (s.elseIfBranches ?? []).map(b =>
-            b.id === head.branchId
-              ? { ...b, steps: tail.length === 0 ? newSteps : setStepsAtScope(b.steps, tail, newSteps) }
-              : b
-          ),
-        };
-    }
+    return withBody(s, head, tail.length === 0 ? newSteps : setStepsAtScope(bodyOf(s, head) ?? [], tail, newSteps));
   });
+}
+
+// ── New steps (factories) ─────────────────────────────────────────────────────
+
+/** The step types added by program editor v2; their defaults come from the catalog. */
+const V2_TYPES = new Set<StepType>([
+  "Note", "LoopControl", "Return", "EndProgram", "RaiseError", "Switch", "Try",
+  "SavePosition", "SetSpeedFactor", "ListOp", "Prompt", "MoveC",
+]);
+
+/** Kinds whose catalog default is a plain value worth stamping onto a new step. */
+const STAMPED_KINDS = new Set(["enum", "bool", "number", "integer", "text", "textList"]);
+
+/**
+ * Per-type starting values the catalog cannot express (fresh ids, empty bodies), and the
+ * built-in fallback for an older controller without a catalog.
+ */
+function builtInDefaults(type: StepType): Partial<ProgramStep> {
+  switch (type) {
+    case "SetBlendRadius": return { blendRadius: 10 };
+    case "SetOutput":      return { outputNumber: 1, outputValue: true };
+    case "Wait":           return { waitMs: 500 };
+    case "Loop":           return { loopCount: 1, loopSteps: [] };
+    case "Label":          return { labelId: newId() };
+    case "IfCondition":    return { condition: { combinator: "ALL", items: [] }, ifSteps: [] };
+    case "CncProgram":     return { cncProgramSteps: [] };
+    case "GripperAction":  return { auxAxisIndex: 0, gripperAction: "Open" };
+    case "ConveyorAction": return { auxAxisIndex: 0, conveyorAction: "RunForward" };
+    case "RotaryIndex":    return { auxAxisIndex: 0, rotaryDirection: 1, rotaryCount: 1 };
+    case "Note":           return { comment: "", noteStyle: "note" };
+    case "LoopControl":    return { loopControl: "break" };
+    case "RaiseError":     return { errorMessage: "" };
+    case "Switch":         return { switchExpr: "", switchCases: [{ id: newId(), values: ["1"], steps: [] }] };
+    case "Try":            return { trySteps: [], catchSteps: [], tryRetries: 0 };
+    case "SavePosition":   return { savePositionTo: "variable", savePositionMode: "replace" };
+    case "SetSpeedFactor": return { speedFactor: 100 };
+    case "ListOp":         return { listAction: "append" };
+    case "Prompt":         return { promptMessage: "", promptButtons: ["OK"], promptInput: "none" };
+    default:               return {};
+  }
+}
+
+/**
+ * A new step of `type` with its starting values: the catalog's defaults for the v2 blocks (enum,
+ * number and list fields), then the per-type values above. Only the fields a type uses are set —
+ * an older build stamped forty unrelated fields onto every step.
+ */
+export function newStep(type: StepType): ProgramStep {
+  const fromCatalog: Record<string, unknown> = {};
+  if (V2_TYPES.has(type)) {
+    for (const f of stepSpecFor(type)?.fields ?? []) {
+      if (f.hidden || f.default == null || !STAMPED_KINDS.has(f.kind) || f.props) continue;
+      fromCatalog[f.key] = Array.isArray(f.default) ? [...f.default] : f.default;
+    }
+  }
+  return { id: newId(), type, ...(fromCatalog as Partial<ProgramStep>), ...builtInDefaults(type) };
+}
+
+// ── Catalog row summaries ─────────────────────────────────────────────────────
+
+/** One field's value as row text ("" when unset). */
+function summaryValue(step: ProgramStep, f: FieldSpec, points?: Point[]): string {
+  const raw = step as unknown as Record<string, unknown>;
+  const expr = f.exprKey ? step.expressions?.[f.exprKey] : undefined;
+  if (expr) return expr;
+  switch (f.kind) {
+    case "target":
+      if (f.key === "via") return step.viaPointNameExpr || step.viaPointName || "";
+      return step.gridPoint ? "grid point" : step.stackPoint ? "stack point"
+        : step.pointNameExpr || (step.pointId || step.pointName ? movePointName(step, points, "") : "");
+    case "pointRef": return step.pointId || step.pointName ? movePointName(step, points, "") : "";
+    case "varWrite": case "varRead": case "listVar": {
+      const v = raw[f.key];
+      return typeof v === "string" && v ? `$${v}` : "";
+    }
+    case "condition": {
+      const g = raw[f.key] as ConditionGroup | undefined;
+      return g?.items?.length ? conditionGroupText(g) : "";
+    }
+    case "textList": {
+      const v = raw[f.key];
+      return Array.isArray(v) ? v.filter(Boolean).join(", ") : "";
+    }
+    case "bool": {
+      const v = raw[f.key];
+      return v === true ? "on" : v === false ? "off" : "";
+    }
+    case "enum": {
+      const v = raw[f.key];
+      if (v == null || v === "") return "";
+      return f.options?.find(o => String(o.value) === String(v))?.label.toLowerCase() ?? String(v);
+    }
+    default: {
+      // Reference fields name the thing through their second prop (localId → localName).
+      const name = f.props && f.props.length > 1 ? raw[f.props[1]] : undefined;
+      const v = name ?? raw[f.key];
+      if (v == null || v === "") return "";
+      if (typeof v === "number") return f.unit ? `${v} ${f.unit}` : String(v);
+      return typeof v === "string" ? v : "";
+    }
+  }
+}
+
+/**
+ * A step's row summary from its catalog template (`→ {target} · {speed}`): each `{key}` becomes
+ * the field's value, and a ` · ` part whose fields are all unset — or, for a decorated part like
+ * `retry {tryRetries}`, still at their default — is dropped. Null without a catalog entry.
+ */
+export function catalogSummary(step: ProgramStep, points?: Point[]): string | null {
+  const spec = stepSpecFor(step.type);
+  if (!spec?.summary) return null;
+  const byKey = new Map(spec.fields.map(f => [f.key, f]));
+  const raw = step as unknown as Record<string, unknown>;
+  const parts = spec.summary.split(" · ").map(part => {
+    const keys = [...part.matchAll(/\{(\w+)\}/g)].map(m => m[1]);
+    const decorated = part.replace(/\{\w+\}/g, "").trim().length > 0;
+    let any = false;
+    const text = part.replace(/\{(\w+)\}/g, (_m, key: string) => {
+      const f = byKey.get(key);
+      if (!f) return "";
+      const v = summaryValue(step, f, points);
+      const atDefault = f.default != null && JSON.stringify(raw[key]) === JSON.stringify(f.default);
+      if (v && !(decorated && atDefault)) any = true;
+      return v;
+    });
+    return keys.length === 0 || any ? text.trim() : "";
+  });
+  const out = parts.filter(Boolean).join("  ·  ");
+  return out || null;
 }
