@@ -12,12 +12,14 @@
 // Prereqs: Expo web dev server on :8081 and a controller on :9000 (the virtual one is fine).
 //   npm run keyboard-audit            # all scenarios
 //   npm run keyboard-audit -- aux     # scenarios whose name contains "aux"
+//   CTRL_PORT=9115 npm run keyboard-audit -- text   # against a private controller on another port
 // Add a scenario below whenever a screen gains a text field inside a modal or sheet.
 
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { Buffer } from "node:buffer";
 
 const BASE = process.env.APP_URL || "http://localhost:8081";
 const CONTROLLER = process.env.CTRL_HOST || "localhost";
@@ -270,6 +272,66 @@ const SCENARIOS = [
     route: "/io/configure?deviceId=ROBOT_NANO_001",
     open: async () => {},
   },
+  // The app-wide operator prompt (PromptDialog), fed by its web dev mock (?mockPrompt=, this load
+  // only) so no program has to run: a number prompt and a text prompt over a busy page.
+  ...[["number", { input: "number", default: "4", min: 1, max: 20, buttons: ["Run", "Cancel"], timeoutMs: 60000 }],
+      ["text", { input: "text", buttons: ["OK"] }]].map(([kind, p]) => ({
+    name: `prompt dialog — ${kind} input`,
+    route: "/program/builder?mockPrompt=" + encodeURIComponent(JSON.stringify({
+      id: `audit-${kind}`, programName: "zz keyboard audit", title: "Operator input", message: "Enter a value to continue.", ...p })),
+    open: async () => { await sleep(500); },
+  })),
+  // The program Text view's full-screen editor (CodeMirror — a contentEditable, not an input, so
+  // it has its own check): type down past the keyboard's top and require the caret line and the
+  // symbol key row to stay above it.
+  {
+    name: "builder — Text editor (full-screen)",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Text"); await sleep(2500);
+      await p.getByLabel("Edit").locator("visible=true").first().click({ force: true }); await sleep(1500);
+    },
+    audit: async (p, report) => {
+      const name = "builder — Text editor (full-screen)";
+      const line = p.locator(".cm-line").locator("visible=true").last();
+      await line.click({ force: true }); await sleep(600);
+      for (let i = 0; i < 30; i++) { await p.keyboard.press("Enter"); await p.keyboard.type(`Wait ${i + 1}`); }
+      await sleep(800);
+      const r = await p.evaluate(() => {
+        const kb = window.__mockKeyboard || {};
+        const top = kb.visible ? kb.top : window.innerHeight;
+        // The focused editor (a read-only preview may sit behind the full-screen one).
+        const ed = document.activeElement?.closest(".cm-editor") ?? document;
+        const caret = ed.querySelector(".cm-cursor")?.getBoundingClientRect();
+        const active = ed.querySelector(".cm-activeLine")?.getBoundingClientRect();
+        const keyRow = [...document.querySelectorAll("[aria-label='Insert variable']")].map(e => e.getBoundingClientRect()).find(b => b.width > 0);
+        return { keyboardUp: !!kb.visible, top, caretBottom: caret?.bottom ?? null, lineBottom: active?.bottom ?? null, keyRowBottom: keyRow?.bottom ?? null };
+      });
+      const lineOk = r.lineBottom != null && r.lineBottom <= r.top + 0.5;
+      const rowOk = r.keyRowBottom != null && r.keyRowBottom <= r.top + 0.5;
+      const pass = r.keyboardUp && lineOk && rowOk;
+      const why = !r.keyboardUp ? "mock keyboard did not appear"
+        : !lineOk ? `edited line bottom ${Math.round(r.lineBottom ?? -1)}px is below keyboard top ${Math.round(r.top)}px`
+        : !rowOk ? `key row bottom ${Math.round(r.keyRowBottom ?? -1)}px is below keyboard top ${Math.round(r.top)}px` : "";
+      report.push({ scenario: name, field: "edited line + key row", pass, why });
+      if (!pass) {
+        const file = join(OUT, `${report.length}-text-editor.png`);
+        await p.screenshot({ path: file }).catch(() => {});
+        report[report.length - 1].shot = file;
+      }
+    },
+  },
+  // Programs → Import .srs: the name field of the import sheet.
+  {
+    name: "programs — Import .srs sheet",
+    route: "/program/robot-programs",
+    open: async p => {
+      const chooser = p.waitForEvent("filechooser");
+      await p.getByLabel("Import a program from a text file (.srs)").locator("visible=true").first().click({ force: true });
+      await (await chooser).setFiles({ name: "audit.srs", mimeType: "text/plain", buffer: Buffer.from('#!srs 1\n@program {"name": "zz keyboard audit import"}\nWait 100ms\n') });
+      await sleep(1500);
+    },
+  },
 ];
 
 // ── Audit ─────────────────────────────────────────────────────────────────────
@@ -361,9 +423,14 @@ async function main() {
   const errors = [];
   p.on("pageerror", e => errors.push(e.message.split("\n")[0]));
 
-  await p.goto(BASE + "/robot", { waitUntil: "load" }); await sleep(2000);
-  const inp = p.getByPlaceholder("192.168.1.50");
-  if (await inp.count()) { await inp.first().fill(CONTROLLER); await tap(p, "Connect"); await sleep(2500); }
+  if (process.env.CTRL_PORT) {
+    // A controller on another port (a private test instance): connect through the station link.
+    await p.goto(`${BASE}/station?host=${encodeURIComponent(CONTROLLER)}&port=${process.env.CTRL_PORT}`, { waitUntil: "load" }); await sleep(15000);
+  } else {
+    await p.goto(BASE + "/robot", { waitUntil: "load" }); await sleep(2000);
+    const inp = p.getByPlaceholder("192.168.1.50");
+    if (await inp.count()) { await inp.first().fill(CONTROLLER); await tap(p, "Connect"); await sleep(2500); }
+  }
 
   const report = [];
   for (const s of SCENARIOS) {
@@ -371,7 +438,9 @@ async function main() {
     try {
       await p.goto(BASE + s.route, { waitUntil: "load" }); await sleep(1800);
       await s.open(p);
-      await auditFields(p, s, report);
+      // A scenario with its own `audit` checks fields the generic input walk cannot (an editor).
+      if (s.audit) await s.audit(p, report);
+      else await auditFields(p, s, report);
     } catch (e) {
       report.push({ scenario: s.name, field: "(scenario)", pass: false, why: "could not run: " + e.message.split("\n")[0] });
     }
