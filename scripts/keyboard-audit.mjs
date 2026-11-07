@@ -33,27 +33,33 @@ const tap = async (p, t, { exact = true, nth = 0, last = false } = {}) => {
   await (last ? e.last() : e.nth(nth)).click({ force: true });
 };
 
-// A vision program with a skewed board zone aligned to a frame, plus corner, edge and texture
-// inspections, and a second board zone snapped by a checker-grid frame on itself.
+// A vision program built from generic tools: a filtered image layer, a line that locates the part
+// (a fixture), a gridded pixel count and a blob that follow it, a corner, and a fixture made from
+// two tools. Covers every text field kind: names, numeric steppers, limits and filter params.
 const AUDIT_VISION_PROGRAM = {
-  id: "", name: "zz keyboard audit", description: "", cameraId: "", lastUpdatedUnixMs: 0, inspectionOrder: [],
-  zones: [{ id: "z1", name: "Board", alignTo: "f1", grid: { rows: 8, cols: 8 },
-    geometry: { shape: "Quad", x: 0, y: 0, width: 1, height: 1, rotation: 0, cx: 0.5, cy: 0.5, radius: 0.25,
-      points: [[0.35, 0.2], [0.65, 0.2], [0.9, 0.85], [0.1, 0.85]] } },
-    { id: "z2", name: "Squares", alignTo: "f2", grid: { rows: 8, cols: 8 },
-    geometry: { shape: "Quad", x: 0, y: 0, width: 1, height: 1, rotation: 0, cx: 0.5, cy: 0.5, radius: 0.25,
-      points: [[0.36, 0.4], [0.66, 0.4], [0.94, 0.86], [0.12, 0.86]] } }],
-  inspections: [],
-  frameInspections: [{ id: "f1", name: "Frame 1", enabled: true, zoneId: null, method: "lines", cannyLow: 50, cannyHigh: 150,
-    minAreaPct: 10, approxEpsilon: 0.02, houghThreshold: 60, minLineLengthPct: 20, maxLineGap: 10,
-    maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10, referenceCorners: null },
-    { id: "f2", name: "Checker 1", enabled: true, zoneId: "z2", method: "checker", cannyLow: 50, cannyHigh: 150,
-    minAreaPct: 10, approxEpsilon: 0.02, houghThreshold: 60, minLineLengthPct: 20, maxLineGap: 10,
-    maxCorners: 200, cornerQuality: 0.01, minCornerDistance: 10, gridRows: 8, gridCols: 8, minEdgeRatio: 4, referenceCorners: null }],
-  cornerInspections: [{ id: "c1", name: "Corners 1", enabled: true, zoneId: "z1", method: "shiTomasi",
-    maxCorners: 50, quality: 0.01, minDistance: 10, blockSize: 3, minCount: 1 }],
-  edgeInspections: [{ id: "e1", name: "Edges 1", enabled: true, zoneId: "z1", cannyLow: 50, cannyHigh: 150, minDensity: 0, maxDensity: 30 }],
-  textureInspections: [{ id: "t1", name: "Texture 1", enabled: true, zoneId: "z2", cellInset: 25, minScore: 4, maxScore: 20 }],
+  id: "", name: "zz keyboard audit", description: "", cameraId: "", lastUpdatedUnixMs: 0,
+  layers: [{ id: "l1", name: "Soft gray", input: "camera", filters: [
+    { id: "f1", type: "blur", enabled: true, size: 5 },
+    { id: "f2", type: "threshold", enabled: true, mode: "adaptive", low: 128, high: 255, blockSize: 31, c: 5, invert: false }] }],
+  tools: [
+    { id: "t1", name: "Top edge", type: "findLine", enabled: true, input: "l1", fixtureId: null,
+      region: { shape: "rect", x: 0.2, y: 0.1, width: 0.6, height: 0.1, rotation: 0 }, grid: null,
+      limits: { angle: { min: -5, max: 5 } }, includeInPass: true, reference: null,
+      params: { probes: 8, polarity: "any", contrast: 20, smoothing: 1, ignore: 0 } },
+    { id: "t2", name: "Squares", type: "pixelCount", enabled: true, input: "camera", fixtureId: "t1",
+      region: { shape: "quad", points: [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.8, y: 0.8 }, { x: 0.2, y: 0.8 }] },
+      grid: { rows: 4, cols: 4, inset: 0.2 }, limits: { percent: { min: 40, max: null } }, includeInPass: true, reference: null,
+      params: { mode: "gray", colors: [], grayMin: 0, grayMax: 90 } },
+    { id: "t3", name: "Holes", type: "blob", enabled: true, input: "l1", fixtureId: "t1",
+      region: { shape: "circle", cx: 0.5, cy: 0.55, radius: 0.2 }, grid: null,
+      limits: { count: { min: 2, max: 4 } }, includeInPass: true, reference: null,
+      params: { polarity: "dark", threshold: "fixed", level: 100, minArea: 100, maxArea: 100000, minCircularity: 0.5, sort: "area", maxCount: 10 } },
+    { id: "t4", name: "Left corner", type: "findCorner", enabled: true, input: "camera", fixtureId: null,
+      region: { shape: "rect", x: 0.1, y: 0.1, width: 0.3, height: 0.06, rotation: 0 }, grid: null, limits: {}, includeInPass: true, reference: null,
+      params: { probes: 8, polarity: "any", contrast: 20, smoothing: 1, ignore: 0, regionB: { shape: "rect", x: 0.1, y: 0.1, width: 0.06, height: 0.3, rotation: 0 } } },
+    { id: "t5", name: "Part frame", type: "makeFixture", enabled: true, input: "camera", fixtureId: null, grid: null, limits: {},
+      includeInPass: true, reference: null, params: { mode: "twoPoints", sources: ["t4", "t1"] } },
+  ],
 };
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -180,12 +186,22 @@ const SCENARIOS = [
     route: "/space/grid-teach",
     open: async () => {},
   },
-  // Vision editor on an inline, never-saved program (no id; opening an inspection saves nothing).
-  ...[["frame", "Frame 1"], ["checker frame", "Checker 1"], ["corner", "Corners 1"], ["edge", "Edges 1"], ["texture", "Texture 1"]].map(([kind, label]) => ({
-    name: `vision — ${kind} inspection settings (page)`,
+  // Vision editor on an inline, never-saved program: each tool's settings page and the layer page.
+  {
+    name: "vision — editor (page)",
+    route: "/program/vision-editor?program=" + encodeURIComponent(JSON.stringify(AUDIT_VISION_PROGRAM)),
+    open: async () => {},
+  },
+  ...[["find line", "Top edge"], ["gridded pixel count", "Squares"], ["blob", "Holes"], ["find corner", "Left corner"], ["make fixture", "Part frame"]].map(([kind, label]) => ({
+    name: `vision — ${kind} tool settings (page)`,
     route: "/program/vision-editor?program=" + encodeURIComponent(JSON.stringify(AUDIT_VISION_PROGRAM)),
     open: async p => { await tap(p, label); await sleep(900); },
   })),
+  {
+    name: "vision — image layer filters (page)",
+    route: "/program/vision-editor?program=" + encodeURIComponent(JSON.stringify(AUDIT_VISION_PROGRAM)),
+    open: async p => { await tap(p, "Soft gray"); await sleep(900); },
+  },
   {
     name: "IO configure (page)",
     route: "/io/configure?deviceId=ROBOT_NANO_001",
