@@ -15,7 +15,7 @@ import {
   ActivityIndicator, Image, Keyboard, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
-import { accents, colors, spacing, radii, shadows, InfoTip, PageHeader, StatusPill } from "@/src/components/ui/kit";
+import { accents, colors, spacing, radii, shadows, cautionRowStyle, CautionTriangle, InfoTip, PageHeader, StatusPill } from "@/src/components/ui/kit";
 import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { useDragReorder } from "@/src/components/ui/useDragReorder";
@@ -413,10 +413,16 @@ export default function VisionEditorScreen() {
         />
       </View>
       <View style={styles.detailsDivider} />
-      <TouchableOpacity style={styles.detailsRow} onPress={() => setCamPickerOpen(true)} activeOpacity={0.75}>
+      <TouchableOpacity
+        style={[styles.detailsRow, !program.cameraId && styles.detailsRowCaution]}
+        onPress={() => setCamPickerOpen(true)}
+        activeOpacity={0.75}
+      >
         <Text style={styles.rowLabel}>Camera</Text>
-        <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? colors.success : colors.borderStrong }]} />
-        <Text style={styles.cameraValue} numberOfLines={1}>
+        {program.cameraId
+          ? <View style={[styles.dot, { backgroundColor: selectedCam?.connected ? colors.success : colors.borderStrong }]} />
+          : <CautionTriangle size={16} />}
+        <Text style={[styles.cameraValue, !program.cameraId && styles.cameraValueCaution]} numberOfLines={1}>
           {selectedCam ? (selectedCam.name || selectedCam.id) : (program.cameraId || "Tap to select")}
         </Text>
         {!!program.cameraId && <CameraCalibrationBadge cameraId={program.cameraId} calibrated={selectedCam?.calibrated} />}
@@ -720,6 +726,7 @@ const styles = StyleSheet.create({
   rowLabel:    { fontSize: 12, fontWeight: "600", color: colors.textMuted, width: 60 },
   nameInput:   { flex: 1, fontSize: 14, color: colors.text },
   cameraValue: { flex: 1, fontSize: 14, color: colors.text },
+  cameraValueCaution: { fontWeight: "600", color: colors.textSecondary },
   dot:         { width: 8, height: 8, borderRadius: 4 },
   waiting:     { fontSize: 12, color: colors.textMuted, textAlign: "center" },
 
@@ -736,6 +743,7 @@ const styles = StyleSheet.create({
 
   detailsCard: { backgroundColor: colors.surface, borderRadius: radii.md, overflow: "hidden", ...shadows.soft },
   detailsRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: spacing.md },
+  detailsRowCaution: { ...cautionRowStyle, borderBottomLeftRadius: radii.md, borderBottomRightRadius: radii.md },
   detailsDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
 
   // Drag-to-reorder feedback, on a non-elevated outer wrapper (Android blanks an elevated view with opacity < 1).

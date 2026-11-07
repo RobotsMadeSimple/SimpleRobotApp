@@ -53,7 +53,7 @@ import {
 } from "@/src/providers/RobotProvider";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { colors, radii, accents } from "@/src/components/ui/kit";
+import { colors, radii, accents, CautionNote } from "@/src/components/ui/kit";
 import { ms } from "./builderStyles";
 import { STEP_THEME, fmtMoveStop, newId } from "./stepUtils";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
@@ -3193,7 +3193,11 @@ export function StepConfigModal({
             {cameraDevices.length === 0 ? (
               <Text style={ms.emptyHint}>No cameras configured. Add cameras in the Camera settings.</Text>
             ) : (
-              cameraDevices.map((cam, i) => {
+              <>
+              {!cameraDevices.some(c => c.id === (draft!.captureImageCameraId ?? "")) && (
+                <CautionNote style={{ marginBottom: 6 }}>No camera selected. Pick one below.</CautionNote>
+              )}
+              {cameraDevices.map((cam, i) => {
                 const active = (draft!.captureImageCameraId ?? "") === cam.id;
                 return (
                   <TouchableOpacity
@@ -3207,7 +3211,8 @@ export function StepConfigModal({
                     {active && <Check size={14} color={accentImg} />}
                   </TouchableOpacity>
                 );
-              })
+              })}
+              </>
             )}
 
             <VarSelectorButton
