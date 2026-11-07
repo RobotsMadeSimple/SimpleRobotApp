@@ -1,15 +1,18 @@
-import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from "@/src/models/robotModels";
+import type { DrawGeometry, DrawGrid, DrawShape } from "./regionMath";
 import { HOMOGRAPHY_JS } from "./homography";
 
+/** Another region drawn faintly behind the one being edited, for context. */
+export type DrawContextRegion = { id: string; name: string; geometry: DrawGeometry; grid: DrawGrid | null };
+
 /**
- * Zone draw/edit canvas.
+ * Region draw/edit canvas (a tool's search area).
  *
  * There is always at most one *working geometry*. Until it exists you are drawing:
  * drag out a rectangle or circle, or tap out polygon points. Once it exists you are
  * editing: drag a handle to reshape, drag the interior to move. Nothing is committed
  * back to the program until the host taps Save, so Cancel is always a clean exit.
  *
- * `initialGeometry` seeds the working geometry, which is what makes "edit the zone I
+ * `initialGeometry` seeds the working geometry, which is what makes "edit the region I
  * already have" work rather than forcing a redraw from scratch. `initialGrid` is drawn
  * over it but not owned here — the host keeps that and pushes updates in via setGrid.
  *
@@ -20,13 +23,13 @@ import { HOMOGRAPHY_JS } from "./homography";
  * rectangle being edited if there is one, else an inset box — and the user drags each
  * corner onto the board's. Its grid is drawn perspective-correct (src/vision/homography.ts).
  */
-export function makeZoneDrawHtml(
+export function makeRegionDrawHtml(
   imageUri: string,
-  zones: VisionZone[],
-  editingZoneId: string | null,
-  activeShape: VisionZoneShape,
-  initialGeometry?: VisionZoneGeometry | null,
-  initialGrid?: VisionZoneGrid | null
+  context: DrawContextRegion[],
+  editingId: string | null,
+  activeShape: DrawShape,
+  initialGeometry?: DrawGeometry | null,
+  initialGrid?: DrawGrid | null
 ): string {
   return `<!DOCTYPE html><html>
 <head>
@@ -42,8 +45,8 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch
 <script>
 ${HOMOGRAPHY_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
-var zones=${JSON.stringify(zones)};
-var editingId=${JSON.stringify(editingZoneId)};
+var zones=${JSON.stringify(context)};
+var editingId=${JSON.stringify(editingId)};
 var drawShape=${JSON.stringify(activeShape)};
 var grid=${JSON.stringify(initialGrid ?? null)};
 var geom=${JSON.stringify(initialGeometry ?? null)};
@@ -629,65 +632,56 @@ ${HOMOGRAPHY_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
 var _ws=null,_timer=null,_lastUrl=null,_gen=0;
 
-// Zone outlines drawn over every frame, so every declared zone is visible whether or
-// not an inspection uses it. The host pushes the zones in and toggles them; the canvas
-// is the image at natural size, so normalized zone coords map straight to it.
-var _zones=[],_zonesVisible=true,_aligned=[];
-window.setZones=function(z){_zones=z||[];};
-window.setZonesVisible=function(v){_zonesVisible=!!v;};
-// The outline each frame-aligned zone actually had on the last result (normalized points),
-// drawn over the drawn zone so you can see the alignment follow the board.
-window.setAlignedZones=function(a){_aligned=a||[];};
-function quadGrid(pts,grid,W,H){
-  if(!grid||grid.rows*grid.cols<=1||!pts||pts.length!==4)return;
-  var q=pts.map(function(p){return[p[0]*W,p[1]*H];});
-  ctx.save();ctx.globalAlpha=0.6;ctx.lineWidth=Math.max(1,ctx.lineWidth/2);
-  for(var r=0;r<grid.rows;r++)for(var k=0;k<grid.cols;k++){
-    var cq=quadCellQuad(q,grid.rows,grid.cols,r,k);
-    ctx.beginPath();ctx.moveTo(cq[0][0],cq[0][1]);for(var t=1;t<4;t++)ctx.lineTo(cq[t][0],cq[t][1]);ctx.closePath();ctx.stroke();
-  }
-  ctx.restore();
-}
-function drawZones(){
-  if(!_zonesVisible||!c.width||!c.height)return;
-  var W=c.width,H=c.height,m=Math.min(W,H);
-  ctx.save();
-  ctx.lineWidth=Math.max(2,Math.round(m*0.005));
-  for(var a=0;a<_aligned.length;a++){
-    var al=_aligned[a];if(!al||!al.points||al.points.length<2)continue;
-    ctx.strokeStyle='#e879f9';
-    ctx.beginPath();ctx.moveTo(al.points[0][0]*W,al.points[0][1]*H);
-    for(var b=1;b<al.points.length;b++)ctx.lineTo(al.points[b][0]*W,al.points[b][1]*H);
-    ctx.closePath();ctx.stroke();
-    var zz=null;for(var zi=0;zi<_zones.length;zi++)if(_zones[zi].id===al.zoneId)zz=_zones[zi];
-    if(zz&&zz.grid)quadGrid(al.points,zz.grid,W,H);
-  }
-  ctx.strokeStyle='#22d3ee';
-  for(var i=0;i<_zones.length;i++){
-    var g=_zones[i].geometry;if(!g)continue;
-    if(g.shape==='Circle'){
-      ctx.beginPath();ctx.arc(g.cx*W,g.cy*H,g.radius*m,0,2*Math.PI);ctx.stroke();
-    }else if((g.shape==='Polygon'||g.shape==='Quad')&&g.points&&g.points.length>=2){
-      ctx.beginPath();ctx.moveTo(g.points[0][0]*W,g.points[0][1]*H);
-      for(var j=1;j<g.points.length;j++)ctx.lineTo(g.points[j][0]*W,g.points[j][1]*H);
-      ctx.closePath();ctx.stroke();
-      if(g.shape==='Quad'&&!_zones[i].alignTo)quadGrid(g.points,_zones[i].grid,W,H);
-    }else{
-      var x=g.x*W,y=g.y*H,w=g.width*W,h=g.height*H,rot=(g.rotation||0)*Math.PI/180;
-      if(rot){ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate(rot);ctx.strokeRect(-w/2,-h/2,w,h);ctx.restore();}
-      else{ctx.strokeRect(x,y,w,h);}
-    }
+// Tool overlay drawn over every frame: each tool's region (as used this frame when there is a
+// result, else as configured), its found points / lines / pose (a small axis cross), grid cells
+// coloured pass / fail, and tools that did not run dimmed. The host pushes it in with setOverlay.
+// An outline (and its cells) in "norm" space is scaled by the frame size, a "px" one is drawn as-is;
+// points, lines and poses are always pixels. The canvas is the frame at its natural size, so result
+// pixels map straight onto it.
+var _ov=[];
+window.setOverlay=function(o){_ov=o||[];};
+function drawOverlay(){
+  if(!_ov.length||!c.width||!c.height)return;
+  var W=c.width,H=c.height,m=Math.min(W,H),lw=Math.max(2,Math.round(m*0.004));
+  ctx.save();ctx.lineJoin='round';
+  for(var i=0;i<_ov.length;i++){
+    var o=_ov[i];var sx=o.space==='norm'?W:1,sy=o.space==='norm'?H:1;
+    function X(p){return p[0]*sx;} function Y(p){return p[1]*sy;}
+    ctx.globalAlpha=o.dim?0.35:1;
+    function poly(pts,fill){if(!pts||pts.length<2)return;ctx.beginPath();ctx.moveTo(X(pts[0]),Y(pts[0]));
+      for(var k=1;k<pts.length;k++)ctx.lineTo(X(pts[k]),Y(pts[k]));ctx.closePath();if(fill)ctx.fill();ctx.stroke();}
+    // Cells first so the region outline sits on top of them.
+    if(o.cells){for(var ci=0;ci<o.cells.length;ci++){var ce=o.cells[ci];
+      ctx.lineWidth=Math.max(1,lw/2);ctx.setLineDash([]);
+      ctx.strokeStyle=ce.passed===true?'#22c55e':ce.passed===false?'#ef4444':o.color;
+      ctx.fillStyle=ce.passed===true?'rgba(34,197,94,0.22)':ce.passed===false?'rgba(239,68,68,0.22)':'rgba(0,0,0,0)';
+      poly(ce.pts,ce.passed!==null&&ce.passed!==undefined);}}
+    if(o.outline){ctx.lineWidth=o.selected?lw*1.6:lw;ctx.strokeStyle=o.color;ctx.setLineDash(o.dashed?[lw*3,lw*2]:[]);
+      ctx.fillStyle='rgba(0,0,0,0)';poly(o.outline,false);ctx.setLineDash([]);
+      if(o.label){var top=o.outline[0];for(var t=1;t<o.outline.length;t++)if(Y(o.outline[t])<Y(top))top=o.outline[t];
+        ctx.font='bold '+Math.max(11,Math.round(m*0.028))+'px sans-serif';
+        var tx=X(top)+4,ty=Y(top)>m*0.05?Y(top)-lw*2:Y(top)+m*0.04;
+        ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.6)';ctx.strokeText(o.label,tx,ty);ctx.fillStyle=o.color;ctx.fillText(o.label,tx,ty);}}
+    if(o.lines){ctx.lineWidth=lw;ctx.strokeStyle='#facc15';for(var li=0;li<o.lines.length;li++){var L=o.lines[li];
+      ctx.beginPath();ctx.moveTo(L[0],L[1]);ctx.lineTo(L[2],L[3]);ctx.stroke();}}
+    if(o.points){ctx.fillStyle='#facc15';var pr=Math.max(2,lw);for(var pi=0;pi<o.points.length;pi++){var P=o.points[pi];
+      ctx.beginPath();ctx.arc(P[0],P[1],pr,0,2*Math.PI);ctx.fill();}}
+    if(o.pose){var px=o.pose.x,py=o.pose.y,a=o.pose.angle*Math.PI/180,len=m*0.06;
+      var ux=Math.cos(a),uy=Math.sin(a);ctx.lineWidth=lw;
+      ctx.strokeStyle='#ef4444';ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px+ux*len,py+uy*len);ctx.stroke();
+      ctx.strokeStyle='#22c55e';ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px-uy*len,py+ux*len);ctx.stroke();
+      ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(px,py,lw*1.2,0,2*Math.PI);ctx.fill();}
   }
   ctx.restore();
 }
 
 // Tap-to-select: report a tap's position in normalized (0-1) image coordinates, so the
-// host can hit-test it against zone geometry (that logic stays out of this shared feed
-// document — see VisionFeedViewer's onTapImagePoint and InspectionConfigModal.tsx).
+// host can hit-test it against tool regions (that logic stays out of this shared feed document —
+// see VisionFeedViewer's onTapImagePoint).
 // canvas{object-fit:contain} lets the browser scale the buffer (c.width/c.height, i.e. the
 // image's natural pixels) into the element's box, letterboxing to preserve aspect ratio —
-// the same "contain" math ZoneDrawModal's imgRect() computes by hand against its own,
-// differently-sized buffer (see makeZoneDrawHtml above). A tap landing in the letterbox
+// the same "contain" math RegionDrawModal's imgRect() computes by hand against its own,
+// differently-sized buffer (see makeRegionDrawHtml above). A tap landing in the letterbox
 // bars (outside the scaled image) is reported as no tap at all.
 function feedTapPoint(clientX,clientY){
   var rect=c.getBoundingClientRect();
@@ -718,7 +712,7 @@ function drawSrc(src,cb,g){
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
-      ctx.drawImage(img,0,0);drawZones();
+      ctx.drawImage(img,0,0);drawOverlay();
     }
     if(cb)cb();
   };
@@ -746,7 +740,7 @@ function startPoll(url,ms,g){
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
-      ctx.drawImage(img,0,0);drawZones();busy=false;
+      ctx.drawImage(img,0,0);drawOverlay();busy=false;
     };
     img.onerror=function(){busy=false;};
     img.src=url+'?_='+Date.now();

@@ -607,13 +607,10 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
     case "RunVision": {
       const lines: string[] = [];
       if (step.visionProgramName) lines.push(`→ ${step.visionProgramName}`);
-      if (step.visionZoneVar) lines.push(`zone → $${step.visionZoneVar}`);
-      else if (step.visionZoneId) lines.push(`zone override`);
-      const outN = (step.visionOutputs?.length ?? 0) + (step.colorOutputs?.length ?? 0)
-        + (step.polygonOutputs?.length ?? 0) + (step.arucoOutputs?.length ?? 0)
-        + (step.frameOutputs?.length ?? 0) + (step.cornerOutputs?.length ?? 0)
-        + (step.edgeOutputs?.length ?? 0) + (step.textureOutputs?.length ?? 0);
-      if (outN > 0) lines.push(`${outN} output${outN !== 1 ? "s" : ""} → variables`);
+      if (step.passVariable) lines.push(`pass → $${step.passVariable}`);
+      const outs = (step.toolOutputs ?? []).filter(o => o.toolId && o.variable);
+      if (outs.length === 1) lines.push(`${outs[0].value} → $${outs[0].variable}`);
+      else if (outs.length > 1) lines.push(`${outs.length} outputs → variables`);
       return lines.length ? lines.join("\n") : null;
     }
     case "SaveImage":

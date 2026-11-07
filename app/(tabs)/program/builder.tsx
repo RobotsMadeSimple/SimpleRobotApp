@@ -674,7 +674,7 @@ export default function BuilderScreen() {
       loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
       statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
       routineName: undefined, routineId: undefined,
-      visionProgramId: undefined, visionProgramName: undefined, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: undefined,
+      visionProgramId: undefined, visionProgramName: undefined, passVariable: undefined, toolOutputs: undefined,
       varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined,
       variableName: undefined, variableExpr: undefined,
       expressions: undefined,

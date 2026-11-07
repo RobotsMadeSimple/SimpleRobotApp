@@ -2,6 +2,7 @@
 import { enrichByAddress } from "./connectionStore";
 import { robotDiscovery } from "./RobotDiscoveryService";
 import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { normalizeVisionProgram, type Pose } from "../models/visionTools";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -1993,7 +1994,8 @@ export class RobotConnectService {
   public async getVisionPrograms(): Promise<{ programs: VisionProgram[]; runningIds: string[] }> {
     const data: any = await this.sendCommand('GetVisionPrograms');
     let programs: VisionProgram[] = [];
-    try { programs = JSON.parse(data?.programs ?? '[]'); } catch { }
+    // Normalized so a program saved in the old zone format (dropped, not converted) still opens.
+    try { programs = (JSON.parse(data?.programs ?? '[]') as Partial<VisionProgram>[]).map(normalizeVisionProgram); } catch { }
     return { programs, runningIds: data?.runningIds ?? [] };
   }
 
@@ -2025,7 +2027,46 @@ export class RobotConnectService {
   public async getVisionResult(id: string): Promise<VisionResult | null> {
     const data: any = await this.sendCommand('GetVisionResult', { id });
     if (!data?.result) return null;
-    try { return JSON.parse(data.result) as VisionResult; } catch { return null; }
+    try {
+      const r = JSON.parse(data.result) as VisionResult;
+      // A result in the old per-inspection shape (an older controller) carries no tool list.
+      return Array.isArray(r?.tools) ? r : null;
+    } catch { return null; }
+  }
+
+  /**
+   * Captures the pose a fixture tool finds on the current frame as its reference (the teach pose
+   * dependent tools' regions are stored against). Returns the pose, or null when nothing was found.
+   */
+  public async setVisionToolReference(programId: string, toolId: string): Promise<Pose | null> {
+    // Uses the program's latest result and saves the program with the new reference.
+    const data: any = await this.sendCommand('SetVisionToolReference', { programId, toolId });
+    const ref = data?.reference;
+    if (!ref) return null;
+    try { return (typeof ref === 'string' ? JSON.parse(ref) : ref) as Pose; } catch { return null; }
+  }
+
+  /**
+   * Teaches a contourMatch / patternMatch tool its template from the program's latest camera
+   * frame inside the tool's region. The controller saves the template on the program — re-read
+   * the program to get it. Returns the controller's one-line summary of what was taught.
+   */
+  public async teachVisionTool(programId: string, toolId: string): Promise<string | null> {
+    const data: any = await this.sendCommand('TeachVisionTool', { programId, toolId });
+    return data?.taught ?? null;
+  }
+
+  /** One tool's result drawn over its own input layer (a debug view), as a JPEG. */
+  public visionToolDebugUrl(programId: string, toolId: string): string | null {
+    const base = this.httpBaseUrl();
+    return base && programId ? `${base}/vision/${programId}/tool/${encodeURIComponent(toolId)}/debug` : null;
+  }
+
+  /** A JPEG of an image layer on the current frame, after its filters up to index `upTo` (inclusive). */
+  public visionLayerPreviewUrl(programId: string, layerId: string, upTo?: number): string | null {
+    const base = this.httpBaseUrl();
+    if (!base || !programId) return null;
+    return `${base}/vision/${programId}/layer/${encodeURIComponent(layerId)}` + (upTo != null ? `?upTo=${upTo}` : '');
   }
 
   public visionWsUrl(id: string): string | null {
@@ -2036,16 +2077,6 @@ export class RobotConnectService {
   public visionSnapshotUrl(id: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/vision/${id}/snapshot` : null;
-  }
-
-  public visionPolygonDebugUrl(programId: string, inspectionId: string): string | null {
-    const base = this.httpBaseUrl();
-    return base ? `${base}/vision/${programId}/debug/polygon/${inspectionId}` : null;
-  }
-
-  public visionLineDebugUrl(programId: string, inspectionId: string): string | null {
-    const base = this.httpBaseUrl();
-    return base ? `${base}/vision/${programId}/debug/line/${inspectionId}` : null;
   }
 
   public visionAnnotatedUrl(id: string): string | null {

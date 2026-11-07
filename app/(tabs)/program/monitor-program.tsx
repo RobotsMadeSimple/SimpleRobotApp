@@ -7,7 +7,7 @@ import { BuiltProgram,
   ProgramStep,
   ProgramSummary,
   ProgramVariableSnapshot,
-  VisionResult, imageDataUri, isListVariable } from "@/src/models/robotModels";
+  VisionResult, VisionTool, imageDataUri, isListVariable } from "@/src/models/robotModels";
 import { useBuiltPrograms,
   useBuiltProgramsLoaded,
   useProgramSummaries,
@@ -324,6 +324,8 @@ export default function MonitorProgramScreen() {
   // ── Vision snapshot polling ────────────────────────────────────────────────
   const [visionSnapshots, setVisionSnapshots] = useState<Record<string, string | null>>({});
   const [visionResults, setVisionResults]     = useState<Record<string, VisionResult | null>>({});
+  // Tool lists of the vision programs this program runs, for naming the tools in their results.
+  const [visionTools, setVisionTools]         = useState<Record<string, VisionTool[]>>({});
 
   const visionSteps: { id: string; name: string }[] = [];
   if (builtProgram) {
@@ -385,6 +387,11 @@ export default function MonitorProgramScreen() {
         }
       };
 
+      if (visionStepsRef.current.length > 0) {
+        robotClient.getVisionPrograms()
+          .then(({ programs }) => { if (!cancelled) setVisionTools(Object.fromEntries(programs.map(p => [p.id, p.tools]))); })
+          .catch(() => {});
+      }
       fetchSnapshots();
       const interval = setInterval(fetchSnapshots, 1500);
       return () => {
@@ -1060,7 +1067,7 @@ export default function MonitorProgramScreen() {
                         </Text>
                       </View>
                     )}
-                    <VisionResults result={visionResults[id] ?? null} />
+                    <VisionResults result={visionResults[id] ?? null} tools={visionTools[id]} />
                   </View>
                 );
               })}

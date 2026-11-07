@@ -1,10 +1,10 @@
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
-import { VisionProgram } from "@/src/models/robotModels";
+import { emptyVisionProgram, type VisionProgram } from "@/src/models/visionTools";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { useCameras } from "@/src/providers/RobotProvider";
+import { useCameras, useConnected } from "@/src/providers/RobotProvider";
 import { router, useFocusEffect } from "expo-router";
-import { Camera, Clock, LayoutGrid, ScanSearch, SearchCheck } from "lucide-react-native";
+import { Camera, Clock, Layers, LayoutGrid, ScanSearch, SearchCheck } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
@@ -31,15 +31,14 @@ export default function VisionListScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  // Also on (re)connect: opened straight after the app loads, the first fetch can beat the socket.
+  const connected = useConnected();
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh, connected])); // eslint-disable-line react-hooks/exhaustive-deps
 
   function createNew() {
-    const newProg: VisionProgram = {
-      id: "", name: "New Vision Program",
-      // Default to the first available camera so the editor opens on a live feed
-      // instead of an empty picker; "" if none are connected yet.
-      description: "", cameraId: cameras[0]?.id ?? "", zones: [], inspections: [], lastUpdatedUnixMs: 0,
-    };
+    // Default to the first available camera so the editor opens on a live feed
+    // instead of an empty picker; "" if none are connected yet.
+    const newProg: VisionProgram = emptyVisionProgram(cameras[0]?.id ?? "");
     router.navigate({ pathname: "/(tabs)/program/vision-editor", params: { program: JSON.stringify(newProg) } });
   }
 
@@ -63,8 +62,8 @@ export default function VisionListScreen() {
     .sort(bySort<VisionProgram>(sort, p => p.name, p => p.lastUpdatedUnixMs ?? 0));
 
   // Counts come straight from the program payloads already fetched above.
-  const zoneTotal       = programs.reduce((n, p) => n + p.zones.length, 0);
-  const inspectionTotal = programs.reduce((n, p) => n + p.inspections.length, 0);
+  const layerTotal = programs.reduce((n, p) => n + p.layers.length, 0);
+  const toolTotal  = programs.reduce((n, p) => n + p.tools.length, 0);
   const lastSaved       = programs.reduce((ms, p) => Math.max(ms, p.lastUpdatedUnixMs ?? 0), 0);
 
   const aside = programs.length > 0 ? (
@@ -77,8 +76,8 @@ export default function VisionListScreen() {
         tint={[accents.cyan, accents.cyanSoft]}
         hint={filtered.length !== programs.length ? `${filtered.length} shown` : undefined}
       />
-      <StatTile label="Zones" value={zoneTotal} icon={LayoutGrid} />
-      <StatTile label="Inspections" value={inspectionTotal} icon={SearchCheck} />
+      <StatTile label="Tools" value={toolTotal} icon={SearchCheck} />
+      <StatTile label="Image layers" value={layerTotal} icon={Layers} />
       {lastSaved > 0 && <StatTile label="Last saved" value={relativeTime(lastSaved)} icon={Clock} />}
       <SectionHeader title="Cameras" icon={Camera} />
       {cameras.length === 0 ? (
@@ -103,7 +102,7 @@ export default function VisionListScreen() {
   return (
     <ProgramListLayout
       title="Vision Programs"
-      subtitle="Camera zones and the inspections that run inside them"
+      subtitle="Camera tools that locate, measure, count and read"
       crumbs={[{ label: "Program", href: "/program" }, { label: "Vision" }]}
       accentColor={colors.accent}
       addLabel="New Vision Program"
@@ -121,7 +120,7 @@ export default function VisionListScreen() {
     >
       <SectionHeader
         title="Vision Programs"
-        right={<InfoTip text="A vision program picks a camera, draws zones on its feed, and attaches inspections to those zones. Programs trigger one with a Run Vision step and read the result back into variables." />}
+        right={<InfoTip text="A vision program picks a camera and runs a list of tools on its image — locate a part, measure it, count or read what is there. Tools can follow a located part so their regions move with it. Programs trigger one with a Run Vision step and read the results back into variables." />}
       />
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} />
@@ -134,8 +133,8 @@ export default function VisionListScreen() {
 
 function VisionRow({ prog, onDelete }: { prog: VisionProgram; onDelete: () => void }) {
   const metaParts: string[] = [];
-  metaParts.push(`${prog.zones.length} zone${prog.zones.length !== 1 ? "s" : ""}`);
-  metaParts.push(`${prog.inspections.length} inspection${prog.inspections.length !== 1 ? "s" : ""}`);
+  metaParts.push(`${prog.tools.length} tool${prog.tools.length !== 1 ? "s" : ""}`);
+  if (prog.layers.length) metaParts.push(`${prog.layers.length} layer${prog.layers.length !== 1 ? "s" : ""}`);
   if (prog.lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(prog.lastUpdatedUnixMs)}`);
 
   return (

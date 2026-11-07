@@ -3,26 +3,24 @@ import { StyleSheet, Text, View } from "react-native";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
 import { FEED_HTML } from "@/src/vision/visionHtml";
-import type { AlignedZone, VisionZone } from "@/src/models/robotModels";
+import type { FeedOverlayItem } from "@/src/vision/feedOverlay";
 import { colors, radii, shadows } from "@/src/components/ui/kit";
 
 export type VisionFeedHandle = VisionCanvasHandle;
 
 /**
- * The camera/feed preview shared by the vision editor and the inspection config editor,
- * so both read the same and stay in sync. Pushes the feed URL and the zone outlines into
- * the WebView (on load and whenever they change) — every declared zone always shows on
- * the preview, whichever editor it's rendered in. Sizes itself by layout: a fixed height
- * on phones, an aspect-ratio box that grows with the pane on wide screens.
+ * The camera/feed preview shared by the vision editor and the tool config page, so both read
+ * the same and stay in sync. Pushes the feed URL and the tool overlay (src/vision/feedOverlay.ts)
+ * into the WebView, on load and whenever they change. Sizes itself by layout: a fixed height on
+ * phones, an aspect-ratio box that grows with the pane on wide screens.
  *
  * The card has no outer margin on purpose — the surrounding pane owns the padding, so the
  * frame lines up identically in both editors.
  */
 export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   feedUrl: string | null;
-  zones?: VisionZone[];
-  /** Outlines of frame-aligned zones from the latest result, drawn over the drawn zones. */
-  alignedZones?: AlignedZone[];
+  /** Tool regions / found geometry drawn over every frame. */
+  overlay?: FeedOverlayItem[];
   isWide: boolean;
   /** width/height for the wide-layout aspect box (defaults to 4:3). */
   aspect?: number;
@@ -33,12 +31,12 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
    * Fires when the feed is tapped, with the tap in normalized (0-1) image coordinates —
    * additive on top of the FEED_HTML document's own "feedTap" message (see visionHtml.ts),
    * which already resolves the tap through the canvas's object-fit:contain letterboxing.
-   * Hit-testing that point against zone geometry is left to the caller (e.g.
-   * InspectionConfigModal), so this component stays presentation-only.
+   * Hit-testing that point against tool regions is left to the caller (e.g.
+   * the tool list), so this component stays presentation-only.
    */
   onTapImagePoint?: (x: number, y: number) => void;
 }>(function VisionFeedViewer(
-  { feedUrl, zones, alignedZones, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint },
+  { feedUrl, overlay, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint },
   ref,
 ) {
   const webRef = useRef<VisionCanvasHandle>(null);
@@ -47,27 +45,20 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   }), []);
 
   // Stringify once so the inject effect fires on real geometry changes, not every render.
-  // id/grid/alignTo let the canvas draw a skewed zone's perspective grid, and the grid of an
-  // aligned zone on its live outline instead.
-  const zonesJson = useMemo(
-    () => JSON.stringify((zones ?? []).map(z => ({ id: z.id, geometry: z.geometry, grid: z.grid ?? null, alignTo: z.alignTo ?? null }))),
-    [zones],
-  );
-  const alignedJson = useMemo(() => JSON.stringify(alignedZones ?? []), [alignedZones]);
+  const overlayJson = useMemo(() => JSON.stringify(overlay ?? []), [overlay]);
 
   const injectFeed = useCallback(() => {
     webRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
   }, [feedUrl]);
-  const injectZones = useCallback(() => {
-    webRef.current?.injectJavaScript(
-      `window.setZones(${zonesJson});window.setAlignedZones&&window.setAlignedZones(${alignedJson});window.setZonesVisible(true);true;`);
-  }, [zonesJson, alignedJson]);
+  const injectOverlay = useCallback(() => {
+    webRef.current?.injectJavaScript(`window.setOverlay(${overlayJson});true;`);
+  }, [overlayJson]);
 
   useEffect(() => { injectFeed(); }, [injectFeed]);
-  useEffect(() => { injectZones(); }, [injectZones]);
+  useEffect(() => { injectOverlay(); }, [injectOverlay]);
 
   // Fresh WebView: re-send both once the document is ready.
-  const onLoad = useCallback(() => { injectFeed(); injectZones(); }, [injectFeed, injectZones]);
+  const onLoad = useCallback(() => { injectFeed(); injectOverlay(); }, [injectFeed, injectOverlay]);
 
   // Additive on top of the caller's own onMessage: a "feedTap" message (see FEED_HTML in
   // visionHtml.ts) is consumed here and reported through onTapImagePoint; every message,

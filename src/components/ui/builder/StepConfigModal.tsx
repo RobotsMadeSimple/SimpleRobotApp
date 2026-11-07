@@ -13,40 +13,22 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
+import { ArrowLeft, ArrowRight, Camera, Check, ChevronRight, CircuitBoard, Cpu, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import { useKeyboardStableCard } from "@/src/platform/keyboard";
 
-/** RunVision outputs of the frame / corner / edge / texture inspections: [field, label, kind]. */
-type AlignOutList = "frameOutputs" | "cornerOutputs" | "edgeOutputs" | "textureOutputs";
-const ALIGN_OUTPUTS: Record<AlignOutList, { title: string; fields: [string, string, "bool" | "num" | "points" | "records"][] }> = {
-  frameOutputs: { title: "FRAME OUTPUTS", fields: [
-    ["foundVar", "FOUND", "bool"], ["cornersVar", "CORNERS (TL, TR, BR, BL)", "points"], ["angleVar", "ANGLE", "num"]] },
-  cornerOutputs: { title: "CORNER OUTPUTS", fields: [
-    ["foundVar", "FOUND", "bool"], ["countVar", "COUNT", "num"], ["pointsVar", "POINTS", "points"]] },
-  edgeOutputs: { title: "EDGE OUTPUTS", fields: [
-    ["passedVar", "PASSED", "bool"], ["densityVar", "EDGE DENSITY %", "num"], ["angleVar", "DOMINANT ANGLE", "num"]] },
-  textureOutputs: { title: "TEXTURE OUTPUTS", fields: [
-    ["passedVar", "PASSED", "bool"], ["scoreVar", "SCORE (HIGHEST CELL)", "num"],
-    ["cellsVar", "CELLS (ROW, COL, INDEX, SCORE, PASSED)", "records"], ["cellsPassedVar", "CELLS PASSED", "num"]] },
-};
 import {
-  ArucoVisionStepOutput,
   AuxAxisChannelState,
   AuxDeviceState,
-  ColorVisionStepOutput,
   ConditionGroup,
   Grid,
   GridPoint,
   JsonInboundMapping,
   JsonKeyValue,
-  PolygonVisionStepOutput,
   ProgramStep,
   ProgramVariable,
   RobotStack,
   StackPoint,
   THREAD_PRESETS,
-  VisionProgram,
-  VisionStepOutput,
   auxStepsPerUnit,
   auxUnitLabel,
   ioPinSymbol,
@@ -77,11 +59,12 @@ import { STEP_THEME, fmtMoveStop, newId } from "./stepUtils";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
-import { VarPickerModal, VarSelectorButton, type VarCreateSpec } from "./VarPicker";
+import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType } from "./VariableEditModal";
 import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
-import { RunVisionOutputFrame } from "./RunVisionOutputFrame";
+import { RunVisionStepFields } from "./RunVisionStepFields";
+import type { VisionProgram } from "@/src/models/visionTools";
 import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
@@ -153,15 +136,6 @@ export function StepConfigModal({
   const [visionPrograms, setVisionPrograms] = useState<VisionProgram[]>([]);
   // Cameras are already streamed globally by the provider — no need to re-subscribe per open.
   const cameraDevices = useCameras();
-  const [visionProgPickerOpen, setVisionProgPickerOpen] = useState(false);
-  const [zonePickerOpen, setZonePickerOpen] = useState(false);
-  const [zoneVarPickerOpen, setZoneVarPickerOpen] = useState(false);
-  const [visionPicker, setVisionPicker]   = useState<{ inspId: string; field: 'detectedVar' | 'countVar' | 'pointsVar' } | null>(null);
-  const [colorPicker, setColorPicker]     = useState<{ inspId: string; field: 'coverageVar' | 'passedVar' | 'cellsVar' | 'cellsPassedVar' } | null>(null);
-  const [polygonPicker, setPolygonPicker] = useState<{ inspId: string; field: keyof Omit<PolygonVisionStepOutput, 'inspectionId'> } | null>(null);
-  const [arucoPicker, setArucoPicker]     = useState<{ inspId: string; field: keyof Omit<ArucoVisionStepOutput, 'inspectionId'> } | null>(null);
-  // Frame / corner / edge outputs share one picker: which list, which inspection, which field.
-  const [alignOutPicker, setAlignOutPicker] = useState<{ list: AlignOutList; inspId: string; field: string } | null>(null);
   const [threadPresetPickerOpen, setThreadPresetPickerOpen] = useState(false);
   const [waitTimeoutVarPicker,  setWaitTimeoutVarPicker]  = useState(false);
   const [moveStopPosVarPicker,  setMoveStopPosVarPicker]  = useState(false);
@@ -1865,327 +1839,18 @@ export function StepConfigModal({
           </>
         );
 
-      case "RunVision": {
-        const selectedVP         = visionPrograms.find(vp => vp.id === draft!.visionProgramId);
-        const inspections        = selectedVP?.inspections ?? [];
-        const colorInspections   = selectedVP?.colorInspections ?? [];
-        const polygonInspections = selectedVP?.polygonInspections ?? [];
-        const arucoInspections   = selectedVP?.arucoInspections ?? [];
-        const alignInspections   = {
-          frameOutputs:  (selectedVP?.frameInspections ?? []).filter(i => i.enabled),
-          cornerOutputs: (selectedVP?.cornerInspections ?? []).filter(i => i.enabled),
-          edgeOutputs:   (selectedVP?.edgeInspections ?? []).filter(i => i.enabled),
-          textureOutputs: (selectedVP?.textureInspections ?? []).filter(i => i.enabled),
-        };
-
-        function getOutput(inspId: string): VisionStepOutput | undefined {
-          return (draft!.visionOutputs ?? []).find(o => o.inspectionId === inspId);
-        }
-
-        function getColorOutput(inspId: string): ColorVisionStepOutput | undefined {
-          return (draft!.colorOutputs ?? []).find(o => o.inspectionId === inspId);
-        }
-
-        function getPolygonOutput(inspId: string): PolygonVisionStepOutput | undefined {
-          return (draft!.polygonOutputs ?? []).find(o => o.inspectionId === inspId);
-        }
-
-        function getArucoOutput(inspId: string): ArucoVisionStepOutput | undefined {
-          return (draft!.arucoOutputs ?? []).find(o => o.inspectionId === inspId);
-        }
-
+      case "RunVision":
         return (
-          <>
-            <Text style={ms.fieldLabel}>VISION PROGRAM</Text>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4,
-                borderWidth: 1, borderColor: selectedVP ? accents.cyan : colors.border,
-                borderRadius: radii.sm, backgroundColor: colors.surfaceMuted, paddingHorizontal: 12, paddingVertical: 11 }}
-              onPress={() => setVisionProgPickerOpen(true)}
-              activeOpacity={0.75}
-            >
-              {selectedVP ? (
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: accents.cyan }}>{selectedVP.name}</Text>
-                  <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 1 }}>
-                    {selectedVP.cameraId || 'No camera'} · {selectedVP.zones.length} zone{selectedVP.zones.length !== 1 ? 's' : ''}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={{ flex: 1, fontSize: 14, color: colors.textFaint }}>Tap to select a vision program…</Text>
-              )}
-              <ChevronDown size={14} color={selectedVP ? accents.cyan : colors.textFaint} />
-            </TouchableOpacity>
-
-            {selectedVP && (
-              <RunVisionOutputFrame
-                value={draft!.outputFrame}
-                onChange={v => set({ outputFrame: v })}
-                cameraId={selectedVP.cameraId || undefined}
-                camera={cameraDevices.find(c => c.id === selectedVP.cameraId)}
-                onOpenWizard={camId => { onSave(draft!); onClose(); openCalibrationWizard(camId); }}
-              />
-            )}
-
-            {selectedVP && (
-              <>
-                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>OVERRIDE ZONE</Text>
-                <Text style={ms.hintText}>
-                  None uses each inspection's own configured zone. Select a zone (or a variable) to override them all at runtime.
-                </Text>
-                {(() => {
-                  const fixedZone  = selectedVP.zones.find(z => z.id === draft!.visionZoneId);
-                  const hasVar     = !!draft!.visionZoneVar;
-                  const active     = !!(fixedZone || hasVar);
-                  const label      = hasVar ? `$${draft!.visionZoneVar}` : fixedZone ? fixedZone.name : 'None — use program defaults';
-                  return (
-                    <TouchableOpacity
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4,
-                        borderWidth: 1, borderColor: active ? accents.cyan : colors.border,
-                        borderRadius: radii.sm, backgroundColor: colors.surfaceMuted, paddingHorizontal: 12, paddingVertical: 11 }}
-                      onPress={() => setZonePickerOpen(true)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={{ flex: 1, fontSize: 14, fontWeight: active ? '700' : '400', color: active ? accents.cyan : colors.textFaint }}>
-                        {label}
-                      </Text>
-                      <ChevronDown size={14} color={active ? accents.cyan : colors.textFaint} />
-                    </TouchableOpacity>
-                  );
-                })()}
-              </>
-            )}
-
-            {inspections.length > 0 && (
-              <>
-                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>OUTPUTS</Text>
-                <Text style={ms.hintText}>
-                  Map inspection results to program variables. Variables are written when the step completes.
-                </Text>
-                {inspections.filter(insp => insp.enabled).map(insp => {
-                  const out = getOutput(insp.id);
-                  return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.border }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>{insp.name}</Text>
-                      <VarSelectorButton
-                        label="DETECTED (any blobs found)"
-                        value={out?.detectedVar}
-                        accent={colors.success}
-                        placeholder="None — tap to assign"
-                        marginTop={false}
-                        onPress={() => setVisionPicker({ inspId: insp.id, field: 'detectedVar' })}
-                      />
-                      <VarSelectorButton
-                        label="COUNT"
-                        value={out?.countVar}
-                        accent={colors.accent}
-                        placeholder="None — tap to assign"
-                        onPress={() => setVisionPicker({ inspId: insp.id, field: 'countVar' })}
-                      />
-                      <VarSelectorButton
-                        label="POINTS"
-                        value={out?.pointsVar}
-                        accent={accents.cyan}
-                        placeholder="None — tap to assign"
-                        onPress={() => setVisionPicker({ inspId: insp.id, field: 'pointsVar' })}
-                      />
-                    </View>
-                  );
-                })}
-                {inspections.every(i => !i.enabled) && (
-                  <Text style={ms.emptyHint}>No enabled inspections in this program. Enable inspections in the Vision editor.</Text>
-                )}
-              </>
-            )}
-
-            {colorInspections.filter(i => i.enabled).length > 0 && (
-              <>
-                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>COLOR OUTPUTS</Text>
-                {colorInspections.filter(i => i.enabled).map(insp => {
-                  const out  = getColorOutput(insp.id);
-                  // A gridded zone measures each cell separately, so it has two more
-                  // outputs worth assigning. Hidden otherwise — they would always be empty.
-                  const grid = (selectedVP?.zones ?? []).find(z => z.id === insp.zoneId)?.grid;
-                  const gridded = !!grid && grid.rows * grid.cols > 1;
-                  return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: "#fdf4ff", borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: "#e9d5ff" }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>
-                        {insp.name}
-                        {gridded && (
-                          <Text style={{ fontWeight: "400", color: colors.textFaint }}>  ({grid!.rows}×{grid!.cols} grid)</Text>
-                        )}
-                      </Text>
-                      <VarSelectorButton
-                        label="COVERAGE %"
-                        value={out?.coverageVar}
-                        accent={accents.purple}
-                        placeholder="None — tap to assign"
-                        marginTop={false}
-                        onPress={() => setColorPicker({ inspId: insp.id, field: 'coverageVar' })}
-                      />
-                      <VarSelectorButton
-                        label={gridded ? "PASSED (ALL CELLS)" : "PASSED"}
-                        value={out?.passedVar}
-                        accent={colors.success}
-                        placeholder="None — tap to assign"
-                        onPress={() => setColorPicker({ inspId: insp.id, field: 'passedVar' })}
-                      />
-                      {gridded && (
-                        <>
-                          <VarSelectorButton
-                            label="CELLS (OBJECT LIST)"
-                            value={out?.cellsVar}
-                            accent={accents.cyan}
-                            placeholder="None — tap to assign"
-                            onPress={() => setColorPicker({ inspId: insp.id, field: 'cellsVar' })}
-                          />
-                          <VarSelectorButton
-                            label="CELLS PASSED"
-                            value={out?.cellsPassedVar}
-                            accent={colors.success}
-                            placeholder="None — tap to assign"
-                            onPress={() => setColorPicker({ inspId: insp.id, field: 'cellsPassedVar' })}
-                          />
-                          <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
-                            Read a cell with $name[i].coverage, .passed, .row, .col or .index.
-                          </Text>
-                        </>
-                      )}
-                    </View>
-                  );
-                })}
-              </>
-            )}
-
-            {polygonInspections.filter(i => i.enabled).length > 0 && (
-              <>
-                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>POLYGON OUTPUTS</Text>
-                {polygonInspections.filter(i => i.enabled).map(insp => {
-                  const out = getPolygonOutput(insp.id);
-                  return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.warningSoft, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.warningBorder }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>
-                        {insp.name}  <Text style={{ fontWeight: "400", color: colors.textFaint }}>({insp.sides}-sided)</Text>
-                      </Text>
-                      <VarSelectorButton
-                        label="FOUND"
-                        value={out?.foundVar}
-                        accent={colors.success}
-                        placeholder="None — tap to assign"
-                        marginTop={false}
-                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'foundVar' })}
-                      />
-                      <VarSelectorButton
-                        label="COUNT"
-                        value={out?.countVar}
-                        accent={colors.accent}
-                        placeholder="None — tap to assign"
-                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'countVar' })}
-                      />
-                      <VarSelectorButton
-                        label="ANGLE (deg)"
-                        value={out?.angleVar}
-                        accent={colors.warning}
-                        placeholder="None — tap to assign"
-                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'angleVar' })}
-                      />
-                      <VarSelectorButton
-                        label="CENTER X"
-                        value={out?.centerXVar}
-                        accent={accents.cyan}
-                        placeholder="None — tap to assign"
-                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerXVar' })}
-                      />
-                      <VarSelectorButton
-                        label="CENTER Y"
-                        value={out?.centerYVar}
-                        accent={accents.cyan}
-                        placeholder="None — tap to assign"
-                        onPress={() => setPolygonPicker({ inspId: insp.id, field: 'centerYVar' })}
-                      />
-                    </View>
-                  );
-                })}
-              </>
-            )}
-
-            {arucoInspections.filter(i => i.enabled).length > 0 && (
-              <>
-                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>ARUCO OUTPUTS</Text>
-                {arucoInspections.filter(i => i.enabled).map(insp => {
-                  const out = getArucoOutput(insp.id);
-                  return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.successSoft, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.successBorder }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>{insp.name}</Text>
-                      <VarSelectorButton
-                        label="FOUND"
-                        value={out?.foundVar}
-                        accent={colors.success}
-                        placeholder="None — tap to assign"
-                        marginTop={false}
-                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'foundVar' })}
-                      />
-                      <VarSelectorButton
-                        label="COUNT"
-                        value={out?.countVar}
-                        accent={colors.accent}
-                        placeholder="None — tap to assign"
-                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'countVar' })}
-                      />
-                      <VarSelectorButton
-                        label="FIRST MARKER ID"
-                        value={out?.firstIdVar}
-                        accent={accents.cyan}
-                        placeholder="None — tap to assign"
-                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstIdVar' })}
-                      />
-                      <VarSelectorButton
-                        label="FIRST CENTER X"
-                        value={out?.firstCenterXVar}
-                        accent={accents.cyan}
-                        placeholder="None — tap to assign"
-                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstCenterXVar' })}
-                      />
-                      <VarSelectorButton
-                        label="FIRST CENTER Y"
-                        value={out?.firstCenterYVar}
-                        accent={accents.cyan}
-                        placeholder="None — tap to assign"
-                        onPress={() => setArucoPicker({ inspId: insp.id, field: 'firstCenterYVar' })}
-                      />
-                    </View>
-                  );
-                })}
-              </>
-            )}
-
-            {(Object.keys(ALIGN_OUTPUTS) as AlignOutList[]).map(list => alignInspections[list].length > 0 && (
-              <React.Fragment key={list}>
-                <Text style={[ms.fieldLabel, { marginTop: 16 }]}>{ALIGN_OUTPUTS[list].title}</Text>
-                {alignInspections[list].map(insp => {
-                  const out = ((draft![list] ?? []) as Record<string, string | undefined>[]).find(o => o.inspectionId === insp.id);
-                  return (
-                    <View key={insp.id} style={{ marginTop: 10, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: 10, borderWidth: 1, borderColor: colors.border }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4 }}>{insp.name}</Text>
-                      {ALIGN_OUTPUTS[list].fields.map(([field, label, kind], fi) => (
-                        <VarSelectorButton
-                          key={field}
-                          label={label}
-                          value={out?.[field]}
-                          accent={kind === "bool" ? colors.success : kind === "points" || kind === "records" ? accents.purple : colors.accent}
-                          placeholder="None — tap to assign"
-                          marginTop={fi > 0}
-                          onPress={() => setAlignOutPicker({ list, inspId: insp.id, field })}
-                        />
-                      ))}
-                    </View>
-                  );
-                })}
-              </React.Fragment>
-            ))}
-          </>
+          <RunVisionStepFields
+            draft={draft!}
+            set={set}
+            visionPrograms={visionPrograms}
+            cameras={cameraDevices}
+            variables={variables}
+            onSaveVariable={onSaveVariable}
+            onOpenWizard={camId => { onSave(draft!); onClose(); openCalibrationWizard(camId); }}
+          />
         );
-      }
 
       case "SetSpeedL":
       case "SetSpeedJ": {
@@ -3760,73 +3425,6 @@ export function StepConfigModal({
   const isSetSpeed = draft.type === "SetSpeedL" || draft.type === "SetSpeedJ" || draft.type === "SetVariable"
                   || draft.type === "Label"      || draft.type === "GoToLabel";
 
-  // Color inspection picker. cellsVar holds a list of records rather than a number, so it
-  // offers object variables and the other fields exclude them.
-  const colorPickerVars = !colorPicker
-    ? []
-    : colorPicker.field === 'cellsVar'
-      ? (variables ?? []).filter(v => isRecordListVariable(v))
-      : (variables ?? []).filter(v => !isListVariable(v));
-  const colorPickerSelected = colorPicker
-    ? (draft?.colorOutputs ?? []).find(o => o.inspectionId === colorPicker.inspId)?.[colorPicker.field]
-    : undefined;
-  const colorPickerTitle = colorPicker
-    ? ({ coverageVar: 'Coverage Variable', passedVar: 'Passed Variable',
-         cellsVar: 'Cells Variable', cellsPassedVar: 'Cells Passed Variable' }[colorPicker.field])
-    : '';
-  // What "+ New … variable" creates for each output — the type the controller writes there.
-  const colorPickerCreate: VarCreateSpec =
-    colorPicker?.field === 'cellsVar'  ? { type: "list", elementType: "Record" } :
-    colorPicker?.field === 'passedVar' ? { type: "boolean" } : { type: "number" };
-
-  // Polygon inspection picker
-  const polygonPickerVars     = polygonPicker ? (variables ?? []).filter(v => !isListVariable(v)) : [];
-  const polygonPickerSelected = polygonPicker
-    ? (draft?.polygonOutputs ?? []).find(o => o.inspectionId === polygonPicker.inspId)?.[polygonPicker.field]
-    : undefined;
-  const polygonPickerTitle = polygonPicker
-    ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', angleVar: 'Angle Variable', centerXVar: 'Center X Variable', centerYVar: 'Center Y Variable' }[polygonPicker.field] ?? 'Variable')
-    : '';
-  const polygonPickerCreate: VarCreateSpec = polygonPicker?.field === 'foundVar' ? { type: "boolean" } : { type: "number" };
-
-  // ArUco inspection picker
-  const arucoPickerVars     = arucoPicker ? (variables ?? []).filter(v => !isListVariable(v)) : [];
-  const arucoPickerSelected = arucoPicker
-    ? (draft?.arucoOutputs ?? []).find(o => o.inspectionId === arucoPicker.inspId)?.[arucoPicker.field]
-    : undefined;
-  const arucoPickerTitle = arucoPicker
-    ? ({ foundVar: 'Found Variable', countVar: 'Count Variable', firstIdVar: 'First Marker ID Variable', firstCenterXVar: 'First Center X Variable', firstCenterYVar: 'First Center Y Variable' }[arucoPicker.field] ?? 'Variable')
-    : '';
-  const arucoPickerCreate: VarCreateSpec = arucoPicker?.field === 'foundVar' ? { type: "boolean" } : { type: "number" };
-
-  // Frame / corner / edge / texture output picker: point-list and record-list fields offer
-  // those lists, the rest scalars.
-  const alignOutField = alignOutPicker
-    ? ALIGN_OUTPUTS[alignOutPicker.list].fields.find(f => f[0] === alignOutPicker.field) ?? null
-    : null;
-  const alignOutPickerVars = !alignOutField ? []
-    : alignOutField[2] === "points"
-      ? (variables ?? []).filter(v => isPointListVariable(v))
-      : alignOutField[2] === "records"
-        ? (variables ?? []).filter(v => isRecordListVariable(v))
-        : (variables ?? []).filter(v => !isListVariable(v));
-
-  // Derive picker variable list from the active field
-  const pickerVars = visionPicker
-    ? visionPicker.field === 'pointsVar'
-      ? (variables ?? []).filter(v => isPointListVariable(v))
-      : (variables ?? []).filter(v => !isListVariable(v))
-    : [];
-  const pickerSelected = visionPicker
-    ? (draft?.visionOutputs ?? []).find(o => o.inspectionId === visionPicker.inspId)?.[visionPicker.field]
-    : undefined;
-  const pickerTitle =
-    visionPicker?.field === 'detectedVar' ? 'Detected Variable' :
-    visionPicker?.field === 'countVar'    ? 'Count Variable'    : 'Points Variable';
-  const pickerCreate: VarCreateSpec =
-    visionPicker?.field === 'detectedVar' ? { type: "boolean" } :
-    visionPicker?.field === 'countVar'    ? { type: "number" }  : { type: "list", elementType: "Point" };
-
   return (
     <>
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => subPage ? closeSubPageDone() : onClose()}>
@@ -3999,84 +3597,6 @@ export function StepConfigModal({
           </View>
         </View>
     </Modal>
-    {/* Vision program picker */}
-    <BottomSheet visible={visionProgPickerOpen} onClose={() => setVisionProgPickerOpen(false)} title="Select Vision Program">
-      {visionPrograms.length === 0 && (
-        <Text style={{ fontSize: 13, color: colors.textFaint, textAlign: 'center', padding: 16 }}>No vision programs saved yet.</Text>
-      )}
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
-        {visionPrograms.map((vp, i) => {
-          const active = draft?.visionProgramId === vp.id;
-          return (
-            <TouchableOpacity
-              key={vp.id}
-              style={[ms.row, i < visionPrograms.length - 1 && ms.rowBorder, active && ms.rowActive]}
-              onPress={() => {
-                set({ visionProgramId: vp.id, visionProgramName: vp.name, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: [], colorOutputs: [], polygonOutputs: [], arucoOutputs: [], frameOutputs: [], cornerOutputs: [], edgeOutputs: [], textureOutputs: [] });
-                setVisionProgPickerOpen(false);
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                {active && <View style={ms.radioDot} />}
-              </View>
-              <View style={ms.rowText}>
-                <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{vp.name}</Text>
-                {!!vp.description && <Text style={ms.rowDesc}>{vp.description}</Text>}
-                <Text style={ms.rowDesc}>{vp.cameraId || 'No camera'} · {vp.zones.length} zone{vp.zones.length !== 1 ? 's' : ''}</Text>
-              </View>
-              {active && <Check size={16} color={colors.accent} />}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
-
-    {/* Zone override picker */}
-    <BottomSheet visible={zonePickerOpen} onClose={() => setZonePickerOpen(false)} title="Override Zone">
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
-        <TouchableOpacity
-          style={[ms.row, ms.rowBorder, !draft?.visionZoneId && !draft?.visionZoneVar && ms.rowActive]}
-          onPress={() => { set({ visionZoneId: undefined, visionZoneVar: undefined }); setZonePickerOpen(false); }}
-          activeOpacity={0.7}
-        >
-          <View style={[ms.radioRing, !draft?.visionZoneId && !draft?.visionZoneVar && ms.radioRingActive]}>
-            {!draft?.visionZoneId && !draft?.visionZoneVar && <View style={ms.radioDot} />}
-          </View>
-          <Text style={[ms.rowLabel, !draft?.visionZoneId && !draft?.visionZoneVar && ms.rowLabelActive]}>None — use program defaults</Text>
-        </TouchableOpacity>
-        {(visionPrograms.find(vp => vp.id === draft?.visionProgramId)?.zones ?? []).map(z => {
-          const active = draft?.visionZoneId === z.id && !draft?.visionZoneVar;
-          return (
-            <TouchableOpacity
-              key={z.id}
-              style={[ms.row, ms.rowBorder, active && ms.rowActive]}
-              onPress={() => { set({ visionZoneId: z.id, visionZoneVar: undefined }); setZonePickerOpen(false); }}
-              activeOpacity={0.7}
-            >
-              <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                {active && <View style={ms.radioDot} />}
-              </View>
-              <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{z.name}</Text>
-              {active && <Check size={16} color={colors.accent} />}
-            </TouchableOpacity>
-          );
-        })}
-        <TouchableOpacity
-          style={[ms.row, !!draft?.visionZoneVar && ms.rowActive]}
-          onPress={() => { setZonePickerOpen(false); setZoneVarPickerOpen(true); }}
-          activeOpacity={0.7}
-        >
-          <View style={[ms.radioRing, !!draft?.visionZoneVar && ms.radioRingActive]}>
-            {!!draft?.visionZoneVar && <View style={ms.radioDot} />}
-          </View>
-          <Text style={[ms.rowLabel, !!draft?.visionZoneVar && ms.rowLabelActive]}>
-            {draft?.visionZoneVar ? `From variable $${draft.visionZoneVar}` : 'From variable…'}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </BottomSheet>
-
     {/* Thread preset picker */}
     <BottomSheet visible={threadPresetPickerOpen} onClose={() => setThreadPresetPickerOpen(false)} title="Select Thread Size">
       <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
@@ -4108,131 +3628,6 @@ export function StepConfigModal({
       </ScrollView>
     </BottomSheet>
 
-    <VarPickerModal
-      visible={zoneVarPickerOpen}
-      onClose={() => setZoneVarPickerOpen(false)}
-      variables={(variables ?? []).filter(v => !isListVariable(v))}
-      selected={draft?.visionZoneVar}
-      title="Zone Variable"
-      showNone
-      onSelect={v => { set({ visionZoneVar: v?.name, visionZoneId: undefined }); }}
-      create={{ type: "number", label: "variable" }}
-      onCreateVariable={onSaveVariable} allVariables={variables}
-    />
-    <VarPickerModal
-      filter={isAssignableVariable}
-      visible={visionPicker !== null}
-      onClose={() => setVisionPicker(null)}
-      variables={pickerVars}
-      selected={pickerSelected}
-      title={pickerTitle}
-      showNone
-      create={pickerCreate}
-      onCreateVariable={onSaveVariable} allVariables={variables}
-      onSelect={v => {
-        if (!visionPicker) return;
-        const { inspId, field } = visionPicker;
-        const outputs = draft!.visionOutputs ?? [];
-        const idx = outputs.findIndex(o => o.inspectionId === inspId);
-        const patch = { [field]: v?.name };
-        const next: VisionStepOutput[] = idx >= 0
-          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
-          : [...outputs, { inspectionId: inspId, ...patch }];
-        set({ visionOutputs: next });
-      }}
-    />
-    <VarPickerModal
-      filter={isAssignableVariable}
-      visible={colorPicker !== null}
-      onClose={() => setColorPicker(null)}
-      variables={colorPickerVars}
-      selected={colorPickerSelected}
-      title={colorPickerTitle}
-      showNone
-      create={colorPickerCreate}
-      onCreateVariable={onSaveVariable} allVariables={variables}
-      onSelect={v => {
-        if (!colorPicker || !draft) return;
-        const { inspId, field } = colorPicker;
-        const outputs = draft.colorOutputs ?? [];
-        const idx = outputs.findIndex(o => o.inspectionId === inspId);
-        const patch = { [field]: v?.name };
-        const next: ColorVisionStepOutput[] = idx >= 0
-          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
-          : [...outputs, { inspectionId: inspId, ...patch }];
-        set({ colorOutputs: next });
-      }}
-    />
-    <VarPickerModal
-      filter={isAssignableVariable}
-      visible={polygonPicker !== null}
-      onClose={() => setPolygonPicker(null)}
-      variables={polygonPickerVars}
-      selected={polygonPickerSelected}
-      title={polygonPickerTitle}
-      showNone
-      create={polygonPickerCreate}
-      onCreateVariable={onSaveVariable} allVariables={variables}
-      onSelect={v => {
-        if (!polygonPicker || !draft) return;
-        const { inspId, field } = polygonPicker;
-        const outputs = draft.polygonOutputs ?? [];
-        const idx = outputs.findIndex(o => o.inspectionId === inspId);
-        const patch = { [field]: v?.name };
-        const next: PolygonVisionStepOutput[] = idx >= 0
-          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
-          : [...outputs, { inspectionId: inspId, ...patch }];
-        set({ polygonOutputs: next });
-      }}
-    />
-    <VarPickerModal
-      filter={isAssignableVariable}
-      visible={arucoPicker !== null}
-      onClose={() => setArucoPicker(null)}
-      variables={arucoPickerVars}
-      selected={arucoPickerSelected}
-      title={arucoPickerTitle}
-      showNone
-      create={arucoPickerCreate}
-      onCreateVariable={onSaveVariable} allVariables={variables}
-      onSelect={v => {
-        if (!arucoPicker || !draft) return;
-        const { inspId, field } = arucoPicker;
-        const outputs = draft.arucoOutputs ?? [];
-        const idx = outputs.findIndex(o => o.inspectionId === inspId);
-        const patch = { [field]: v?.name };
-        const next: ArucoVisionStepOutput[] = idx >= 0
-          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
-          : [...outputs, { inspectionId: inspId, ...patch }];
-        set({ arucoOutputs: next });
-      }}
-    />
-    <VarPickerModal
-      filter={isAssignableVariable}
-      visible={alignOutPicker !== null}
-      onClose={() => setAlignOutPicker(null)}
-      variables={alignOutPickerVars}
-      selected={alignOutPicker
-        ? ((draft?.[alignOutPicker.list] ?? []) as Record<string, string | undefined>[]).find(o => o.inspectionId === alignOutPicker.inspId)?.[alignOutPicker.field]
-        : undefined}
-      title={alignOutField ? `${alignOutField[1].charAt(0)}${alignOutField[1].slice(1).toLowerCase()} Variable` : 'Variable'}
-      showNone
-      create={alignOutField?.[2] === "points" ? { type: "list", elementType: "Point" }
-        : alignOutField?.[2] === "records" ? { type: "list", elementType: "Record" }
-        : alignOutField?.[2] === "bool" ? { type: "boolean" } : { type: "number" }}
-      onCreateVariable={onSaveVariable} allVariables={variables}
-      onSelect={v => {
-        if (!alignOutPicker || !draft) return;
-        const { list, inspId, field } = alignOutPicker;
-        const outputs = (draft[list] ?? []) as { inspectionId: string }[];
-        const idx = outputs.findIndex(o => o.inspectionId === inspId);
-        const patch = { [field]: v?.name };
-        const next = idx >= 0
-          ? outputs.map((o, i) => i === idx ? { ...o, ...patch } : o)
-          : [...outputs, { inspectionId: inspId, ...patch }];
-        set({ [list]: next } as Partial<ProgramStep>);
-      }}
-    />
     <VarPickerModal
       filter={isAssignableVariable}
       visible={moveStopPosVarPicker}

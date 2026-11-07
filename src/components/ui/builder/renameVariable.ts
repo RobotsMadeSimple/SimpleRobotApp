@@ -33,16 +33,11 @@ const BARE_NAME_KEYS = new Set<string>([
   "stopwatchVariableName", "waitTimeoutVariableName",
   "forEachVariableName", "forEachValueVariableName", "forEachIndexVariableName",
   "captureImageVariableName", "imageVar", "listVar",
-  // Move stop sub-page, StartRecording, RunVision zone override
+  // Move stop sub-page, StartRecording
   "moveStopPositionVariableName", "moveStopFlagVariableName",
-  "recordVariableName", "visionZoneVar",
-  // RunVision output rows: blob, color, polygon, ArUco, line, barcode
-  "detectedVar", "countVar", "pointsVar",
-  "coverageVar", "passedVar", "cellsVar", "cellsPassedVar",
-  "foundVar", "angleVar", "centerXVar", "centerYVar",
-  "firstIdVar", "firstCenterXVar", "firstCenterYVar",
-  "firstAngleVar", "firstX1Var", "firstY1Var", "firstX2Var", "firstY2Var",
-  "firstValueVar", "firstFormatVar",
+  "recordVariableName",
+  // RunVision: the overall pass target and each toolOutputs row's target
+  "passVariable", "variable",
 ]);
 
 /** The bare name a list/image/variable plugin param stores, or the text as typed otherwise. */
