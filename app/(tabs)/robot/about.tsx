@@ -815,9 +815,9 @@ const styles = StyleSheet.create({
   heroRowWide:   { flexDirection: "row", alignItems: "center", gap: spacing.lg },
   heroColNarrow: { alignItems: "center", gap: spacing.md },
 
-  heroImageWrapperWide:   { width: 168, height: 168, borderRadius: radii.xl, backgroundColor: colors.surfaceMuted, justifyContent: "center", alignItems: "center" },
+  heroImageWrapperWide:   { width: 168, height: 168, justifyContent: "center", alignItems: "center" },
   heroImageWide:          { width: 148, height: 148 },
-  heroImageWrapperNarrow: { width: 128, height: 128, borderRadius: radii.xl, backgroundColor: colors.surfaceMuted, justifyContent: "center", alignItems: "center" },
+  heroImageWrapperNarrow: { width: 128, height: 128, justifyContent: "center", alignItems: "center" },
   heroImageNarrow:        { width: 112, height: 112 },
 
   identityFieldsColWide:   { flex: 1 },
