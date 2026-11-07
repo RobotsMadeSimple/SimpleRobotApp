@@ -2,6 +2,7 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Button,
+  buttonTextColor,
   Card,
   colors,
   Divider,
@@ -21,7 +22,7 @@ import { Grid } from "@/src/models/robotModels";
 import { useGrids, usePoints } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronRight, X } from "lucide-react-native";
+import { ChevronRight, Crosshair, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -122,10 +123,12 @@ export default function GridEditPage() {
 
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
 
-  // Sync draft if the grid loads after navigation (grids from context may lag)
+  // Sync draft if the grid loads after navigation (grids from context may lag), and again
+  // when the saved grid itself changes — e.g. after re-teaching it in the wizard.
+  const existingKey = existing ? JSON.stringify(existing) : "";
   useEffect(() => {
     if (existing) setDraft({ ...existing });
-  }, [existing?.id]);
+  }, [existingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (fields: Partial<Grid>) => setDraft(d => ({ ...d, ...fields }));
 
@@ -136,6 +139,17 @@ export default function GridEditPage() {
   }
 
   const canSave = draft.name.trim().length > 0;
+
+  // Teach opens the corner wizard. A saved grid is re-taught in place (same id); a new one is
+  // created by the wizard, so it replaces this blank page and Done returns to the grid list.
+  function openTeach() {
+    if (isNew) {
+      const name = draft.name.trim();
+      router.replace(name ? `/space/grid-teach?name=${encodeURIComponent(name)}` : "/space/grid-teach");
+    } else {
+      router.push(`/space/grid-teach?id=${encodeURIComponent(draft.id)}`);
+    }
+  }
 
   return (
     <KeyboardAvoidingView
@@ -151,23 +165,24 @@ export default function GridEditPage() {
           { label: isNew ? "New Grid" : "Edit Grid" },
         ]}
         backTo="/space/grids"
-        right={
-          <View style={s.headerButtons}>
-            {/* Re-teach this grid by jogging to its corners (a wizard of its own). */}
-            {!isNew && (
-              <Button
-                label="Teach with wizard"
-                size="sm"
-                variant="secondary"
-                onPress={() => router.push(`/space/grid-teach?id=${encodeURIComponent(draft.id)}`)}
-              />
-            )}
-            <Button label="Save" size="sm" onPress={handleSave} disabled={!canSave} />
-          </View>
-        }
+        right={<Button label="Save" size="sm" onPress={handleSave} disabled={!canSave} />}
       />
 
       <Screen>
+        {/* Teach this grid by jogging to its corners (a wizard of its own). */}
+        <Card style={s.teachCard}>
+          <Text style={s.teachText}>
+            {isNew
+              ? "Jog the robot to the grid's corners and the offsets are worked out for you — or enter them by hand below."
+              : "Re-teach this grid by jogging the robot to its corners. Its base point and offsets are replaced."}
+          </Text>
+          <Button
+            label="Teach with wizard"
+            icon={<Crosshair size={16} color={buttonTextColor("primary")} />}
+            onPress={openTeach}
+          />
+        </Card>
+
         {(() => {
           const nameSection = (
             <>
@@ -359,7 +374,9 @@ export default function GridEditPage() {
 
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
-  headerButtons: { flexDirection: "row", gap: spacing.sm },
+
+  teachCard: { gap: spacing.md },
+  teachText: { ...type.body, color: colors.textMuted },
 
   // Wide: two columns instead of one long stack of cards. Each column keeps
   // its own vertical rhythm since Screen's `gap` only spaces its direct child.

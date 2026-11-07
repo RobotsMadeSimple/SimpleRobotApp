@@ -1,12 +1,12 @@
 import { usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
-import { Button, buttonTextColor, colors, EmptyState, InfoTip, ListRow, PageHeader, SectionHeader, spacing } from "@/src/components/ui/kit";
+import { Button, colors, EmptyState, InfoTip, ListRow, PageHeader, SectionHeader, spacing } from "@/src/components/ui/kit";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Crosshair, Grid3x3, Plus } from "lucide-react-native";
+import { Grid3x3, Plus } from "lucide-react-native";
 import { FlatList, StyleSheet, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 
@@ -76,24 +76,17 @@ export default function GridsPage() {
           <EmptyState
             icon={<Grid3x3 size={40} color={colors.textFaint} />}
             title="No Grids"
-            subtitle="Teach one by jogging to its corners, or enter the offsets by hand."
+            subtitle="Add one, then teach it by jogging to its corners or enter the offsets by hand."
           />
         }
         ListFooterComponent={
-          <View style={gs.footer}>
-            <Button
-              label="Teach a grid"
-              icon={<Crosshair size={16} color={buttonTextColor("primary")} />}
-              style={gs.addCard}
-              onPress={() => router.push("/space/grid-teach")}
-            />
-            <Button
-              variant="dashed"
-              label="New Grid (enter offsets)"
-              icon={<Plus size={16} color={colors.accent} />}
-              onPress={() => router.push("/space/grid-edit")}
-            />
-          </View>
+          <Button
+            variant="dashed"
+            label="New Grid"
+            icon={<Plus size={16} color={colors.accent} />}
+            style={gs.addCard}
+            onPress={() => router.push("/space/grid-edit")}
+          />
         }
       />
     </View>
@@ -114,5 +107,4 @@ const gs = StyleSheet.create({
   deleteBtn: { padding: spacing.xs },
 
   addCard: { marginTop: 2 },
-  footer: { gap: spacing.sm },
 });

@@ -16,23 +16,24 @@ import { robotClient } from "@/src/services/RobotConnectService";
  * Grid teaching wizard: Setup → one step per corner → Review & save. Turns 2, 3 or 4 taught
  * corners into a base point ("<name> origin") plus row/column steps (src/components/ui/grid/gridFit.ts).
  * Route param `id`: re-teach that existing grid (keeps its id, so Move steps that use it follow).
+ * Route param `name`: pre-fills the name of a new grid (from the New Grid page).
  */
 export default function GridTeachScreen() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, name } = useLocalSearchParams<{ id?: string; name?: string }>();
   const grids = useGrids();
   const existing = id ? grids.find(g => g.id === id) ?? null : null;
   // Keyed on the grid so its name/size seed the form even when the grid list arrives late.
-  return <GridTeachWizard key={existing?.id ?? "new"} existing={existing} />;
+  return <GridTeachWizard key={existing?.id ?? "new"} existing={existing} initialName={name} />;
 }
 
-function GridTeachWizard({ existing }: { existing: Grid | null }) {
+function GridTeachWizard({ existing, initialName }: { existing: Grid | null; initialName?: string }) {
   const grids  = useGrids();
   const points = usePoints();
   const tools  = useTools();
   const status = useRobotStatus();
 
   const [step, setStep]       = useState(0);
-  const [name, setName]       = useState(existing?.name ?? "");
+  const [name, setName]       = useState(existing?.name ?? initialName ?? "");
   const [rows, setRows]       = useState(existing?.rowCount != null ? String(existing.rowCount) : "8");
   const [cols, setCols]       = useState(existing?.colCount != null ? String(existing.colCount) : "8");
   const [method, setMethod]   = useState<GridMethod>("3pt");

@@ -96,6 +96,7 @@ function ToolFormModal({
   onChangeDraft,
   onSave,
   onClose,
+  onTeach,
 }: {
   visible: boolean;
   title: string;
@@ -103,6 +104,8 @@ function ToolFormModal({
   onChangeDraft: (d: ToolDraft) => void;
   onSave: () => void;
   onClose: () => void;
+  /** Opens the Teach TCP wizard for this tool (ASTRO only). */
+  onTeach: () => void;
 }) {
   const set = (k: keyof ToolDraft) => (v: string) =>
     onChangeDraft({ ...draft, [k]: v });
@@ -162,6 +165,17 @@ function ToolFormModal({
                 <CoordField label="RZ" value={draft.rz} onChange={set("rz")} />
               </View>
 
+              {/* Teach the planar TCP by touching one point from several wrist angles (ASTRO only). */}
+              {isAstro && (
+                <Button
+                  variant="secondary"
+                  label="Teach offset with wizard"
+                  icon={<Crosshair size={16} color={colors.textMuted} />}
+                  onPress={onTeach}
+                  style={styles.teachBtn}
+                />
+              )}
+
               {/* Actions */}
               <View style={styles.modalActions}>
                 <Button label="Cancel" variant="secondary" onPress={onClose} style={styles.modalCancel} />
@@ -194,6 +208,7 @@ export default function ToolsPage() {
   const [editOpen,   setEditOpen]   = useState(false);
   const [draft,      setDraft]      = useState<ToolDraft>(EMPTY_DRAFT);
   const editingName = useRef<string>("");
+  const editingId   = useRef<string | undefined>(undefined);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -221,6 +236,7 @@ export default function ToolsPage() {
     const t = tools.find(t => t.name === name);
     if (!t) return;
     editingName.current = name;
+    editingId.current   = t.id;
     setDraft({
       name:        t.name,
       description: t.description,
@@ -240,6 +256,22 @@ export default function ToolsPage() {
       rx: p.rx, ry: p.ry, rz: p.rz,
     });
     setEditOpen(false);
+  }
+
+  // Teach lives inside a tool's editor. An existing tool is re-taught by its stable id; a new
+  // one hands the typed name to the wizard, which creates the tool when it saves.
+  function teachEditing() {
+    setEditOpen(false);
+    const id = editingId.current;
+    router.push(id
+      ? `/(tabs)/space/teach-tcp?id=${encodeURIComponent(id)}`
+      : `/(tabs)/space/teach-tcp?name=${encodeURIComponent(editingName.current)}`);
+  }
+
+  function teachNew() {
+    setCreateOpen(false);
+    const name = draft.name.trim();
+    router.push(name ? `/(tabs)/space/teach-tcp?name=${encodeURIComponent(name)}` : "/(tabs)/space/teach-tcp");
   }
 
   function confirmDelete(name: string) {
@@ -331,6 +363,8 @@ export default function ToolsPage() {
                           style={styles.iconBtn}
                           onPress={() => openEdit(tool.name)}
                           hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Edit ${tool.name}`}
                         >
                           <Edit2 size={16} color={colors.textMuted} />
                         </Pressable>
@@ -355,17 +389,6 @@ export default function ToolsPage() {
           onPress={() => { setDraft(EMPTY_DRAFT); setCreateOpen(true); }}
         />
 
-        {/* Teach a planar TCP by touching one point from several wrist angles (ASTRO only). */}
-        {status.robotType === "ASTRO" && (
-          <Button
-            variant="secondary"
-            label="Teach TCP with Wizard"
-            icon={<Crosshair size={16} color={colors.textMuted} />}
-            onPress={() => router.push("/(tabs)/space/teach-tcp")}
-            style={styles.teachBtn}
-          />
-        )}
-
       </Screen>
 
       {/* Create modal */}
@@ -376,6 +399,7 @@ export default function ToolsPage() {
         onChangeDraft={setDraft}
         onSave={handleCreate}
         onClose={() => setCreateOpen(false)}
+        onTeach={teachNew}
       />
 
       {/* Edit modal */}
@@ -386,6 +410,7 @@ export default function ToolsPage() {
         onChangeDraft={setDraft}
         onSave={handleEdit}
         onClose={() => setEditOpen(false)}
+        onTeach={teachEditing}
       />
     </View>
   );
@@ -439,7 +464,7 @@ const styles = StyleSheet.create({
     padding: spacing.xs,
   },
   teachBtn: {
-    marginTop: spacing.sm,
+    marginBottom: spacing.md,
   },
 
   // ── Modal ─────────────────────────────────────────────────────────────────

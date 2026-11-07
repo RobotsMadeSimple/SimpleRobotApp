@@ -664,6 +664,7 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.tools = []; this.emitTools(); return; }
 
     this.tools = parsed.map((t: any): Tool => ({
+      id:                t.id                ?? t.Id                ?? undefined,
       name:              t.Name              ?? t.name              ?? "",
       description:       t.Description       ?? t.description       ?? "",
       lastUpdatedUnixMs: t.LastUpdatedUnixMs ?? t.lastUpdatedUnixMs ?? 0,
@@ -688,6 +689,7 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.locals = []; this.emitLocals(); return; }
 
     this.locals = parsed.map((l: any): Local => ({
+      id:                l.id                ?? l.Id                ?? undefined,
       name:              l.Name              ?? l.name              ?? "",
       description:       l.Description       ?? l.description       ?? "",
       lastUpdatedUnixMs: l.LastUpdatedUnixMs ?? l.lastUpdatedUnixMs ?? 0,
