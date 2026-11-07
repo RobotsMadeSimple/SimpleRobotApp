@@ -135,7 +135,7 @@ export function ManualChapterView({ id, anchor, onNavigate, wide, contentStyle, 
     <ScrollView
       ref={scrollRef}
       style={{ flex: 1 }}
-      contentContainerStyle={[styles.content, contentStyle]}
+      contentContainerStyle={[styles.content, contentStyle, !wide && styles.contentFabRoom]}
       onScroll={onScroll}
       scrollEventThrottle={64}
       keyboardShouldPersistTaps="handled"
@@ -186,6 +186,9 @@ export function ManualChapterView({ id, anchor, onNavigate, wide, contentStyle, 
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: spacing.xxl * 2, gap: spacing.lg },
+  // Phones: room under the Previous/Next links for the floating buttons (two 44 px buttons, their
+  // gap and bottom offset), so scrolling to the end brings the links up clear of them.
+  contentFabRoom: { paddingBottom: spacing.xl + 44 * 2 + spacing.sm + spacing.lg },
   missing: { padding: spacing.lg },
   wideRow: { flex: 1, flexDirection: "row" },
   aside: { width: 240, borderLeftWidth: 1, borderLeftColor: colors.border, paddingHorizontal: spacing.sm },
