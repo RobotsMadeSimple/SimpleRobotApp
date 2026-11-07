@@ -16,7 +16,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { ArrowRight, Check, ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from "lucide-react-native";
-import { Point, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { Point, ProgramStep, ProgramVariable, isStepEnabled } from "@/src/models/robotModels";
 import { sharedStyles } from "./builderStyles";
 import { colors, accents, radii } from "@/src/components/ui/kit";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -194,6 +194,8 @@ export function StepRow({
                      || step.type === "Label"      || step.type === "GoToLabel";
   const innerSteps    = step.loopSteps ?? [];
   const theme         = STEP_THEME[step.type] ?? STEP_THEME["MoveL"];
+  // A disabled step (and its body) is skipped at run time: dim the card and say so.
+  const disabled      = !isStepEnabled(step);
   // The 4px rail carries the block's *category* colour, so a program reads as
   // bands of Motion / Logic / I-O at a glance; the icon tile and type label keep
   // the step's own theme so individual steps stay distinguishable within a band.
@@ -221,6 +223,7 @@ export function StepRow({
         { borderLeftColor: category.color },
         problems && (stepHasError(problems) ? sharedStyles.stepCardError : sharedStyles.stepCardWarning),
         selected && sharedStyles.stepCardSelected,
+        disabled && sharedStyles.stepCardDisabled,
       ]}>
         {isError && (
           <Animated.View
@@ -254,7 +257,7 @@ export function StepRow({
           <View style={sharedStyles.stepCardText}>
             <View style={sharedStyles.stepCardTypeRow}>
               <Text style={[sharedStyles.stepCardType, { color: theme.accent }]}>
-                {index + 1} · {theme.label.toUpperCase()}
+                {index + 1} · {theme.label.toUpperCase()}{disabled ? " · DISABLED" : ""}
               </Text>
             </View>
             {showName && (

@@ -5,7 +5,8 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import { useBuiltPrograms, useConnected, usePoints } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ListElementType, PluginStepContribution, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
+import { BuiltProgram, EditorMode, ListElementType, PluginStepContribution, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, isStepEnabled, variableList } from "@/src/models/robotModels";
+import { mapStepTree } from "@/src/models/stepTree";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
@@ -19,6 +20,7 @@ import {
   History as HistoryIcon,
   ImagePlus,
   Plus,
+  Power,
   Repeat,
   Repeat2,
   Scissors,
@@ -49,6 +51,9 @@ import {
 import { StepConfigModal } from "@/src/components/ui/builder/StepConfigModal";
 import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
 import { usePluginContributions } from "@/src/components/ui/builder/usePluginContributions";
+import { useStepCatalog } from "@/src/components/ui/builder/useStepCatalog";
+import { useBreakpoints } from "@/src/components/ui/builder/useBreakpoints";
+import { TextProgramView } from "@/src/components/ui/builder/TextProgramView";
 import { pluginStepFields } from "@/src/components/ui/builder/pluginSteps";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
@@ -131,6 +136,9 @@ export default function BuilderScreen() {
   const connected     = useConnected();
   // Plugin steps/functions for the picker, config form and step labels; refetched on reconnect.
   usePluginContributions(connected);
+  // The controller's step catalog (labels, typed fields, text syntax); refetched on reconnect.
+  // An older controller has none — the built-in tables in stepUtils stand in.
+  useStepCatalog(connected);
   const points        = usePoints();
   const paneLayout    = usePaneLayout();
   const isWide        = paneLayout !== "single";
@@ -171,6 +179,10 @@ export default function BuilderScreen() {
   const [contextPickerOpen,  setContextPickerOpen]  = useState(false);
 
   const [programId, setProgramId]     = useState<string | undefined>(existing?.id);
+  // Blocks | Text — the program's preferred view (BuiltProgram.editorMode). A view switch is
+  // not an edit: it is kept out of the undo document and saved with the program.
+  const [editorMode, setEditorMode]   = useState<EditorMode>(existing?.editorMode ?? "blocks");
+  const breakpoints = useBreakpoints(programId);
   const [coverImage, setCoverImage]   = useState<string | null>(null);
   const [localLoading, setLocalLoading] = useState(isLocalMode && !!editName);
 
@@ -198,6 +210,7 @@ export default function BuilderScreen() {
         history.reset(loaded);
         markSaved(loaded);
         if (prog.id) setProgramId(prog.id);
+        if (prog.editorMode) setEditorMode(prog.editorMode);
       }
       if (img) setCoverImage(img);
       setLocalLoading(false);
@@ -219,6 +232,7 @@ export default function BuilderScreen() {
       const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true });
       history.reset(loaded);
       markSaved(loaded);
+      if (existing.editorMode) setEditorMode(existing.editorMode);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing?.name]);
@@ -296,14 +310,16 @@ export default function BuilderScreen() {
     return JSON.parse(JSON.stringify(step));
   }
 
-  // Recursively assign fresh ids to a step and everything nested inside it.
+  // Fresh ids for a step and everything nested inside it (every body kind, via stepTree),
+  // including its else-if branches and switch cases. Labels keep their labelId so a pasted
+  // GoToLabel still finds its pasted Label.
   function reassignIds(step: ProgramStep): ProgramStep {
-    step.id = newId();
-    step.loopSteps?.forEach(reassignIds);
-    step.ifSteps?.forEach(reassignIds);
-    step.elseSteps?.forEach(reassignIds);
-    step.elseIfBranches?.forEach(b => { b.id = newId(); b.steps.forEach(reassignIds); });
-    return step;
+    return mapStepTree(step, s => ({
+      ...s,
+      id: newId(),
+      ...(s.elseIfBranches ? { elseIfBranches: s.elseIfBranches.map(b => ({ ...b, id: newId() })) } : {}),
+      ...(s.switchCases    ? { switchCases:    s.switchCases.map(c => ({ ...c, id: newId() })) }    : {}),
+    }));
   }
 
   function cloneStepWithNewIds(step: ProgramStep): ProgramStep {
@@ -390,6 +406,20 @@ export default function BuilderScreen() {
       });
       if (firstIdx < 0) rebuilt.push(loop);
       return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
+    });
+    exitSelect();
+  }
+
+  // Disable (or, when every selected step is already disabled, enable) the selection. A
+  // disabled step is skipped at run time with its whole body.
+  function toggleSelectedEnabled() {
+    if (selectedIds.length === 0) return;
+    const sel = selectedInOrder();
+    const enable = sel.length > 0 && sel.every(s => !isStepEnabled(s));
+    setSteps(prev => {
+      const scoped = getStepsAtScope(prev, scopeStackRef.current).map(s =>
+        selectedIds.includes(s.id) ? { ...s, enabled: enable ? undefined : false } : s);
+      return setStepsAtScope(prev, scopeStackRef.current, scoped);
     });
     exitSelect();
   }
@@ -701,7 +731,24 @@ export default function BuilderScreen() {
       conveyorAction: type === "ConveyorAction" ? "RunForward" : undefined,
       rotaryDirection: type === "RotaryIndex" ? 1 : undefined,
       rotaryCount:     type === "RotaryIndex" ? 1 : undefined,
+      // Program editor v2 — defaults match the controller's step catalog.
+      ...newBlockDefaults(type),
     };
+  }
+
+  function newBlockDefaults(type: StepType): Partial<ProgramStep> {
+    switch (type) {
+      case "Note":           return { comment: "", noteStyle: "note" };
+      case "LoopControl":    return { loopControl: "break" };
+      case "RaiseError":     return { errorMessage: "" };
+      case "Switch":         return { switchExpr: "", switchCases: [{ id: newId(), values: ["1"], steps: [] }] };
+      case "Try":            return { trySteps: [], catchSteps: [], tryRetries: 0 };
+      case "SavePosition":   return { savePositionTo: "variable", savePositionMode: "replace" };
+      case "SetSpeedFactor": return { speedFactor: 100 };
+      case "ListOp":         return { listAction: "append" };
+      case "Prompt":         return { promptMessage: "", promptButtons: ["OK"], promptInput: "none" };
+      default:               return {};
+    }
   }
 
   function openTypePicker(target: InsertTarget) {
@@ -783,7 +830,7 @@ export default function BuilderScreen() {
     } : {};
     // Self-migration: stamp a stable pointId onto any move step that still
     // references a point only by name, so renaming that point won't break it.
-    return { ...prog, ...page, steps: backfillPointIds(prog.steps, points) };
+    return { ...prog, ...page, editorMode, steps: backfillPointIds(prog.steps, points) };
   }
 
   async function save(): Promise<boolean> {
@@ -1053,6 +1100,18 @@ export default function BuilderScreen() {
     setTimeout(() => { setEditingStep(loc.step); setConfigOpen(true); }, 350);
   }
 
+  // Blocks ↔ Text. Text shows the whole program, so leave any block scope and selection.
+  function changeEditorMode(mode: EditorMode) {
+    exitSelect();
+    if (mode === "text") setScopeStack([]);
+    setEditorMode(mode);
+  }
+
+  // A parsed text program becomes the document in ONE undoable edit.
+  function applyTextProgram(p: BuiltProgram) {
+    commit(d => ({ ...d, steps: p.steps ?? [], variables: p.variables ?? [] }));
+  }
+
   const editorTools = (variant: "header" | "bar") => (
     <EditorToolbar
       variant={variant}
@@ -1060,6 +1119,8 @@ export default function BuilderScreen() {
       canRedo={history.canRedo}
       onUndo={undo}
       onRedo={redo}
+      editorMode={editorMode}
+      onEditorModeChange={changeEditorMode}
     >
       {validation.supported && (
         <ProblemsPill
@@ -1359,7 +1420,18 @@ export default function BuilderScreen() {
     </>
   );
 
-  const stepsSection = (
+  const textView = (
+    <TextProgramView
+      program={validationProgram}
+      onApply={applyTextProgram}
+      onSwitchToBlocks={() => changeEditorMode("blocks")}
+      connected={connected}
+      problems={validationProblems}
+      breakpoints={breakpoints}
+    />
+  );
+
+  const stepsSection = editorMode === "text" && !inScope ? textView : (
     <>
       {currentSteps.length === 0 ? (
         <View style={styles.emptySteps}>
@@ -1578,6 +1650,17 @@ export default function BuilderScreen() {
           >
             <Repeat2 size={16} color={accents.purple} />
             <Text style={[styles.selectActionText, { color: accents.purple }]}>Routine</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={toggleSelectedEnabled}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+          >
+            <Power size={16} color={colors.textSecondary} />
+            <Text style={[styles.selectActionText, { color: colors.textSecondary }]}>
+              {selectedIds.length > 0 && selectedInOrder().every(s => !isStepEnabled(s)) ? "Enable" : "Disable"}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}

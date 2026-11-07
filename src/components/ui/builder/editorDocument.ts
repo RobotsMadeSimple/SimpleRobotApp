@@ -1,5 +1,6 @@
 import { BuiltProgram, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { ScopeFrame, newId } from "./stepUtils";
+import { mapStepTree } from "@/src/models/stepTree";
 
 /**
  * Everything the program builder lets the user edit, as one immutable value so the
@@ -25,16 +26,15 @@ export const EMPTY_DOC: EditorDoc = {
   killBackgroundOnStop: true,
 };
 
-/** Assign fresh ids to any steps that lost theirs during a server round-trip. */
+/** Assign fresh ids to any steps (and else-if branches / switch cases) that lost theirs
+ *  during a server round-trip. Every body kind is walked via stepTree. */
 export function rehydrateIds(src: ProgramStep[]): ProgramStep[] {
-  return src.map(s => ({
+  return src.map(root => mapStepTree(root, s => ({
     ...s,
     id: s.id || newId(),
-    loopSteps:      s.loopSteps      ? rehydrateIds(s.loopSteps)      : s.loopSteps,
-    ifSteps:        s.ifSteps        ? rehydrateIds(s.ifSteps)        : s.ifSteps,
-    elseSteps:      s.elseSteps      ? rehydrateIds(s.elseSteps)      : s.elseSteps,
-    elseIfBranches: s.elseIfBranches ? s.elseIfBranches.map(b => ({ ...b, id: b.id || newId(), steps: rehydrateIds(b.steps) })) : s.elseIfBranches,
-  }));
+    ...(s.elseIfBranches ? { elseIfBranches: s.elseIfBranches.map(b => ({ ...b, id: b.id || newId() })) } : {}),
+    ...(s.switchCases    ? { switchCases:    s.switchCases.map(c => ({ ...c, id: c.id || newId() })) }    : {}),
+  })));
 }
 
 /** The editable document for a stored program. */

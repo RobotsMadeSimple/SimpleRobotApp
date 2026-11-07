@@ -40,12 +40,25 @@ import {
   Home,
   LocateFixed,
   Zap,
+  StickyNote,
+  SkipForward,
+  CornerDownLeft,
+  Flag,
+  TriangleAlert,
+  Split,
+  ShieldCheck,
+  MapPin,
+  Percent,
+  List,
+  MessageCircleQuestionMark,
+  Spline,
 } from "lucide-react-native";
 import React from "react";
 import { ConditionGroup, ElseIfBranch, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
 import { accents, colors } from "@/src/components/ui/kit";
 import { findPluginStep, pluginDisplayName } from "./usePluginContributions";
 import { outputsSummary, paramsSummary } from "./pluginSteps";
+import { mapStepTree } from "@/src/models/stepTree";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -94,20 +107,15 @@ export function backfillPointIds(steps: ProgramStep[], points: Point[] | undefin
   if (!points || points.length === 0) return steps;
   const idByName = new Map(points.map(p => [p.name, p.id] as const));
   const isMove = (t: StepType) => t === "MoveL" || t === "MoveJ" || t === "JumpL" || t === "JumpJ";
-  const walk = (list: ProgramStep[]): ProgramStep[] => list.map(s => {
-    let next = s;
+  // Every nested body (loop, if/else, switch, try/catch) via stepTree.
+  return steps.map(root => mapStepTree(root, s => {
     if (isMove(s.type) && s.pointName && !s.pointId
         && !s.gridPoint && !s.stackPoint && !s.varPointName && !s.pointNameExpr) {
       const id = idByName.get(s.pointName);
-      if (id) next = { ...next, pointId: id };
+      if (id) return { ...s, pointId: id };
     }
-    if (next.loopSteps)      next = { ...next, loopSteps:      walk(next.loopSteps) };
-    if (next.ifSteps)        next = { ...next, ifSteps:        walk(next.ifSteps) };
-    if (next.elseSteps)      next = { ...next, elseSteps:      walk(next.elseSteps) };
-    if (next.elseIfBranches) next = { ...next, elseIfBranches: next.elseIfBranches.map(b => ({ ...b, steps: walk(b.steps) })) };
-    return next;
-  });
-  return walk(steps);
+    return s;
+  }));
 }
 
 // ── Step label ─────────────────────────────────────────────────────────────────
@@ -282,6 +290,23 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return pluginStepTitle(step);
     case "Unknown":
       return step.unknownStepType ? `Unknown (${step.unknownStepType})` : "Unknown Step";
+    // Program editor v2 — minimal labels until the catalog-driven summaries (package E).
+    case "Note":
+      return (step.comment ?? "").split("\n")[0].trim() || (step.noteStyle === "section" ? "Section" : "Note");
+    case "LoopControl":
+      return step.loopControl === "continue" ? "Next Iteration" : "Break Loop";
+    case "EndProgram":
+      return step.statusMessage ? `End Program: ${step.statusMessage}` : "End Program";
+    case "RaiseError":
+      return step.errorMessage ? `Raise Error: ${step.errorMessage}` : "Raise Error";
+    case "Switch":
+      return step.switchExpr ? `Switch ${step.switchExpr}` : "Switch";
+    case "ListOp":
+      return step.variableName ? `$${step.variableName}.${step.listAction ?? "append"}` : "List";
+    case "Prompt":
+      return step.promptMessage ? `Prompt: ${step.promptMessage}` : "Prompt";
+    case "Return": case "Try": case "SavePosition": case "SetSpeedFactor": case "MoveC":
+      return STEP_THEME[step.type]?.label ?? step.type;
     default:              return step.type;
   }
 }
@@ -336,6 +361,18 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "CaptureImage":       return <Camera        size={size} color={color} />;
     case "HttpReceive":        return <Inbox         size={size} color={color} />;
     case "Plugin":             return <Plug          size={size} color={color} />;
+    case "Note":               return <StickyNote    size={size} color={color} />;
+    case "LoopControl":        return <SkipForward   size={size} color={color} />;
+    case "Return":             return <CornerDownLeft size={size} color={color} />;
+    case "EndProgram":         return <Flag          size={size} color={color} />;
+    case "RaiseError":         return <TriangleAlert size={size} color={color} />;
+    case "Switch":             return <Split         size={size} color={color} />;
+    case "Try":                return <ShieldCheck   size={size} color={color} />;
+    case "SavePosition":       return <MapPin        size={size} color={color} />;
+    case "SetSpeedFactor":     return <Percent       size={size} color={color} />;
+    case "ListOp":             return <List          size={size} color={color} />;
+    case "Prompt":             return <MessageCircleQuestionMark size={size} color={color} />;
+    case "MoveC":              return <Spline        size={size} color={color} />;
     case "Unknown":            return <HelpCircle    size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
@@ -391,6 +428,19 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   HttpReceive:      { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Receive"        },
   // Ink/slate: the one kit tone no built-in family uses, so plugin blocks read as "external".
   Plugin:           { accent: colors.surfaceDark, iconBg: colors.border, iconColor: colors.surfaceDark, label: "Plugin" },
+  // Program editor v2
+  Note:             { accent: "#64748b", iconBg: "#f1f5f9", iconColor: "#64748b", label: "Note"                },
+  LoopControl:      { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Break / Next"        },
+  Return:           { accent: "#16a34a", iconBg: "#bbf7d0", iconColor: "#16a34a", label: "Return"              },
+  EndProgram:       { accent: "#374151", iconBg: "#f3f4f6", iconColor: "#374151", label: "End Program"         },
+  RaiseError:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Raise Error"         },
+  Switch:           { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Switch"              },
+  Try:              { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Try"                 },
+  SavePosition:     { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Save Position"       },
+  SetSpeedFactor:   { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed Factor"    },
+  ListOp:           { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "List"                },
+  Prompt:           { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Prompt"              },
+  MoveC:            { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Arc"            },
   Unknown:          { accent: "#9ca3af", iconBg: "#f3f4f6", iconColor: "#6b7280", label: "Unknown Step"        },
 };
 
@@ -899,13 +949,26 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "HttpRequest",   label: "HTTP Request",           desc: "POST a JSON payload to a server and optionally load values from the response back into program variables" },
   { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with HTTP Request to send it to a server" },
   { type: "HttpReceive",    label: "HTTP Receive",           desc: "Wait for an incoming HTTP POST to a named webhook endpoint — other robots or servers can trigger this step by POSTing to /webhook/{name}" },
+  // Program editor v2 (labels/descriptions mirror the controller's step catalog)
+  { type: "MoveC",          label: "Move Arc",               desc: "Move along a circular arc through a via point to the end target" },
+  { type: "SavePosition",   label: "Save Position",          desc: "Store the current position in a Points list or a saved point" },
+  { type: "SetSpeedFactor", label: "Set Speed Factor",       desc: "Scale this program's move speeds by a percentage" },
+  { type: "Switch",         label: "Switch",                 desc: "Run the case whose value equals an expression" },
+  { type: "LoopControl",    label: "Break / Next",           desc: "Leave the enclosing loop, or skip to its next iteration" },
+  { type: "Try",            label: "Try",                    desc: "Run steps; on a runtime error retry them or run the catch steps" },
+  { type: "RaiseError",     label: "Raise Error",            desc: "Fail with a message — caught by an enclosing Try, otherwise ends the program" },
+  { type: "Return",         label: "Return",                 desc: "Leave the routine (or end the program)" },
+  { type: "EndProgram",     label: "End Program",            desc: "Finish the program now, from anywhere" },
+  { type: "Note",           label: "Note",                   desc: "A note or section header — not executed" },
+  { type: "ListOp",         label: "List",                   desc: "Append, insert, remove, set, sort or copy list elements" },
+  { type: "Prompt",         label: "Prompt",                 desc: "Ask the operator: show a message with buttons and an optional input" },
 ];
 
 export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
 
 export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
-  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram",
-  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram", "MoveC",
+  "SetTool", "SetSpeedL", "SetSpeedJ", "SetSpeedFactor", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
 ]);
 
 /**
@@ -941,25 +1004,25 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "MoveC", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram", "SavePosition"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,
     desc: "Change how later moves behave: speed, blending, tool and frame.",
     color: "#0284c7", soft: "#e0f2fe",
-    types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius", "SetTool", "SetLocal", "ClearLocal"],
+    types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius", "SetSpeedFactor", "SetTool", "SetLocal", "ClearLocal"],
   },
   {
     key: "flow", label: "Logic & Flow", icon: GitBranch,
     desc: "Decide what runs next — branches, loops, jumps and pauses.",
     color: accents.purple, soft: accents.purpleSoft,
-    types: ["IfCondition", "Loop", "CallRoutine", "Label", "GoToLabel", "PauseProgram"],
+    types: ["IfCondition", "Switch", "Loop", "LoopControl", "Try", "RaiseError", "CallRoutine", "Return", "Label", "GoToLabel", "PauseProgram", "EndProgram", "Note"],
   },
   {
     key: "variables", label: "Variables & Timing", icon: Hash,
     desc: "Store values, count time, and wait before continuing.",
     color: colors.warning, soft: colors.warningSoft,
-    types: ["SetVariable", "StopwatchControl", "Wait"],
+    types: ["SetVariable", "ListOp", "StopwatchControl", "Wait"],
   },
   {
     key: "io", label: "I/O & Aux Axes", icon: Zap,
@@ -983,7 +1046,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "comms", label: "Communication", icon: Radio,
     desc: "Talk to the operator and to other machines over HTTP.",
     color: "#0f766e", soft: "#f0fdfa",
-    types: ["HttpRequest", "HttpReceive", "StatusUpdate"],
+    types: ["Prompt", "HttpRequest", "HttpReceive", "StatusUpdate"],
   },
 ];
 
