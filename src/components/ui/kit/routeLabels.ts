@@ -44,8 +44,10 @@ export const ROUTE_LABELS: Record<string, string> = {
   // Space
   grids:        "Grids",
   "grid-edit":  "Edit Grid",
+  "grid-teach": "Teach Grid",
   stacks:       "Stacks",
   "stack-edit": "Edit Stack",
+  "stack-teach": "Teach Stack",
   locals:       "Locals",
   points:       "Points",
   tools:        "Tools",

@@ -3,6 +3,7 @@ import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   accents,
   Button,
+  buttonTextColor,
   Card,
   colors,
   Divider,
@@ -21,7 +22,7 @@ import { RobotStack } from "@/src/models/robotModels";
 import { usePoints, useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronRight, X } from "lucide-react-native";
+import { ChevronRight, Crosshair, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -121,9 +122,12 @@ export default function StackEditPage() {
 
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
 
+  // Sync draft if the stack loads after navigation, and again when the saved stack itself
+  // changes — e.g. after re-teaching it in the wizard.
+  const existingKey = existing ? JSON.stringify(existing) : "";
   useEffect(() => {
     if (existing) setDraft({ ...existing });
-  }, [existing?.id]);
+  }, [existingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (fields: Partial<RobotStack>) => setDraft(d => ({ ...d, ...fields }));
 
@@ -134,6 +138,17 @@ export default function StackEditPage() {
   }
 
   const canSave = draft.name.trim().length > 0;
+
+  // Teach opens the stack wizard. A saved stack is re-taught in place (same id); a new one is
+  // created by the wizard, so it replaces this blank page and Done returns to the stack list.
+  function openTeach() {
+    if (isNew) {
+      const name = draft.name.trim();
+      router.replace(name ? `/space/stack-teach?name=${encodeURIComponent(name)}` : "/space/stack-teach");
+    } else {
+      router.push(`/space/stack-teach?id=${encodeURIComponent(draft.id)}`);
+    }
+  }
 
   return (
     <KeyboardAvoidingView
@@ -161,6 +176,21 @@ export default function StackEditPage() {
       />
 
       <Screen>
+        {/* Teach this stack from the robot's position (a wizard of its own). */}
+        <Card style={s.teachCard}>
+          <Text style={s.teachText}>
+            {isNew
+              ? "Jog the robot to the first item and one more, and the step is worked out for you — or enter it by hand below."
+              : "Re-teach this stack by jogging the robot to its items. Its base point and step are replaced."}
+          </Text>
+          <Button
+            label="Teach with wizard"
+            icon={<Crosshair size={16} color={buttonTextColor("primary")} />}
+            onPress={openTeach}
+            style={s.teachBtn}
+          />
+        </Card>
+
         {(() => {
           const nameSection = (
             <>
@@ -311,6 +341,10 @@ const s = StyleSheet.create({
   // Stacks use accents.purple for their primary action, unlike the default
   // kit Button primary (accent blue), to match the app-wide Stacks color coding.
   saveBtn: { backgroundColor: accents.purple },
+  teachBtn: { backgroundColor: accents.purple },
+
+  teachCard: { gap: spacing.md },
+  teachText: { ...type.body, color: colors.textMuted },
 
   // Wide: two columns instead of one long stack of cards. Each column keeps
   // its own vertical rhythm since Screen's `gap` only spaces its direct child.

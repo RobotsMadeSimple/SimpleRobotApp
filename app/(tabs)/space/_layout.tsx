@@ -13,6 +13,7 @@ export default function SpaceLayout() {
       <Stack.Screen name="grid-teach" options={{ headerShown: false }} />
       <Stack.Screen name="stacks"     options={{ headerShown: false }} />
       <Stack.Screen name="stack-edit" options={{ headerShown: false }} />
+      <Stack.Screen name="stack-teach" options={{ headerShown: false }} />
     </Stack>
   );
 }
