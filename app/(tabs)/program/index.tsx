@@ -6,7 +6,8 @@ import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
-import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Plug, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
+import { openManual } from "@/src/docs/navigation";
+import { AlertTriangle, BookOpen, Box, Cpu, Gauge, PlayCircle, Plug, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -40,6 +41,7 @@ import {
 const ROUTINE_TINT = { color: accents.purple, bg: accents.purpleSoft };
 const LOCAL_TINT    = { color: accents.orange, bg: accents.orangeSoft };
 const VISION_TINT   = { color: accents.cyan,   bg: accents.cyanSoft };
+const MANUAL_TINT   = { color: colors.success, bg: colors.successSoft };
 
 // ── Status theming ─────────────────────────────────────────────────────────────
 // Collapsed onto the same handful of tones StatusPill uses (success/accent/
@@ -408,6 +410,14 @@ export default function ProgramScreen() {
             icon: <Plug size={20} color={colors.accent} />,
             iconColor: colors.accentSoft,
             onPress: () => router.navigate("/(tabs)/program/plugins"),
+          },
+          {
+            key: "manual",
+            title: "Programming Manual",
+            subtitle: "Concepts, every instruction and its parameters",
+            icon: <BookOpen size={20} color={MANUAL_TINT.color} />,
+            iconColor: MANUAL_TINT.bg,
+            onPress: () => openManual(),
           },
         ].map((item, i, arr) => (
           <View key={item.key}>

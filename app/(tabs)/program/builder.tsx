@@ -36,7 +36,9 @@ import {
   Upload,
   Wrench,
   X,
+  BookOpen,
 } from "lucide-react-native";
+import { openManual, openStepReference } from "@/src/docs/navigation";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import React, { SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1256,6 +1258,9 @@ export default function BuilderScreen() {
           <HistoryIcon size={16} color={colors.textSecondary} />
         </ToolbarButton>
       )}
+      <ToolbarButton label="Manual" onPress={() => { exitSelect(); openManual(); }}>
+        <BookOpen size={16} color={colors.textSecondary} />
+      </ToolbarButton>
     </EditorToolbar>
   );
 
@@ -2084,6 +2089,8 @@ export default function BuilderScreen() {
                 "Open block", "Show only this block's steps",
                 <ChevronRight size={17} color={colors.textSecondary} />,
                 () => { const loc = locateStep(steps, m.id); const f = bodyFrames(m)[0]; if (loc && f) setScopeStack([...loc.scope, { ...f, stepId: m.id }]); })}
+              {item("Step help", "Open this step's page in the programming manual",
+                <BookOpen size={17} color={colors.textSecondary} />, () => openStepReference(m.type))}
               {item("Delete step", "Remove it and everything inside it",
                 <Trash2 size={17} color={colors.danger} />, () => appAlert("Delete Step", "Remove this step?", [
                   { text: "Cancel", style: "cancel" },

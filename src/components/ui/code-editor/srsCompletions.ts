@@ -422,18 +422,21 @@ export function srsCompletionsAt(
   return null;
 }
 
-/** Help for the statement on a line: the catalog syntax + description, or a flow form's. */
-export function srsLineHelp(line: string, data: SrsCompletionData | null): { title: string; syntax: string; description: string } | null {
+/**
+ * Help for the statement on a line: the catalog syntax + description, or a flow form's. `ref` is
+ * the step type (or flow word) to look up in the programming manual.
+ */
+export function srsLineHelp(line: string, data: SrsCompletionData | null): { title: string; syntax: string; description: string; ref?: string } | null {
   const code = stripComment(line).trim();
   if (!code) return null;
   const word = /^([A-Za-z_]\w*)/.exec(code)?.[1];
   if (code.startsWith("$")) {
     const s = data?.steps.find(x => x.type === (/^\$\w+(\[[^\]]*\])?(\.\w+)?\s*=/.test(code) && !/^\$\w+\.\w+\(/.test(code) ? "SetVariable" : "ListOp"));
-    return s ? { title: s.label, syntax: s.syntax, description: s.description } : null;
+    return s ? { title: s.label, syntax: s.syntax, description: s.description, ref: s.type } : null;
   }
   if (!word) return null;
   const step = findStepByKeyword(data, word);
-  if (step) return { title: step.label, syntax: step.syntax, description: step.description };
+  if (step) return { title: step.label, syntax: step.syntax, description: step.description, ref: step.type };
   const f = FLOW_SNIPPETS.find(x => x.label === word.toLowerCase());
-  return f ? { title: f.label, syntax: f.snippet.replace(/\$\{([^}]*)\}/g, "$1").replace(/\n\t?/g, " … "), description: f.detail } : null;
+  return f ? { title: f.label, syntax: f.snippet.replace(/\$\{([^}]*)\}/g, "$1").replace(/\n\t?/g, " … "), description: f.detail, ref: f.label } : null;
 }

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AlertCircle, AlertTriangle, Blocks, Check, Code, Loader, RotateCcw, SquarePen, WandSparkles, WifiOff } from "lucide-react-native";
+import { AlertCircle, AlertTriangle, Blocks, BookOpen, Check, Code, Loader, RotateCcw, SquarePen, WandSparkles, WifiOff } from "lucide-react-native";
 import { Button, colors, radii, spacing } from "@/src/components/ui/kit";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import type {
@@ -23,6 +23,8 @@ import { useExpressionEnv } from "./expressions/ExpressionEnv";
 import { StepTypePicker } from "./StepTypePicker";
 import { newId } from "./stepUtils";
 import { useStepCatalog } from "./useStepCatalog";
+import { findRefEntry } from "@/src/docs/manual";
+import { openStepReference } from "@/src/docs/navigation";
 import type { BreakpointsView } from "./useBreakpoints";
 
 /**
@@ -539,7 +541,7 @@ export function TextProgramView({
       </View>
 
       {!modalEditing && !readOnly && <KeyRow compact send={send} onInsertStep={() => setPickerOpen(true)} />}
-      {!modalEditing && help && <HelpStrip help={help} />}
+      {!modalEditing && help && <HelpStrip help={help} onDocs={openStepReference} />}
 
       {modalEditing && dirty && (
         <View style={styles.inlineActions}>
@@ -568,7 +570,7 @@ export function TextProgramView({
               <ToolButton label="Format" icon={WandSparkles} iconOnly disabled={readOnly || !parseOk} onPress={format} />
               <ToolButton label="Revert" icon={RotateCcw} iconOnly disabled={!dirty} onPress={revert} />
             </View>
-            {help && <HelpStrip help={help} compact />}
+            {help && <HelpStrip help={help} compact onDocs={ref => { closeFullscreen(); setTimeout(() => openStepReference(ref), 300); }} />}
             <View style={{ flex: 1 }}>
               {fullscreen && (
                 <CodeEditor
@@ -671,11 +673,27 @@ function ToolButton({ label, icon: Icon, onPress, disabled, primary, iconOnly }:
   );
 }
 
-function HelpStrip({ help, compact }: { help: { title: string; syntax: string; description: string }; compact?: boolean }) {
+function HelpStrip({ help, compact, onDocs }: {
+  help: { title: string; syntax: string; description: string; ref?: string };
+  compact?: boolean;
+  /** Open the line's instruction in the programming manual. */
+  onDocs?: (ref: string) => void;
+}) {
+  // Only link a keyword the bundled manual has a page for.
+  const entry = help.ref ? findRefEntry(help.ref) : undefined;
   return (
-    <View style={[styles.help, compact && styles.helpCompact]}>
-      <Text style={styles.helpSyntax} numberOfLines={compact ? 1 : 2}>{help.syntax}</Text>
-      {!compact && !!help.description && <Text style={styles.helpDesc} numberOfLines={2}>{help.description}</Text>}
+    <View style={[styles.help, compact && styles.helpCompact, styles.helpRow]}>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={styles.helpSyntax} numberOfLines={compact ? 1 : 2}>{help.syntax}</Text>
+        {!compact && !!help.description && <Text style={styles.helpDesc} numberOfLines={2}>{help.description}</Text>}
+      </View>
+      {entry && onDocs && (
+        <TouchableOpacity onPress={() => onDocs(entry.type)} hitSlop={8} activeOpacity={0.7} style={styles.helpDocs}
+          accessibilityRole="link" accessibilityLabel={`${entry.keyword} in the programming manual`}>
+          <BookOpen size={14} color={colors.accent} />
+          {!compact && <Text style={styles.helpDocsText}>Docs</Text>}
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -787,6 +805,12 @@ const styles = StyleSheet.create({
   helpCompact: { paddingVertical: 5, borderTopWidth: 0, borderBottomWidth: 1, borderBottomColor: colors.border },
   helpSyntax: { fontSize: 12, color: colors.textSecondary, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) },
   helpDesc: { fontSize: 12, color: colors.textMuted },
+  helpRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  helpDocs: {
+    flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderRadius: radii.sm, backgroundColor: colors.accentSoft,
+  },
+  helpDocsText: { fontSize: 12, fontWeight: "700", color: colors.accent },
   problems: { borderTopWidth: 1, borderTopColor: colors.border },
   problemsHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: spacing.md, paddingVertical: 8 },
   problemsTitle: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, color: colors.textMuted },

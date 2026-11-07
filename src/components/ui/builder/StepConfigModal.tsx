@@ -14,7 +14,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, ChevronRight, CircuitBoard, Cpu, Crosshair, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
+import { AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, ChevronRight, CircleHelp, CircuitBoard, Cpu, Crosshair, Globe, List, Minus, Pencil, Plus, Radio, RotateCcw, RotateCw, Search, Trash2, X } from "lucide-react-native";
 import { useKeyboardStableCard } from "@/src/platform/keyboard";
 
 import {
@@ -77,6 +77,8 @@ import type { VisionProgram } from "@/src/models/visionTools";
 import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
+import { ManualPanel } from "@/src/components/docs/ManualPanel";
+import { openManual } from "@/src/docs/navigation";
 
 type SubPage = null | "point" | "speed" | "posOffset" | "toolOffset" | "posOverride" | "jumpHeight" | "blend" | "moveStop";
 
@@ -148,6 +150,8 @@ export function StepConfigModal({
   const [draft, setDraft]           = useState<ProgramStep | null>(null);
   const [pulseMsText, setPulseMs]   = useState("");
   const [subPage, setSubPage]       = useState<SubPage>(null);
+  // The step's manual page, shown in place of the fields (the "?" in the header).
+  const [helpOpen, setHelpOpen]     = useState(false);
   // Step name is edited in-place in the header via a pencil toggle.
   const [editingName, setEditingName] = useState(false);
   // Description + status description collapse to an "Add …" button when empty, to save room.
@@ -259,6 +263,7 @@ export function StepConfigModal({
       setGridPointMode('savedPoint');
     }
     setSubPage(null);
+    setHelpOpen(false);
     setClearConfirm(null);
     setEditingName(false);
     setShowComment(false);
@@ -3641,7 +3646,24 @@ export function StepConfigModal({
     </View>
   );
 
-  const back = () => (subPage ? closeSubPageDone() : pageMode ? closePage() : onClose());
+  const back = () => (helpOpen ? setHelpOpen(false) : subPage ? closeSubPageDone() : pageMode ? closePage() : onClose());
+
+  // "?" — the step's reference page from the programming manual, in place of the fields. On the
+  // phone page (edits are already live) it can also leave for the full manual page.
+  const helpButton = !subPage && draft ? (
+    <TouchableOpacity onPress={() => setHelpOpen(o => !o)} hitSlop={10} activeOpacity={0.7}
+      accessibilityRole="button" accessibilityLabel={helpOpen ? "Hide step help" : "Step help"}
+      accessibilityState={{ selected: helpOpen }}>
+      <CircleHelp size={19} color={helpOpen ? colors.accent : colors.textMuted} />
+    </TouchableOpacity>
+  ) : null;
+  const helpPanel = helpOpen && draft ? (
+    <ManualPanel
+      initial={{ kind: "step", key: draft.type }}
+      onClose={() => setHelpOpen(false)}
+      onOpenFull={pageMode ? t => { closePage(); setTimeout(() => openManual(t), 250); } : undefined}
+    />
+  ) : null;
 
   return (
     <>
@@ -3654,6 +3676,7 @@ export function StepConfigModal({
               <ArrowLeft size={20} color={colors.text} />
             </TouchableOpacity>
             {titleNode}
+            {helpButton}
             {subPage ? <View style={{ width: 52 }} /> : (
               <TouchableOpacity onPress={closePage} hitSlop={8} activeOpacity={0.7} style={sc.doneBtn}
                 accessibilityRole="button" accessibilityLabel="Done">
@@ -3661,7 +3684,7 @@ export function StepConfigModal({
               </TouchableOpacity>
             )}
           </View>
-          {scrollBody}
+          {helpPanel ?? scrollBody}
           {subPage && subPageFooter}
         </View>
       </Modal>
@@ -3692,12 +3715,13 @@ export function StepConfigModal({
                 </TouchableOpacity>
               ) : <View style={{ width: 18 }} />}
               {titleNode}
+              {helpButton && <View style={{ marginRight: 14 }}>{helpButton}</View>}
               <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
                 <X size={18} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
 
-            {scrollBody}
+            {helpPanel ? <View style={{ height: Math.max(320, cardMaxHeight - 140), marginHorizontal: -20 }}>{helpPanel}</View> : scrollBody}
 
             {subPage ? subPageFooter : (
               <View style={ms.actions}>
