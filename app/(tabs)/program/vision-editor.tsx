@@ -4,7 +4,7 @@ import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
 import { CameraState } from "@/src/models/robotModels";
 import {
   TOOL_META, dependentsOf, fixtureDepth, layerOrderProblems, newLayer, newTool, newVisionId,
-  normalizeVisionProgram, orderProblems,
+  normalizeVisionProgram, orderProblems, regionOwner,
   type ImageLayer, type Pose, type Region, type VisionProgram, type VisionResult, type VisionTool, type VisionToolType,
 } from "@/src/models/visionTools";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -227,7 +227,7 @@ export default function VisionEditorScreen() {
 
   function deleteTool(t: VisionTool) {
     const deps = dependentsOf(t.id, program.tools);
-    const direct = program.tools.filter(x => x.fixtureId === t.id || (Array.isArray(x.params.sources) && (x.params.sources as string[]).includes(t.id)));
+    const direct = program.tools.filter(x => x.fixtureId === t.id || x.regionFrom === t.id || (Array.isArray(x.params.sources) && (x.params.sources as string[]).includes(t.id)));
     appAlert("Delete tool", deps.size
       ? `Delete "${t.name}"? ${direct.length} tool${direct.length !== 1 ? "s use" : " uses"} it; they will lose that link.`
       : `Delete "${t.name}"?`, [
@@ -236,10 +236,13 @@ export default function VisionEditorScreen() {
         ...p,
         tools: p.tools.filter(x => x.id !== t.id).map(x => {
           const src = Array.isArray(x.params.sources) ? (x.params.sources as string[]) : null;
-          if (x.fixtureId !== t.id && !(src && src.includes(t.id))) return x;
+          if (x.fixtureId !== t.id && x.regionFrom !== t.id && !(src && src.includes(t.id))) return x;
+          // A tool sharing the deleted tool's area keeps that area as its own.
+          const shared = x.regionFrom === t.id ? regionOwner(t, p.tools) : null;
           return {
             ...x,
-            fixtureId: x.fixtureId === t.id ? null : x.fixtureId,
+            ...(shared ? { regionFrom: null, region: shared.region ?? x.region ?? null } : {}),
+            fixtureId: shared ? shared.fixtureId : x.fixtureId === t.id ? null : x.fixtureId,
             params: src ? { ...x.params, sources: src.map(s => (s === t.id ? "" : s)) } : x.params,
           };
         }),
@@ -529,7 +532,8 @@ export default function VisionEditorScreen() {
         const prob = problems[t.id];
         const fixture = t.fixtureId ? program.tools.find(x => x.id === t.fixtureId) : null;
         const inputName = t.input === "camera" ? null : program.layers.find(l => l.id === t.input)?.name ?? "missing layer";
-        const detail = [inputName && `on ${inputName}`, fixture && `follows ${fixture.name}`].filter(Boolean).join(" · ");
+        const areaFrom = t.regionFrom ? program.tools.find(x => x.id === t.regionFrom) : null;
+        const detail = [inputName && `on ${inputName}`, fixture && `follows ${fixture.name}`, areaFrom && `area of ${areaFrom.name}`].filter(Boolean).join(" · ");
         const drop = toolDrag.dropAt(t.id, index);
         const tint = CATEGORY_TINT[meta.category];
         return (
@@ -672,6 +676,7 @@ export default function VisionEditorScreen() {
           snapshotUri={snapshotUri}
           onFetchSnapshot={fetchSnapshot}
           onChange={updateTool}
+          onChangeTool={updateTool}
           onSetReference={() => setReference(pageTool.id)}
           onSetFixtureReference={(fixtureId, pose) => setProgram(p => ({ ...p, tools: p.tools.map(t => (t.id === fixtureId ? { ...t, reference: pose } : t)) }))}
           onTeach={() => teach(pageTool.id)}

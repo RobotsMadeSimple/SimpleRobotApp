@@ -85,6 +85,11 @@ export type VisionTool = {
   fixtureId: string | null;
   /** Omitted for tools that need none (makeFixture, distance, angle). */
   region?: Region | null;
+  /**
+   * An earlier tool whose region (and fixture) this one uses instead of its own, or null — one area
+   * drawn once, shared by several tools. The grid stays this tool's own.
+   */
+  regionFrom?: string | null;
   grid?: ToolGrid | null;
   /** Judgement on any numeric value key. */
   limits?: Record<string, ToolLimit>;
@@ -685,13 +690,47 @@ export function normalizeVisionProgram(p: Partial<VisionProgram> & { id?: string
 
 // ── References and order ─────────────────────────────────────────────────────
 
-/** Ids of the tools a tool reads: its fixture and its geometry sources. */
+/** Ids of the tools a tool reads: its fixture, its shared region and its geometry sources. */
 export function toolRefs(tool: VisionTool): string[] {
   const refs: string[] = [];
   if (tool.fixtureId) refs.push(tool.fixtureId);
+  if (tool.regionFrom) refs.push(tool.regionFrom);
   const src = tool.params.sources;
   if (Array.isArray(src)) for (const s of src) if (typeof s === "string" && s) refs.push(s);
   return refs;
+}
+
+/**
+ * The tool whose region (and fixture) a tool uses: itself, or the end of its regionFrom chain.
+ * A missing link or a loop stops at the last tool reached (orderProblems reports it).
+ */
+export function regionOwner(tool: VisionTool, tools: VisionTool[]): VisionTool {
+  let cur = tool;
+  const seen = new Set<string>([tool.id]);
+  while (cur.regionFrom) {
+    const next = tools.find(t => t.id === cur.regionFrom);
+    if (!next || seen.has(next.id)) break;
+    seen.add(next.id);
+    cur = next;
+  }
+  return cur;
+}
+
+/** Can a tool whose region rule is `rule` use this region? */
+export function regionFits(rule: RegionRule, r: Region | null | undefined): boolean {
+  if (!r || rule === "none") return false;
+  return rule === "any" || r.shape === rule;
+}
+
+/**
+ * Tools a tool can share an area with: earlier tools that draw a region of a shape it accepts
+ * (resolved through their own sharing).
+ */
+export function regionSources(tool: VisionTool, tools: VisionTool[]): VisionTool[] {
+  const rule = TOOL_META[tool.type]?.region ?? "none";
+  const i = tools.findIndex(t => t.id === tool.id);
+  return tools.slice(0, Math.max(0, i)).filter(t =>
+    TOOL_META[t.type]?.region !== "none" && regionFits(rule, regionOwner(t, tools).region));
 }
 
 /** How deep a tool sits in its fixture chain (0 = no fixture). */
@@ -735,7 +774,11 @@ export function orderProblems(program: VisionProgram): Record<string, string> {
     if (t.input !== "camera" && !layerIds.has(t.input)) { problems[t.id] = "Its image layer no longer exists"; return; }
     for (const r of toolRefs(t)) {
       const j = index.get(r);
-      if (j === undefined) { problems[t.id] = r === t.fixtureId ? "Its fixture no longer exists" : "A source tool no longer exists"; return; }
+      if (j === undefined) {
+        problems[t.id] = r === t.fixtureId ? "Its fixture no longer exists"
+          : r === t.regionFrom ? "The tool it shares an area with no longer exists" : "A source tool no longer exists";
+        return;
+      }
       if (j >= i) { problems[t.id] = `Must come after "${program.tools[j].name}"`; return; }
     }
   });

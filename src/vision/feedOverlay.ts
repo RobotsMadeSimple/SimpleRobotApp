@@ -4,8 +4,9 @@
 // moved it), coloured by status, with its found points, lines and pose and its grid cells pass/fail.
 // Without one, each tool's configured region is drawn as stored — dashed when it follows a fixture,
 // since a stored fixture region is in the fixture's reference space, not necessarily where it shows.
+// A tool that shares another's area (regionFrom) is drawn on that tool's region.
 
-import { TOOL_META, type ToolResult, type VisionProgram, type VisionResult, type VisionTool, type VPoint } from "@/src/models/visionTools";
+import { TOOL_META, regionOwner, type ToolResult, type VisionProgram, type VisionResult, type VisionTool, type VPoint } from "@/src/models/visionTools";
 import { gridCells, looksNormalized, regionOutlinePx } from "./regionMath";
 
 type P = [number, number];
@@ -65,10 +66,13 @@ export function buildOverlay(
     if (r?.region && r.region.length >= 2) {
       outline = r.region;
       space = looksNormalized(r.region) ? "norm" : "px";
-    } else if (tool.region) {
-      outline = regionOutlinePx(tool.region, W, H).map(p => ({ x: p.x / W, y: p.y / H }));
-      space = "norm";
-      dashed = !!tool.fixtureId;
+    } else {
+      const owner = regionOwner(tool, program.tools);
+      if (owner.region) {
+        outline = regionOutlinePx(owner.region, W, H).map(p => ({ x: p.x / W, y: p.y / H }));
+        space = "norm";
+        dashed = !!owner.fixtureId;
+      }
     }
 
     const grid = tool.grid && tool.grid.rows * tool.grid.cols > 1 && TOOL_META[tool.type].grid ? tool.grid : null;

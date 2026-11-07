@@ -22,6 +22,10 @@ export type DrawContextRegion = { id: string; name: string; geometry: DrawGeomet
  * A `Quad` (skewed grid) has no draw phase: choosing it seeds four corners — from the
  * rectangle being edited if there is one, else an inset box — and the user drags each
  * corner onto the board's. Its grid is drawn perspective-correct (src/vision/homography.ts).
+ *
+ * While a corner or point is dragged, a magnifier shows the image around it (with the shape's
+ * edges) in the top corner away from the finger, so it can be placed exactly on a phone, where
+ * the finger hides the very spot being placed.
  */
 export function makeRegionDrawHtml(
   imageUri: string,
@@ -56,6 +60,8 @@ var drag=null;
 var HIT=26;       // finger-sized handle hit radius
 var ROT_ARM=34;   // how far the rotation grip stands off the top edge
 var ORANGE='#f97316';
+var LOUPE_R=70;   // magnifier radius (px)
+var LOUPE_ZOOM=3; // magnifier zoom over the image as shown
 
 var img=new Image();
 img.onload=function(){resize();render();};
@@ -304,6 +310,64 @@ function render(){
   }
 
   if(!editing&&drawShape==='Polygon'&&polyPts.length>0) drawPolyDraft();
+  var lp=loupePoint();
+  if(lp) drawLoupe(lp);
+}
+
+// The point being placed right now: a dragged corner / point, else none.
+function loupePoint(){
+  if(!drag||!geom) return null;
+  if(drag.kind==='vertex'&&geom.points&&geom.points[drag.idx]){
+    var v=geom.points[drag.idx];return toScr(v[0],v[1]);
+  }
+  if(drag.kind==='rectcorner'&&drag.hx!=null) return{x:drag.hx,y:drag.hy};
+  return null;
+}
+
+// A round magnifier on the side away from the point, showing the image and the working shape
+// around it, with a crosshair. It sits in the empty band above or below the image when there is
+// room (a phone held upright), clear of the hint strip; else in a top corner.
+function drawLoupe(p){
+  if(!(img.complete&&img.naturalWidth>0)) return;
+  var R=LOUPE_R,Z=LOUPE_ZOOM,m=12;
+  var r=imgRect();
+  var cx=p.x<c.width/2?c.width-R-m:R+m;
+  var cy;
+  if(r.y>=2*R+2*m) cy=r.y-R-m;
+  else if(c.height-(r.y+r.h)>=2*R+2*m) cy=r.y+r.h+R+m;
+  else{
+    cy=R+m;
+    if(p.y<R*2+m*2&&Math.abs(p.x-cx)<R*2+m) cy=c.height-R-m;
+  }
+  ctx.save();
+  ctx.beginPath();ctx.arc(cx,cy,R,0,2*Math.PI);ctx.closePath();
+  ctx.fillStyle='#000';ctx.fill();
+  ctx.clip();
+  ctx.translate(cx,cy);ctx.scale(Z,Z);ctx.translate(-p.x,-p.y);
+  ctx.drawImage(img,r.x,r.y,r.w,r.h);
+  ctx.strokeStyle=ORANGE;ctx.lineWidth=1.5/Z;ctx.fillStyle='rgba(0,0,0,0)';
+  if(isQuad(geom)||geom.shape==='Polygon'){
+    var q=geom.points.map(function(v){return toScr(v[0],v[1]);});
+    traceQuad(q);ctx.stroke();
+    if(isQuad(geom)&&grid&&grid.rows*grid.cols>1){
+      ctx.globalAlpha=0.6;ctx.setLineDash([4/Z,3/Z]);ctx.lineWidth=1/Z;
+      var qs=quadScr(geom);
+      for(var a=0;a<grid.rows;a++)for(var b=0;b<grid.cols;b++){
+        traceQuad(quadCellQuad(qs,grid.rows,grid.cols,a,b).map(function(t){return{x:t[0],y:t[1]};}));ctx.stroke();
+      }
+      ctx.setLineDash([]);ctx.globalAlpha=1;
+    }
+  }else if(geom.shape==='Rectangle'){
+    traceQuad(rectCorners(geom));ctx.stroke();
+  }
+  ctx.restore();
+  // Crosshair on the point, and the rim.
+  ctx.save();
+  ctx.strokeStyle='#fff';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(cx-10,cy);ctx.lineTo(cx-3,cy);ctx.moveTo(cx+3,cy);ctx.lineTo(cx+10,cy);
+  ctx.moveTo(cx,cy-10);ctx.lineTo(cx,cy-3);ctx.moveTo(cx,cy+3);ctx.lineTo(cx,cy+10);ctx.stroke();
+  ctx.beginPath();ctx.arc(cx,cy,R,0,2*Math.PI);ctx.lineWidth=2.5;ctx.strokeStyle=ORANGE;ctx.stroke();
+  ctx.restore();
 }
 
 function drawPolyDraft(){
@@ -465,7 +529,7 @@ function onDown(p){
   // that is what Clear is for. Only handles and the interior respond.
   if(editing&&geom){
     var h=hitHandle(p.x,p.y);
-    if(h){startHandleDrag(h);return;}
+    if(h){startHandleDrag(h);render();return;}
     if(inside(p.x,p.y)){
       drag={kind:'body',px:p.x,py:p.y,orig:JSON.parse(JSON.stringify(geom))};
       return;
@@ -510,6 +574,7 @@ function onMove(p){
     // axes are the screen's and this reduces to the plain min/max corner rebuild.
     // Only the dragged corner is clamped; the anchor is already inside the frame.
     var px=Math.max(r.x,Math.min(r.x+r.w,p.x)),py=Math.max(r.y,Math.min(r.y+r.h,p.y));
+    drag.hx=px;drag.hy=py;
     var ax=axes(geom),dx=px-drag.fx,dy=py-drag.fy;
     var lw=dx*ax.ux+dy*ax.uy, lh=dx*ax.vx+dy*ax.vy;
     var mid=toNorm(drag.fx+(ax.ux*lw+ax.vx*lh)/2, drag.fy+(ax.uy*lw+ax.vy*lh)/2);

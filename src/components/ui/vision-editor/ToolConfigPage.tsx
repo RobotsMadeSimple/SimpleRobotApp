@@ -8,7 +8,7 @@ import { VisionFeedViewer } from "@/src/components/vision/VisionFeedViewer";
 import { StatusChip, fmtVisionValue, summarizeResult } from "@/src/components/ui/VisionResults";
 import { ColorEntry, defaultColorEntry } from "@/src/models/robotModels";
 import {
-  DISTANCE_MODES, FIXTURE_MODES, TOOL_META, canFeed, mainValueKey, orderProblems, sourceSlots,
+  DISTANCE_MODES, FIXTURE_MODES, TOOL_META, canFeed, mainValueKey, orderProblems, regionOwner, regionSources, sourceSlots,
   type Pose, type Region, type ToolGrid, type ToolLimit, type VisionProgram, type VisionResult, type VisionTool,
 } from "@/src/models/visionTools";
 import { buildOverlay } from "@/src/vision/feedOverlay";
@@ -37,7 +37,7 @@ const shapeLabel = (r: Region | null | undefined) =>
  */
 export function ToolConfigPage({
   tool, program, result, frame, feedUrl, isRunning, transitioning, onToggleRunning,
-  snapshotUri, onFetchSnapshot, onChange, onSetReference, onSetFixtureReference, onTeach, onClose,
+  snapshotUri, onFetchSnapshot, onChange, onChangeTool, onSetReference, onSetFixtureReference, onTeach, onClose,
 }: {
   tool: VisionTool;
   program: VisionProgram;
@@ -50,6 +50,8 @@ export function ToolConfigPage({
   snapshotUri: string | null;
   onFetchSnapshot: () => Promise<string | null>;
   onChange: (next: VisionTool) => void;
+  /** Changes another tool (the one whose area this tool shares, when its corners are moved here). */
+  onChangeTool: (next: VisionTool) => void;
   onSetReference: () => void;
   /** Gives a fixture its reference (when a dependent region is drawn before it had one). */
   onSetFixtureReference: (fixtureId: string, pose: Pose) => void;
@@ -66,7 +68,7 @@ export function ToolConfigPage({
   const problem = orderProblems(program)[tool.id];
   const W = frame.width || 640, H = frame.height || 480;
 
-  const [sheet, setSheet] = useState<null | "input" | "fixture" | "mode" | { slot: number } | "addLimit">(null);
+  const [sheet, setSheet] = useState<null | "input" | "fixture" | "regionFrom" | "mode" | { slot: number } | "addLimit">(null);
   const [formatsOpen, setFormatsOpen] = useState(false);
   const [colorEdit, setColorEdit] = useState<ColorEntry | null>(null);
   const [draw, setDraw] = useState<null | { which: "region" | "regionB"; initial: Region | null }>(null);
@@ -84,8 +86,16 @@ export function ToolConfigPage({
   const set = (patch: Partial<VisionTool>) => onChange({ ...tool, ...patch });
   const setParam = (key: string, value: unknown) => onChange({ ...tool, params: { ...tool.params, [key]: value as never } });
 
+  // ── Shared area ────────────────────────────────────────────────────────
+  // With regionFrom set, the area (and the fixture it follows) belong to the owner tool; drawing
+  // here moves the owner's area, so every tool sharing it moves together.
+  const owner = regionOwner(tool, program.tools);
+  const linked = owner.id !== tool.id;
+  const regionSource = tool.regionFrom ? program.tools.find(t => t.id === tool.regionFrom) ?? null : null;
+  const sharers = program.tools.filter(t => t.id !== owner.id && regionOwner(t, program.tools).id === owner.id);
+
   // ── Fixture ────────────────────────────────────────────────────────────
-  const fixture = tool.fixtureId ? program.tools.find(t => t.id === tool.fixtureId) ?? null : null;
+  const fixture = owner.fixtureId ? program.tools.find(t => t.id === owner.fixtureId) ?? null : null;
   const fixRes = fixture ? result?.tools?.find(r => r.id === fixture.id) : undefined;
   const fixPose = fixRes?.status === "ok" && fixRes.pose ? fixRes.pose : null;
   // Reference space → where the fixture is now. Null when the fixture has no reference or no pose now.
@@ -99,7 +109,7 @@ export function ToolConfigPage({
 
   async function openDraw(which: "region" | "regionB") {
     await onFetchSnapshot();
-    const stored = which === "region" ? tool.region ?? null : (tool.params.regionB as Region | null) ?? null;
+    const stored = which === "region" ? owner.region ?? null : (tool.params.regionB as Region | null) ?? null;
     setDraw({ which, initial: stored && fwd ? transformRegion(stored, fwd, W, H) : stored });
   }
 
@@ -111,19 +121,24 @@ export function ToolConfigPage({
       else if (!fixture.reference && fixPose) onSetFixtureReference(fixture.id, fixPose);
     }
     if (draw?.which === "regionB") onChange({ ...tool, params: { ...tool.params, regionB: store } });
+    else if (linked) {
+      onChangeTool({ ...owner, region: store });
+      if (meta.grid) onChange({ ...tool, grid });
+    }
     else onChange({ ...tool, region: store, ...(meta.grid ? { grid } : {}) });
     setDraw(null);
   }
 
   // Other tools' regions, drawn faintly behind the one being edited — where they ran last, if known.
-  const context: DrawContextRegion[] = useMemo(() => program.tools.filter(t => t.id !== tool.id && t.enabled).flatMap(t => {
+  const context: DrawContextRegion[] = useMemo(() => program.tools.filter(t => t.id !== tool.id && t.id !== owner.id && t.enabled).flatMap(t => {
     const r = result?.tools?.find(x => x.id === t.id);
     if (r?.region && r.region.length >= 3) {
       const norm = looksNormalized(r.region);
       return [{ id: t.id, name: t.name, grid: null, geometry: regionToDraw({ shape: "polygon", points: r.region.map(p => norm ? p : { x: p.x / W, y: p.y / H }) }) }];
     }
-    return t.region ? [{ id: t.id, name: t.name, grid: null, geometry: regionToDraw(t.region) }] : [];
-  }), [program.tools, result, tool.id, W, H]);
+    const own = regionOwner(t, program.tools).region;
+    return own ? [{ id: t.id, name: t.name, grid: null, geometry: regionToDraw(own) }] : [];
+  }), [program.tools, result, tool.id, owner.id, W, H]);
 
   const overlay = useMemo(
     () => buildOverlay(program, isRunning ? result : null, { width: W, height: H, selectedId: tool.id }),
@@ -256,9 +271,10 @@ export function ToolConfigPage({
         {meta.region !== "none" && (
           <PickerRow
             label="Follows"
-            value={fixture ? fixture.name : "Nothing — fixed in the image"}
-            onPress={() => setSheet("fixture")}
-            warn={tool.fixtureId && !fixture ? "Its fixture no longer exists" : null}
+            value={linked ? `${fixture ? fixture.name : "Nothing"} · set on ${owner.name}` : fixture ? fixture.name : "Nothing — fixed in the image"}
+            // A shared area follows what its owner follows: change it there, or stop sharing.
+            onPress={() => setSheet(linked ? "regionFrom" : "fixture")}
+            warn={!linked && tool.fixtureId && !fixture ? "Its fixture no longer exists" : null}
           />
         )}
       </GroupCard>
@@ -266,11 +282,28 @@ export function ToolConfigPage({
       {meta.region !== "none" && (
         <GroupCard title={tool.type === "findCorner" ? "REGIONS" : "REGION"}>
           {!!fixtureNote && <Text style={st.note}>{fixtureNote}</Text>}
+          {tool.type !== "findCorner" && (
+            <PickerRow
+              label="Shared"
+              value={regionSource ? `Same area as ${regionSource.name}` : "No — its own area"}
+              onPress={() => setSheet("regionFrom")}
+              border={false}
+              warn={tool.regionFrom && !regionSource ? "That tool no longer exists" : null}
+              accessibilityLabel="Share an area"
+            />
+          )}
           <RegionRow
             label={tool.type === "findCorner" ? "Side A" : tool.type === "findLine" ? "Search box" : "Area"}
-            value={shapeLabel(tool.region)}
+            value={shapeLabel(owner.region)}
             onPress={() => openDraw("region")}
           />
+          {(linked || sharers.length > 0) && (
+            <Text style={ves.paramDesc}>
+              {linked
+                ? `Shared with "${owner.name}" — moving it here moves it there too.`
+                : `Shared with ${sharers.map(t => `"${t.name}"`).join(", ")} — they move with it.`}
+            </Text>
+          )}
           {tool.type === "findCorner" && (
             <RegionRow label="Side B" value={shapeLabel(regionB)} onPress={() => openDraw("regionB")} />
           )}
@@ -494,6 +527,20 @@ export function ToolConfigPage({
         rows={poseTools.map(t => ({ id: t.id, title: t.name, subtitle: `${TOOL_META[t.type].label}${t.reference ? "" : " · no reference yet"}${t.enabled ? "" : " · disabled"}` }))}
         selected={tool.fixtureId}
         onSelect={id => set({ fixtureId: id })}
+        onClose={() => setSheet(null)}
+      />
+      <ChoiceSheet
+        visible={sheet === "regionFrom"}
+        title="Share an area"
+        hint="Use another tool's area (and what it follows) instead of drawing one here: draw it once, and every tool that shares it moves with it. This tool keeps its own grid. Only tools above this one are listed."
+        noneLabel="No — its own area"
+        rows={regionSources(tool, program.tools).map(t => ({ id: t.id, title: t.name, subtitle: `${TOOL_META[t.type].label} · ${shapeLabel(regionOwner(t, program.tools).region)}` }))}
+        selected={tool.regionFrom ?? null}
+        onSelect={id => {
+          if (id) set({ regionFrom: id, fixtureId: null });
+          // Unsharing keeps the area where it is now, as this tool's own (and what it followed).
+          else set({ regionFrom: null, region: owner.region ?? tool.region ?? null, fixtureId: owner.fixtureId });
+        }}
         onClose={() => setSheet(null)}
       />
       <ChoiceSheet
