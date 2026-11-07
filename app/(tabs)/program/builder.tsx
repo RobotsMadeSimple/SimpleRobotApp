@@ -41,6 +41,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import React, { SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   BackHandler,
   Dimensions,
   Image,
@@ -78,7 +79,7 @@ import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, programFromDoc, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
-import { EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
+import { EditorModeToggle, EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
 import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
 import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
@@ -1227,21 +1228,22 @@ export default function BuilderScreen() {
     commit(d => ({ ...d, steps: p.steps ?? [], variables: p.variables ?? [] }));
   }
 
-  const editorTools = (variant: "header" | "bar") => (
+  // Undo / redo, problems, find and history: in the wide header next to Save, or at the
+  // start of the narrow Save bar. The Blocks | Text switch sits on the STEPS row instead.
+  const editorTools = (variant: "header" | "footer") => (
     <EditorToolbar
       variant={variant}
       canUndo={history.canUndo}
       canRedo={history.canRedo}
       onUndo={undo}
       onRedo={redo}
-      editorMode={editorMode}
-      onEditorModeChange={m => { void changeEditorMode(m); }}
     >
       {validation.supported && (
         <ProblemsPill
           errorCount={validation.errorCount}
           warningCount={validation.warningCount}
           onPress={() => setProblemsOpen(true)}
+          compact={variant === "footer"}
         />
       )}
       {editorMode === "blocks" && (
@@ -1255,6 +1257,12 @@ export default function BuilderScreen() {
         </ToolbarButton>
       )}
     </EditorToolbar>
+  );
+
+  // Blocks | Text lives on the STEPS row (it switches how the steps show), so it scrolls
+  // with the program rather than taking a fixed bar.
+  const modeToggle = (
+    <EditorModeToggle value={editorMode} onChange={m => { void changeEditorMode(m); }} />
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1769,6 +1777,46 @@ export default function BuilderScreen() {
     </View>
   ) : undefined;
 
+  // Narrow: one bottom bar holds the editing tools (compact icon buttons) and the save
+  // actions, Save filling what is left so it stays the main action. The tools scroll
+  // sideways only if a very narrow screen can't fit them all.
+  const narrowFooter = (
+    <View style={styles.bottomBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.footerTools}
+        contentContainerStyle={styles.footerToolsContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {editorTools("footer")}
+      </ScrollView>
+      {isLocalMode && connected && (
+        <TouchableOpacity
+          style={styles.footerUploadBtn}
+          onPress={saveToRobot}
+          disabled={savingToRobot}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Save to Robot"
+        >
+          {savingToRobot
+            ? <ActivityIndicator size="small" color={colors.success} />
+            : <Upload size={17} color={colors.success} />}
+        </TouchableOpacity>
+      )}
+      <ActionButton
+        label="Save"
+        icon={<Wrench size={16} color={colors.accent} />}
+        loading={saving}
+        style={styles.saveBtn}
+        textStyle={styles.saveBtnText}
+        spinnerColor={colors.accent}
+        onPress={handleSave}
+      />
+    </View>
+  );
+
   // ── Header ────────────────────────────────────────────────────────────────
   // PageHeader owns chrome both wide and narrow. Narrow's back press runs
   // `handleBack` (pop a scope, or prompt on unsaved changes) via onBack; wide's
@@ -1818,7 +1866,6 @@ export default function BuilderScreen() {
           onBack={handleBack}
         />
       )}
-      {!isWide && editorTools("bar")}
       {!isWide && searchBar && <View style={styles.searchWrap}>{searchBar}</View>}
 
       {/* Multi-select toolbar */}
@@ -1953,6 +2000,7 @@ export default function BuilderScreen() {
                     <Text style={styles.sectionLabel}>STEPS</Text>
                     <Text style={styles.sectionCount}>{currentSteps.length}</Text>
                     <View style={{ flex: 1 }} />
+                    {modeToggle}
                     <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Drag a step by its bar to move it, also into and out of blocks opened with their chevron. ⋮ on a step runs from it or sets a breakpoint. Long-press to select several, then copy, cut, disable, wrap them in a Loop, If or Try, or save them as a routine." />
                   </View>
                 )}
@@ -1976,19 +2024,7 @@ export default function BuilderScreen() {
             {stepsSection}
           </ScrollView>
 
-          {isLocalMode && connected && (
-            <View style={styles.bottomBar}>
-              <ActionButton
-                label="Save to Robot"
-                icon={<Upload size={15} color={colors.success} />}
-                loading={savingToRobot}
-                style={styles.uploadBtn}
-                textStyle={styles.uploadBtnText}
-                spinnerColor={colors.success}
-                onPress={saveToRobot}
-              />
-            </View>
-          )}
+          {narrowFooter}
         </>
       ) : (
         <>
@@ -2009,34 +2045,13 @@ export default function BuilderScreen() {
           <Text style={styles.sectionLabel}>STEPS</Text>
           <Text style={styles.sectionCount}>{currentSteps.length}</Text>
           <View style={{ flex: 1 }} />
+          {modeToggle}
           <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Drag a step by its bar to move it, also into and out of blocks opened with their chevron. ⋮ on a step runs from it or sets a breakpoint. Long-press to select several, then copy, cut, disable, wrap them in a Loop, If or Try, or save them as a routine." />
         </View>
         {stepsSection}
       </ScrollView>
 
-      {/* Bottom bar */}
-      <View style={styles.bottomBar}>
-        {isLocalMode && connected && (
-          <ActionButton
-            label="Save to Robot"
-            icon={<Upload size={15} color={colors.success} />}
-            loading={savingToRobot}
-            style={styles.uploadBtn}
-            textStyle={styles.uploadBtnText}
-            spinnerColor={colors.success}
-            onPress={saveToRobot}
-          />
-        )}
-        <ActionButton
-          label="Save"
-          icon={<Wrench size={16} color={colors.accent} />}
-          loading={saving}
-          style={styles.saveBtn}
-          textStyle={styles.saveBtnText}
-          spinnerColor={colors.accent}
-          onPress={handleSave}
-        />
-      </View>
+      {narrowFooter}
         </>
       )}
 
@@ -2648,27 +2663,27 @@ const styles = StyleSheet.create({
   },
 
   bottomBar: {
-    flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: spacing.lg,
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md,
     paddingTop: 10, paddingBottom: 14,
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
+  },
+  footerTools: { flexGrow: 0, flexShrink: 1 },
+  footerToolsContent: { alignItems: "center" },
+  footerUploadBtn: {
+    width: 44, height: 44, borderRadius: radii.md, alignItems: "center", justifyContent: "center",
+    borderWidth: 1.5, borderColor: colors.success, backgroundColor: colors.successSoft,
   },
   stopBtn: {
     width: 48, height: 48, borderRadius: radii.md, backgroundColor: colors.dangerSoft,
     justifyContent: "center", alignItems: "center",
   },
   saveBtn: {
-    width: "33%", flexDirection: "row", alignItems: "center", justifyContent: "center",
+    flexGrow: 1, flexShrink: 0, minWidth: 104, flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: spacing.sm, borderWidth: 1.5, borderColor: colors.accent, borderRadius: radii.md,
     paddingVertical: spacing.md, backgroundColor: colors.accentSoft,
   },
   saveBtnText: { fontSize: 15, fontWeight: "600", color: colors.accent },
-  uploadBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: spacing.sm, borderWidth: 1.5, borderColor: colors.success, borderRadius: radii.md,
-    paddingVertical: spacing.md, backgroundColor: colors.successSoft,
-  },
-  uploadBtnText: { fontSize: 15, fontWeight: "600", color: colors.success },
   runBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: spacing.sm, backgroundColor: colors.accent, borderRadius: radii.md, paddingVertical: spacing.md,

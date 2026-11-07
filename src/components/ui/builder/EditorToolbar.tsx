@@ -17,8 +17,8 @@ export function EditorModeToggle({ value, onChange }: { value: EditorMode; onCha
 /**
  * The builder's editing tools: the Blocks | Text view switch (when the screen passes
  * `editorMode`), undo / redo, plus whatever the screen adds after them (problem count,
- * history). Rendered in the wide header's action slot, or as a slim bar under the header
- * on narrow screens where the header has no room.
+ * history). Rendered in the wide header's action slot, or at the start of the bottom
+ * Save bar on narrow screens.
  */
 export function EditorToolbar({
   canUndo,
@@ -35,7 +35,7 @@ export function EditorToolbar({
   onUndo: () => void;
   onRedo: () => void;
   children?: ReactNode;
-  variant: "header" | "bar";
+  variant: "header" | "footer";
   editorMode?: EditorMode;
   onEditorModeChange?: (mode: EditorMode) => void;
 }) {
@@ -54,9 +54,7 @@ export function EditorToolbar({
       {children}
     </>
   );
-  return variant === "header"
-    ? <View style={styles.row}>{content}</View>
-    : <View style={styles.bar}><View style={styles.row}>{content}</View></View>;
+  return <View style={[styles.row, variant === "footer" && styles.footerRow]}>{content}</View>;
 }
 
 /** Square icon button matching undo/redo, for tools the screen adds to the toolbar. */
@@ -112,15 +110,7 @@ export function useUndoShortcuts({ enabled, onUndo, onRedo }: {
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  bar: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
+  footerRow: { gap: 6 },
   iconBtn: {
     width: 34,
     height: 34,
