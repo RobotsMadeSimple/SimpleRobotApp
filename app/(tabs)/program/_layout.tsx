@@ -16,6 +16,9 @@ export default function ProgramLayout() {
       <Stack.Screen name="plugin-detail"   options={{ headerShown: false }} />
       <Stack.Screen name="display-page"      options={{ headerShown: false }} />
       <Stack.Screen name="display-page-edit" options={{ headerShown: false }} />
+      <Stack.Screen name="manual"            options={{ headerShown: false }} />
+      <Stack.Screen name="manual-chapter"    options={{ headerShown: false }} />
+      <Stack.Screen name="manual-step"       options={{ headerShown: false }} />
     </Stack>
   );
 }

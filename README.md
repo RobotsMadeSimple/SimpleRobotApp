@@ -86,6 +86,24 @@ app/
 
 ---
 
+## Programming Manual
+
+The app carries the SimpleRobot programming manual (Program tab → **Programming Manual**, the
+book button in the builder, and the **?** in every step editor). It renders natively from the
+controller repo's `docs/manual` (Markdown chapters, SVG figures, screenshots, `reference.json`),
+bundled into `src/docs/content/` so it works offline. When the manual changes, re-sync and commit:
+
+```bash
+node scripts/sync-manual.mjs        # reads ../SimpleRobotController/docs/manual
+git add src/docs/content
+```
+
+When connected, instruction pages take their syntax, parameters and defaults from the robot's own
+step catalog. A running Metro may miss newly added screenshots after a sync — restart it if a
+bundle fails with "Unable to resolve ./screens/…".
+
+---
+
 ## Connecting to the Robot
 
 RobotReact connects to [SimpleRobotController](https://github.com/RobotsMadeSimple/SimpleRobotController) via WebSocket on port `9000`. Make sure:

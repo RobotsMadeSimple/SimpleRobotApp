@@ -25,6 +25,9 @@ export const ROUTE_LABELS: Record<string, string> = {
   vision:            "Vision",
   "vision-editor":   "Vision Editor",
   "inspection":      "Inspection",
+  manual:            "Manual",
+  "manual-chapter":  "Chapter",
+  "manual-step":     "Instruction",
 
   // Control
   jog: "Jog & Teach",
