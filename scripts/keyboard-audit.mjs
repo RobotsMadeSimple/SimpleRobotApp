@@ -181,6 +181,69 @@ const SCENARIOS = [
     route: "/program/builder",
     open: async () => {},
   },
+  // Program editor v2 (package E): the step search field, the catalog-driven fields of the new
+  // blocks (on phones the step editor is a full page — its fields must still clear the keyboard),
+  // the Switch case-values editor and teach-here's new point name.
+  {
+    name: "builder — step search (page)",
+    route: "/program/builder",
+    open: async p => { await p.getByLabel("Find", { exact: true }).locator("visible=true").first().click({ force: true }); await sleep(500); },
+  },
+  ...[
+    ["Prompt step (catalog fields)", "Communication", "Prompt", async p => {
+      await p.getByLabel("Input: Number").locator("visible=true").first().click({ force: true }); await sleep(400);
+    }],
+    ["Raise Error step", "Logic & Flow", "Raise Error"],
+    ["Note step", "Logic & Flow", "Note"],
+    ["Try step (retries + own error code)", "Logic & Flow", "Try", async p => {
+      await p.getByLabel("Add your own code").locator("visible=true").first().click({ force: true }); await sleep(400);
+    }],
+    ["List step fields", "Variables & Timing", "List", async p => {
+      await p.getByLabel("Add field row").locator("visible=true").first().click({ force: true }); await sleep(400);
+    }],
+    ["Set Speed Factor step", "Motion Settings", "Set Speed Factor"],
+    ["End Program step", "Logic & Flow", "End Program"],
+    ["Move Arc via variable", "Motion", "Move Arc", async p => {
+      await p.getByLabel("Via point: variable").locator("visible=true").first().click({ force: true }); await sleep(400);
+    }],
+  ].map(([what, category, tile, more]) => ({
+    name: `builder — ${what}`,
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, category, { exact: false }); await sleep(400);
+      await tap(p, tile); await sleep(900);
+      if (more) await more(p);
+    },
+  })),
+  {
+    // Close the new Switch's editor, then open the case-values editor from the block's case card.
+    name: "builder — Switch case values",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Logic & Flow", { exact: false }); await sleep(400);
+      await tap(p, "Switch"); await sleep(900);
+      const done = p.getByLabel("Done", { exact: true }).locator("visible=true");
+      if (await done.count()) await done.first().click({ force: true });
+      else await tap(p, "Save");
+      await sleep(700);
+      await p.getByLabel("Edit values of case 1").locator("visible=true").first().click({ force: true }); await sleep(600);
+      await p.getByLabel("Add value").locator("visible=true").first().click({ force: true }); await sleep(300);
+    },
+  },
+  {
+    // Move step → Point → "Save current position as a new point…" (needs a connected robot).
+    name: "builder — teach a new point from the move target",
+    route: "/program/builder",
+    open: async p => {
+      await tap(p, "Add Step"); await sleep(600);
+      await tap(p, "Motion", { exact: false }); await sleep(400);
+      await tap(p, "Move Linear"); await sleep(900);
+      await tap(p, "Point", { exact: false }); await sleep(600);
+      await p.getByLabel("Save current position as new point").locator("visible=true").first().click({ force: true }); await sleep(500);
+    },
+  },
   {
     name: "space — grid teaching wizard setup (page)",
     route: "/space/grid-teach",

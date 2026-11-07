@@ -3488,8 +3488,10 @@ export function StepConfigModal({
     moveStop: "Stop or Record on Condition",
   };
 
+  // Move rows sit in one grouped card. Move Arc's via field grows while typing, so it is not
+  // clipped into that card.
   const isMove     = draft.type === "MoveL"    || draft.type === "MoveJ"
-                  || draft.type === "JumpL"    || draft.type === "JumpJ"   || draft.type === "MoveC";
+                  || draft.type === "JumpL"    || draft.type === "JumpJ";
   // A Note's text is its comment, and it never runs — no separate description or status line.
   const isNote     = draft.type === "Note";
 

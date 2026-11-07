@@ -322,7 +322,8 @@ function AddCustomChip({ onAdd, placeholder }: { onAdd: (v: string) => void; pla
       </TouchableOpacity>
     );
   }
-  const done = () => { onAdd(text.trim()); setText(""); setEditing(false); };
+  // Typing a code and leaving the field adds it; an empty field stays open for typing.
+  const done = () => { if (!text.trim()) return; onAdd(text.trim()); setText(""); setEditing(false); };
   return (
     <TextInput
       style={[st.chip, { minWidth: 110, paddingVertical: 4, color: colors.text }]}

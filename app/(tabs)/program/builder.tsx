@@ -60,7 +60,7 @@ import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
 import { usePluginContributions } from "@/src/components/ui/builder/usePluginContributions";
 import { useStepCatalog } from "@/src/components/ui/builder/useStepCatalog";
 import { useBreakpoints } from "@/src/components/ui/builder/useBreakpoints";
-import { TextProgramView } from "@/src/components/ui/builder/TextProgramView";
+import * as TextView from "@/src/components/ui/builder/TextProgramView";
 import { pluginStepFields } from "@/src/components/ui/builder/pluginSteps";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
 import { useDragReorder } from "@/src/components/ui/useDragReorder";
@@ -211,14 +211,23 @@ function buildRows(
 }
 
 // Step search: what a step can be found by — its block name, row label and summary, its own
-// name and comment, and every field it stores (so `$count` finds the steps that use it).
+// name and comment, and every value it stores (so `$count` finds the steps that use it, and a
+// point's name the moves to it). Field names are not searched, only values.
 const BODY_KEYS = new Set<string>(["loopSteps", "ifSteps", "elseSteps", "switchDefault", "trySteps", "catchSteps", "cncProgramSteps", "steps"]);
+function stepValues(node: unknown, out: string[]) {
+  if (typeof node === "string" || typeof node === "number") { out.push(String(node)); return; }
+  if (Array.isArray(node)) { node.forEach(x => stepValues(x, out)); return; }
+  if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) if (!BODY_KEYS.has(k) && k !== "id" && k !== "type") stepValues(v, out);
+  }
+}
 function searchText(step: ProgramStep, points: Point[] | undefined): string {
-  const own = JSON.stringify(step, (k, v) => (BODY_KEYS.has(k) ? undefined : v));
+  const values: string[] = [];
+  stepValues(step, values);
   return [
     STEP_THEME[step.type]?.label, stepLabel(step, points), stepDetail(step, undefined, undefined, points),
-    step.name, step.comment, own,
-  ].filter(Boolean).join("\n").toLowerCase();
+    ...values,
+  ].filter(Boolean).join(" • ").toLowerCase();
 }
 
 /** The tint of a body header badge. */
@@ -381,6 +390,7 @@ export default function BuilderScreen() {
       const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true });
       history.reset(loaded);
       markSaved(loaded);
+      if (existing.id) setProgramId(existing.id);
       if (existing.editorMode) setEditorMode(existing.editorMode);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -795,11 +805,9 @@ export default function BuilderScreen() {
     [currentSteps, scopeStack, expanded, foldedSections, points]);
   const draggedRef = useRef<string | null>(null);
   const rowDrag = useDragReorder(rows, next => dropRow(next));
-  const rowY = useRef<Map<string, number>>(new Map());
-  const rowLayout = (id: string) => (e: { nativeEvent: { layout: { y: number; height: number } } }) => {
-    rowDrag.onRowLayout(id)(e);
-    rowY.current.set(id, e.nativeEvent.layout.y);
-  };
+  const rowRefs = useRef<Map<string, View>>(new Map());
+  const rowRef = (id: string) => (v: View | null) => { if (v) rowRefs.current.set(id, v); else rowRefs.current.delete(id); };
+  const rowLayout = (id: string) => rowDrag.onRowLayout(id);
   const dragHandlers = {
     onStart: (id: string) => { draggedRef.current = id; rowDrag.handle.onStart(id); },
     onMove: (id: string, dy: number, absY: number) => {
@@ -851,7 +859,6 @@ export default function BuilderScreen() {
     return [...walkSteps(steps)].filter(({ step }) => searchText(step, points).includes(q)).map(x => x.step.id);
   }, [query, steps, points]);
   const hitSet = useMemo(() => new Set(hits), [hits]);
-  const listY = useRef(0);
 
   // Show a hit: when it is not on screen, open the list it sits in; then scroll to it.
   function gotoHit(i: number) {
@@ -863,12 +870,14 @@ export default function BuilderScreen() {
       const loc = locateStep(steps, id);
       if (loc) { exitSelect(); setScopeStack(loc.scope); }
     }
+    // Measured on screen (layout offsets are parent-relative), then scrolled by the difference.
     setTimeout(() => {
-      const y = rowY.current.get(id);
-      if (y == null) return;
+      const node = rowRefs.current.get(id);
       const ref = scopeStackRef.current.length > 0 ? scopeScrollViewRef : scrollViewRef;
-      ref.current?.scrollTo({ y: Math.max(0, listY.current + y - 90), animated: true });
-    }, 180);
+      node?.measureInWindow((_x, y) => {
+        ref.current?.scrollTo({ y: Math.max(0, scrollYRef.current + y - 220), animated: true });
+      });
+    }, 220);
   }
 
   // ── Run from here, breakpoints, the running step ─────────────────────────
@@ -1199,7 +1208,15 @@ export default function BuilderScreen() {
   }
 
   // Blocks ↔ Text. Text shows the whole program, so leave any block scope and selection.
-  function changeEditorMode(mode: EditorMode) {
+  // Leaving Text asks the text view first: it applies the text, or asks what to do with text
+  // that has errors, and answers false to stay. (Read off the module so a build whose text view
+  // has no guard yet still switches.)
+  async function changeEditorMode(mode: EditorMode, opts?: { checked?: boolean }) {
+    if (mode === editorMode) return;
+    if (editorMode === "text" && !opts?.checked) {
+      const leave = (TextView as unknown as { requestLeaveTextView?: () => Promise<boolean> }).requestLeaveTextView;
+      if (leave && !(await leave())) return;
+    }
     exitSelect();
     if (mode === "text") setScopeStack([]);
     setEditorMode(mode);
@@ -1218,7 +1235,7 @@ export default function BuilderScreen() {
       onUndo={undo}
       onRedo={redo}
       editorMode={editorMode}
-      onEditorModeChange={changeEditorMode}
+      onEditorModeChange={m => { void changeEditorMode(m); }}
     >
       {validation.supported && (
         <ProblemsPill
@@ -1532,10 +1549,11 @@ export default function BuilderScreen() {
   );
 
   const textView = (
-    <TextProgramView
+    <TextView.TextProgramView
       program={validationProgram}
       onApply={applyTextProgram}
-      onSwitchToBlocks={() => changeEditorMode("blocks")}
+      // The text view's own "back to Blocks" has already run its guard.
+      onSwitchToBlocks={() => { void changeEditorMode("blocks", { checked: true }); }}
       connected={connected}
       problems={validationProblems}
       breakpoints={breakpoints}
@@ -1582,7 +1600,6 @@ export default function BuilderScreen() {
 
   const stepsSection = editorMode === "text" && !inScope ? textView : (
     <>
-      {searchBar}
       {currentSteps.length === 0 ? (
         <View style={styles.emptySteps}>
           <Cpu size={32} color={colors.borderStrong} />
@@ -1594,7 +1611,7 @@ export default function BuilderScreen() {
           </Text>
         </View>
       ) : (
-        <View style={styles.stepsList} onLayout={e => { listY.current = e.nativeEvent.layout.y; }}>
+        <View style={styles.stepsList}>
           <InsertDivider
             onPress={() => openTypePicker(atScope(scopeStack, 0))}
             onPaste={canPaste ? () => pasteStep(atScope(scopeStack, 0)) : undefined}
@@ -1648,7 +1665,7 @@ export default function BuilderScreen() {
 
             const step = r.step;
             return (
-              <View key={r.id} onLayout={rowLayout(r.id)} style={indent}>
+              <View key={r.id} ref={rowRef(r.id)} onLayout={rowLayout(r.id)} style={indent}>
                 <StepRow
                   step={step}
                   index={r.index}
@@ -1802,6 +1819,7 @@ export default function BuilderScreen() {
         />
       )}
       {!isWide && editorTools("bar")}
+      {!isWide && searchBar && <View style={styles.searchWrap}>{searchBar}</View>}
 
       {/* Multi-select toolbar */}
       {selectMode && (
@@ -1911,6 +1929,7 @@ export default function BuilderScreen() {
               {variablesSection}
             </ScrollView>
             <View style={styles.widePaneRight}>
+              {searchBar && <View style={styles.searchWrap}>{searchBar}</View>}
               {/* Scope header — back arrow + breadcrumb, scoped to the steps pane */}
               {inScope && (
                 <View style={[styles.scopeBreadcrumb, styles.scopeHeaderWide]}>
@@ -2483,6 +2502,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4,
   },
   searchInput: { flex: 1, fontSize: 14, color: colors.text, paddingVertical: 6 },
+  searchWrap: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, width: "100%", maxWidth: 720, alignSelf: "center" },
   searchCount: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
   // Row actions sheet
   menuRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
