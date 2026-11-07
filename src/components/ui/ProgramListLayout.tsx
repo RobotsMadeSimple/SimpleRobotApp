@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Button, EmptyState, Input, PageHeader, colors, radii, spacing } from "@/src/components/ui/kit";
+import { Button, EmptyState, Input, PageHeader, buttonTextColor, colors, radii, spacing } from "@/src/components/ui/kit";
 import type { Crumb } from "@/src/components/ui/kit";
 
 // ── Shared types & helpers ────────────────────────────────────────────────────
@@ -83,6 +83,11 @@ interface Props {
   accentColor: string;
   addLabel: string;
   onAdd: () => void;
+  /**
+   * A second way to add (e.g. import from a file). Shown as a secondary button beside the add
+   * button in the header and as a second dashed button under the list.
+   */
+  secondaryAdd?: { label: string; shortLabel?: string; icon: (color: string) => ReactNode; onPress: () => void };
   search: string;
   onSearchChange: (q: string) => void;
   sort: SortState;
@@ -107,7 +112,7 @@ interface Props {
 }
 
 export function ProgramListLayout({
-  title, subtitle, crumbs, accentColor, addLabel, onAdd,
+  title, subtitle, crumbs, accentColor, addLabel, onAdd, secondaryAdd,
   search, onSearchChange, sort, onSortChange,
   isEmpty, hasResults, emptyIcon, emptyTitle, emptySubtitle,
   topOverlay, aside, children,
@@ -179,14 +184,26 @@ export function ProgramListLayout({
   // Dashed "add" CTA — the thumb-reachable primary action at the end of the list
   // on narrow screens (wide screens also get one in the header).
   const addCta = (
-    <Button
-      variant="dashed"
-      label={addLabel}
-      icon={<Plus size={16} color={accentColor} />}
-      style={[s.addCard, { borderColor: accentColor }]}
-      textStyle={{ color: accentColor }}
-      onPress={onAdd}
-    />
+    <>
+      <Button
+        variant="dashed"
+        label={addLabel}
+        icon={<Plus size={16} color={accentColor} />}
+        style={[s.addCard, { borderColor: accentColor }]}
+        textStyle={{ color: accentColor }}
+        onPress={onAdd}
+      />
+      {secondaryAdd && (
+        <Button
+          variant="dashed"
+          label={secondaryAdd.label}
+          icon={secondaryAdd.icon(colors.textSecondary)}
+          style={s.addCard}
+          textStyle={{ color: colors.textSecondary }}
+          onPress={secondaryAdd.onPress}
+        />
+      )}
+    </>
   );
 
   return (
@@ -198,13 +215,24 @@ export function ProgramListLayout({
         subtitle={subtitle}
         crumbs={crumbs}
         right={
-          <Button
-            size="sm"
-            label={isWide ? addLabel : "New"}
-            icon={<Plus size={15} color={colors.onAccent} />}
-            style={{ backgroundColor: accentColor }}
-            onPress={onAdd}
-          />
+          <View style={s.headerActions}>
+            {secondaryAdd && (
+              <Button
+                size="sm"
+                variant="secondary"
+                label={isWide ? secondaryAdd.label : (secondaryAdd.shortLabel ?? secondaryAdd.label)}
+                icon={secondaryAdd.icon(buttonTextColor("secondary"))}
+                onPress={secondaryAdd.onPress}
+              />
+            )}
+            <Button
+              size="sm"
+              label={isWide ? addLabel : "New"}
+              icon={<Plus size={15} color={colors.onAccent} />}
+              style={{ backgroundColor: accentColor }}
+              onPress={onAdd}
+            />
+          </View>
         }
       />
 
@@ -239,6 +267,7 @@ export function ProgramListLayout({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   root:    { flex: 1, backgroundColor: colors.background },
   scroll:  { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },

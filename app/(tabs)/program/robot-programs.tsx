@@ -4,7 +4,7 @@ import { BuiltProgram, ProgramSummary, imageDataUri } from "@/src/models/robotMo
 import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { isNotImplementedCommand, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Clock, Cpu, FileDown, FileUp, Layers, PlayCircle } from "lucide-react-native";
+import { Box, Clock, Cpu, FileDown, Layers, PlayCircle, Upload } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   Image,
@@ -260,6 +260,12 @@ export default function RobotProgramsScreen() {
       accentColor={colors.accent}
       addLabel="New Program"
       onAdd={() => router.navigate("/program/builder")}
+      secondaryAdd={{
+        label: "Import from file",
+        shortLabel: "Import",
+        icon: color => <Upload size={15} color={color} />,
+        onPress: handleImport,
+      }}
       search={search}
       onSearchChange={setSearch}
       sort={sort}
@@ -274,14 +280,7 @@ export default function RobotProgramsScreen() {
       <SectionHeader
         title="Programs"
         right={
-          <View style={s.sectionHeaderRight}>
-            <TouchableOpacity onPress={handleImport} style={s.importBtn} activeOpacity={0.7}
-              accessibilityRole="button" accessibilityLabel="Import a program from a text file (.srs)">
-              <FileUp size={14} color={colors.accent} />
-              <Text style={s.importText}>Import .srs</Text>
-            </TouchableOpacity>
-            <InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller. Export a program as text (.srs) with its file icon; Import .srs adds one from a text file." />
-          </View>
+          <InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller. Download a program as a text file (.srs) with its download icon; Import (top right) adds a program from a .srs file." />
         }
       />
       {allRegularCards.map(c => (
@@ -360,10 +359,4 @@ const s = StyleSheet.create({
 
   deleteBtn: { padding: 4 },
   exportBtn: { padding: 4 },
-  importBtn: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8,
-    borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft,
-  },
-  importText: { fontSize: 12, fontWeight: "700", color: colors.accent },
 });
