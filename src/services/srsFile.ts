@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -7,7 +8,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 
 // Simple Robot Script files (.srs — controller docs/program-language.md §6.12).
 // Export = FormatProgramText + an `@program {…}` header line (name and kind), shared as a file:
-// a browser download on web/Electron, the share sheet on Android/iOS. Import = pick a file, read
+// a browser download on web/Electron, a remembered folder on Android, the share sheet on iOS. Import = pick a file, read
 // its text; the caller parses it (ParseProgramText with no base) and saves it under a name.
 
 export type SrsProgramMeta = { name?: string; description?: string; isRoutine?: boolean; isBackground?: boolean };
@@ -41,7 +42,50 @@ export function readSrsProgramMeta(text: string): SrsProgramMeta | null {
   try { return JSON.parse(m[1]) as SrsProgramMeta; } catch { return null; }
 }
 
-/** Save/share a .srs file. */
+const DOWNLOAD_DIR_KEY = "rms.srsDownloadDir";
+
+/** Readable name of an Android folder URI ("content://…/tree/primary%3ADownload" → "Download"). */
+function folderLabel(treeUri: string): string {
+  const id = decodeURIComponent(treeUri.split("/tree/")[1] ?? "");
+  return id.replace(/^primary:/, "").replace(/^[^:]+:/, "") || "the chosen folder";
+}
+
+/** Forget the remembered download folder, so the next download asks again. */
+export async function forgetSrsDownloadFolder(): Promise<void> {
+  await AsyncStorage.removeItem(DOWNLOAD_DIR_KEY).catch(() => {});
+}
+
+/**
+ * Download a .srs file. Web/Electron: a browser download. Android: saved straight into a folder
+ * the user picked once (Downloads is offered first) and that is remembered — no share sheet.
+ * iOS has no shared Downloads folder, so it uses the share sheet ("Save to Files").
+ * Returns where it went (Android), or null when it was handled elsewhere or cancelled.
+ */
+export async function downloadSrsFile(programName: string, content: string): Promise<{ fileName: string; folder: string } | null> {
+  const filename = `${safeName(programName)}.srs`;
+  if (Platform.OS === "android") {
+    const SAF = FileSystem.StorageAccessFramework;
+    const write = async (dir: string) => {
+      // octet-stream keeps the ".srs" name as given (text/plain would add ".txt").
+      const uri = await SAF.createFileAsync(dir, filename, "application/octet-stream");
+      await FileSystem.writeAsStringAsync(uri, content, { encoding: "utf8" });
+    };
+    const saved = await AsyncStorage.getItem(DOWNLOAD_DIR_KEY).catch(() => null);
+    if (saved) {
+      try { await write(saved); return { fileName: filename, folder: folderLabel(saved) }; }
+      catch { await forgetSrsDownloadFolder(); } // permission revoked or folder gone: ask again
+    }
+    const perm = await SAF.requestDirectoryPermissionsAsync(SAF.getUriForDirectoryInRoot("Download"));
+    if (!perm.granted) return null;
+    await AsyncStorage.setItem(DOWNLOAD_DIR_KEY, perm.directoryUri).catch(() => {});
+    await write(perm.directoryUri);
+    return { fileName: filename, folder: folderLabel(perm.directoryUri) };
+  }
+  await shareSrsFile(programName, content);
+  return null;
+}
+
+/** Save/share a .srs file (browser download on web, share sheet on native). */
 export async function shareSrsFile(programName: string, content: string): Promise<void> {
   const filename = `${safeName(programName)}.srs`;
   if (Platform.OS === "web") {

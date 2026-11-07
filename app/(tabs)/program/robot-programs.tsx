@@ -16,7 +16,7 @@ import {
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { Card, IconTile, InfoTip, SectionHeader, StatTile, StatusPill, colors, spacing } from "@/src/components/ui/kit";
 import { ImportProgramTextSheet } from "@/src/components/ui/program/ImportProgramTextSheet";
-import { pickSrsFile, programToSrsFile, shareSrsFile } from "@/src/services/srsFile";
+import { downloadSrsFile, forgetSrsDownloadFolder, pickSrsFile, programToSrsFile } from "@/src/services/srsFile";
 
 // ── Program Row ────────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ function ProgramRow({
 
       {onExport && (
         <TouchableOpacity onPress={onExport} style={s.exportBtn} hitSlop={6} activeOpacity={0.6}
-          accessibilityRole="button" accessibilityLabel={`Export ${name} as text (.srs)`}>
+          accessibilityRole="button" accessibilityLabel={`Download ${name} as text (.srs)`}>
           <FileDown size={17} color={colors.textMuted} />
         </TouchableOpacity>
       )}
@@ -193,9 +193,15 @@ export default function RobotProgramsScreen() {
   // Simple Robot Script (.srs) export / import (controller docs/program-language.md §6.12).
   async function handleExport(bp: BuiltProgram) {
     try {
-      await shareSrsFile(bp.name, await programToSrsFile(bp));
+      const saved = await downloadSrsFile(bp.name, await programToSrsFile(bp));
+      if (saved) {
+        appAlert("Downloaded", `Saved ${saved.fileName} to ${saved.folder}.`, [
+          { text: "Change folder", onPress: () => { void forgetSrsDownloadFolder(); } },
+          { text: "OK", style: "cancel" },
+        ]);
+      }
     } catch (e) {
-      appAlert("Export Failed", isNotImplementedCommand(e) || isUnsupportedCommand(e)
+      appAlert("Download Failed", isNotImplementedCommand(e) || isUnsupportedCommand(e)
         ? "This controller cannot turn programs into text yet."
         : e instanceof Error ? e.message : String(e));
     }
