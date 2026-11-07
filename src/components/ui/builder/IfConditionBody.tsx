@@ -25,7 +25,7 @@ import { colors, accents } from "@/src/components/ui/kit";
 
 const CARD_GAP = 8;
 
-const ifStyles = StyleSheet.create({
+export const ifStyles = StyleSheet.create({
   strip: { paddingHorizontal: 10, paddingTop: 10, gap: CARD_GAP },
   branchCard: {
     borderRadius: 10,
@@ -84,7 +84,7 @@ const ifStyles = StyleSheet.create({
 });
 
 /** The branch's condition, drawn as a field: summary text (or a placeholder) + pencil. */
-function ConditionField({ group, tint, onPress }: { group: ConditionGroup | undefined; tint: string; onPress: () => void }) {
+export function ConditionField({ group, tint, onPress }: { group: ConditionGroup | undefined; tint: string; onPress: () => void }) {
   const empty = !group?.items?.length;
   return (
     <TouchableOpacity style={ifStyles.condField} onPress={onPress} activeOpacity={0.7}
@@ -98,7 +98,7 @@ function ConditionField({ group, tint, onPress }: { group: ConditionGroup | unde
 }
 
 /** "N steps · Enter →" — the row taps, and the pill makes the action obvious. */
-function BranchFooter({ count, tint, onPress }: { count: number; tint: string; onPress: () => void }) {
+export function BranchFooter({ count, tint, onPress }: { count: number; tint: string; onPress: () => void }) {
   return (
     <TouchableOpacity style={[ifStyles.footer, { borderTopColor: tint + "40" }]} onPress={onPress} activeOpacity={0.7}
       accessibilityRole="button" accessibilityLabel={`Enter branch, ${count} steps`}>
@@ -111,7 +111,7 @@ function BranchFooter({ count, tint, onPress }: { count: number; tint: string; o
   );
 }
 
-function DeleteBranchButton({ onPress }: { onPress: () => void }) {
+export function DeleteBranchButton({ onPress }: { onPress: () => void }) {
   return (
     <TouchableOpacity onPress={onPress} hitSlop={8} activeOpacity={0.7} style={ifStyles.deleteBtn}
       accessibilityRole="button" accessibilityLabel="Delete branch">
@@ -127,6 +127,8 @@ export function IfConditionBody({
   variables,
   contextVariables,
   editTrigger,
+  editRequest,
+  compact,
 }: {
   step: ProgramStep;
   onEnterScope: (frame: ScopeFrame) => void;
@@ -135,6 +137,13 @@ export function IfConditionBody({
   contextVariables?: ProgramVariable[];
   /** Bump to open the IF condition editor from outside (the step header tap, or right after adding). */
   editTrigger?: number;
+  /** Opens one branch's condition editor ("if" or an else-if branch id); bump `tick` to reopen. */
+  editRequest?: { key: string; tick: number };
+  /**
+   * The branches are shown inline in the step list (expanded), so only the branch controls
+   * and the condition editor are drawn here — not the strip of branch cards.
+   */
+  compact?: boolean;
 }) {
   const theme          = STEP_THEME["IfCondition"] ?? STEP_THEME["MoveL"];
   const ifSteps        = step.ifSteps        ?? [];
@@ -165,6 +174,11 @@ export function IfConditionBody({
     if (editTrigger) openConditionEditor("if");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editTrigger]);
+
+  useEffect(() => {
+    if (editRequest?.tick) openConditionEditor(editRequest.key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest?.tick]);
 
   // A newly added branch lands at the end of the strip — scroll to it so it's not hidden.
   const prevCount = useRef(branchCount);
@@ -231,7 +245,7 @@ export function IfConditionBody({
         </Pressable>
       </Modal>
 
-      <View onLayout={e => setStripW(e.nativeEvent.layout.width)}>
+      {!compact && <View onLayout={e => setStripW(e.nativeEvent.layout.width)}>
         <ScrollView
           ref={stripRef}
           horizontal
@@ -299,10 +313,10 @@ export function IfConditionBody({
             ))}
           </View>
         )}
-      </View>
+      </View>}
 
       {/* Branch controls */}
-      <View style={ifStyles.branchControlRow}>
+      <View style={[ifStyles.branchControlRow, compact && { marginTop: 0, paddingTop: 0, borderTopWidth: 0 }]}>
         <TouchableOpacity
           style={ifStyles.branchControlBtn}
           onPress={() => onUpdateIfCondition({

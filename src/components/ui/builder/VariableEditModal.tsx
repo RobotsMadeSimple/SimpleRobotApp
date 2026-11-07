@@ -21,12 +21,21 @@ import {
   itemScalar,
   numberItem,
   variableList,
+  type ParamMode,
 } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
 import { ExpressionInput } from "./NumericInputs";
 import { newId } from "./stepUtils";
 
 export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "image" | "computed";
+
+/** The routine-parameter choices (ProgramVariable.paramMode) with what each does. */
+const PARAM_MODES: { value: ParamMode | "none"; label: string; hint: string }[] = [
+  { value: "none",  label: "No",     hint: "An ordinary variable of this routine." },
+  { value: "in",    label: "In",     hint: "Set from the caller's argument before the routine runs (its value here is the default)." },
+  { value: "out",   label: "Out",    hint: "Copied into the caller's chosen variable when the routine returns." },
+  { value: "inOut", label: "In-Out", hint: "Set from the caller's argument, and copied back when the routine returns." },
+];
 
 /**
  * Module scope rather than rebuilt per render — it is a constant, and the trigger button
@@ -87,9 +96,12 @@ export function VariableEditModal({
   variables,
   onSave,
   onClose,
+  isRoutine,
 }: {
   visible: boolean;
   variable: ProgramVariable | null;
+  /** Editing a routine's variable: it can be made an In / Out / In-Out parameter. */
+  isRoutine?: boolean;
   defaultType?: VarType;
   /** The element type a new list starts on (new variables only; lists default to Number). */
   defaultElementType?: ListElementType;
@@ -123,6 +135,7 @@ export function VariableEditModal({
   const [displayOnMonitor,  setDisplayOnMonitor]  = useState(false);
   const [isInput,           setIsInput]           = useState(false);
   const [isPersistent,      setIsPersistent]      = useState(false);
+  const [paramMode,         setParamMode]         = useState<ParamMode | undefined>(undefined);
   /**
    * The Computed kind's formula and its "Is boolean" toggle. Kept apart from valueExpr /
    * the Boolean kind so switching between Computed and a stored kind in the picker does
@@ -132,6 +145,7 @@ export function VariableEditModal({
   const [computedBool, setComputedBool] = useState(false);
 
   useEffect(() => {
+    setParamMode(variable?.paramMode);
     if (variable?.isComputed) {
       // Checked before the stored kinds: a computed variable's isBoolean is a display
       // flag on the formula, not the Boolean kind.
@@ -622,6 +636,27 @@ export function VariableEditModal({
             returnKeyType="done"
           />
 
+          {isRoutine && varType !== "computed" && (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 14 }]}>ROUTINE PARAMETER</Text>
+              <View style={ms.segRow}>
+                {PARAM_MODES.map(m => {
+                  const active = (paramMode ?? "none") === m.value;
+                  return (
+                    <TouchableOpacity key={m.value} style={[ms.seg, active && ms.segActive, { flex: 1 }]} activeOpacity={0.8}
+                      onPress={() => setParamMode(m.value === "none" ? undefined : m.value)}
+                      accessibilityRole="button" accessibilityLabel={`Parameter: ${m.label}`}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{m.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={ms.hintText}>
+                {PARAM_MODES.find(m => m.value === (paramMode ?? "none"))!.hint}
+              </Text>
+            </>
+          )}
+
           {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image" || varType === "computed") && (
             <>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
@@ -746,6 +781,8 @@ export function VariableEditModal({
                   isInput:         (varType === "number" || varType === "boolean" || varType === "string") ? (isInput || undefined) : undefined,
                   isPersistent:    (varType === "number" || varType === "boolean" || varType === "string"    || varType === "image") ? (isPersistent || undefined) : undefined,
                   description: desc.trim() || undefined,
+                  // Only a routine's variables are parameters; elsewhere an imported mode is kept as is.
+                  paramMode: isRoutine ? paramMode : variable?.paramMode,
                 });
                 onClose();
               }}

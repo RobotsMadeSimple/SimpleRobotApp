@@ -70,7 +70,8 @@ export function renameRefsInExpr(expr: string, oldName: string, newName: string)
 // expression/template. Arrays and nested objects (child step lists, condition items, output mappings)
 // are walked automatically, so no field path needs to be enumerated.
 function walk<T>(node: T, oldName: string, newName: string): T {
-  if (Array.isArray(node)) return node.map(x => walk(x, oldName, newName)) as unknown as T;
+  // A list of strings (switch case values, prompt buttons) holds expressions/templates too.
+  if (Array.isArray(node)) return node.map(x => (typeof x === "string" ? renameRefsInExpr(x, oldName, newName) : walk(x, oldName, newName))) as unknown as T;
   if (node && typeof node === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
