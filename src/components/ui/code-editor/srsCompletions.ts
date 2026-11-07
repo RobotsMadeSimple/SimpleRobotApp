@@ -10,6 +10,8 @@
 //   bare word in an expression → functions
 //   MoveL / via=     → point names (+ here, grid, stack)
 //   call / goto / SetTool / SetLocal / RunVision / StartBackground / device= / camera= → those names
+//                    (a name with spaces completes as its underscore form, `Pick_1`, the real
+//                    name in the detail — or quoted when that form is ambiguous or a keyword)
 //   after `,`        → the step's remaining named args, unit in the detail
 //   after `arg=`     → the arg's enum options, or on/off
 
@@ -160,9 +162,95 @@ export function findStepByKeyword(data: SrsCompletionData | null, word: string):
   return data.steps.find(s => s.keyword.toLowerCase() === w || s.aliases.some(a => a.toLowerCase() === w));
 }
 
-/** A name as SRS writes it: bare when it is an identifier, else quoted. */
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Value words the controller never prints bare as a name (SrsText.Reserved). */
+const RESERVED = new Set([
+  "on", "off", "true", "false", "here", "grid", "stack", "point", "and", "or", "not", "forever",
+  "as", "in", "out", "to", "toggle", "list", "image", "send", "receive", "end", "_",
+]);
+
+/** Statement, clause and declaration words (SrsParser.IsKeyword, minus the catalog's own). */
+const STATEMENT_WORDS = [
+  "if", "while", "repeat", "for", "switch", "try", "break", "continue", "return", "exit", "raise", "label", "goto",
+  "call", "pause", "status", "stopwatch", "prompt", "plugin", "unknown", "end", "elif", "else", "case", "default",
+  "catch", "var", "computed", "param", "global", "persistent", "input", "monitor", "SetVariable", "ListOp", "Note",
+];
+
+/** Every word an underscore-form name must not be (lower-case): reserved + statement words + the catalog's keywords. */
+export function srsKeywordSet(steps: SrsStepSpec[] = []): Set<string> {
+  const out = new Set<string>(RESERVED);
+  for (const w of STATEMENT_WORDS) out.add(w.toLowerCase());
+  for (const s of steps) {
+    out.add(s.type.toLowerCase());
+    out.add(s.keyword.toLowerCase());
+    for (const a of s.aliases) out.add(a.toLowerCase());
+  }
+  return out;
+}
+
+/**
+ * A name's underscore form (controller SrsNameMatch.Underscore): each run of characters an
+ * identifier cannot hold becomes one `_` — "Pick 1" → `Pick_1`, "Bin - left" → `Bin_left`.
+ */
+export function srsUnderscore(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]+/g, "_");
+}
+
+/**
+ * What `text` resolves to among `names`, as the controller resolves a name written in the text:
+ * an exact name, then case-insensitive, then the underscore form (case-sensitive first). An
+ * underscore form that fits several names is ambiguous (null + ambiguous).
+ */
+export function srsResolveName(names: string[], text: string): { name: string | null; ambiguous: boolean } {
+  if (!text) return { name: null, ambiguous: false };
+  const exact = names.find(n => n === text);
+  if (exact !== undefined) return { name: exact, ambiguous: false };
+  const lower = text.toLowerCase();
+  const ci = names.find(n => n.toLowerCase() === lower);
+  if (ci !== undefined) return { name: ci, ambiguous: false };
+  const u = srsUnderscore(text);
+  for (const fold of [false, true]) {
+    const want = fold ? u.toLowerCase() : u;
+    const hits = [...new Set(names.filter(n => n && (fold ? srsUnderscore(n).toLowerCase() : srsUnderscore(n)) === want))];
+    if (hits.length === 1) return { name: hits[0], ambiguous: false };
+    if (hits.length > 1) return { name: null, ambiguous: true };
+  }
+  return { name: null, ambiguous: false };
+}
+
+/**
+ * How the text writes `name` (one of `names`), as the controller's printer does: bare when it
+ * is an identifier (and not a reserved word), else its underscore form when that is an
+ * identifier, is no keyword and resolves back to this same name, else quoted.
+ */
+export function srsNameText(name: string, names: string[] = [name], keywords: Set<string> = srsKeywordSet()): string {
+  if (IDENT.test(name) && !RESERVED.has(name.toLowerCase())) return name;
+  const u = srsUnderscore(name);
+  if (u !== name && IDENT.test(u) && !keywords.has(u.toLowerCase()) && srsResolveName(names, u).name === name) return u;
+  return JSON.stringify(name);
+}
+
+/** A name as SRS writes it on its own (no other names to clash with): bare, underscore form or quoted. */
 export function srsName(name: string): string {
-  return /^[A-Za-z_]\w*$/.test(name) ? name : JSON.stringify(name);
+  return srsNameText(name);
+}
+
+/**
+ * Completion items for a list of names: the label and insert are how the text writes each
+ * name; when that is the underscore form, the detail shows the real name (`point "Pick 1"`).
+ */
+export function srsNameItems(list: string[], detail: string, keywords: Set<string> = srsKeywordSet()): SrsCompletion[] {
+  return list.map(n => {
+    const text = srsNameText(n, list, keywords);
+    const underscored = text !== n && !text.startsWith("\"");
+    return {
+      label: underscored ? text : n,
+      kind: "name" as const,
+      insert: text,
+      detail: underscored ? `${detail} ${JSON.stringify(n)}` : detail,
+    };
+  });
 }
 
 const NAME_KIND_LIST: Record<string, keyof SrsNames> = {
@@ -204,8 +292,13 @@ function filterPrefix<T extends { label: string }>(items: T[], prefix: string): 
   return [...starts, ...contains].slice(0, MAX);
 }
 
-function nameItems(list: string[], detail: string): SrsCompletion[] {
-  return list.map(n => ({ label: n, kind: "name" as const, insert: srsName(n), detail }));
+let keywordCache: { steps: SrsStepSpec[] | null; set: Set<string> } = { steps: null, set: srsKeywordSet() };
+
+/** The keyword set for a completion snapshot (rebuilt only when the catalog changes). */
+function keywordsOf(data: SrsCompletionData | null): Set<string> {
+  const steps = data?.steps ?? null;
+  if (keywordCache.steps !== steps) keywordCache = { steps, set: srsKeywordSet(steps ?? []) };
+  return keywordCache.set;
 }
 
 /**
@@ -264,6 +357,7 @@ export function srsCompletionsAt(
   const lstmt = stmt.toLowerCase();
   const step = findStepByKeyword(data, stmt);
   const names = data?.names ?? EMPTY_NAMES;
+  const kw = keywordsOf(data);
 
   // ── After `arg=` : the arg's values ──
   const argEq = /(?:^|[\s,(])([A-Za-z_]\w*)\s*=\s*$/.exec(head);
@@ -271,7 +365,7 @@ export function srsCompletionsAt(
     const argName = argEq[1];
     if (argName === "via" || argName === "local" || argName === "device" || argName === "camera") {
       const list = argName === "via" ? names.points : argName === "local" ? names.locals : argName === "device" ? names.devices : names.cameras;
-      return { from, to, items: filterPrefix(nameItems(list, argName), prefix) };
+      return { from, to, items: filterPrefix(srsNameItems(list, argName, kw), prefix) };
     }
     const a = step?.args.find(x => x.arg === argName);
     if (a?.options?.length) {
@@ -280,33 +374,33 @@ export function srsCompletionsAt(
     if (a?.kind === "bool") {
       return { from, to, items: filterPrefix(["on", "off"].map(o => ({ label: o, kind: "value" as const, insert: o, detail: a.label })), prefix) };
     }
-    if (a && NAME_KIND_LIST[a.kind]) return { from, to, items: filterPrefix(nameItems(names[NAME_KIND_LIST[a.kind]], a.label), prefix) };
+    if (a && NAME_KIND_LIST[a.kind]) return { from, to, items: filterPrefix(srsNameItems(names[NAME_KIND_LIST[a.kind]], a.label, kw), prefix) };
     return null;
   }
 
   // ── grid / stack names ──
-  if (/\bgrid\s+$/i.test(head)) return { from, to, items: filterPrefix(nameItems(names.grids, "grid"), prefix) };
-  if (/\bstack\s+$/i.test(head)) return { from, to, items: filterPrefix(nameItems(names.stacks, "stack"), prefix) };
+  if (/\bgrid\s+$/i.test(head)) return { from, to, items: filterPrefix(srsNameItems(names.grids, "grid", kw), prefix) };
+  if (/\bstack\s+$/i.test(head)) return { from, to, items: filterPrefix(srsNameItems(names.stacks, "stack", kw), prefix) };
 
   // ── Flow words with a name ──
   const firstArg = new RegExp(`^\\s*${stmt}\\s+$`, "i").test(head);
   if (firstArg) {
-    if (lstmt === "call") return { from, to, items: filterPrefix(nameItems(names.routines, "routine"), prefix) };
-    if (lstmt === "goto") return { from, to, items: filterPrefix(nameItems(labelsIn(fullText), "label"), prefix) };
+    if (lstmt === "call") return { from, to, items: filterPrefix(srsNameItems(names.routines, "routine", kw), prefix) };
+    if (lstmt === "goto") return { from, to, items: filterPrefix(srsNameItems(labelsIn(fullText), "label", kw), prefix) };
     if (lstmt === "stopwatch") return { from, to, items: filterPrefix(["start", "stop", "reset"].map(w => ({ label: w, kind: "value" as const, insert: w + " " })), prefix) };
     if (lstmt === "status") return { from, to, items: filterPrefix(["info", "warning", "error"].map(w => ({ label: w, kind: "value" as const, insert: w + " " })), prefix) };
     if (step) {
       const p0 = step.positional[0];
       if (p0?.kind === "target") {
         const items: SrsCompletion[] = [
-          ...nameItems(names.points, "point"),
+          ...srsNameItems(names.points, "point", kw),
           { label: "here", kind: "flow", insert: "here", detail: "current position" },
           { label: "grid", kind: "flow", insert: "grid ", detail: "a grid cell" },
           { label: "stack", kind: "flow", insert: "stack ", detail: "a stack slot" },
         ];
         return { from, to, items: filterPrefix(items, prefix) };
       }
-      if (p0 && NAME_KIND_LIST[p0.kind]) return { from, to, items: filterPrefix(nameItems(names[NAME_KIND_LIST[p0.kind]], p0.label), prefix) };
+      if (p0 && NAME_KIND_LIST[p0.kind]) return { from, to, items: filterPrefix(srsNameItems(names[NAME_KIND_LIST[p0.kind]], p0.label, kw), prefix) };
     }
   }
 

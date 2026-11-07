@@ -11,7 +11,9 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { srsKeywords, srsStartState, srsTokenize, srsTokenizeLine, type SrsTokenType } from "../src/components/ui/code-editor/srsTokens";
-import { buildSrsCompletionData, srsCompletionsAt, srsLineHelp, stepSnippet } from "../src/components/ui/code-editor/srsCompletions";
+import {
+  buildSrsCompletionData, srsCompletionsAt, srsKeywordSet, srsLineHelp, srsNameItems, srsNameText, srsResolveName, srsUnderscore, stepSnippet,
+} from "../src/components/ui/code-editor/srsCompletions";
 import type { StepCatalog } from "../src/models/robotModels";
 
 let failures = 0;
@@ -212,7 +214,26 @@ ok(labels(srsCompletionsAt("Mo", 2, data)).includes("MoveL"), "line start: MoveL
 ok(srsCompletionsAt("Mo", 2, data)?.items.find(i => i.label === "MoveL")?.snippet?.startsWith("MoveL ${") === true, "MoveL completes as a snippet");
 ok(labels(srsCompletionsAt("  rep", 5, data)).includes("repeat"), "line start (indented): repeat");
 ok(labels(srsCompletionsAt("MoveL ", 6, data)).includes("Pick1"), "MoveL target: points");
-ok(srsCompletionsAt("MoveL ", 6, data)?.items.find(i => i.label === "Place 2")?.insert === "\"Place 2\"", "a name with a space is quoted");
+{
+  const place = srsCompletionsAt("MoveL ", 6, data)?.items.find(i => i.insert === "Place_2");
+  ok(place?.label === "Place_2" && place?.detail === "point \"Place 2\"", "a name with a space completes as its underscore form, real name in the detail");
+  ok(labels(srsCompletionsAt("MoveL Pla", 9, data)).includes("Place_2"), "the underscore form filters by prefix");}
+// Underscore forms (controller SrsNameMatch): resolution, ambiguity, keyword clash.
+ok(srsUnderscore("Pick 1") === "Pick_1" && srsUnderscore("Bin - left") === "Bin_left" && srsUnderscore("  padded  ") === "_padded_", "srsUnderscore: each run → one _");
+ok(srsResolveName(["Pick 1", "Pick_1"], "Pick_1").name === "Pick_1", "an exact name wins over an underscore form");
+ok(srsResolveName(["Pick 1"], "pick_1").name === "Pick 1", "underscore forms resolve case-insensitively");
+ok(srsResolveName(["Pick 1", "Pick-1"], "Pick_1").ambiguous, "two names with one underscore form are ambiguous");
+ok(srsNameText("Pick 1", ["Pick 1", "Pick-1"]) === "\"Pick 1\"", "an ambiguous underscore form falls back to quotes");
+ok(srsNameText("Pick 1", ["Pick 1", "Pick_1"]) === "\"Pick 1\"", "an underscore form naming another item falls back to quotes");
+ok(srsNameText("Pick1") === "Pick1" && srsNameText("Pick 1") === "Pick_1", "bare identifier / underscore form");
+ok(srsNameText("1st pick") === "\"1st pick\"" && srsNameText(" ") === "\" \"" && srsNameText("end") === "\"end\"", "not an identifier / reserved → quoted");
+ok(srsNameText("Move L", ["Move L"], new Set(["move_l"])) === "\"Move L\"", "an underscore form that is a keyword is quoted");
+ok(srsKeywordSet(data.steps).has("movel") && srsKeywordSet().has("elif"), "keyword set: catalog + statement words");
+{
+  const items = srsNameItems(["Pick 1", "Pick-1", "Pick1"], "point");
+  ok(JSON.stringify(items.map(i => i.insert)) === JSON.stringify(["\"Pick 1\"", "\"Pick-1\"", "Pick1"]), "ambiguous names complete quoted");
+  ok(items[0].label === "Pick 1" && items[0].detail === "point", "a quoted item keeps the real name as its label");
+}
 ok(labels(srsCompletionsAt("MoveL ", 6, data)).includes("here"), "MoveL target: here");
 ok(labels(srsCompletionsAt("MoveL grid ", 11, data)).includes("Tray"), "grid names");
 ok(labels(srsCompletionsAt("MoveL Pick1, ", 13, data)).includes("speed"), "after comma: named args");
@@ -227,7 +248,14 @@ ok(labels(srsCompletionsAt("$x = rou", 8, data)).includes("round"), "functions i
 ok(srsCompletionsAt("# MoveL ", 8, data) === null, "no completion in a comment");
 ok(srsCompletionsAt("status \"Mo", 10, data) === null, "no completion in a string");
 ok(labels(srsCompletionsAt("status \"{$co", 12, data)).includes("$count"), "$ completes in a template");
-ok(labels(srsCompletionsAt("goto ", 5, data, "label retry\nlabel \"Next one\"\ngoto ")).join() === "retry,Next one", "goto: labels in the text");
+ok(labels(srsCompletionsAt("goto ", 5, data, "label retry\nlabel \"Next one\"\ngoto ")).join() === "retry,Next_one", "goto: labels in the text (underscore form)");
+ok(typeOf("MoveL Pick_1, speed=200", "Pick_1") === "name", "an underscore-form name highlights as a name");
+{
+  const st = srsStartState();
+  srsTokenizeLine("RunVision Detect_Parts", st);
+  const row = types("  Top_edge.angle -> $a", st);
+  ok(!row.some(([, k]) => k === "error") && row.some(([w, k]) => w === "$a" && k === "variable"), "a Run Vision row with an underscore tool name tokenizes");
+}
 ok(srsLineHelp("  MoveL Pick1", data)?.syntax.startsWith("MoveL") === true, "line help for a step");
 ok(srsLineHelp("repeat 3", data)?.syntax.includes("repeat") === true, "line help for a flow form");
 if (catalog) {
