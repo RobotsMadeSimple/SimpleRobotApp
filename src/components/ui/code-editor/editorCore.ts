@@ -21,6 +21,32 @@ import type { EditorCommand, EditorController, EditorEvent, EditorLineRange } fr
 import { type SrsKeywords, srsKeywords, srsStreamParser } from "./srsTokens";
 import { type SrsCompletionData, srsCompletionsAt } from "./srsCompletions";
 
+type Box = { left: number; right: number; top: number; bottom: number };
+
+/**
+ * Where a completion's info (syntax + description) sits. Beside the list when there is room; on a
+ * narrow screen CodeMirror's default drops it under the selected row, on top of the rest of the
+ * list — so put it below the whole list instead (or above it when the space below is short).
+ */
+function positionInfo(_view: EditorView, list: Box, _option: Box, info: Box, space: Box) {
+  const gap = 4;
+  const infoW = info.right - info.left, infoH = info.bottom - info.top;
+  const spaceRight = space.right - list.right, spaceLeft = list.left - space.left;
+  if (infoW + gap <= spaceRight) {
+    return { style: `top: 0; max-width: ${Math.min(400, spaceRight - gap)}px`, class: "cm-completionInfo-right" };
+  }
+  if (infoW + gap <= spaceLeft) {
+    return { style: `top: 0; max-width: ${Math.min(400, spaceLeft - gap)}px`, class: "cm-completionInfo-left" };
+  }
+  const maxWidth = Math.min(400, space.right - list.left - 8);
+  const listH = list.bottom - list.top;
+  const below = space.bottom - list.bottom >= infoH + gap || space.bottom - list.bottom >= list.top - space.top;
+  return {
+    style: `${below ? "top" : "bottom"}: ${listH + gap}px; left: 0; max-width: ${maxWidth}px`,
+    class: "cm-completionInfo-below",
+  };
+}
+
 export type SrsEditorOptions = {
   text?: string;
   readOnly?: boolean;
@@ -225,7 +251,7 @@ export function createSrsEditor(parent: HTMLElement, opts: SrsEditorOptions): Ed
     syntaxHighlighting(srsHighlight),
     baseTheme,
     runLineField,
-    autocompletion({ override: [source], activateOnTyping: true, icons: false, maxRenderedOptions: 40 }),
+    autocompletion({ override: [source], activateOnTyping: true, icons: false, maxRenderedOptions: 40, positionInfo }),
     keymap.of([
       ...closeBracketsKeymap, ...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab,
       { key: "Mod-/", run: toggleComment },
