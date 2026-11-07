@@ -59,7 +59,7 @@ export const DocFigure = memo(function DocFigure({ src, alt, title, maxWidth }: 
   const natural = fig ? fig.width * 1.5 : 900;
   const width = Math.max(0, Math.min(w, maxWidth ?? Infinity, natural));
   const render = (width: number) => (fig ? <SvgFigure fig={fig} width={width} /> : <ScreenImage source={shot!} width={width} />);
-  const zoomW = fig ? Math.max(win.width - 32, Math.min(fig.width * 2, 1400)) : Math.min(win.width - 32, 1400);
+  const zoomW = fig ? Math.max(win.width - 32, Math.min(fig.width * 1.5, 1400)) : Math.min(win.width - 32, 1400);
 
   return (
     <View style={styles.wrap} onLayout={e => setW(Math.floor(e.nativeEvent.layout.width))}>
