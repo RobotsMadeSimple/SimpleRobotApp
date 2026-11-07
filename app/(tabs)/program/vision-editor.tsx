@@ -9,7 +9,7 @@ import {
 } from "@/src/models/visionTools";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { useLocalSearchParams, useNavigation } from "expo-router";
-import { AlertTriangle, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Layers, Plus } from "lucide-react-native";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Layers, Plus } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Image, Keyboard, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
@@ -18,6 +18,7 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 import { accents, colors, spacing, radii, shadows, InfoTip, PageHeader, StatusPill } from "@/src/components/ui/kit";
 import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { DragHandle } from "@/src/components/ui/builder/StepRow";
+import { useDragReorder } from "@/src/components/ui/useDragReorder";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
 import { CameraCalibrationBadge } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { ToolTile, ToolTypePicker, CATEGORY_TINT } from "@/src/components/ui/vision-editor/ToolPickers";
@@ -264,11 +265,7 @@ export default function VisionEditorScreen() {
     ]);
   }
 
-  function moveLayer(i: number, d: number) {
-    const j = i + d;
-    if (j < 0 || j >= program.layers.length) return;
-    const layers = [...program.layers];
-    [layers[i], layers[j]] = [layers[j], layers[i]];
+  function reorderLayers(layers: ImageLayer[]) {
     const before = Object.keys(layerOrderProblems(program.layers));
     const bad = Object.keys(layerOrderProblems(layers)).filter(id => !before.includes(id));
     if (bad.length) {
@@ -358,46 +355,11 @@ export default function VisionEditorScreen() {
   const problems = useMemo(() => orderProblems(program), [program]);
   const layerProblems = useMemo(() => layerOrderProblems(program.layers), [program.layers]);
 
-  type DragState = { id: string; fromIndex: number; toIndex: number };
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const dragRef    = useRef<DragState | null>(null);
-  const rowHeights = useRef<Map<string, number>>(new Map());
+  const toolDrag  = useDragReorder(program.tools, reorderTools);
+  const layerDrag = useDragReorder(program.layers, reorderLayers);
+  const dragging  = toolDrag.dragging || layerDrag.dragging;
 
-  function calcDropIndex(fromIndex: number, dy: number): number {
-    const ids = program.tools.map(t => t.id);
-    if (fromIndex < 0 || ids.length < 2) return Math.max(0, Math.min(ids.length - 1, fromIndex));
-    let target = fromIndex, acc = 0;
-    if (dy > 0) {
-      for (let i = fromIndex + 1; i < ids.length; i++) {
-        const h = rowHeights.current.get(ids[i]) ?? 64;
-        if (dy > acc + h / 2) { target = i; acc += h; } else break;
-      }
-    } else {
-      for (let i = fromIndex - 1; i >= 0; i--) {
-        const h = rowHeights.current.get(ids[i]) ?? 64;
-        if (-dy > acc + h / 2) { target = i; acc += h; } else break;
-      }
-    }
-    return target;
-  }
-  function onDragStart(id: string) {
-    const i = program.tools.findIndex(t => t.id === id);
-    const s = { id, fromIndex: i, toIndex: i };
-    dragRef.current = s; setDrag(s);
-  }
-  function onDragMove(id: string, dy: number) {
-    const d = dragRef.current;
-    if (!d || d.id !== id) return;
-    const to = calcDropIndex(d.fromIndex, dy);
-    if (to !== d.toIndex) { const u = { ...d, toIndex: to }; dragRef.current = u; setDrag(u); }
-  }
-  function onDragEnd(id: string) {
-    const d = dragRef.current;
-    dragRef.current = null; setDrag(null);
-    if (!d || d.id !== id || d.toIndex === d.fromIndex) return;
-    const tools = [...program.tools];
-    const [m] = tools.splice(d.fromIndex, 1);
-    tools.splice(d.toIndex, 0, m);
+  function reorderTools(tools: VisionTool[]) {
     // A tool may only use tools above it — refuse a drop that would break that.
     const before = new Set(Object.keys(problems));
     const after = orderProblems({ ...program, tools });
@@ -510,8 +472,15 @@ export default function VisionEditorScreen() {
         const on = l.filters.filter(f => f.enabled).length;
         const prob = layerProblems[l.id];
         const src = l.input === "camera" ? "Camera" : program.layers.find(x => x.id === l.input)?.name ?? "missing layer";
+        const drop = layerDrag.dropAt(l.id, i);
         return (
-          <View key={l.id} style={styles.layerCard}>
+          <View
+            key={l.id}
+            onLayout={layerDrag.onRowLayout(l.id)}
+            style={[styles.noSelect, layerDrag.isDragged(l.id) && styles.dragDim, drop === "above" && styles.dropAbove, drop === "below" && styles.dropBelow]}
+          >
+          <View style={styles.layerCard}>
+            {program.layers.length > 1 && <DragHandle stepId={l.id} {...layerDrag.handle} />}
             <TouchableOpacity style={styles.rowTap} onPress={() => setPage({ kind: "layer", id: l.id })} activeOpacity={0.75}>
               <View style={[styles.tile, { backgroundColor: accents.orangeSoft }]}><Layers size={18} color={accents.orange} /></View>
               <View style={styles.rowText}>
@@ -522,17 +491,8 @@ export default function VisionEditorScreen() {
               </View>
               <ChevronRight size={16} color={colors.textFaint} />
             </TouchableOpacity>
-            {program.layers.length > 1 && (
-              <View style={styles.arrows}>
-                <TouchableOpacity onPress={() => moveLayer(i, -1)} disabled={i === 0} hitSlop={6} accessibilityLabel="Move layer up">
-                  <ArrowUp size={14} color={i === 0 ? colors.border : colors.textMuted} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => moveLayer(i, 1)} disabled={i === program.layers.length - 1} hitSlop={6} accessibilityLabel="Move layer down">
-                  <ArrowDown size={14} color={i === program.layers.length - 1 ? colors.border : colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-            )}
             <DeleteIconButton size={15} style={styles.iconBtn} onPress={() => deleteLayer(l)} />
+          </View>
           </View>
         );
       })}
@@ -564,20 +524,18 @@ export default function VisionEditorScreen() {
         const fixture = t.fixtureId ? program.tools.find(x => x.id === t.fixtureId) : null;
         const inputName = t.input === "camera" ? null : program.layers.find(l => l.id === t.input)?.name ?? "missing layer";
         const detail = [inputName && `on ${inputName}`, fixture && `follows ${fixture.name}`].filter(Boolean).join(" · ");
-        const isDragged = drag?.id === t.id;
-        const dropAbove = !!(drag && drag.id !== t.id && drag.toIndex === index && drag.toIndex < drag.fromIndex);
-        const dropBelow = !!(drag && drag.id !== t.id && drag.toIndex === index && drag.toIndex > drag.fromIndex);
+        const drop = toolDrag.dropAt(t.id, index);
         const tint = CATEGORY_TINT[meta.category];
         return (
           <View
             key={t.id}
-            onLayout={e => rowHeights.current.set(t.id, e.nativeEvent.layout.height)}
-            style={[styles.noSelect, { paddingLeft: Math.min(depth, 4) * 18 }, isDragged && styles.dragDim, dropAbove && styles.dropAbove, dropBelow && styles.dropBelow]}
+            onLayout={toolDrag.onRowLayout(t.id)}
+            style={[styles.noSelect, { paddingLeft: Math.min(depth, 4) * 18 }, toolDrag.isDragged(t.id) && styles.dragDim, drop === "above" && styles.dropAbove, drop === "below" && styles.dropBelow]}
           >
             {depth > 0 && <View style={[styles.treeLine, { left: Math.min(depth, 4) * 18 - 10 }]} />}
             <View style={[styles.toolCard, { borderLeftColor: tint.fg }, (!t.enabled || r?.status === "notRun") && { opacity: 0.6 }]}>
               <View style={styles.toolHead}>
-                <DragHandle stepId={t.id} onStart={onDragStart} onMove={(id, dy) => onDragMove(id, dy)} onEnd={onDragEnd} />
+                <DragHandle stepId={t.id} {...toolDrag.handle} />
                 <TouchableOpacity style={styles.rowTap} onPress={() => setPage({ kind: "tool", id: t.id })} activeOpacity={0.75}>
                   <ToolTile type={t.type} />
                   <View style={styles.rowText}>
@@ -662,7 +620,7 @@ export default function VisionEditorScreen() {
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
                 showsVerticalScrollIndicator={false}
-                scrollEnabled={drag === null}
+                scrollEnabled={!dragging}
               >
                 {detailsCard}
                 {layersSection}
@@ -684,7 +642,7 @@ export default function VisionEditorScreen() {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
-              scrollEnabled={drag === null}
+              scrollEnabled={!dragging}
             >
               {detailsCard}
               {infoSection}
@@ -797,7 +755,6 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
     backgroundColor: colors.surface, borderRadius: radii.md, paddingHorizontal: 12, paddingVertical: 10, ...shadows.soft,
   },
-  arrows: { flexDirection: "column", gap: 6, paddingHorizontal: 2 },
   tile: { width: 36, height: 36, borderRadius: radii.sm, alignItems: "center", justifyContent: "center" },
 
   toolCard: { backgroundColor: colors.surface, borderRadius: radii.lg, borderLeftWidth: 4, ...shadows.soft, overflow: "hidden" },

@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { BackHandler, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { AlertTriangle, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Plus } from "lucide-react-native";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Plus } from "lucide-react-native";
 import { Button, PageHeader, accents, colors, radii, spacing } from "@/src/components/ui/kit";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
+import { DragHandle } from "@/src/components/ui/builder/StepRow";
+import { useDragReorder } from "@/src/components/ui/useDragReorder";
 import {
   FILTER_META, layerOrderProblems, newFilter,
   type FilterType, type ImageLayer, type VisionFilter, type VisionProgram,
@@ -50,13 +52,7 @@ export function LayerEditorPage({ layer, program, previewUrl, aspect, onChange, 
   const setFilters = (filters: VisionFilter[]) => onChange({ ...layer, filters });
   const updateFilter = (id: string, patch: Partial<VisionFilter>) =>
     setFilters(layer.filters.map(f => (f.id === id ? ({ ...f, ...patch } as VisionFilter) : f)));
-  function move(i: number, d: number) {
-    const j = i + d;
-    if (j < 0 || j >= layer.filters.length) return;
-    const next = [...layer.filters];
-    [next[i], next[j]] = [next[j], next[i]];
-    setFilters(next);
-  }
+  const filterDrag = useDragReorder(layer.filters, setFilters);
   function add(type: FilterType) {
     const f = newFilter(type);
     setFilters([...layer.filters, f]);
@@ -115,9 +111,16 @@ export function LayerEditorPage({ layer, program, previewUrl, aspect, onChange, 
       {layer.filters.map((f, i) => {
         const meta = FILTER_META[f.type];
         const open = f.id === selected;
+        const drop = filterDrag.dropAt(f.id, i);
         return (
-          <View key={f.id} style={[st.filterCard, open && st.filterCardOpen, !f.enabled && { opacity: 0.7 }]}>
+          <View
+            key={f.id}
+            onLayout={filterDrag.onRowLayout(f.id)}
+            style={[st.noSelect, filterDrag.isDragged(f.id) && st.dragDim, drop === "above" && st.dropAbove, drop === "below" && st.dropBelow]}
+          >
+          <View style={[st.filterCard, open && st.filterCardOpen, !f.enabled && { opacity: 0.7 }]}>
             <View style={st.filterHead}>
+              {layer.filters.length > 1 && <DragHandle stepId={f.id} {...filterDrag.handle} />}
               <TouchableOpacity style={st.filterTap} onPress={() => setSelected(open ? null : f.id)} activeOpacity={0.75}
                 accessibilityLabel={`${meta.label} filter`}>
                 <View style={[st.num, open && { backgroundColor: accents.cyan }]}>
@@ -137,12 +140,6 @@ export function LayerEditorPage({ layer, program, previewUrl, aspect, onChange, 
                 <Text style={ves.paramDesc}>{meta.description}</Text>
                 <ParamFields fields={meta.fields} values={f} onChange={(key, value) => updateFilter(f.id, { [key]: value })} />
                 <View style={st.filterActions}>
-                  <TouchableOpacity style={st.iconBtn} onPress={() => move(i, -1)} disabled={i === 0} accessibilityLabel="Move filter up">
-                    <ArrowUp size={15} color={i === 0 ? colors.border : colors.textMuted} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={st.iconBtn} onPress={() => move(i, 1)} disabled={i === layer.filters.length - 1} accessibilityLabel="Move filter down">
-                    <ArrowDown size={15} color={i === layer.filters.length - 1 ? colors.border : colors.textMuted} />
-                  </TouchableOpacity>
                   <View style={{ flex: 1 }} />
                   <DeleteIconButton size={15} style={st.iconBtn} onPress={() => {
                     setFilters(layer.filters.filter(x => x.id !== f.id));
@@ -151,6 +148,7 @@ export function LayerEditorPage({ layer, program, previewUrl, aspect, onChange, 
                 </View>
               </View>
             )}
+          </View>
           </View>
         );
       })}
@@ -175,7 +173,7 @@ export function LayerEditorPage({ layer, program, previewUrl, aspect, onChange, 
       />
       <View style={isWide ? st.wideRow : { flex: 1 }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={[{ padding: spacing.lg, gap: spacing.sm }, isWide && st.rightPaneContent]}
-          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} scrollEnabled={!filterDrag.dragging}>
           {!isWide && preview}
           {editor}
         </ScrollView>
@@ -228,9 +226,14 @@ const st = StyleSheet.create({
     backgroundColor: colors.warningSoft, borderRadius: radii.md, borderWidth: 1, borderColor: colors.warningBorder,
   },
   problemText: { flex: 1, fontSize: 13, color: colors.textSecondary },
+  // Keep drag targets from turning into text selections mid-drag on web; drop feedback goes on the outer wrapper.
+  noSelect:  { userSelect: "none" },
+  dragDim:   { opacity: 0.35 },
+  dropAbove: { borderTopWidth: 2.5, borderTopColor: accents.cyan, borderTopLeftRadius: radii.md, borderTopRightRadius: radii.md },
+  dropBelow: { borderBottomWidth: 2.5, borderBottomColor: accents.cyan, borderBottomLeftRadius: radii.md, borderBottomRightRadius: radii.md },
   filterCard: { backgroundColor: colors.surface, borderRadius: radii.md, borderWidth: 1, borderColor: colors.border },
   filterCardOpen: { borderColor: accents.cyanBorder },
-  filterHead: { flexDirection: "row", alignItems: "center", paddingLeft: spacing.md, paddingRight: spacing.sm, paddingVertical: 10, gap: spacing.sm },
+  filterHead: { flexDirection: "row", alignItems: "center", paddingLeft: spacing.sm, paddingRight: spacing.sm, paddingVertical: 10, gap: spacing.sm },
   filterTap: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10 },
   num: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.surfaceMuted, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
   numText: { fontSize: 12, fontWeight: "700", color: colors.textSecondary },
