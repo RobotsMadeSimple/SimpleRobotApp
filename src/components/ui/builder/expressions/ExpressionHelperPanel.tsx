@@ -120,7 +120,7 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
 
         <View style={tab !== "fns" && hs.hidden}>
           {functions.length > 0
-            ? <FunctionsList functions={functions} search={search} onInsert={name => insert(name + "(")} />
+            ? <FunctionsList functions={functions} search={search} onInsert={insert} />
             : <Text style={hs.empty}>No functions.</Text>}
         </View>
 
@@ -130,7 +130,7 @@ export function ExpressionHelperPanel({ variables, contextVariables, contextLabe
             {pluginGroups.map(({ g, fns }) => (
               <React.Fragment key={g.id}>
                 <Text style={hs.section}>{pluginGroupTitle(g)}  ·  functions</Text>
-                <FunctionsList functions={fns} search="" onInsert={name => insert(name + "(")} />
+                <FunctionsList functions={fns} search="" onInsert={insert} />
               </React.Fragment>
             ))}
           </View>

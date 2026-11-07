@@ -379,7 +379,7 @@ function EditorCard({
           {functions.length > 0 && (
             <>
               <SectionHeader title="Functions" />
-              <FunctionsList functions={functions} search={search} onInsert={name => insertToken(`${name}(`)} />
+              <FunctionsList functions={functions} search={search} onInsert={insertToken} />
             </>
           )}
         </>
@@ -387,7 +387,7 @@ function EditorCard({
       {pluginFns.map(({ g, fns }) => (
         <React.Fragment key={g.id}>
           <SectionHeader title={pluginGroupTitle(g)} />
-          <FunctionsList functions={fns} search="" onInsert={name => insertToken(`${name}(`)} />
+          <FunctionsList functions={fns} search="" onInsert={insertToken} />
         </React.Fragment>
       ))}
     </ScrollView>
