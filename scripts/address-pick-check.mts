@@ -1,6 +1,6 @@
 // Check of src/services/addressPick.ts (choosing a reachable controller address from mDNS).
 //   npx tsx scripts/address-pick-check.mts
-import { isCgnat, pickReachable, probe, rankAddresses } from "../src/services/addressPick.ts";
+import { isCgnat, pickReachable, pickReachableEndpoint, probe, rankAddresses, rankEndpoints } from "../src/services/addressPick.ts";
 import { createServer } from "node:http";
 
 let fails = 0;
@@ -27,6 +27,21 @@ ok(await pickReachable(["lan", "vpn"], 9000, fake) === "vpn", "falls back when t
 delays.vpn = [20, false];
 ok(await pickReachable(["lan", "vpn"], 9000, fake) === null, "null when nothing answers");
 ok(await pickReachable([], 9000, fake) === null, "null with no candidates");
+
+// Remembered addresses of one robot (saved/recent entries), each with its own port.
+ok(eq(rankEndpoints([
+  { host: "100.103.123.116", port: 9000 }, { host: "briefcase.example.ts.net", port: 9000 },
+  { host: "192.168.4.83", port: 9000 }, { host: "192.168.4.83", port: 9000 }, { host: "127.0.0.1", port: 9101 },
+  { host: "169.254.1.1", port: 9000 }, { host: "fe80::1", port: 9000 }, { host: "", port: 9000 },
+]), [
+  { host: "192.168.4.83", port: 9000 }, { host: "127.0.0.1", port: 9101 },
+  { host: "briefcase.example.ts.net", port: 9000 }, { host: "100.103.123.116", port: 9000 },
+]), "endpoints: LAN, then hostnames, then overlay; junk and duplicates dropped");
+const up: Record<string, boolean> = { "a:1": false, "b:2": true, "c:3": true };
+const fakeEp = (h: string, p: number) => Promise.resolve(up[`${h}:${p}`]);
+ok(eq(await pickReachableEndpoint([{ host: "a", port: 1 }, { host: "b", port: 2 }, { host: "c", port: 3 }], fakeEp),
+  { host: "b", port: 2 }), "endpoints: best-ranked answering one wins, port kept");
+ok(await pickReachableEndpoint([], fakeEp) === null, "endpoints: null with no candidates");
 
 // Real probe: a 404 still counts as reachable; a closed port does not.
 const srv = createServer((_q, res) => { res.statusCode = 404; res.end(); });

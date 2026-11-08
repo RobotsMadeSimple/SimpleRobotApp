@@ -43,13 +43,56 @@ export async function probe(ip: string, port: number, timeoutMs = PROBE_TIMEOUT_
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    await fetch(`http://${ip}:${port}/`, { method: "GET", signal: ctl.signal });
+    // no-cors: in a browser the controller's reply has no CORS headers, which would otherwise reject
+    // the fetch even though the address answered (an opaque response still proves the route).
+    await fetch(`http://${ip}:${port}/`, { method: "GET", mode: "no-cors", signal: ctl.signal });
     return true;
   } catch {
     return false;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A controller address with its own port (a saved robot may be known on several). */
+export type Endpoint = { host: string; port: number };
+
+/**
+ * Rank remembered addresses of one robot, keeping the given order within each group: LAN IPv4
+ * first, then loopback, then hostnames, then overlay (CGNAT/VPN) addresses — the same "LAN before
+ * VPN" rule as rankAddresses. Duplicates, link-local and 0.0.0.0 are dropped.
+ */
+export function rankEndpoints(list: Endpoint[]): Endpoint[] {
+  const seen = new Set<string>();
+  const unique: Endpoint[] = [];
+  for (const e of list) {
+    const host = (e?.host ?? "").trim();
+    const port = Number(e?.port) || 0;
+    if (!host || !port || host === "0.0.0.0" || host.startsWith("169.254.") || host.includes(":")) continue;
+    const k = `${host.toLowerCase()}:${port}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push({ host, port });
+  }
+  const loop = (h: string) => h.startsWith("127.") || h.toLowerCase() === "localhost";
+  const lan  = unique.filter(e => isIpv4(e.host) && !isCgnat(e.host) && !loop(e.host));
+  const self = unique.filter(e => loop(e.host));   // only answers when the controller is on this device
+  const name = unique.filter(e => !isIpv4(e.host) && !loop(e.host));
+  const vpn  = unique.filter(e => isCgnat(e.host));
+  return [...lan, ...self, ...name, ...vpn];
+}
+
+/** pickReachable for endpoints that may differ in port: best-ranked one that answers, or null. */
+export async function pickReachableEndpoint(
+  candidates: Endpoint[],
+  probeFn: (ip: string, port: number) => Promise<boolean> = probe,
+): Promise<Endpoint | null> {
+  if (candidates.length === 0) return null;
+  const results = candidates.map(c => probeFn(c.host, c.port).catch(() => false));
+  for (let i = 0; i < candidates.length; i++) {
+    if (await results[i]) return candidates[i];
+  }
+  return null;
 }
 
 /**

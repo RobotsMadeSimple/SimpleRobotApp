@@ -1,5 +1,6 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { enrichByAddress } from "./connectionStore";
+import { pickReachableEndpoint } from "./addressPick";
+import { enrichByAddress, knownEndpoints } from "./connectionStore";
 import { robotDiscovery } from "./RobotDiscoveryService";
 import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 import { normalizeVisionProgram, type Pose, type Region } from "../models/visionTools";
@@ -140,6 +141,25 @@ export class RobotConnectService {
     setSelectedRobot({ ...selected, ipAddress: found.ipAddress, port: found.port });
   }
 
+  /** Every few failed reconnects: probe the other addresses the selected robot is known on
+   *  (saved/recent entries for the same robot) and switch to the best one that answers. */
+  private reconnectFailures = 0;
+  private tryKnownAddresses() {
+    if (++this.reconnectFailures % 5 !== 0) return;
+    const selected = getSelectedRobot();
+    if (!selected) return;
+    knownEndpoints(selected).then(async endpoints => {
+      if (endpoints.length <= 1) return;
+      const best = await pickReachableEndpoint(endpoints);
+      const cur = getSelectedRobot();
+      if (!best || this.connected || cur !== selected) return;
+      if (best.host === selected.ipAddress && best.port === selected.port) return;
+      console.log("[RobotWS] Robot answers at", `${best.host}:${best.port}`, "— switching");
+      this.url = `ws://${best.host}:${best.port}/control`;
+      setSelectedRobot({ ...selected, ipAddress: best.host, port: best.port });
+    }).catch(() => {});
+  }
+
   connect() {
     // Validate there is a url
     if (!this.url) return;
@@ -157,11 +177,16 @@ export class RobotConnectService {
       return;
 
     console.log("[RobotWS] Connecting to", this.url);
-    this.ws = new WebSocket(this.url);
+    // Handlers act only while this is still the current socket: one let go by disconnect()
+    // (e.g. still connecting to an address that never answered) must not touch the next one.
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
     this.connecting = true;
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (this.ws !== ws) { try { ws.close(); } catch {} return; }
       this.connecting = false;
+      this.reconnectFailures = 0;
       console.log("[RobotWS] Connected");
       this.emitStatus({ connected: true });
       this.startStatusPolling();
@@ -195,7 +220,8 @@ export class RobotConnectService {
       }).catch(() => {});
     };
 
-    this.ws.onclose = (event: any) => {
+    ws.onclose = (event: any) => {
+      if (this.ws !== ws) return;
       // React Native dispatches a bare Event for `error` with no detail, then
       // forwards the native failure text here as `reason`. This is the only
       // place the actual cause (refused, unreachable, ...) is visible.
@@ -207,16 +233,18 @@ export class RobotConnectService {
 
       if (this.reconnect) {
         this.followDiscoveredAddress();
+        this.tryKnownAddresses();
         setTimeout(() => this.connect(), this.reconnectIntervalMs);
       }
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
       // Deliberately quiet — the close handler above always follows and is the
       // one that carries the reason.
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       let data: any;
 
       try {
@@ -454,10 +482,16 @@ export class RobotConnectService {
 
   disconnect() {
     this.reconnect = false;
-    if (this.ws?.readyState === 1){
-      this.ws?.close();
+    // The socket being let go (open, or still connecting to an address that may never answer) is
+    // closed; its handlers ignore it from here on (see connect), so its late close can't tear down
+    // the next connection or start a reconnect. Report the disconnect here instead.
+    const old = this.ws;
+    const wasOpen = old?.readyState === 1;
+    if (old && old.readyState <= 1) {
+      try { old.close(); } catch {}
     }
     this.cleanup();
+    if (wasOpen) this.emitStatus({ connected: false });
   }
 
   private cleanup() {

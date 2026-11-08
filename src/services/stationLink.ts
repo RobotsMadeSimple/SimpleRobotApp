@@ -4,7 +4,7 @@ import * as Linking from "expo-linking";
 // scanning a code resolves to a `simplerobotapp://station?…` URI that tells the app which controller
 // to connect to, which page to open, and (optionally) which program to start — see app/station.tsx.
 //
-//   simplerobotapp://station?host=192.168.4.52&port=9000&go=program&run=Weld%20Cycle&name=Weld%20Cell&confirm=1
+//   simplerobotapp://station?host=192.168.4.52&port=9000&robotId=AB12CD34EF&go=program&run=Weld%20Cycle&name=Weld%20Cell&confirm=1
 //
 // Because the scheme is a registered app link, scanning the QR with the OS camera — or tapping an
 // NFC tag that carries it as an NDEF URI record — launches the app straight to the landing screen,
@@ -22,6 +22,12 @@ export interface StationLink {
   host?: string;
   /** Control port; 9000 is the default and is left out of the URI. */
   port?: number;
+  /**
+   * The robot's stable id (its controller's serial number). When present the app connects to that
+   * robot on whichever of its known addresses answers, with host as one more candidate; host
+   * alone (older tags) still works.
+   */
+  robotId?: string;
   /** Which page to land on after connecting. */
   go?: StationGo;
   /** Program name to auto-start once connected ("tap to start the cycle"). Display/fallback. */
@@ -76,6 +82,7 @@ export function normalizeLink(link: StationLink): StationLink {
   const go = link.go && GO_VALUES.includes(link.go) ? link.go : undefined;
   const port = link.port && Number.isFinite(link.port) && link.port > 0 ? Math.trunc(link.port) : undefined;
   const host = link.host?.trim() || undefined;
+  const robotId = link.robotId?.trim() || undefined;
   const run = link.run?.trim() || undefined;
   const runId = (run || link.runId) ? (link.runId?.trim() || undefined) : undefined;
   // runKind only matters alongside a run target; default a run to "program".
@@ -84,7 +91,7 @@ export function normalizeLink(link: StationLink): StationLink {
     : undefined;
   const name = link.name?.trim() || undefined;
   const provider = link.provider?.trim() || undefined;
-  return { host, port, go, run, runId, runKind, name, provider, confirm: !!link.confirm };
+  return { host, port, robotId, go, run, runId, runKind, name, provider, confirm: !!link.confirm };
 }
 
 /** Build the canonical `simplerobotapp://station?…` URI for a link (encoded for QR / NFC). */
@@ -96,6 +103,7 @@ export function buildStationUri(link: StationLink): string {
   };
   add("host", l.host);
   if (l.port && l.port !== DEFAULT_CONTROL_PORT) add("port", String(l.port));
+  add("robotId", l.robotId);
   add("go", l.go);
   add("run", l.run);
   add("runId", l.runId);
@@ -135,6 +143,7 @@ export function parseStationUri(uri: string | null | undefined): StationLink | n
   return normalizeLink({
     host: firstString(qp.host),
     port: portStr ? Number(portStr) : undefined,
+    robotId: firstString(qp.robotId),
     go: firstString(qp.go) as StationGo | undefined,
     run: firstString(qp.run),
     runId: firstString(qp.runId),
@@ -151,6 +160,7 @@ export function paramsToLink(params: Record<string, string | string[] | undefine
   return normalizeLink({
     host: firstString(params.host),
     port: portStr ? Number(portStr) : undefined,
+    robotId: firstString(params.robotId),
     go: firstString(params.go) as StationGo | undefined,
     run: firstString(params.run),
     runId: firstString(params.runId),
@@ -167,6 +177,7 @@ export function linkToParams(link: StationLink): Record<string, string> {
   const p: Record<string, string> = {};
   if (l.host) p.host = l.host;
   if (l.port && l.port !== DEFAULT_CONTROL_PORT) p.port = String(l.port);
+  if (l.robotId) p.robotId = l.robotId;
   if (l.go) p.go = l.go;
   if (l.run) p.run = l.run;
   if (l.runId) p.runId = l.runId;

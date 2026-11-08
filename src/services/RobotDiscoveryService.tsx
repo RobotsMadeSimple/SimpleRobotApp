@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
 import { RobotInfo } from '../models/robotModels';
 import { pickReachable, rankAddresses } from './addressPick';
-import { knownAddresses } from './connectionStore';
+import { knownAddresses, learnAddress } from './connectionStore';
 
 /** How long a working address is trusted before re-probing on the next announcement. */
 const REPROBE_MS = 60_000;
@@ -82,6 +82,8 @@ class RobotDiscoveryService {
     if (!cur || cur.probing !== key) return;   // removed or superseded meanwhile
     this.picks.set(service.name, { key, ip, at: Date.now(), probing: null });
     if (ip && this.robots.has(service.name)) this.publishRobot(service, ip);
+    // Remember the working address on the robot's saved/recent entries (matched by serial).
+    if (ip) learnAddress(String(txt.SerialNumber ?? ''), ip, port).catch(() => {});
   }
 
   private publishRobot(service: any, ipAddress: string) {
@@ -105,8 +107,10 @@ class RobotDiscoveryService {
       const res = await fetch('http://localhost:3001/get-robots');
       if (!res.ok) return;
       const data = await res.json();
+      // One row per robot: keyed by its serial (the name isn't unique), replacing the last list.
+      this.robots.clear();
       for (const r of data) {
-        this.robots.set(r.robotName, r as RobotInfo);
+        this.robots.set(r.serialNumber || `${r.ipAddress}:${r.port}`, r as RobotInfo);
       }
       this.emit();
     } catch {}

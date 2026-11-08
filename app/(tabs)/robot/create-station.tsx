@@ -31,6 +31,8 @@ export default function CreateStation() {
   const robot = useSelectedRobot();
   const host  = robot?.ipAddress ?? "";
   const port  = robot?.port;
+  // The robot's stable id goes on the tag too, so it still finds the robot if its address changes.
+  const robotId = robot?.serialNumber?.trim() || undefined;
   const robotLabel = robot?.robotName && robot.robotName !== "Manual" ? robot.robotName : host;
 
   const [name, setName]   = useState(robot?.robotName && robot.robotName !== "Manual" ? robot.robotName : "");
@@ -70,13 +72,14 @@ export default function CreateStation() {
   const link = useMemo(() => normalizeLink({
     host,
     port: port && port !== DEFAULT_CONTROL_PORT ? port : undefined,
+    robotId,
     go: go === "none" ? undefined : go,
     run,
     runId,
     runKind,
     name,
     confirm,
-  }), [host, port, go, run, runId, runKind, name, confirm]);
+  }), [host, port, robotId, go, run, runId, runKind, name, confirm]);
 
   const uri = useMemo(() => buildStationUri(link), [link]);
   const ready = hasAction(link);

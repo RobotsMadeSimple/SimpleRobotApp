@@ -4,10 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { Button, Card, colors, radii, spacing, type } from "@/src/components/ui/kit";
-import { getSelectedRobot, setSelectedRobot } from "@/src/connections/robotState";
+import { getSelectedRobot } from "@/src/connections/robotState";
 import type { RobotInfo } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { manualRobot, recordConnection } from "@/src/services/connectionStore";
+import { manualRobot } from "@/src/services/connectionStore";
+import { connectToRobot } from "@/src/services/robotConnect";
 import {
   DEFAULT_CONTROL_PORT,
   goRoute,
@@ -30,6 +31,8 @@ const RUN_CONNECT_TIMEOUT_MS = 15000;
 function robotFromLink(link: StationLink): RobotInfo {
   const robot = manualRobot(link.host!);
   robot.port = link.port ?? DEFAULT_CONTROL_PORT;
+  // The robot's stable id ties the tag to the robot, so its other known addresses are tried too.
+  if (link.robotId) robot.serialNumber = link.robotId;
   if (link.name) robot.robotName = link.name;
   return robot;
 }
@@ -58,15 +61,13 @@ function targetRoute(link: StationLink): string {
 
 type Phase = "redirect" | "confirm" | "working";
 
-/** True if the client is already connected to exactly this controller (host + port). */
+/** True if the client is already connected to this robot (same id, else same host + port). */
 function alreadyConnectedTo(link: StationLink): boolean {
   if (!link.host) return false;
   const cur = getSelectedRobot();
-  return (
-    robotClient.connected &&
-    cur?.ipAddress === link.host &&
-    cur?.port === (link.port ?? DEFAULT_CONTROL_PORT)
-  );
+  if (!robotClient.connected || !cur) return false;
+  if (link.robotId && cur.serialNumber) return cur.serialNumber === link.robotId;
+  return cur.ipAddress === link.host && cur.port === (link.port ?? DEFAULT_CONTROL_PORT);
 }
 
 export default function Station() {
@@ -85,10 +86,10 @@ export default function Station() {
     // #2 Idempotent connect: if a re-fired tag points at the controller we're already connected to,
     // skip connectTo() entirely — it would otherwise disconnect + reconnect, flickering the status.
     if (link.host && !alreadyConnectedTo(link)) {
-      const robot = robotFromLink(link);
-      recordConnection(robot);
-      setSelectedRobot(robot);       // persist + flip the Robot tab to the connected dashboard
-      robotClient.connectTo(robot);  // connect now (covers a warm launch where providers are up)
+      // Records + selects (flipping the Robot tab to the connected dashboard) and connects now
+      // (covers a warm launch where providers are up). With a robot id, the robot's other known
+      // addresses are candidates too; a host-only tag connects to exactly its host.
+      connectToRobot(robotFromLink(link), { exact: !link.robotId });
     }
     if (link.run || link.runId) startWhenConnected(link.run ?? "", link.runId, link.runKind);
 
