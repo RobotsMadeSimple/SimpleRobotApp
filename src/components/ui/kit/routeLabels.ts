@@ -22,6 +22,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   "phone-programs":  "Local Programs",
   "robot-programs":  "Programs",
   routines:          "Routines",
+  background:        "Background",
   vision:            "Vision",
   "vision-editor":   "Vision Editor",
   "inspection":      "Inspection",

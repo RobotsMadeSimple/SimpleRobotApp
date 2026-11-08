@@ -62,7 +62,9 @@ export function programFromDoc(d: EditorDoc, id: string | undefined, lastUpdated
     lastUpdatedUnixMs,
     isRoutine: d.isRoutine,
     isBackground: d.isBackground || undefined,
-    killBackgroundOnStop: (!d.isRoutine && !d.isBackground) ? (d.killBackgroundOnStop || undefined) : undefined,
+    // Main programs only. Send false explicitly: the controller defaults a missing value to true,
+    // so dropping false would make turning it off impossible to save.
+    killBackgroundOnStop: (!d.isRoutine && !d.isBackground) ? d.killBackgroundOnStop : undefined,
   };
 }
 

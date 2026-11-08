@@ -292,7 +292,7 @@ function BodyHeaderRow({ row, condition, onEdit, onAdd, onPaste, onEnter, disabl
 }
 
 export default function BuilderScreen() {
-  const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
+  const { name: editName, isRoutine: isRoutineParam, isBackground: isBackgroundParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; isBackground?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected     = useConnected();
   // Plugin steps/functions for the picker, config form and step labels; refetched on reconnect.
@@ -316,7 +316,9 @@ export default function BuilderScreen() {
   // way to change it, and every one routes through history.commit.
   const history = useDocumentHistory<EditorDoc>(() => {
     const isRoutine = isRoutineParam === "1" || existing?.isRoutine === true;
-    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine };
+    // `isBackground=1` starts a new background program (the Background page's New button).
+    const isBackground = !isRoutine && isBackgroundParam === "1";
+    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine, isBackground };
   }, { limit: 100 });
   const { doc, commit } = history;
   const {

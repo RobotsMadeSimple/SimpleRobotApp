@@ -7,6 +7,7 @@ export default function ProgramLayout() {
       <Stack.Screen name="monitor-program" options={{ headerShown: false }} />
       <Stack.Screen name="builder"  options={{ headerShown: false }} />
       <Stack.Screen name="routines"        options={{ headerShown: false }} />
+      <Stack.Screen name="background"      options={{ headerShown: false }} />
       <Stack.Screen name="robot-programs"  options={{ headerShown: false }} />
       <Stack.Screen name="phone-programs"  options={{ headerShown: false }} />
       <Stack.Screen name="vision"          options={{ headerShown: false }} />

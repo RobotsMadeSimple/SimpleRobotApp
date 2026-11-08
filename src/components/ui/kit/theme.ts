@@ -71,6 +71,9 @@ export const accents = {
   orange:       "#ea580c",
   orangeSoft:   "#fff7ed",
   orangeBorder: "#fed7aa",
+  pink:         "#db2777",
+  pinkSoft:     "#fdf2f8",
+  pinkBorder:   "#fbcfe8",
 } as const;
 
 /** 4-based spacing scale. Use these instead of magic padding/margins. */

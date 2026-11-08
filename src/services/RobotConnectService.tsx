@@ -1408,8 +1408,9 @@ export class RobotConnectService {
     return this.sendCommand("StartBackgroundProgram", { programName: name, programId });
   }
 
-  public stopBackgroundProgram(name: string) {
-    return this.sendCommand("StopBackgroundProgram", { name });
+  public stopBackgroundProgram(name: string, programId?: string) {
+    // Same params as Start: id first (rename-proof), then name.
+    return this.sendCommand("StopBackgroundProgram", { programName: name, programId });
   }
 
   /**

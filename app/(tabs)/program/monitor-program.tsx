@@ -21,6 +21,7 @@ import { useBreakpoints } from "@/src/components/ui/builder/useBreakpoints";
 import { useStepCatalog } from "@/src/components/ui/builder/useStepCatalog";
 import { stepLabel } from "@/src/components/ui/builder/stepUtils";
 import { findStep, walkSteps } from "@/src/models/stepTree";
+import { findBackgroundStatus } from "@/src/models/backgroundStatus";
 import { ProgramStepTrace, type TraceHighlight } from "@/src/components/ui/program/ProgramStepTrace";
 import { router,
   Tabs,
@@ -225,7 +226,7 @@ export default function MonitorProgramScreen() {
   const builtProgram  = builtPrograms.find((p) => p.name === programName) ?? null;
   const isBuilt       = builtProgram !== null;
   const isBackground  = builtProgram?.isBackground ?? false;
-  const bgRunning     = (robotStatus.backgroundPrograms ?? []).find(b => b.name === programName) ?? null;
+  const bgRunning     = builtProgram ? findBackgroundStatus(robotStatus.backgroundPrograms, builtProgram) : null;
 
   // Toolpath of the CNC block currently executing — polled from the robot,
   // which resolves the origin anchor and runtime variables when the block
@@ -928,7 +929,7 @@ export default function MonitorProgramScreen() {
                   loading={pending === "Stop"}
                   style={[styles.actionBtn, { backgroundColor: colors.danger }]}
                   textStyle={styles.actionBtnText}
-                  onPress={() => { setPending("Stop"); robotClient.stopBackgroundProgram(programName).catch(() => {}); }}
+                  onPress={() => { setPending("Stop"); robotClient.stopBackgroundProgram(programName, builtProgram?.id).catch(() => {}); }}
                 />
               ) : (
                 <ActionButton
@@ -937,7 +938,7 @@ export default function MonitorProgramScreen() {
                   loading={pending === "Start"}
                   style={[styles.actionBtn, { backgroundColor: colors.success }]}
                   textStyle={styles.actionBtnText}
-                  onPress={() => { setPending("Start"); robotClient.startBackgroundProgram(programName).catch(() => {}); }}
+                  onPress={() => { setPending("Start"); robotClient.startBackgroundProgram(programName, builtProgram?.id).catch(() => {}); }}
                 />
               )}
             </View>
