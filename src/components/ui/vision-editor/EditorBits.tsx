@@ -2,6 +2,7 @@ import React, { ReactNode, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ChevronDown, Eye, EyeOff } from "lucide-react-native";
 import { accents, colors, radii, shadows, spacing } from "@/src/components/ui/kit";
+import { ExpandBadge, LiveViewerModal } from "@/src/components/vision/LiveViewerModal";
 import { ves } from "./visionEditorStyles";
 
 /** Start / Stop Vision, pulsing while a start or stop is in flight. */
@@ -72,16 +73,24 @@ export function PickerRow({ label, value, onPress, warn, border = true, accessib
  * An image that re-fetches its URL on an interval without flashing: the next frame loads off-screen
  * and replaces the shown one only once it has arrived.
  */
-export function RefreshingImage({ url, intervalMs = 900, aspect, placeholder }: {
+/**
+ * A preview image re-fetched every `intervalMs`, swapped in only once the next one has loaded so it
+ * never flashes. Tapping it (or its corner badge) opens it in the full-screen LiveViewerModal, which
+ * keeps polling the same URL at the same rate, with zoom and pan.
+ */
+export function RefreshingImage({ url, intervalMs = 900, aspect, placeholder, title }: {
   url: string | null; intervalMs?: number; aspect: number; placeholder: string;
+  /** Title shown in the full-screen viewer. */
+  title?: string;
 }) {
+  const [full, setFull] = useState(false);
   // Remounted (keyed by url) when the url changes, so there is no stale frame to reset here.
   const [shown, setShown] = useState<string | null>(null);
   const [next, setNext]   = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const busy = useRef(false);
   useEffect(() => {
-    if (!url) return;
+    if (!url || full) return;
     const tick = () => {
       if (busy.current) return;
       busy.current = true;
@@ -90,10 +99,14 @@ export function RefreshingImage({ url, intervalMs = 900, aspect, placeholder }: 
     const first = setTimeout(tick, 0);
     const t = setInterval(tick, intervalMs);
     return () => { clearTimeout(first); clearInterval(t); };
-  }, [url, intervalMs]);
+  }, [url, intervalMs, full]);
   return (
     <View style={[st.preview, { aspectRatio: aspect }]}>
-      {shown && <Image source={{ uri: shown }} style={StyleSheet.absoluteFill} resizeMode="contain" />}
+      {shown && (
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={0.9} onPress={() => setFull(true)} accessibilityLabel="View full screen">
+          <Image source={{ uri: shown }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+        </TouchableOpacity>
+      )}
       {next && (
         <Image
           source={{ uri: next }}
@@ -107,6 +120,9 @@ export function RefreshingImage({ url, intervalMs = 900, aspect, placeholder }: 
           <Text style={st.previewEmptyText}>{failed ? "Preview unavailable — is the controller up to date?" : placeholder}</Text>
         </View>
       )}
+      {shown && <ExpandBadge onPress={() => setFull(true)} />}
+      {/* Paused here while open, so the preview is only fetched once per tick. */}
+      <LiveViewerModal visible={full} onClose={() => setFull(false)} feedUrl={url} pollMs={intervalMs} title={title} />
     </View>
   );
 }

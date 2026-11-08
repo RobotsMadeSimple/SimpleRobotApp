@@ -62,6 +62,7 @@ import {
 // are looking at it. React Native's own Image blanks and then fades in on every source
 // change, which on a board updating each ply reads as a flicker rather than a move.
 import { Image as ExpoImage } from "expo-image";
+import { ExpandBadge, LiveViewerModal } from "@/src/components/vision/LiveViewerModal";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
@@ -441,6 +442,8 @@ export default function MonitorProgramScreen() {
 
   // ── Vision snapshot polling ────────────────────────────────────────────────
   const [visionSnapshots, setVisionSnapshots] = useState<Record<string, string | null>>({});
+  // The vision step whose debug frame is open full screen (it keeps updating there).
+  const [fullFrameId, setFullFrameId] = useState<string | null>(null);
   const [visionResults, setVisionResults]     = useState<Record<string, VisionResult | null>>({});
   // Tool lists of the vision programs this program runs, for naming the tools in their results.
   const [visionTools, setVisionTools]         = useState<Record<string, VisionTool[]>>({});
@@ -1282,13 +1285,16 @@ export default function MonitorProgramScreen() {
                     {dataUri ? (
                       // Also a live frame, replaced on every poll, so the same no-fade
                       // treatment as the image variables above.
-                      <ExpoImage
-                        source={{ uri: dataUri }}
-                        style={styles.snapshotImage}
-                        contentFit="contain"
-                        transition={0}
-                        cachePolicy="none"
-                      />
+                      <TouchableOpacity activeOpacity={0.9} onPress={() => setFullFrameId(id)} accessibilityLabel="View full screen">
+                        <ExpoImage
+                          source={{ uri: dataUri }}
+                          style={styles.snapshotImage}
+                          contentFit="contain"
+                          transition={0}
+                          cachePolicy="none"
+                        />
+                        <ExpandBadge onPress={() => setFullFrameId(id)} />
+                      </TouchableOpacity>
                     ) : (
                       <View style={styles.snapshotPlaceholder}>
                         <Camera size={24} color={colors.borderStrong} />
@@ -1301,6 +1307,12 @@ export default function MonitorProgramScreen() {
                   </View>
                 );
               })}
+              <LiveViewerModal
+                visible={!!fullFrameId}
+                onClose={() => setFullFrameId(null)}
+                feedUrl={fullFrameId ? visionSnapshots[fullFrameId] ?? null : null}
+                title={visionSteps.find(v => v.id === fullFrameId)?.name}
+              />
             </View>
           </>
         )}

@@ -69,6 +69,7 @@ export function LayerEditorPage({ layer, program, previewUrl, aspect, onChange, 
         url={url}
         aspect={aspect}
         placeholder={program.id ? "Loading preview…" : "Saving the program…"}
+        title={layer.name || "Image layer"}
       />
       <Text style={st.previewCaption}>
         {selectedFilter

@@ -1,6 +1,7 @@
 import type { DrawGeometry, DrawGrid, DrawShape } from "./regionMath";
 import { HOMOGRAPHY_JS } from "./homography";
 import { FEED_NOTE_JS, LIVE_FEED_JS } from "./liveFeedSocket";
+import { ZOOM_PAN_JS } from "./zoomPan";
 
 /** Another region drawn faintly behind the one being edited, for context. */
 export type DrawContextRegion = { id: string; name: string; geometry: DrawGeometry; grid: DrawGrid | null };
@@ -49,6 +50,7 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch
 <canvas id="c"></canvas>
 <script>
 ${HOMOGRAPHY_JS}
+${ZOOM_PAN_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
 var zones=${JSON.stringify(context)};
 var editingId=${JSON.stringify(editingId)};
@@ -120,12 +122,16 @@ window.closePolygon=function(){
   polyPts=[];editing=true;drag=null;render();post();
 };
 
+// The image as shown: fitted to the canvas, then through the zoom view (VS, VX, VY — see the
+// interaction section). Every shape, handle and hit test goes through this, so zooming needs no
+// other maths and the handles keep their finger size while zoomed.
+var VS=1,VX=0,VY=0;
 function imgRect(){
   var iw=img.naturalWidth||1,ih=img.naturalHeight||1;
   var cw=c.width,ch=c.height;
   var scale=Math.min(cw/iw,ch/ih);
   var w=iw*scale,h=ih*scale;
-  return{x:(cw-w)/2,y:(ch-h)/2,w:w,h:h};
+  return{x:VX+VS*(cw-w)/2,y:VY+VS*(ch-h)/2,w:VS*w,h:VS*h};
 }
 function toNorm(px,py){var r=imgRect();return{x:(px-r.x)/r.w,y:(py-r.y)/r.h};}
 function toScr(nx,ny){var r=imgRect();return{x:r.x+nx*r.w,y:r.y+ny*r.h};}
@@ -520,7 +526,7 @@ function hoverCursor(x,y){
   if(editing&&geom){
     if(hitHandle(x,y)) return 'grab';
     if(inside(x,y)) return 'grab';
-    return 'default';
+    return VS>1?'move':'default';
   }
   return 'crosshair';
 }
@@ -659,22 +665,37 @@ function onUp(){
   drag=null;render();post();
 }
 
-c.addEventListener('pointerdown',function(e){
-  e.preventDefault();
-  try{c.setPointerCapture(e.pointerId);}catch(err){}
-  onDown({x:e.clientX,y:e.clientY});
-  // A drag that grabbed a handle or the body reads as grabbing; a fresh draw stays crosshair.
-  if(drag&&drag.kind!=='new'&&drag.kind!=='polyhover') c.style.cursor='grabbing';
-},{passive:false});
-
-c.addEventListener('pointermove',function(e){
-  if(drag){e.preventDefault();onMove({x:e.clientX,y:e.clientY});return;}
-  // Not dragging: just update the hover cursor so the mouse tells you what a point does.
-  c.style.cursor=hoverCursor(e.clientX,e.clientY);
-},{passive:false});
-
-c.addEventListener('pointerup',function(e){e.preventDefault();onUp();c.style.cursor=hoverCursor(e.clientX,e.clientY);},{passive:false});
-c.addEventListener('pointercancel',function(){onUp();c.style.cursor='default';},{passive:false});
+// Pointers go through ZoomPan (src/vision/zoomPan.ts): one finger edits exactly as before; two
+// fingers pinch-zoom and pan, and the wheel zooms about the cursor, so a corner can be placed on the
+// exact pixel. A one-finger drag on empty canvas around a finished shape pans the zoomed view. A
+// second finger landing mid-edit undoes what the first had started, so a pinch never nudges the shape.
+var snap=null;
+var zp=ZoomPan({el:c,dbl:false,max:10,
+  content:function(){var iw=img.naturalWidth||1,ih=img.naturalHeight||1,k=Math.min(c.width/iw,c.height/ih);
+    return{x:(c.width-iw*k)/2,y:(c.height-ih*k)/2,w:iw*k,h:ih*k};},
+  apply:function(s,ox,oy){
+    // The polygon being tapped out is held in screen points: carry it through the view change.
+    var keep=polyPts.map(function(p){return toNorm(p[0],p[1]);});
+    VS=s;VX=ox;VY=oy;
+    polyPts=keep.map(function(n){var q=toScr(n.x,n.y);return[q.x,q.y];});
+    render();
+  },
+  down:function(p){
+    snap={g:JSON.stringify(geom),pl:polyPts.length,ed:editing};
+    onDown(p);
+    // A drag that grabbed a handle or the body reads as grabbing; a fresh draw stays crosshair.
+    if(drag&&drag.kind!=='new'&&drag.kind!=='polyhover') c.style.cursor='grabbing';
+    return !!drag;
+  },
+  cancel:function(){
+    if(snap){geom=JSON.parse(snap.g);polyPts.length=snap.pl;editing=snap.ed;}
+    drag=null;render();post();
+  },
+  move:function(p){onMove(p);},
+  up:function(p,e,cancelled){onUp();c.style.cursor=cancelled?'default':hoverCursor(p.x,p.y);},
+  hover:function(e){c.style.cursor=hoverCursor(e.clientX,e.clientY);}
+});
+window.resetZoom=function(){zp.reset();};
 
 post();
 <\/script>
@@ -695,6 +716,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 <canvas id="c"></canvas>
 <script>
 ${HOMOGRAPHY_JS}
+${ZOOM_PAN_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
 ${LIVE_FEED_JS}
 ${FEED_NOTE_JS}
@@ -762,6 +784,7 @@ function drawOverlay(){
 // the same "contain" math RegionDrawModal's imgRect() computes by hand against its own,
 // differently-sized buffer (see makeRegionDrawHtml above). A tap landing in the letterbox
 // bars (outside the scaled image) is reported as no tap at all.
+// The bounding rect is the zoomed one while zoomed (a uniform CSS scale), so the same maths holds.
 function feedTapPoint(clientX,clientY){
   var rect=c.getBoundingClientRect();
   if(!c.width||!c.height||!rect.width||!rect.height) return null;
@@ -772,10 +795,26 @@ function feedTapPoint(clientX,clientY){
   if(px<0||py<0||px>dispW||py>dispH) return null;
   return{x:px/dispW,y:py/dispH};
 }
-c.addEventListener('pointerup',function(e){
-  var p=feedTapPoint(e.clientX,e.clientY);
-  if(p){try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedTap',x:p.x,y:p.y}));}catch(err){}}
-},{passive:true});
+
+// Zoom and pan (src/vision/zoomPan.ts) as a CSS transform on the canvas: the frame and the overlay
+// drawn into it scale together, and every new frame lands already zoomed. Off until the host calls
+// setZoomable(true) (the full-screen viewer); a clean tap is reported either way — a tap in the
+// letterbox bars as feedTap with null coordinates, so the host can still open the viewer.
+var zp=ZoomPan({el:document.body,enabled:false,content:function(){
+  var vw=window.innerWidth||1,vh=window.innerHeight||1;
+  if(!c.width||!c.height)return null;
+  var k=Math.min(vw/c.width,vh/c.height);
+  return{x:(vw-c.width*k)/2,y:(vh-c.height*k)/2,w:c.width*k,h:c.height*k};
+},apply:function(s,ox,oy){
+  c.style.transformOrigin='0 0';
+  c.style.transform=s===1?'':'translate('+ox+'px,'+oy+'px) scale('+s+')';
+},tap:function(x,y){
+  var p=feedTapPoint(x,y);
+  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedTap',x:p?p.x:null,y:p?p.y:null}));}catch(err){}
+}});
+window.setZoomable=function(b){zp.setEnabled(b);document.body.style.touchAction=b?'none':'';};
+window.resetZoom=function(){zp.reset();};
+window.zoomBy=function(f){zp.zoomBy(f);};
 
 // Each setFeed bumps the generation; only the current generation is allowed to
 // draw, so a just-closed feed (e.g. the raw camera socket while switching to the
@@ -824,20 +863,23 @@ function startPoll(url,ms,g){
       ctx.drawImage(img,0,0);drawOverlay();busy=false;
     };
     img.onerror=function(){busy=false;};
-    img.src=url+'?_='+Date.now();
+    img.src=url+(url.indexOf('?')>=0?'&':'?')+'_='+Date.now();
   }
   load();_timer=setInterval(load,ms||150);
 }
 
-window.setFeed=function(url){
+// ms: the poll interval for an http(s) URL (default 150). A data: URL is one still frame, drawn once.
+var _lastMs;
+window.setFeed=function(url,ms){
   _gen++;var g=_gen;
-  _lastUrl=url;closeWs();stopTimer();
+  _lastUrl=url;_lastMs=ms;closeWs();stopTimer();
   if(!url)return;
   if(url.startsWith('ws://')||url.startsWith('wss://'))startWs(url,g);
-  else startPoll(url,150,g);
+  else if(url.startsWith('data:'))drawSrc(url,null,g);
+  else startPoll(url,ms||150,g);
 };
 window.pauseFeed=function(){_gen++;closeWs();stopTimer();};
-window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl);};
+window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl,_lastMs);};
 <\/script>
 </body></html>`;
 

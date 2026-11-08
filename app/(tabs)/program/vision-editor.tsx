@@ -388,7 +388,7 @@ export default function VisionEditorScreen() {
     () => buildOverlay(program, showResults ? visionResult : null, { width: frame.width, height: frame.height }),
     [program, visionResult, showResults, frame.width, frame.height],
   );
-  const onFeedTap = useCallback((nx: number, ny: number) => {
+  const onFeedTap = useCallback((nx: number, ny: number): boolean => {
     // The smallest region under the tap opens its tool.
     let best: { id: string; area: number } | null = null;
     for (const o of overlay) {
@@ -403,7 +403,9 @@ export default function VisionEditorScreen() {
       area = Math.abs(area) / 2;
       if (hit && (!best || area < best.area)) best = { id: o.id, area };
     }
-    if (best) setPage({ kind: "tool", id: best.id });
+    if (!best) return false; // not on a tool: the frame opens full screen instead
+    setPage({ kind: "tool", id: best.id });
+    return true;
   }, [overlay, frame.width, frame.height]);
 
   // ── Render fragments ───────────────────────────────────────────────────────
@@ -452,6 +454,7 @@ export default function VisionEditorScreen() {
         aspect={feedAspect}
         onMessage={onFeedMessage}
         onTapImagePoint={onFeedTap}
+        title={program.name || "Camera"}
         placeholder={program.cameraId ? "Connecting to camera…" : "Select a camera above"}
       />
       <RunVisionButton isRunning={isRunning} transitioning={transitioning} onPress={toggleRunning} />

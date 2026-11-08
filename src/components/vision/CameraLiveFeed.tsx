@@ -6,6 +6,7 @@ import { colors, radii } from "@/src/components/ui/kit";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import { FEED_NOTE_JS, LIVE_FEED_JS, startLiveFeedHere } from "@/src/vision/liveFeedSocket";
+import { ExpandBadge, LiveViewerModal } from "./LiveViewerModal";
 
 // The WebView's decode/draw loop for the camera's MJPEG-over-WebSocket feed (native).
 function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
@@ -38,7 +39,11 @@ export { makeCameraHtml };
 /**
  * Live view of a camera: the controller's `/camera/{id}/ws` stream of base64 JPEG
  * frames, drawn on a canvas (web) or inside a WebView (native). Shared by the
- * camera pages and the calibration wizard.
+ * camera pages, the calibration wizard and the phone camera preview.
+ *
+ * A tap (or the corner badge) opens the full-screen LiveViewerModal on the same stream,
+ * with zoom and pan, unless the caller passes its own `onTap`. The inline stream closes
+ * while the viewer is open.
  */
 export function CameraLiveFeed({
   cameraId, onTap, style, aspectRatio = 4 / 3, zoomable = false,
@@ -53,10 +58,15 @@ export function CameraLiveFeed({
 }) {
   const [hasFrame, setHasFrame] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [full, setFull] = useState(false);
   const canvasRef = useRef<any>(null);
+  const tap = onTap ?? (() => setFull(true));
+  const viewer = (
+    <LiveViewerModal visible={full} onClose={() => setFull(false)} feedUrl={robotClient.cameraWsUrl(cameraId)} />
+  );
 
   useEffect(() => {
-    if (Platform.OS !== "web") return;
+    if (Platform.OS !== "web" || full) return;
     const wsUrl = robotClient.cameraWsUrl(cameraId);
     if (!wsUrl) return;
     let cancelled = false;
@@ -84,7 +94,7 @@ export function CameraLiveFeed({
       log: (m) => console.log(`[feed] ${m}`),
     });
     return () => { feed.close(); cancelled = true; };
-  }, [cameraId]);
+  }, [cameraId, full]);
 
   const box = [styles.feed, { aspectRatio }, style];
 
@@ -94,7 +104,7 @@ export function CameraLiveFeed({
         {/* @ts-ignore — DOM element on web */}
         <canvas
           ref={canvasRef}
-          onClick={() => (onTap ? onTap() : canvasRef.current?.requestFullscreen?.())}
+          onClick={tap}
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", backgroundColor: "#000", cursor: "pointer" }}
         />
         {!hasFrame && (
@@ -108,6 +118,8 @@ export function CameraLiveFeed({
             <Text style={styles.noteText}>{note}</Text>
           </View>
         )}
+        {hasFrame && !onTap && <ExpandBadge onPress={tap} />}
+        {viewer}
       </View>
     );
   }
@@ -123,11 +135,17 @@ export function CameraLiveFeed({
   }
 
   return (
-    <VisionCanvas
-      html={makeCameraHtml(wsUrl, zoomable)}
-      style={box}
-      onMessage={(e) => { if (e.nativeEvent.data === "tap") onTap?.(); }}
-    />
+    <View style={box}>
+      {!full && (
+        <VisionCanvas
+          html={makeCameraHtml(wsUrl, zoomable)}
+          style={StyleSheet.absoluteFill}
+          onMessage={(e) => { if (e.nativeEvent.data === "tap" && !zoomable) tap(); }}
+        />
+      )}
+      {!onTap && !zoomable && <ExpandBadge onPress={tap} />}
+      {viewer}
+    </View>
   );
 }
 

@@ -1,18 +1,22 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
-import { FEED_HTML } from "@/src/vision/visionHtml";
 import type { FeedOverlayItem } from "@/src/vision/feedOverlay";
 import { colors, radii, shadows } from "@/src/components/ui/kit";
+import { FeedCanvas, type FeedCanvasHandle } from "./FeedCanvas";
+import { ExpandBadge, LiveViewerModal } from "./LiveViewerModal";
 
 export type VisionFeedHandle = VisionCanvasHandle;
 
 /**
  * The camera/feed preview shared by the vision editor and the tool config page, so both read
  * the same and stay in sync. Pushes the feed URL and the tool overlay (src/vision/feedOverlay.ts)
- * into the WebView, on load and whenever they change. Sizes itself by layout: a fixed height on
+ * into the feed document, on load and whenever they change. Sizes itself by layout: a fixed height on
  * phones, an aspect-ratio box that grows with the pane on wide screens.
+ *
+ * Tapping the frame (or its corner badge) opens it in the full-screen LiveViewerModal with zoom and
+ * pan, still live with the same overlay; the inline feed pauses meanwhile so only one stream runs.
+ * A caller with its own use for a tap (onTapImagePoint) gets it first and returns true to keep it.
  *
  * The card has no outer margin on purpose — the surrounding pane owns the padding, so the
  * frame lines up identically in both editors.
@@ -28,64 +32,50 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   pointerEvents?: "none" | "auto" | "box-none" | "box-only";
   onMessage?: (event: { nativeEvent: { data: string } }) => void;
   /**
-   * Fires when the feed is tapped, with the tap in normalized (0-1) image coordinates —
-   * additive on top of the FEED_HTML document's own "feedTap" message (see visionHtml.ts),
-   * which already resolves the tap through the canvas's object-fit:contain letterboxing.
-   * Hit-testing that point against tool regions is left to the caller (e.g.
-   * the tool list), so this component stays presentation-only.
+   * Fires when the feed is tapped on the picture, with the tap in normalized (0-1) image
+   * coordinates (FEED_HTML resolves it through the canvas's letterboxing). Return true when the
+   * tap was used (e.g. it hit a tool region); otherwise the frame opens full screen.
+   * Hit-testing is left to the caller, so this component stays presentation-only.
    */
-  onTapImagePoint?: (x: number, y: number) => void;
+  onTapImagePoint?: (x: number, y: number) => boolean | void;
+  /** Title shown in the full-screen viewer. */
+  title?: string;
 }>(function VisionFeedViewer(
-  { feedUrl, overlay, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint },
+  { feedUrl, overlay, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint, title },
   ref,
 ) {
-  const webRef = useRef<VisionCanvasHandle>(null);
+  const canvasRef = useRef<FeedCanvasHandle>(null);
+  const [full, setFull] = useState(false);
   useImperativeHandle(ref, () => ({
-    injectJavaScript: (code: string) => webRef.current?.injectJavaScript(code),
+    injectJavaScript: (code: string) => canvasRef.current?.injectJavaScript(code),
   }), []);
 
-  // Stringify once so the inject effect fires on real geometry changes, not every render.
-  const overlayJson = useMemo(() => JSON.stringify(overlay ?? []), [overlay]);
+  const openFull = useCallback(() => { if (feedUrl) setFull(true); }, [feedUrl]);
 
-  const injectFeed = useCallback(() => {
-    webRef.current?.injectJavaScript(`window.setFeed(${JSON.stringify(feedUrl)});true;`);
-  }, [feedUrl]);
-  const injectOverlay = useCallback(() => {
-    webRef.current?.injectJavaScript(`window.setOverlay(${overlayJson});true;`);
-  }, [overlayJson]);
-
-  useEffect(() => { injectFeed(); }, [injectFeed]);
-  useEffect(() => { injectOverlay(); }, [injectOverlay]);
-
-  // Fresh WebView: re-send both once the document is ready.
-  const onLoad = useCallback(() => { injectFeed(); injectOverlay(); }, [injectFeed, injectOverlay]);
-
-  // Additive on top of the caller's own onMessage: a "feedTap" message (see FEED_HTML in
-  // visionHtml.ts) is consumed here and reported through onTapImagePoint; every message,
-  // including that one, is still forwarded to onMessage exactly as before.
+  // Every message is still forwarded to onMessage; a "feedTap" (see FEED_HTML in visionHtml.ts)
+  // is offered to onTapImagePoint, and opens the full-screen viewer when that does not use it.
   const handleMessage = useCallback((e: { nativeEvent: { data: string } }) => {
-    if (onTapImagePoint) {
-      try {
-        const msg = JSON.parse(e.nativeEvent.data);
-        if (msg?.type === "feedTap" && typeof msg.x === "number" && typeof msg.y === "number") {
-          onTapImagePoint(msg.x, msg.y);
-        }
-      } catch {}
-    }
+    try {
+      const msg = JSON.parse(e.nativeEvent.data);
+      if (msg?.type === "feedTap") {
+        const onImage = typeof msg.x === "number" && typeof msg.y === "number";
+        if (!(onImage && onTapImagePoint?.(msg.x, msg.y) === true)) openFull();
+      }
+    } catch {}
     onMessage?.(e);
-  }, [onTapImagePoint, onMessage]);
+  }, [onTapImagePoint, onMessage, openFull]);
 
   return (
     <View
       style={[styles.feedCard, isWide ? { width: "100%", aspectRatio: aspect, maxHeight: 560 } : { height: 220 }]}
       pointerEvents={pointerEvents}
     >
-      <VisionCanvas
-        ref={webRef}
-        html={FEED_HTML}
+      <FeedCanvas
+        ref={canvasRef}
+        feedUrl={feedUrl}
+        overlay={overlay}
+        paused={full}
         style={{ flex: 1, backgroundColor: "#111" }}
-        focusable={false}
-        onLoad={onLoad}
         onMessage={handleMessage}
       />
       {!feedUrl && (
@@ -93,6 +83,8 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
           <Text style={styles.placeholderText}>{placeholder}</Text>
         </View>
       )}
+      {!!feedUrl && <ExpandBadge onPress={openFull} />}
+      <LiveViewerModal visible={full} onClose={() => setFull(false)} feedUrl={feedUrl} overlay={overlay} title={title} />
     </View>
   );
 });

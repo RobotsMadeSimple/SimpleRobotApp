@@ -9,6 +9,7 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
 import { colors, accents } from "@/src/components/ui/kit";
+import { FitChip, zoomScaleOf } from "@/src/components/vision/LiveViewerModal";
 import { ves } from "./visionEditorStyles";
 
 type ShapeIcon = React.ComponentType<{ size?: number; color?: string }>;
@@ -73,6 +74,7 @@ export function RegionDrawModal({
   const [geometry, setGeometry] = useState<DrawGeometry | null>(initialGeometry);
   const [editing, setEditing]   = useState(!!initialGeometry);
   const [pts, setPts]           = useState(0);
+  const [zoom, setZoom]         = useState(1); // the canvas's pinch / wheel zoom, for the Fit chip
   const [grid, setGrid]         = useState<{ rows: number; cols: number } | null>(initialDrawGrid);
   // Shape change confirmation, shown in-modal (an app-root alert sits behind the canvas iframe on web).
   const [pendingShape, setPendingShape] = useState<DrawShape | null>(null);
@@ -83,6 +85,7 @@ export function RegionDrawModal({
     setGeometry(initialGeometry);
     setEditing(!!initialGeometry);
     setPts(0);
+    setZoom(1);
     setPendingShape(null);
     setGrid(initialDrawGrid);
   }, [visible, initialShape, initialGeometry, initialDrawGrid]);
@@ -125,6 +128,8 @@ export function RegionDrawModal({
   }
 
   function onMessage(e: any) {
+    const z = zoomScaleOf(e.nativeEvent.data);
+    if (z !== null) { setZoom(z); return; }
     try {
       const msg = JSON.parse(e.nativeEvent.data);
       if (msg.type === "state") {
@@ -153,6 +158,7 @@ export function RegionDrawModal({
   const rotation = geometry?.shape === "Rectangle" ? (geometry.rotation ?? 0) : 0;
   const drafting = !editing && shape === "Polygon" && pts > 0;
 
+  const zoomHint = zoom > 1.02 ? "" : " · pinch or scroll to zoom";
   const hint =
     editing && shape === "Quad"      ? "Drag each corner into place · 1,1 marks row 1, column 1 · drag inside to move"
     : editing && shape === "Rectangle" ? "Drag a corner to resize · the top grip to rotate · inside to move"
@@ -271,8 +277,15 @@ export function RegionDrawModal({
       )}
 
       <View style={ves.drawHint} pointerEvents="none">
-        <Text style={ves.drawHintText}>{title ? `${title} · ${hint}` : hint}</Text>
+        <Text style={ves.drawHintText}>{title ? `${title} · ${hint}${zoomHint}` : hint + zoomHint}</Text>
       </View>
+      {html && (
+        <FitChip
+          scale={zoom}
+          style={{ position: "absolute", right: 12, bottom: 12 }}
+          onPress={() => webviewRef.current?.injectJavaScript("window.resetZoom();true;")}
+        />
+      )}
     </View>
   );
 

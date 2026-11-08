@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Camera, RotateCcw } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeRegionDrawHtml } from "@/src/vision/visionHtml";
@@ -9,6 +9,8 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
 import type { VisionCanvasHandle } from "@/src/vision/visionCanvasTypes";
 import { colors, radii, spacing } from "@/src/components/ui/kit";
+import { FeedCanvas, type FeedCanvasHandle } from "@/src/components/vision/FeedCanvas";
+import { FitChip, zoomScaleOf } from "@/src/components/vision/LiveViewerModal";
 import { ves } from "./visionEditorStyles";
 
 type Step = "frame" | "area" | "check";
@@ -68,6 +70,15 @@ function TeachFlow({ initialRegion, onGrab, onPreview, onSave, onCancel }: FlowP
   const [result, setResult]     = useState<TeachPreview | null>(null);
   // The draw canvas document, built when the area step is entered (edits then stay inside it).
   const [html, setHtml]         = useState<string | null>(null);
+  // Zoom of whichever canvas is showing (every step's frame zooms), tied to its step and document.
+  const [zoomOf, setZoomOf]     = useState<{ key: string; scale: number }>({ key: "", scale: 1 });
+  const zoomKey = `${step}:${step === "area" ? html : step === "frame" ? frame : result?.preview}`;
+  const zoom = zoomOf.key === zoomKey ? zoomOf.scale : 1;
+  const zoomRef = useRef<FeedCanvasHandle>(null);
+  const onZoomMessage = (e: { nativeEvent: { data: string } }) => {
+    const z = zoomScaleOf(e.nativeEvent.data);
+    if (z !== null) setZoomOf({ key: zoomKey, scale: z });
+  };
 
   const grabbed = (uri: string | null) => {
     setFrame(uri);
@@ -88,6 +99,7 @@ function TeachFlow({ initialRegion, onGrab, onPreview, onSave, onCancel }: FlowP
   }, []);
 
   function onCanvasMessage(e: { nativeEvent: { data: string } }) {
+    onZoomMessage(e);
     try {
       const msg = JSON.parse(e.nativeEvent.data);
       if (msg.type === "state") setGeometry(msg.geometry ?? null);
@@ -129,7 +141,7 @@ function TeachFlow({ initialRegion, onGrab, onPreview, onSave, onCancel }: FlowP
 
   const hint =
     step === "frame" ? "Place a good part in view, then grab the frame"
-    : step === "area" ? "Drag a corner to resize · the top grip to turn the box with the part · inside to move"
+    : step === "area" ? "Drag a corner to resize · the top grip to turn the box with the part · inside to move · pinch or scroll to zoom"
     : "Green: the outlines found in the pattern. Red arrow: its 0° direction";
 
   const stepBar = (
@@ -153,7 +165,7 @@ function TeachFlow({ initialRegion, onGrab, onPreview, onSave, onCancel }: FlowP
     <View style={ves.drawCanvasArea}>
       {step === "frame" && (
         frame
-          ? <Image source={{ uri: frame }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+          ? <FeedCanvas ref={zoomRef} feedUrl={frame} zoomable style={StyleSheet.absoluteFill} onMessage={onZoomMessage} />
           : <View style={st.center}>{grabbing ? <ActivityIndicator color="#fff" /> : <Text style={st.faint}>No frame yet</Text>}</View>
       )}
       {step === "area" && html && (
@@ -161,7 +173,13 @@ function TeachFlow({ initialRegion, onGrab, onPreview, onSave, onCancel }: FlowP
       )}
       {step === "check" && result?.preview && (
         <View style={st.previewWrap}>
-          <Image source={{ uri: `data:image/png;base64,${result.preview}` }} style={st.previewImg} resizeMode="contain" />
+          <FeedCanvas
+            ref={zoomRef}
+            feedUrl={`data:image/png;base64,${result.preview}`}
+            zoomable
+            style={st.previewImg}
+            onMessage={onZoomMessage}
+          />
           {tpl && (
             <Text style={st.previewInfo}>
               {tpl.width} × {tpl.height} px · box at {fmtDeg(tpl.angle ?? 0)} · {(tpl.contours ?? []).length} outline{(tpl.contours ?? []).length !== 1 ? "s" : ""}
@@ -175,6 +193,11 @@ function TeachFlow({ initialRegion, onGrab, onPreview, onSave, onCancel }: FlowP
       <View style={[ves.drawHint, { top: 8 }]} pointerEvents="none">
         <Text style={ves.drawHintText}>{hint}</Text>
       </View>
+      <FitChip
+        scale={zoom}
+        style={{ position: "absolute", right: 12, bottom: 12 }}
+        onPress={() => (step === "area" ? canvasRef.current?.injectJavaScript("window.resetZoom();true;") : zoomRef.current?.resetZoom())}
+      />
       {busy && (
         <View style={st.busy} pointerEvents="none"><ActivityIndicator color="#fff" size="large" /></View>
       )}

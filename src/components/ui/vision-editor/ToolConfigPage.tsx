@@ -197,6 +197,7 @@ export function ToolConfigPage({
           url={robotClient.visionToolDebugUrl(program.id, tool.id)}
           aspect={W / H}
           placeholder={program.id ? "Loading…" : "Saving the program…"}
+          title={`${tool.name} · on its image`}
         />
       ) : (
         <VisionFeedViewer
@@ -205,6 +206,7 @@ export function ToolConfigPage({
           isWide={isWide}
           aspect={W / H}
           placeholder="No camera feed"
+          title={tool.name}
         />
       )}
       <RunVisionButton isRunning={isRunning} transitioning={transitioning} onPress={onToggleRunning} />
