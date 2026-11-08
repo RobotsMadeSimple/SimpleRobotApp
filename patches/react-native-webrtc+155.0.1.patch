@@ -241,3 +241,124 @@ index 10e8499..77bb0f5 100644
              if (!c.deviceId) {
                  delete c.deviceId;
              }
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
+@@ -32,7 +32,10 @@
+     @Override
+     public VideoEncoder createEncoder(VideoCodecInfo codecInfo) {
+         if (codecInfo.name.equalsIgnoreCase("H264")) {
+-            return this.hardwareVideoEncoderFactory.createEncoder(codecInfo);
++            // Wrapped: a Java exception in the hardware encoder (e.g. no EGL context left) must not
++            // abort the app inside libwebrtc's JNI.
++            VideoEncoder hw = this.hardwareVideoEncoderFactory.createEncoder(codecInfo);
++            return hw == null ? null : new SafeVideoEncoder(hw);
+         }
+ 
+         return this.softwareVideoEncoderFactory.createEncoder(codecInfo);
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/SafeVideoEncoder.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/SafeVideoEncoder.java
+new file mode 100644
+index 0000000..da8c60f
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/SafeVideoEncoder.java
+@@ -0,0 +1,100 @@
++package com.oney.WebRTCModule.webrtcutils;
++
++import android.util.Log;
++
++import org.webrtc.VideoCodecStatus;
++import org.webrtc.VideoEncoder;
++import org.webrtc.VideoFrame;
++
++/**
++ * Wraps a Java video encoder (the hardware H.264 one) so a Java exception thrown inside it is
++ * turned into an error status instead of reaching libwebrtc's JNI layer. There an uncaught
++ * exception is a CHECK failure (jvm.cc "Check failed: false") that aborts the whole app — e.g.
++ * HardwareVideoEncoder.initEncode throwing GLException "Failed to create EGL context" when the
++ * process has run out of EGL contexts. With this the stream just stops encoding and the app's
++ * own watchdog restarts it.
++ */
++public class SafeVideoEncoder implements VideoEncoder {
++    private static final String TAG = "SafeVideoEncoder";
++    private final VideoEncoder inner;
++
++    public SafeVideoEncoder(VideoEncoder inner) {
++        this.inner = inner;
++    }
++
++    @Override
++    public boolean isHardwareEncoder() {
++        return inner.isHardwareEncoder();
++    }
++
++    @Override
++    public VideoCodecStatus initEncode(Settings settings, Callback callback) {
++        try {
++            return inner.initEncode(settings, callback);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "initEncode failed (" + settings.width + "x" + settings.height + "), not aborting", e);
++            try { inner.release(); } catch (RuntimeException ignored) { /* half-initialised */ }
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus release() {
++        try {
++            return inner.release();
++        } catch (RuntimeException e) {
++            Log.e(TAG, "release failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus encode(VideoFrame frame, EncodeInfo info) {
++        try {
++            return inner.encode(frame, info);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "encode failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus setRateAllocation(BitrateAllocation allocation, int framerate) {
++        try {
++            return inner.setRateAllocation(allocation, framerate);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "setRateAllocation failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus setRates(RateControlParameters parameters) {
++        try {
++            return inner.setRates(parameters);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "setRates failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public ScalingSettings getScalingSettings() {
++        return inner.getScalingSettings();
++    }
++
++    @Override
++    public ResolutionBitrateLimits[] getResolutionBitrateLimits() {
++        return inner.getResolutionBitrateLimits();
++    }
++
++    @Override
++    public String getImplementationName() {
++        return inner.getImplementationName();
++    }
++
++    @Override
++    public EncoderInfo getEncoderInfo() {
++        return inner.getEncoderInfo();
++    }
++}
