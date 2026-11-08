@@ -1,6 +1,6 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search } from "lucide-react-native";
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -8,7 +8,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Button, EmptyState, Input, PageHeader, buttonTextColor, colors, radii, spacing } from "@/src/components/ui/kit";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { BottomSheet } from "@/src/components/ui/BottomSheet";
+import { Button, EmptyState, Input, PageHeader, colors, radii, spacing } from "@/src/components/ui/kit";
 import type { Crumb } from "@/src/components/ui/kit";
 
 // ── Shared types & helpers ────────────────────────────────────────────────────
@@ -83,11 +85,13 @@ interface Props {
   accentColor: string;
   addLabel: string;
   onAdd: () => void;
+  /** One line under the add option in the "new" chooser (only shown with `secondaryAdd`). */
+  addHint?: string;
   /**
-   * A second way to add (e.g. import from a file). Shown as a secondary button beside the add
-   * button in the header and as a second dashed button under the list.
+   * A second way to add (e.g. import from a file). With it, the header's New button and the
+   * dashed button under the list open a chooser offering both ways.
    */
-  secondaryAdd?: { label: string; shortLabel?: string; icon: (color: string) => ReactNode; onPress: () => void };
+  secondaryAdd?: { label: string; hint?: string; icon: (color: string) => ReactNode; onPress: () => void };
   search: string;
   onSearchChange: (q: string) => void;
   sort: SortState;
@@ -112,7 +116,7 @@ interface Props {
 }
 
 export function ProgramListLayout({
-  title, subtitle, crumbs, accentColor, addLabel, onAdd, secondaryAdd,
+  title, subtitle, crumbs, accentColor, addLabel, addHint, onAdd, secondaryAdd,
   search, onSearchChange, sort, onSortChange,
   isEmpty, hasResults, emptyIcon, emptyTitle, emptySubtitle,
   topOverlay, aside, children,
@@ -120,6 +124,10 @@ export function ProgramListLayout({
   const activeChipBg = accentColor + "22"; // ~13 % opacity tint
   const wideContent = useWideContent();
   const isWide = useIsWide();
+  const [chooser, setChooser] = useState(false);
+  // With a second way to add, "New" asks which one; otherwise it adds straight away.
+  const pressAdd = secondaryAdd ? () => setChooser(true) : onAdd;
+  const choose = (fn: () => void) => { setChooser(false); setTimeout(fn, 200); };
 
   // Search + sort. Wide puts them on one line inside the content gutter; narrow
   // keeps them in a sticky surface bar directly under the header.
@@ -184,26 +192,24 @@ export function ProgramListLayout({
   // Dashed "add" CTA — the thumb-reachable primary action at the end of the list
   // on narrow screens (wide screens also get one in the header).
   const addCta = (
-    <>
-      <Button
-        variant="dashed"
-        label={addLabel}
-        icon={<Plus size={16} color={accentColor} />}
-        style={[s.addCard, { borderColor: accentColor }]}
-        textStyle={{ color: accentColor }}
-        onPress={onAdd}
-      />
-      {secondaryAdd && (
-        <Button
-          variant="dashed"
-          label={secondaryAdd.label}
-          icon={secondaryAdd.icon(colors.textSecondary)}
-          style={s.addCard}
-          textStyle={{ color: colors.textSecondary }}
-          onPress={secondaryAdd.onPress}
-        />
-      )}
-    </>
+    <Button
+      variant="dashed"
+      label={addLabel}
+      icon={<Plus size={16} color={accentColor} />}
+      style={[s.addCard, { borderColor: accentColor }]}
+      textStyle={{ color: accentColor }}
+      onPress={pressAdd}
+    />
+  );
+
+  const chooserOption = (label: string, hint: string | undefined, icon: ReactNode, onPress: () => void) => (
+    <AnimatedPressable style={s.option} onPress={() => choose(onPress)} accessibilityRole="button" accessibilityLabel={label}>
+      <View style={[s.optionIcon, { backgroundColor: activeChipBg }]}>{icon}</View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={s.optionLabel}>{label}</Text>
+        {!!hint && <Text style={s.optionHint}>{hint}</Text>}
+      </View>
+    </AnimatedPressable>
   );
 
   return (
@@ -215,26 +221,24 @@ export function ProgramListLayout({
         subtitle={subtitle}
         crumbs={crumbs}
         right={
-          <View style={s.headerActions}>
-            {secondaryAdd && (
-              <Button
-                size="sm"
-                variant="secondary"
-                label={isWide ? secondaryAdd.label : (secondaryAdd.shortLabel ?? secondaryAdd.label)}
-                icon={secondaryAdd.icon(buttonTextColor("secondary"))}
-                onPress={secondaryAdd.onPress}
-              />
-            )}
-            <Button
-              size="sm"
-              label={isWide ? addLabel : "New"}
-              icon={<Plus size={15} color={colors.onAccent} />}
-              style={{ backgroundColor: accentColor }}
-              onPress={onAdd}
-            />
-          </View>
+          <Button
+            size="sm"
+            label={isWide ? addLabel : "New"}
+            icon={<Plus size={15} color={colors.onAccent} />}
+            style={{ backgroundColor: accentColor }}
+            onPress={pressAdd}
+          />
         }
       />
+
+      {secondaryAdd && (
+        <BottomSheet visible={chooser} onClose={() => setChooser(false)} title={addLabel}>
+          <View style={s.options}>
+            {chooserOption(addLabel, addHint, <Plus size={18} color={accentColor} />, onAdd)}
+            {chooserOption(secondaryAdd.label, secondaryAdd.hint, secondaryAdd.icon(accentColor), secondaryAdd.onPress)}
+          </View>
+        </BottomSheet>
+      )}
 
       {!isWide && <View style={s.toolbarBar}>{toolbar}</View>}
 
@@ -267,7 +271,15 @@ export function ProgramListLayout({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  options: { gap: spacing.sm, paddingBottom: spacing.md },
+  option: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    padding: spacing.md, borderRadius: radii.lg,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  optionIcon:  { width: 40, height: 40, borderRadius: radii.md, alignItems: "center", justifyContent: "center" },
+  optionLabel: { fontSize: 15, fontWeight: "600", color: colors.text },
+  optionHint:  { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   root:    { flex: 1, backgroundColor: colors.background },
   scroll:  { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },

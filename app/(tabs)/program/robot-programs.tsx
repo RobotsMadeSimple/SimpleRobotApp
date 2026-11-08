@@ -259,11 +259,12 @@ export default function RobotProgramsScreen() {
       crumbs={[{ label: "Program", href: "/program" }, { label: "Programs" }]}
       accentColor={colors.accent}
       addLabel="New Program"
+      addHint="Start from a blank program"
       onAdd={() => router.navigate("/program/builder")}
       secondaryAdd={{
         label: "Import from file",
-        shortLabel: "Import",
-        icon: color => <Upload size={15} color={color} />,
+        hint: "Open a .srs program file",
+        icon: color => <Upload size={18} color={color} />,
         onPress: handleImport,
       }}
       search={search}

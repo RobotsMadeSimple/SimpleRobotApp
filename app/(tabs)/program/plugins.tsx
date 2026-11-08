@@ -13,6 +13,7 @@ import {
 import {
   errText, isActive, runtimeLabel, showError, stateLabel, stateTone,
 } from "@/src/components/ui/plugins/pluginUi";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { useActionPending } from "@/src/hooks/useActionPending";
 import type { PluginSummary } from "@/src/models/robotModels";
 import { useConnected } from "@/src/providers/RobotProvider";
@@ -104,6 +105,7 @@ function PluginCard({ plugin, onChanged }: { plugin: PluginSummary; onChanged: (
 
 export default function PluginsPage() {
   const connected = useConnected();
+  const wide = useIsWide();
   const [plugins, setPlugins]       = useState<PluginSummary[] | null>(null);
   const [installing, setInstalling] = useState(false);
   const [reloading, setReloading]   = useState(false);
@@ -184,13 +186,14 @@ export default function PluginsPage() {
         crumbs={[{ label: "Program", href: "/program" }, { label: "Plugins" }]}
         right={
           <>
+            {/* Phones: icons only, so the title and subtitle keep the room. */}
             <Button
-              label="Reload" size="sm" variant="secondary" loading={reloading}
-              icon={<RefreshCw size={14} color={buttonTextColor("secondary")} />} onPress={reload}
+              label="Reload" size="sm" variant="secondary" loading={reloading} iconOnly={!wide}
+              icon={<RefreshCw size={wide ? 14 : 17} color={buttonTextColor("secondary")} />} onPress={reload}
             />
             <Button
-              label="Install" size="sm" loading={installing}
-              icon={<Download size={14} color={buttonTextColor("primary")} />} onPress={install}
+              label="Install" size="sm" loading={installing} iconOnly={!wide}
+              icon={<Download size={wide ? 14 : 17} color={buttonTextColor("primary")} />} onPress={install}
             />
           </>
         }
