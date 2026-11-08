@@ -46,6 +46,12 @@ const RESTART_BASE_MS = 1000;      // first restart delay; doubles per failed at
 const RESTART_MAX_MS = 15000;      // …up to this
 const CAMERA_OPEN_MS = 8000;       // give up on a camera open that hasn't finished by then
 const HEALTH_MS = 5 * 60_000;      // how often a streaming phone logs one health line (leak watch)
+// A settings change (resolution, fps, aspect, lens, orientation) rebuilds the whole camera pipeline:
+// new capturer, new peer connection, new hardware encoder. Tapping through the options used to do that
+// once per tap (13 rebuilds in 4 min on the S22+), so changes are coalesced: the rebuild waits until
+// the settings stop changing, and two rebuilds are never closer together than the minimum gap.
+const REBUILD_SETTLE_MS = 800;
+const REBUILD_MIN_GAP_MS = 3000;
 
 /** One plain log line. console.log, not console.warn: in a dev build every warn is kept by LogBox,
  *  so a phone left streaming for hours would pile them up in memory. */
@@ -59,6 +65,7 @@ const log = (msg: string) => console.log(`[Provider] ${msg}`);
  */
 export function releaseStream(stream: MediaStream | null | undefined): void {
   if (!stream) return;
+  providerHealth.released++;
   try { stream.getTracks().forEach(t => { try { t.stop(); } catch { /* already ended */ } }); } catch { /* noop */ }
   try { (stream as unknown as { release?: () => void }).release?.(); } catch { /* web / already released */ }
 }
@@ -80,9 +87,15 @@ export function foregroundTypes(camOn: boolean, locationOn: boolean): Foreground
   return types;
 }
 
-/** Live counts of what the camera pipeline holds, for the health line (and the leak test). */
+/**
+ * Live counts of what the camera pipeline holds, for the health line (and the leak test).
+ * Every build creates one hardware encoder and every `resizes` is WebRTC re-creating it at a new
+ * frame size, so builds + resizes is the encoder re-init count. `released` should keep pace with
+ * builds: a stream that is never released keeps its capture thread and EGL context, and once the
+ * process runs out of EGL contexts the next encoder init aborts the app inside libwebrtc.
+ */
 export const providerHealth = {
-  pcOpen: 0, streamsOpen: 0, tracksOpen: 0, restarts: 0, builds: 0,
+  pcOpen: 0, streamsOpen: 0, tracksOpen: 0, restarts: 0, builds: 0, released: 0, resizes: 0,
 };
 
 export type ResTier = "low" | "med" | "high";
@@ -407,7 +420,8 @@ class ProviderEngine {
   private camStartedAt = 0;      // when the current stream build began
   private lastFlowAt = 0;        // last time the sender's frame count went up (0 = no frame yet)
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
-  private restartAttempts = 0;   // consecutive restarts without frames flowing (drives the backoff)
+  private settingsRebuildTimer: ReturnType<typeof setTimeout> | null = null;   // coalesced settings rebuild
+  private restartAttempts = 0;  // consecutive restarts without frames flowing (drives the backoff)
   private appStateSub: { remove: () => void } | null = null;
 
   // Sensor pipeline
@@ -531,7 +545,7 @@ class ProviderEngine {
   private applyChanges(prev: ProviderConfig) {
     if (!this.assignedHere) return;
     const c = this.config;
-    if (changed(prev, c, CAM_KEYS) && this.camOn) this.rebuildCamera();
+    if (changed(prev, c, CAM_KEYS) && this.camOn) this.requestCamRebuild();
     // Bitrate changes apply live on the running sender — no capture restart needed.
     else if (prev.bitrate !== c.bitrate && this.camOn) this.applyEncodingLive();
     if (changed(prev, c, SENSOR_KEYS)) this.rebuildSensors();
@@ -860,7 +874,8 @@ class ProviderEngine {
       }
     } catch { /* not Hermes */ }
     return `health: ${heap}pc ${h.pcOpen} · streams ${h.streamsOpen} · tracks ${h.tracksOpen}`
-      + ` · builds ${h.builds} · restarts ${h.restarts} · sensors ${this.sensorSubs.length}${this.locSub ? "+gps" : ""}`
+      + ` · encoder inits ${h.builds + h.resizes} (builds ${h.builds}, resizes ${h.resizes}) · released ${h.released}`
+      + ` · restarts ${h.restarts} · sensors ${this.sensorSubs.length}${this.locSub ? "+gps" : ""}`
       + ` · ${this.rtcState || "idle"}`;
   }
 
@@ -870,9 +885,24 @@ class ProviderEngine {
   }
 
   // ── Camera (WebRTC) pipeline ────────────────────────────────────────────────
+  /**
+   * Rebuild the camera for a settings change, coalesced: wait until the settings have stopped
+   * changing for REBUILD_SETTLE_MS, and keep REBUILD_MIN_GAP_MS since the last build began. The
+   * running stream keeps going meanwhile, so a burst of taps costs one encoder re-init, not one each.
+   */
+  private requestCamRebuild() {
+    if (this.settingsRebuildTimer) clearTimeout(this.settingsRebuildTimer);
+    const wait = Math.max(REBUILD_SETTLE_MS, this.camStartedAt + REBUILD_MIN_GAP_MS - Date.now());
+    this.settingsRebuildTimer = setTimeout(() => {
+      this.settingsRebuildTimer = null;
+      if (this.camOn && this.assignedHere) this.rebuildCamera();
+    }, wait);
+  }
+
   private teardownCamera() {
     this.camGen++;
     if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; }
+    if (this.settingsRebuildTimer) { clearTimeout(this.settingsRebuildTimer); this.settingsRebuildTimer = null; }
     if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
     const ws = this.camWs, stream = this.stream, pc = this.pc;
     this.camWs = null;
@@ -1015,6 +1045,7 @@ class ProviderEngine {
     this.pc = pc;
     providerHealth.pcOpen++;
     providerHealth.builds++;
+    log(this.healthLine());   // one line per rebuild: encoder inits vs streams released, at a glance
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
     // Pin the sender encoding (bitrate cap + full resolution + prefer dropping frames over downscaling)
@@ -1023,7 +1054,7 @@ class ProviderEngine {
 
     // Live fps / resolution / bitrate from the sender's own WebRTC stats — and the stall watchdog,
     // which goes by the sender's frame count (the connection state stays "connected" with no video).
-    let prevBytes = 0, prevTs = 0, prevFrames = -1, statsBusy = false;
+    let prevBytes = 0, prevTs = 0, prevFrames = -1, statsBusy = false, prevSize = "";
     this.statsTimer = setInterval(async () => {
       if (gen !== this.camGen) return;
       // Watchdog first, so a getStats call that never settles can't hide a stall.
@@ -1040,13 +1071,13 @@ class ProviderEngine {
       statsBusy = true;
       try {
         const rep = await (pc as unknown as { getStats: () => Promise<Map<string, RtcReport>> }).getStats();
-        let fw = 0, fh = 0, fps = 0, bytes = 0, ts = 0, frames = -1, limit: string | undefined;
+        let fw = 0, fh = 0, sentSize = "", fps = 0, bytes = 0, ts = 0, frames = -1, limit: string | undefined;
         rep.forEach(r => {
           if (r.type === "outbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
             bytes = r.bytesSent ?? bytes; ts = r.timestamp ?? ts;
             frames = r.framesEncoded ?? r.framesSent ?? frames;
             if (r.framesPerSecond) fps = r.framesPerSecond;
-            if (r.frameWidth) { fw = r.frameWidth; fh = r.frameHeight ?? 0; }
+            if (r.frameWidth) { fw = r.frameWidth; fh = r.frameHeight ?? 0; sentSize = `${fw}x${fh}`; }
             if (r.qualityLimitationReason && r.qualityLimitationReason !== "none") limit = r.qualityLimitationReason;
           } else if (r.type === "media-source") {
             if (!fw && r.width) { fw = r.width; fh = r.height ?? 0; }
@@ -1061,6 +1092,12 @@ class ProviderEngine {
         if (frames >= 0) prevFrames = frames;
         if (gen !== this.camGen) return;
         if (progressed) { this.lastFlowAt = Date.now(); this.restartAttempts = 0; }
+        // The sent frame size changing mid-stream means WebRTC re-created the encoder (it should not:
+        // the sender is pinned to maintain-resolution). Counted for the health line.
+        if (sentSize) {
+          if (prevSize && sentSize !== prevSize) { providerHealth.resizes++; log(`encoder resized ${prevSize} → ${sentSize}`); }
+          prevSize = sentSize;
+        }
         this.rtcStats = { fps: Math.round(fps), w: fw, h: fh, kbps, limit };
         this.publish();
       } catch { /* stats unavailable this tick */ } finally { statsBusy = false; }

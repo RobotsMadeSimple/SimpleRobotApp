@@ -3,7 +3,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { router, useFocusEffect } from "expo-router";
 import { Moon, RotateCw } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { BackHandler, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { AppState, BackHandler, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { DeviceStatusBar } from "@/src/components/ui/io/ioShared";
@@ -111,6 +111,18 @@ export function PhoneProvider({
     return () => sub.remove();
   }, [backToIo]));
 
+  // The preview is a WebView decoding the controller's feed: it holds GPU memory and keeps decoding
+  // even when nobody can see it. Only mount it while this screen is focused, the app is in the
+  // foreground and the screen isn't dimmed — the stream itself runs on regardless.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
+  const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", s => setAppActive(s === "active"));
+    return () => sub.remove();
+  }, []);
+  const previewLive = focused && appActive && !dimmed;
+
   // ── Render ────────────────────────────────────────────────────────────────
   const crumbs = [{ label: "I/O", href: "/io" }, { label: name }];
   const lenses = st.lenses;
@@ -207,9 +219,9 @@ export function PhoneProvider({
                       />
                     </View>
                   </FormRow>
-                  {st.camId
+                  {st.camId && previewLive
                     ? <CameraLiveFeed cameraId={st.camId} aspectRatio={previewAspect} />
-                    : <View style={[styles.preview, styles.previewEmpty]}><Text style={type.caption}>Connecting…</Text></View>}
+                    : <View style={[styles.preview, styles.previewEmpty]}><Text style={type.caption}>{st.camId ? "Preview paused" : "Connecting…"}</Text></View>}
                   <Text style={type.caption}>
                     {!st.assignedHere
                       ? `Streamed by ${st.assignedPhoneName || "the linked phone"} · controller view of “${name}”.`
