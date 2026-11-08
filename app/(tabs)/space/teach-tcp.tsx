@@ -219,8 +219,13 @@ export default function TeachTcpScreen() {
       ],
     );
   };
-  const goBack = () => router.dismissTo("/(tabs)/space/tools");
+  // Return to whatever opened the wizard — the tool's editor reloads the re-taught offset; a new
+  // tool's editor was replaced by the wizard, so that lands back on the tool list.
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(tabs)/space/tools"));
   const exit = () => leave(goBack);
+  // The tool's editor sits right under the wizard — its crumb steps back to it rather than
+  // opening a second copy.
+  const editorHref = target?.id ? `/space/tool-edit?id=${encodeURIComponent(target.id)}` : null;
 
   const captureTouch = () => {
     const t: Touch = { x: status.x, y: status.y, rz: status.rz };
@@ -471,10 +476,11 @@ export default function TeachTcpScreen() {
           crumbs={[
             { label: "Space", href: "/(tabs)/space" },
             { label: "Tools", href: "/(tabs)/space/tools" },
+            ...(editorHref ? [{ label: target!.name, href: editorHref }] : []),
             { label: "Teach TCP" },
           ]}
           onBack={exit}
-          onNavigate={href => leave(() => router.navigate(href as never))}
+          onNavigate={href => leave(() => (href === editorHref ? goBack() : router.navigate(href as never)))}
         />
         <Screen>
           <WizardStepper steps={STEPS} current={step} reachable={reachable} onStep={goto} />

@@ -136,7 +136,7 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
     <View style={[styles.narrowBar, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.narrowRow}>
         {parent && (
-          <Pressable style={styles.backBtn} onPress={goBack} hitSlop={10}>
+          <Pressable style={styles.backBtn} onPress={goBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
             <ChevronLeft size={20} color={colors.accent} />
             <Text style={styles.backLabel} numberOfLines={1}>{parent.label}</Text>
           </Pressable>

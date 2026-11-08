@@ -251,6 +251,16 @@ const SCENARIOS = [
     route: "/space/grid-teach",
     open: async () => {},
   },
+  {
+    name: "space — tool editor (page)",
+    route: "/space/tool-edit",
+    open: async () => {},
+  },
+  {
+    name: "space — local editor (page)",
+    route: "/space/local-edit",
+    open: async () => {},
+  },
   // Vision editor on an inline, never-saved program: each tool's settings page and the layer page.
   {
     name: "vision — editor (page)",

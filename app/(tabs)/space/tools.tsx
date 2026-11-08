@@ -5,197 +5,22 @@ import {
   colors,
   Divider,
   EmptyState,
-  FormRow,
   InfoTip,
-  Input,
   PageHeader,
   radii,
   RadioRow,
   Screen,
   SectionHeader,
-  shadows,
   spacing,
   type,
 } from "@/src/components/ui/kit";
-import { useRobotStatus, useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
+import { Tool } from "@/src/models/robotModels";
+import { useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { Check, Crosshair, Edit2, Plus, Wrench, X } from "lucide-react-native";
+import { Edit2, Plus, Wrench } from "lucide-react-native";
 import { router } from "expo-router";
-import { ComponentProps, useRef, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-type ToolDraft = {
-  name: string;
-  description: string;
-  x: string; y: string; z: string;
-  rx: string; ry: string; rz: string;
-};
-
-const EMPTY_DRAFT: ToolDraft = {
-  name: "", description: "",
-  x: "0", y: "0", z: "0",
-  rx: "0", ry: "0", rz: "0",
-};
-
-// ── Inputs ──────────────────────────────────────────────────────────────────
-
-/**
- * A text input that holds its own copy of the value while being edited, so frequent parent
- * re-renders don't push the value back into the field mid-type. This screen subscribes to the
- * ~20Hz status broadcast (for the active tool), so the modal re-renders constantly; a plain
- * controlled input would have its native text re-set on every tick, which — with
- * selectTextOnFocus — reselects and overwrites what you're typing. The local copy is re-seeded
- * only when the value changes from outside (e.g. opening the modal on a different tool).
- */
-type LocalInputProps = Omit<ComponentProps<typeof Input>, "value" | "onChangeText" | "onChange"> & {
-  value: string;
-  onChange: (v: string) => void;
-};
-function LocalInput({ value, onChange, ...rest }: LocalInputProps) {
-  const [text, setText] = useState(value);
-  const [seed, setSeed] = useState(value);
-  if (value !== seed) { setSeed(value); setText(value); }   // external change → re-seed
-  return <Input value={text} onChangeText={t => { setText(t); onChange(t); }} {...rest} />;
-}
-
-function CoordField({
-  label, value, onChange,
-}: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <View style={styles.coordField}>
-      <Text style={styles.coordFieldLabel}>{label}</Text>
-      <LocalInput
-        style={styles.coordInput}
-        value={value}
-        onChange={onChange}
-        keyboardType="numeric"
-        selectTextOnFocus
-      />
-    </View>
-  );
-}
-
-// ── Tool form modal ────────────────────────────────────────────────────────────
-
-function ToolFormModal({
-  visible,
-  title,
-  draft,
-  onChangeDraft,
-  onSave,
-  onClose,
-  onTeach,
-}: {
-  visible: boolean;
-  title: string;
-  draft: ToolDraft;
-  onChangeDraft: (d: ToolDraft) => void;
-  onSave: () => void;
-  onClose: () => void;
-  /** Opens the Teach TCP wizard for this tool (ASTRO only). */
-  onTeach: () => void;
-}) {
-  const set = (k: keyof ToolDraft) => (v: string) =>
-    onChangeDraft({ ...draft, [k]: v });
-  const robot   = useSelectedRobot();
-  const isAstro = robot?.robotType === 'ASTRO';
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.modalOuter}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={onClose}>
-          <Pressable style={styles.modalCard} onPress={() => {}}>
-
-            {/* Header */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{title}</Text>
-              <Pressable onPress={onClose} hitSlop={12}>
-                <X size={18} color={colors.textFaint} />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-
-              {/* Name */}
-              <FormRow label="Name" style={styles.formRow}>
-                <LocalInput
-                  value={draft.name}
-                  onChange={set("name")}
-                  placeholder="e.g. Gripper"
-                  returnKeyType="next"
-                />
-              </FormRow>
-
-              {/* Description */}
-              <FormRow label="Description" style={styles.formRow}>
-                <LocalInput
-                  value={draft.description}
-                  onChange={set("description")}
-                  placeholder="Optional"
-                  returnKeyType="next"
-                />
-              </FormRow>
-
-              {/* Position */}
-              <View style={styles.fieldLabelRow}>
-                <Text style={styles.fieldLabel}>TCP Offset (mm / °)</Text>
-                <InfoTip text="The tool center point's offset and rotation relative to the robot flange. This is the point that gets driven to saved coordinates while this tool is active." />
-              </View>
-              <View style={styles.coordGrid}>
-                <CoordField label="X"  value={draft.x}  onChange={set("x")}  />
-                <CoordField label="Y"  value={draft.y}  onChange={set("y")}  />
-                <CoordField label="Z"  value={draft.z}  onChange={set("z")}  />
-                {!isAstro && <CoordField label="RX" value={draft.rx} onChange={set("rx")} />}
-                {!isAstro && <CoordField label="RY" value={draft.ry} onChange={set("ry")} />}
-                <CoordField label="RZ" value={draft.rz} onChange={set("rz")} />
-              </View>
-
-              {/* Teach the planar TCP by touching one point from several wrist angles (ASTRO only). */}
-              {isAstro && (
-                <Button
-                  variant="secondary"
-                  label="Teach offset with wizard"
-                  icon={<Crosshair size={16} color={colors.textMuted} />}
-                  onPress={onTeach}
-                  style={styles.teachBtn}
-                />
-              )}
-
-              {/* Actions */}
-              <View style={styles.modalActions}>
-                <Button label="Cancel" variant="secondary" onPress={onClose} style={styles.modalCancel} />
-                <Button
-                  label="Save"
-                  variant="primary"
-                  icon={<Check size={15} color={colors.onAccent} />}
-                  onPress={onSave}
-                  disabled={!draft.name.trim()}
-                  style={styles.modalConfirm}
-                />
-              </View>
-
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -204,74 +29,9 @@ export default function ToolsPage() {
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editOpen,   setEditOpen]   = useState(false);
-  const [draft,      setDraft]      = useState<ToolDraft>(EMPTY_DRAFT);
-  const editingName = useRef<string>("");
-  const editingId   = useRef<string | undefined>(undefined);
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
-  function parseDraft(d: ToolDraft) {
-    return {
-      name:        d.name.trim(),
-      description: d.description.trim() || undefined,
-      x:  parseFloat(d.x)  || 0,
-      y:  parseFloat(d.y)  || 0,
-      z:  parseFloat(d.z)  || 0,
-      rx: parseFloat(d.rx) || 0,
-      ry: parseFloat(d.ry) || 0,
-      rz: parseFloat(d.rz) || 0,
-    };
-  }
-
-  function handleCreate() {
-    const p = parseDraft(draft);
-    robotClient.createTool(p);
-    setCreateOpen(false);
-    setDraft(EMPTY_DRAFT);
-  }
-
-  function openEdit(name: string) {
-    const t = tools.find(t => t.name === name);
-    if (!t) return;
-    editingName.current = name;
-    editingId.current   = t.id;
-    setDraft({
-      name:        t.name,
-      description: t.description,
-      x:  String(t.x),  y:  String(t.y),  z:  String(t.z),
-      rx: String(t.rx), ry: String(t.ry), rz: String(t.rz),
-    });
-    setEditOpen(true);
-  }
-
-  function handleEdit() {
-    const p = parseDraft(draft);
-    const orig = editingName.current;
-    robotClient.editTool(orig, {
-      newName:     p.name !== orig ? p.name : undefined,
-      description: p.description,
-      x: p.x, y: p.y, z: p.z,
-      rx: p.rx, ry: p.ry, rz: p.rz,
-    });
-    setEditOpen(false);
-  }
-
-  // Teach lives inside a tool's editor. An existing tool is re-taught by its stable id; a new
-  // one hands the typed name to the wizard, which creates the tool when it saves.
-  function teachEditing() {
-    setEditOpen(false);
-    const id = editingId.current;
-    router.push(id
-      ? `/(tabs)/space/teach-tcp?id=${encodeURIComponent(id)}`
-      : `/(tabs)/space/teach-tcp?name=${encodeURIComponent(editingName.current)}`);
-  }
-
-  function teachNew() {
-    setCreateOpen(false);
-    const name = draft.name.trim();
-    router.push(name ? `/(tabs)/space/teach-tcp?name=${encodeURIComponent(name)}` : "/(tabs)/space/teach-tcp");
+  // Each tool is edited on its own page, linked by the tool's stable id.
+  function openEdit(tool: Tool) {
+    if (tool.id) router.push(`/space/tool-edit?id=${encodeURIComponent(tool.id)}`);
   }
 
   function confirmDelete(name: string) {
@@ -361,7 +121,7 @@ export default function ToolsPage() {
                         {/* Edit */}
                         <Pressable
                           style={styles.iconBtn}
-                          onPress={() => openEdit(tool.name)}
+                          onPress={() => openEdit(tool)}
                           hitSlop={8}
                           accessibilityRole="button"
                           accessibilityLabel={`Edit ${tool.name}`}
@@ -386,32 +146,10 @@ export default function ToolsPage() {
           variant="dashed"
           label="New Tool"
           icon={<Plus size={16} color={colors.accent} />}
-          onPress={() => { setDraft(EMPTY_DRAFT); setCreateOpen(true); }}
+          onPress={() => router.push("/space/tool-edit")}
         />
 
       </Screen>
-
-      {/* Create modal */}
-      <ToolFormModal
-        visible={createOpen}
-        title="New Tool"
-        draft={draft}
-        onChangeDraft={setDraft}
-        onSave={handleCreate}
-        onClose={() => setCreateOpen(false)}
-        onTeach={teachNew}
-      />
-
-      {/* Edit modal */}
-      <ToolFormModal
-        visible={editOpen}
-        title="Edit Tool"
-        draft={draft}
-        onChangeDraft={setDraft}
-        onSave={handleEdit}
-        onClose={() => setEditOpen(false)}
-        onTeach={teachEditing}
-      />
     </View>
   );
 }
@@ -462,94 +200,5 @@ const styles = StyleSheet.create({
 
   iconBtn: {
     padding: spacing.xs,
-  },
-  teachBtn: {
-    marginBottom: spacing.md,
-  },
-
-  // ── Modal ─────────────────────────────────────────────────────────────────
-  modalOuter: {
-    flex: 1,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: colors.overlay,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: spacing.xl,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 380,
-    maxHeight: "90%",
-    backgroundColor: colors.surface,
-    borderRadius: radii.xl,
-    padding: spacing.lg + 4,
-    ...shadows.raised,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: colors.text,
-  },
-
-  // ── Form fields ───────────────────────────────────────────────────────────
-  fieldLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.textFaint,
-    letterSpacing: 0.5,
-  },
-  fieldLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-    marginBottom: spacing.xs + 2,
-  },
-  formRow: { marginBottom: spacing.md + 2 },
-
-  coordGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  coordField: {
-    width: "30%",
-    flexGrow: 1,
-  },
-  coordFieldLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: colors.textFaint,
-    letterSpacing: 0.6,
-    marginBottom: spacing.xs,
-  },
-  coordInput: {
-    ...type.mono,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    textAlign: "center",
-  },
-
-  // ── Modal actions ─────────────────────────────────────────────────────────
-  modalActions: {
-    flexDirection: "row",
-    gap: spacing.sm + 2,
-    marginTop: spacing.xs,
-    marginBottom: spacing.xs,
-  },
-  modalCancel: {
-    flex: 1,
-  },
-  modalConfirm: {
-    flex: 2,
   },
 });

@@ -49,8 +49,11 @@ export const ROUTE_LABELS: Record<string, string> = {
   "stack-edit": "Edit Stack",
   "stack-teach": "Teach Stack",
   locals:       "Locals",
+  "local-edit": "Edit Local",
   points:       "Points",
   tools:        "Tools",
+  "tool-edit":  "Edit Tool",
+  "teach-tcp":  "Teach TCP",
 };
 
 /** Label for a route segment: the map entry, or Title Case of the slug. */
