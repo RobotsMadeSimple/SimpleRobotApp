@@ -871,6 +871,9 @@ function startPoll(url,ms,g){
 // ms: the poll interval for an http(s) URL (default 150). A data: URL is one still frame, drawn once.
 var _lastMs;
 window.setFeed=function(url,ms){
+  // The host re-sends the feed on every load and prop change: the same source that is still
+  // running is left alone, so it is never closed and reopened for nothing (one socket per feed).
+  if(url&&url===_lastUrl&&ms===_lastMs&&(_feed||_timer))return;
   _gen++;var g=_gen;
   _lastUrl=url;_lastMs=ms;closeWs();stopTimer();
   if(!url)return;
