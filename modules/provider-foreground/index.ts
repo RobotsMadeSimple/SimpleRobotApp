@@ -11,7 +11,7 @@ import { requireNativeModule } from "expo";
  * Native-only: on web/Electron (and anywhere the module isn't linked) every call is a no-op.
  */
 
-export type ForegroundServiceType = "camera" | "dataSync" | "location" | "microphone";
+export type ForegroundServiceType = "camera" | "dataSync" | "location" | "microphone" | "connectedDevice";
 
 type NativeProviderForeground = {
   startService(title: string, text: string, types: ForegroundServiceType[]): void;

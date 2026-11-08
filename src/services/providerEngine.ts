@@ -21,7 +21,8 @@ import { robotClient } from "@/src/services/RobotConnectService";
 // the provider screen or turn the screen off. The old implementation lived in the screen's effects
 // and tore down on unmount; this singleton is the "keep serving data regardless of the screen" piece.
 //
-// It drives a native Android foreground service (camera + dataSync + location types) so Android 14+
+// It drives a native Android foreground service (camera / location / connectedDevice types, see
+// foregroundTypes) so Android 14+
 // permits background camera access and doesn't kill the process. The visible preview is still the
 // controller's decoded round-trip (CameraLiveFeed) — the engine renders nothing itself.
 //
@@ -44,6 +45,45 @@ const FIRST_FRAME_MS = 12000;      // a new stream gets this long to start sendi
 const RESTART_BASE_MS = 1000;      // first restart delay; doubles per failed attempt…
 const RESTART_MAX_MS = 15000;      // …up to this
 const CAMERA_OPEN_MS = 8000;       // give up on a camera open that hasn't finished by then
+const HEALTH_MS = 5 * 60_000;      // how often a streaming phone logs one health line (leak watch)
+
+/** One plain log line. console.log, not console.warn: in a dev build every warn is kept by LogBox,
+ *  so a phone left streaming for hours would pile them up in memory. */
+const log = (msg: string) => console.log(`[Provider] ${msg}`);
+
+/**
+ * Release a camera stream for good. In react-native-webrtc `track.stop()` only stops the capture: the
+ * native track, its video source, the capturer and its capture thread/GL context stay allocated until
+ * `release()`. Without it every watchdog restart leaked one full camera pipeline (native memory
+ * and a thread), which is what made a phone left streaming for hours fall over.
+ */
+export function releaseStream(stream: MediaStream | null | undefined): void {
+  if (!stream) return;
+  try { stream.getTracks().forEach(t => { try { t.stop(); } catch { /* already ended */ } }); } catch { /* noop */ }
+  try { (stream as unknown as { release?: () => void }).release?.(); } catch { /* web / already released */ }
+}
+
+/**
+ * The foreground-service types to hold. Never `dataSync` while the camera or location is on: since
+ * Android 15 a dataSync service may only run 6 hours a day, and when that runs out the app crashes
+ * (ForegroundServiceDidNotStopInTimeException) — the "crashes after a while" of a streaming phone.
+ * `camera` and `location` have no time limit and keep the process (and its sockets) alive just the
+ * same. Sensors alone use `connectedDevice` (no limit either: the phone is feeding an external
+ * controller); a build whose service predates that type falls back to dataSync by itself.
+ * `camera` needs the CAMERA permission, so it is only asked for while the camera is on.
+ */
+export function foregroundTypes(camOn: boolean, locationOn: boolean): ForegroundServiceType[] {
+  const types: ForegroundServiceType[] = [];
+  if (camOn) types.push("camera");
+  if (locationOn) types.push("location");
+  if (!types.length) types.push("connectedDevice");
+  return types;
+}
+
+/** Live counts of what the camera pipeline holds, for the health line (and the leak test). */
+export const providerHealth = {
+  pcOpen: 0, streamsOpen: 0, tracksOpen: 0, restarts: 0, builds: 0,
+};
 
 export type ResTier = "low" | "med" | "high";
 
@@ -359,6 +399,10 @@ class ProviderEngine {
   private stream: MediaStream | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private camGen = 0;   // bumped to invalidate in-flight camera builds
+  private encodingBusy = false;   // a setParameters call is in flight
+  private encodingAgain = false;  // another change came in meanwhile — apply once more after it
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
+  private fgsKey = "";            // types + text last sent to the foreground service ("" = stopped)
   // Watchdog / recovery
   private camStartedAt = 0;      // when the current stream build began
   private lastFlowAt = 0;        // last time the sender's frame count went up (0 = no frame yet)
@@ -585,10 +629,13 @@ class ProviderEngine {
   }
 
   private onAppActive() {
+    // The foreground is the one moment Android always lets an app (re)start its foreground service,
+    // so re-assert it here: the OS may have stopped it, or dropped a type, while we were in the back.
+    if (this.active) { this.fgsKey = ""; this.syncForeground(); }
     if (!this.camOn || !this.assignedHere || !robotClient.connected) return;
     const stalled = this.restartTimer !== null || (this.lastFlowAt > 0 && Date.now() - this.lastFlowAt > STALL_MS / 2);
     if (!stalled) return;
-    console.warn("[Provider] camera stream restarting: app returned to the foreground with no video flowing");
+    log("camera stream restarting: app returned to the foreground with no video flowing");
     this.restartAttempts = 0;
     this.rebuildCamera();
   }
@@ -602,7 +649,8 @@ class ProviderEngine {
     if (gen !== this.camGen || !this.camOn || !this.assignedHere) return;
     const delay = Math.min(RESTART_MAX_MS, RESTART_BASE_MS * 2 ** this.restartAttempts);
     this.restartAttempts++;
-    console.warn(`[Provider] camera stream stopped: ${reason} — restarting in ${Math.round(delay / 1000)} s (attempt ${this.restartAttempts})`);
+    providerHealth.restarts++;
+    log(`camera stream stopped: ${reason} — restarting in ${Math.round(delay / 1000)} s (attempt ${this.restartAttempts})`);
     this.teardownCamera();   // bumps camGen: every callback of the stopped stream goes quiet
     this.rtcState = `restarting (${reason})`;
     this.publish();
@@ -773,15 +821,47 @@ class ProviderEngine {
 
   // ── Foreground service ──────────────────────────────────────────────────────
   private syncForeground() {
-    if (!this.active) { stopForegroundStreaming(); return; }
-    // camera type requires the CAMERA runtime permission, so only request it while the camera is on.
-    const types: ForegroundServiceType[] = ["dataSync"];
-    if (this.camOn) types.unshift("camera");
-    if (this.config.locationOn) types.push("location");
+    this.syncHealth();
+    if (!this.active) {
+      if (this.fgsKey !== "") { this.fgsKey = ""; stopForegroundStreaming(); }
+      return;
+    }
+    const types = foregroundTypes(this.camOn, this.config.locationOn);
     const text = this.camOn
       ? "Streaming camera & sensors to the controller"
       : "Streaming sensors to the controller";
+    // Only tell the service when something changed: every call is a startForegroundService(), which
+    // Android may refuse from the background.
+    const key = `${types.join(",")}|${text}|${this.deviceName}`;
+    if (key === this.fgsKey) return;
+    this.fgsKey = key;
     startForegroundStreaming(this.deviceName || "Phone", text, types);
+  }
+
+  // ── Health line (leak watch for a phone left streaming for hours) ──────────
+  private syncHealth() {
+    if (this.active && !this.healthTimer) {
+      this.healthTimer = setInterval(() => log(this.healthLine()), HEALTH_MS);
+    } else if (!this.active && this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
+  }
+
+  /** One cheap line: JS heap (Hermes), what the camera pipeline holds, restarts, timers. */
+  healthLine(): string {
+    const h = providerHealth;
+    let heap = "";
+    try {
+      const hermes = (globalThis as { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> } }).HermesInternal;
+      const s = hermes?.getInstrumentedStats?.();
+      if (s && typeof s.js_heapSize === "number") {
+        heap = `heap ${Math.round((s.js_allocatedBytes ?? 0) / 1048576)}/${Math.round(s.js_heapSize / 1048576)} MB · `;
+      }
+    } catch { /* not Hermes */ }
+    return `health: ${heap}pc ${h.pcOpen} · streams ${h.streamsOpen} · tracks ${h.tracksOpen}`
+      + ` · builds ${h.builds} · restarts ${h.restarts} · sensors ${this.sensorSubs.length}${this.locSub ? "+gps" : ""}`
+      + ` · ${this.rtcState || "idle"}`;
   }
 
   /** Turn the stream a quarter turn clockwise. */
@@ -794,12 +874,29 @@ class ProviderEngine {
     this.camGen++;
     if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; }
     if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
-    try { this.camWs?.close(); } catch { /* noop */ }
-    try { this.stream?.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
-    try { this.pc?.close(); } catch { /* noop */ }
+    const ws = this.camWs, stream = this.stream, pc = this.pc;
     this.camWs = null;
     this.stream = null;
     this.pc = null;
+    if (ws) {
+      // Drop the handlers first: they close over the peer connection, and a late message must not
+      // reach a closed one (setRemoteDescription / addIceCandidate on a closed pc).
+      ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null;
+      try { ws.close(); } catch { /* noop */ }
+    }
+    if (pc) {
+      // Close before releasing the track, so nothing is still encoding from it. close() also has the
+      // library dispose the native connection (on its "closed" signaling event).
+      try { pc.close(); } catch { /* noop */ }
+      providerHealth.pcOpen = Math.max(0, providerHealth.pcOpen - 1);
+    }
+    if (stream) {
+      providerHealth.tracksOpen = Math.max(0, providerHealth.tracksOpen - stream.getTracks().length);
+      providerHealth.streamsOpen = Math.max(0, providerHealth.streamsOpen - 1);
+      releaseStream(stream);
+    }
+    this.encodingBusy = false;
+    this.encodingAgain = false;
     this.rtcState = "";
     this.rtcStats = null;
     this.rxStats = null;
@@ -814,10 +911,18 @@ class ProviderEngine {
    */
   private async applyEncodingLive() {
     const pc = this.pc;
-    if (!pc) return;
+    if (!pc || this.encodingBusy) { if (pc) this.encodingAgain = true; return; }
+    const gen = this.camGen;
+    // Never touch the sender of a connection that is closing / closed, or whose track has ended:
+    // setParameters on a torn-down native sender is the kind of call that crashes inside libwebrtc.
+    const live = () => gen === this.camGen && this.pc === pc
+      && (pc as unknown as { connectionState?: string }).connectionState !== "closed"
+      && (pc as unknown as { signalingState?: string }).signalingState !== "closed";
+    if (!live()) return;
+    this.encodingBusy = true;
     try {
       const sender = pc.getSenders().find(s => s.track?.kind === "video");
-      if (!sender) return;
+      if (!sender || !sender.track || sender.track.readyState === "ended") return;
       const params = sender.getParameters();
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{ active: true }];
       params.encodings[0].active = true;
@@ -825,8 +930,13 @@ class ProviderEngine {
       params.encodings[0].maxFramerate = Number(this.config.rtcFps);
       params.encodings[0].scaleResolutionDownBy = 1;
       params.degradationPreference = "maintain-resolution";
+      if (!live()) return;
       await sender.setParameters(params);
-    } catch { /* older impl without full param support — capture constraints still apply */ }
+    } catch { /* older impl without full param support — capture constraints still apply */ } finally {
+      this.encodingBusy = false;
+      // A change arrived while this one was in flight: apply the latest once (never stacked calls).
+      if (this.encodingAgain) { this.encodingAgain = false; if (live()) void this.applyEncodingLive(); }
+    }
   }
 
   private async rebuildCamera() {
@@ -869,7 +979,8 @@ class ProviderEngine {
       const t = setTimeout(() => { settled = true; reject(new Error("camera open timed out")); }, CAMERA_OPEN_MS);
       mediaDevices.getUserMedia({ video: videoFor(lens), audio: false }).then(s => {
         clearTimeout(t);
-        if (settled) s.getTracks().forEach(tr => tr.stop()); else { settled = true; resolve(s); }
+        // Opened after we gave up on it: release it fully, or the camera pipeline leaks.
+        if (settled) releaseStream(s); else { settled = true; resolve(s); }
       }, err => { clearTimeout(t); if (!settled) { settled = true; reject(err); } });
     });
 
@@ -887,8 +998,10 @@ class ProviderEngine {
         if (gen === this.camGen) this.config.lensId = null;
       } catch { this.scheduleRestart(gen, "the camera couldn't be opened"); return; }
     }
-    if (gen !== this.camGen) { stream.getTracks().forEach(t => t.stop()); return; }
+    if (gen !== this.camGen) { releaseStream(stream); return; }
     this.stream = stream;
+    providerHealth.streamsOpen++;
+    providerHealth.tracksOpen += stream.getTracks().length;
     this.refreshLenses(); // labels are available now that the camera is open
     // Android ends the track when it takes the camera away (another app opened it, the camera failed).
     stream.getVideoTracks().forEach(t => {
@@ -900,6 +1013,8 @@ class ProviderEngine {
 
     const pc = new RTCPeerConnection({ iceServers: [] }); // tailnet: direct host candidates, no STUN/TURN
     this.pc = pc;
+    providerHealth.pcOpen++;
+    providerHealth.builds++;
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
     // Pin the sender encoding (bitrate cap + full resolution + prefer dropping frames over downscaling)
@@ -991,6 +1106,7 @@ class ProviderEngine {
       } catch { this.scheduleRestart(gen, "couldn't start the connection (offer failed)"); }
     };
     ws.onmessage = async e => {
+      if (gen !== this.camGen) return;   // this stream was torn down — its pc is closed
       try {
         const m = JSON.parse(typeof e.data === "string" ? e.data : "");
         if (m.type === "answer" && m.sdp) {
@@ -1034,8 +1150,12 @@ class ProviderEngine {
     this.locSub?.remove();
     this.locSub = null;
     if (this.flushTimer) { clearInterval(this.flushTimer); this.flushTimer = null; }
-    try { this.devWs?.close(); } catch { /* noop */ }
+    const ws = this.devWs;
     this.devWs = null;
+    if (ws) {
+      ws.onopen = null; ws.onclose = null; ws.onerror = null;
+      try { ws.close(); } catch { /* noop */ }
+    }
     this.pending = {};
     this.devLive = false;
   }
@@ -1120,7 +1240,9 @@ class ProviderEngine {
     this.teardownSensors();
     this.camId = null;
     this.values = {};
+    this.fgsKey = "";
     stopForegroundStreaming();
+    this.syncHealth();
   }
 }
 
