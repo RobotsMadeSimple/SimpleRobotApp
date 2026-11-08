@@ -1,5 +1,6 @@
 import type { DrawGeometry, DrawGrid, DrawShape } from "./regionMath";
 import { HOMOGRAPHY_JS } from "./homography";
+import { FEED_NOTE_JS, LIVE_FEED_JS } from "./liveFeedSocket";
 
 /** Another region drawn faintly behind the one being edited, for context. */
 export type DrawContextRegion = { id: string; name: string; geometry: DrawGeometry; grid: DrawGrid | null };
@@ -695,7 +696,9 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 <script>
 ${HOMOGRAPHY_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
-var _ws=null,_timer=null,_lastUrl=null,_gen=0;
+${LIVE_FEED_JS}
+${FEED_NOTE_JS}
+var _ws=null,_timer=null,_lastUrl=null,_gen=0,_feed=null;
 
 // Tool overlay drawn over every frame: each tool's region (as used this frame when there is a
 // result, else as configured), its found points / lines / pose (a small axis cross), matched
@@ -777,7 +780,7 @@ c.addEventListener('pointerup',function(e){
 // Each setFeed bumps the generation; only the current generation is allowed to
 // draw, so a just-closed feed (e.g. the raw camera socket while switching to the
 // annotated vision socket) can't paint stale frames and cause flicker.
-function closeWs(){if(_ws){try{_ws.onmessage=null;_ws.close();}catch(e){}_ws=null;}}
+function closeWs(){if(_feed){_feed.close();_feed=null;}}
 function stopTimer(){if(_timer){clearInterval(_timer);_timer=null;}}
 
 function drawSrc(src,cb,g){
@@ -796,14 +799,16 @@ function drawSrc(src,cb,g){
   img.src=src;
 }
 
+// The socket reconnects and watches itself (src/vision/liveFeedSocket.ts): a feed that closes or
+// goes quiet comes back on its own, with "No new frames for N s, …" over the picture meanwhile.
 function startWs(url,g){
-  var dec=false,pend=null;
-  function step(src){dec=true;drawSrc(src,function(){dec=false;if(pend!==null){var n=pend;pend=null;step(n);}},g);}
-  _ws=new WebSocket(url);
-  _ws.onmessage=function(e){if(g!==_gen)return;if(dec){pend=e.data;}else{step(e.data);}};
-  _ws.onerror=function(){_ws=null;};
-  _ws.onclose=function(){_ws=null;};
+  _feed=liveFeed(url,{
+    frame:function(src,done){if(g!==_gen){done();return;}drawSrc(src,done,g);},
+    note:showNote,
+    log:function(m){try{console.log('[feed] '+m);}catch(e){}}
+  });
 }
+window.kickFeed=function(why){if(_feed)_feed.kick(why);};
 
 function startPoll(url,ms,g){
   var busy=false;

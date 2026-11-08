@@ -5,6 +5,7 @@ import { Camera } from "lucide-react-native";
 import { colors, radii } from "@/src/components/ui/kit";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { VisionCanvas } from "@/src/vision/VisionCanvas";
+import { FEED_NOTE_JS, LIVE_FEED_JS, startLiveFeedHere } from "@/src/vision/liveFeedSocket";
 
 // The WebView's decode/draw loop for the camera's MJPEG-over-WebSocket feed (native).
 function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
@@ -21,10 +22,12 @@ function makeCameraHtml(wsUrl: string, zoomable: boolean): string {
 <body>
   <canvas id="c"></canvas>
   <script>
-    var c=document.getElementById('c'),x=c.getContext('2d'),dec=false,pend=null;
-    function draw(src){dec=true;var i=new Image();i.onload=function(){if(c.width!==i.naturalWidth||c.height!==i.naturalHeight){c.width=i.naturalWidth;c.height=i.naturalHeight;}x.drawImage(i,0,0,c.width,c.height);dec=false;if(pend!==null){var n=pend;pend=null;draw(n);}};i.src=src;}
-    var ws=new WebSocket(${JSON.stringify(wsUrl)});
-    ws.onmessage=function(e){if(dec){pend=e.data;}else{draw(e.data);}};
+    var c=document.getElementById('c'),x=c.getContext('2d');
+    ${LIVE_FEED_JS}
+    ${FEED_NOTE_JS}
+    function draw(src,done){var i=new Image();i.onload=function(){if(c.width!==i.naturalWidth||c.height!==i.naturalHeight){c.width=i.naturalWidth;c.height=i.naturalHeight;}x.drawImage(i,0,0,c.width,c.height);done();};i.onerror=done;i.src=src;}
+    // Reconnects and watches itself (src/vision/liveFeedSocket.ts), so a dropped socket never freezes the picture.
+    liveFeed(${JSON.stringify(wsUrl)},{frame:draw,note:showNote,log:function(m){try{console.log('[feed] '+m);}catch(e){}}});
     ${tapScript}
   <\/script>
 </body></html>`;
@@ -49,6 +52,7 @@ export function CameraLiveFeed({
   zoomable?: boolean;
 }) {
   const [hasFrame, setHasFrame] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const canvasRef = useRef<any>(null);
 
   useEffect(() => {
@@ -56,15 +60,11 @@ export function CameraLiveFeed({
     const wsUrl = robotClient.cameraWsUrl(cameraId);
     if (!wsUrl) return;
     let cancelled = false;
-    let decoding  = false;
-    let pending: string | null = null;
-    function decode(data: string) {
-      decoding = true;
+    function decode(data: string, done: () => void) {
       const img = new (window as any).Image() as HTMLImageElement;
       img.onload = () => {
-        if (cancelled) { decoding = false; return; }
         const canvas = canvasRef.current;
-        if (canvas) {
+        if (!cancelled && canvas) {
           if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
             canvas.width  = img.naturalWidth;
             canvas.height = img.naturalHeight;
@@ -72,15 +72,18 @@ export function CameraLiveFeed({
           canvas.getContext("2d")?.drawImage(img, 0, 0);
           setHasFrame(true);
         }
-        decoding = false;
-        if (pending !== null) { const next = pending; pending = null; decode(next); }
+        done();
       };
+      img.onerror = () => done();
       img.src = data;
     }
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (e) => { if (decoding) { pending = e.data as string; } else { decode(e.data as string); } };
-    ws.onerror = () => {};
-    return () => { cancelled = true; ws.close(); };
+    // Reconnects and watches itself (src/vision/liveFeedSocket.ts), like the native document.
+    const feed = startLiveFeedHere(wsUrl, {
+      frame: decode,
+      note: (t) => { if (!cancelled) setNote(t); },
+      log: (m) => console.log(`[feed] ${m}`),
+    });
+    return () => { feed.close(); cancelled = true; };
   }, [cameraId]);
 
   const box = [styles.feed, { aspectRatio }, style];
@@ -98,6 +101,11 @@ export function CameraLiveFeed({
           <View style={[StyleSheet.absoluteFill, styles.placeholder]}>
             <Camera size={28} color={colors.textFaint} />
             <Text style={styles.placeholderText}>Connecting…</Text>
+          </View>
+        )}
+        {hasFrame && !!note && (
+          <View style={styles.note} pointerEvents="none">
+            <Text style={styles.noteText}>{note}</Text>
           </View>
         )}
       </View>
@@ -132,4 +140,8 @@ const styles = StyleSheet.create({
   },
   placeholder: { justifyContent: "center", alignItems: "center", gap: 8, backgroundColor: "#000" },
   placeholderText: { fontSize: 13, color: colors.textMuted },
+  // The "No new frames…" note over a stalled feed (dark chip on the video, like the native one).
+  note: { position: "absolute", bottom: 10, alignSelf: "center", maxWidth: "92%", paddingHorizontal: 10, paddingVertical: 5,
+          borderRadius: 6, backgroundColor: "rgba(0,0,0,0.72)" },
+  noteText: { color: "#fff", fontSize: 12, fontWeight: "600", textAlign: "center" },
 });

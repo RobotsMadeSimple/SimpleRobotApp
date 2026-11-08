@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef } from "react";
+import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { WebView } from "react-native-webview";
 import type { VisionCanvasHandle, VisionCanvasProps } from "./visionCanvasTypes";
 
@@ -14,6 +14,14 @@ import type { VisionCanvasHandle, VisionCanvasProps } from "./visionCanvasTypes"
 export const VisionCanvas = forwardRef<VisionCanvasHandle, VisionCanvasProps>(
   function VisionCanvas({ html, style, onMessage, onLoad, focusable }, ref) {
     const webRef = useRef<WebView>(null);
+    // Bumped when the WebView's renderer dies (Android can kill it under memory pressure, a live
+    // feed is heavy): a fresh WebView loads the document again and onLoad re-sends the host's state,
+    // instead of a dead, frozen picture (or, unhandled, the whole app going down).
+    const [life, setLife] = useState(0);
+    const revive = useCallback((why: string) => {
+      console.warn(`[VisionCanvas] ${why}; reloading the document`);
+      setLife(n => n + 1);
+    }, []);
 
     useImperativeHandle(ref, () => ({
       injectJavaScript: (code: string) => { webRef.current?.injectJavaScript(code); },
@@ -21,6 +29,9 @@ export const VisionCanvas = forwardRef<VisionCanvasHandle, VisionCanvasProps>(
 
     return (
       <WebView
+        key={life}
+        onRenderProcessGone={(e) => revive(`renderer gone (crashed: ${e.nativeEvent.didCrash})`)}
+        onContentProcessDidTerminate={() => revive("content process terminated")}
         ref={webRef}
         source={{ html }}
         style={style}
