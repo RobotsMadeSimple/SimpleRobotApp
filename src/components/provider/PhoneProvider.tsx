@@ -69,7 +69,7 @@ export function PhoneProvider({
   const cfg = st.config;
   const streaming = st.rtcState === "connected";
   // What the controller actually decodes (the sender's stats only say frames are going out).
-  const rx = st.assignedHere && st.rxStats ? describeRxStats(st.rxStats) : null;
+  const rx = st.assignedHere && st.rxStats ? describeRxStats(st.rxStats, cfg.bitrate) : null;
   const ready = st.identityReady && st.configLoaded;
   // Preview shape follows the stream (portrait frames are taller than wide). Other phones have no
   // sender stats, so they work it out from the settings.
@@ -213,7 +213,7 @@ export function PhoneProvider({
                   <Text style={type.caption}>
                     {!st.assignedHere
                       ? `Streamed by ${st.assignedPhoneName || "the linked phone"} · controller view of “${name}”.`
-                      : `WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · sending ${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
+                      : `WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · sending ${st.rtcStats.fps} fps${st.rtcStats.limit ? ` (held back by ${st.rtcStats.limit})` : ""} ·${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
                   </Text>
                   {rx && streaming && (
                     <Text style={[type.caption, rx.bad && styles.rxBad]}>{rx.text}</Text>

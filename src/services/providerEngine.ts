@@ -144,7 +144,11 @@ const changed = (a: ProviderConfig, b: ProviderConfig, keys: (keyof ProviderConf
 /** One selectable camera on the phone, from enumerateDevices(). */
 export type Lens = { id: string; label: string; facing?: string };
 
-export type RtcStats = { fps: number; w: number; h: number; kbps: number };
+export type RtcStats = {
+  fps: number; w: number; h: number; kbps: number;
+  /** Why WebRTC is holding the encoder back ("cpu", "bandwidth", "other"), when it is. */
+  limit?: string;
+};
 
 /**
  * The controller's side of the stream, sent once a second over the signaling socket. The sender's
@@ -169,6 +173,15 @@ export type RxStats = {
   /** Ms since the last clean picture (-1 = none yet). */
   msSincePicture: number;
   reason?: string;
+  /** Rate arriving at the controller (kbps, resends included). */
+  rxKbps: number;
+  /** The bitrate the controller asks this phone to stay under (kbps) because the link overran, or
+   *  null for no limit. Applied to the encoder under the user's own bitrate setting. */
+  capKbps: number | null;
+  /** How often the controller has lowered that cap. */
+  capLowered: number;
+  /** Typical time for a resend to come back after the controller asked for it (ms; 0 = not measured). */
+  resendRttMs: number;
 };
 
 /** Parses a controller `{type:"stats"}` signal; null if it isn't one. */
@@ -181,8 +194,23 @@ export function parseRxStats(m: unknown): RxStats | null {
     keyRequests: n("keyRequests"), keyFrames: n("keyFrames"), waitingForKeyFrame: o.waitingForKeyFrame === true,
     msSincePicture: typeof o.msSincePicture === "number" ? o.msSincePicture : -1,
     reason: typeof o.reason === "string" ? o.reason : undefined,
+    rxKbps: n("rxKbps"),
+    capKbps: typeof o.capKbps === "number" && Number.isFinite(o.capKbps) && o.capKbps > 0 ? o.capKbps : null,
+    capLowered: n("capLowered"),
+    resendRttMs: n("resendRttMs"),
   };
 }
+
+/** The bitrate the encoder should run at: the user's setting, under the controller's cap if it set one. */
+export function effectiveBitrate(userBps: number, capKbps: number | null | undefined): number {
+  if (!capKbps || capKbps <= 0) return userBps;
+  return Math.max(MIN_BITRATE, Math.min(userBps, Math.round(capKbps * 1000)));
+}
+
+const mbps = (kbps: number) => {
+  const m = kbps / 1000;
+  return m >= 10 ? String(Math.round(m)) : String(Math.round(m * 10) / 10);
+};
 
 /**
  * Force the H.264 encoder's start/min/max bitrate via SDP. `maxBitrate` from setParameters is only a
@@ -220,22 +248,29 @@ function forceBitrateSdp(sdp: string, bps: number): string {
 }
 
 /**
- * One honest line about what the controller is getting: clean pictures decoded per second, frames
- * dropped, packets lost / resent. `bad` = the picture is frozen (waiting for a key frame) or
- * decoding well below what arrives.
+ * One honest line about what the controller is getting: clean pictures decoded per second, packets
+ * resent / lost for good, frames dropped, and whether it lowered the bitrate (only said when the cap
+ * is under the user's own setting, `userBps`, so it actually binds). `bad` = the picture is frozen
+ * (waiting for a key frame) or decoding well below what arrives.
  */
-export function describeRxStats(rx: RxStats): { text: string; bad: boolean } {
+export function describeRxStats(rx: RxStats, userBps?: number): { text: string; bad: boolean } {
   const fps = (v: number) => (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+  const extra: string[] = [];
+  if (rx.recovered > 0) extra.push(`resent ${rx.recovered} lost packets`);
+  if (rx.lost > 0) extra.push(`${rx.lost} lost for good`);
+  if (rx.dropped > 0) extra.push(`${rx.dropped} frames dropped`);
+  if (rx.capKbps && (userBps === undefined || rx.capKbps * 1000 < userBps)) {
+    extra.push(`lowered bitrate to ${mbps(rx.capKbps)} Mbps (the link couldn't carry more)`);
+  }
   if (rx.waitingForKeyFrame) {
     const since = rx.msSincePicture >= 0 ? ` for ${(rx.msSincePicture / 1000).toFixed(1)} s` : "";
     return {
-      text: `Controller: picture frozen${since} — packets were lost, waiting for a key frame (asked ${rx.keyRequests}×). ${rx.dropped} frames dropped.`,
+      text: `Controller: picture frozen${since} — packets were lost, waiting for a key frame (asked ${rx.keyRequests}×)`
+        + (extra.length ? ` · ${extra.join(" · ")}` : "") + ".",
       bad: true,
     };
   }
-  const parts = [`Controller: ${fps(rx.decodedFps)} fps decoded`];
-  if (rx.dropped > 0) parts.push(`${rx.dropped} frames dropped`);
-  if (rx.lost > 0 || rx.recovered > 0) parts.push(`${rx.lost} packets lost, ${rx.recovered} resent`);
+  const parts = [`Controller: ${fps(rx.decodedFps)} fps decoded`, ...extra];
   return { text: parts.join(" · ") + ".", bad: rx.rxFps >= 2 && rx.decodedFps < rx.rxFps * 0.5 };
 }
 
@@ -284,6 +319,7 @@ type RtcReport = {
   type?: string; kind?: string; mediaType?: string;
   bytesSent?: number; timestamp?: number; framesPerSecond?: number; framesEncoded?: number; framesSent?: number;
   frameWidth?: number; frameHeight?: number; width?: number; height?: number;
+  qualityLimitationReason?: string;
 };
 
 type Sub = { remove: () => void };
@@ -298,6 +334,8 @@ class ProviderEngine {
   private rtcState = "";
   private rtcStats: RtcStats | null = null;
   private rxStats: RxStats | null = null;
+  /** The controller's bitrate cap (kbps) currently applied to the encoder, null = none. */
+  private rtcCapKbps: number | null = null;
   private devLive = false;
   private values: Record<string, number> = {};
   private lenses: Lens[] = [];
@@ -765,11 +803,14 @@ class ProviderEngine {
     this.rtcState = "";
     this.rtcStats = null;
     this.rxStats = null;
+    this.rtcCapKbps = null;
   }
 
   /**
    * Apply the sender encoding params (bitrate cap, framerate, keep-resolution) to the LIVE peer
    * connection — no renegotiation, so a bitrate change takes effect immediately on the running stream.
+   * The bitrate is the user's setting, lowered to the controller's cap while it reports one (it
+   * measures what actually arrives; the pinned SDP rate gives WebRTC no way to back off by itself).
    */
   private async applyEncodingLive() {
     const pc = this.pc;
@@ -780,7 +821,7 @@ class ProviderEngine {
       const params = sender.getParameters();
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{ active: true }];
       params.encodings[0].active = true;
-      params.encodings[0].maxBitrate = this.config.bitrate;
+      params.encodings[0].maxBitrate = effectiveBitrate(this.config.bitrate, this.rtcCapKbps);
       params.encodings[0].maxFramerate = Number(this.config.rtcFps);
       params.encodings[0].scaleResolutionDownBy = 1;
       params.degradationPreference = "maintain-resolution";
@@ -884,13 +925,14 @@ class ProviderEngine {
       statsBusy = true;
       try {
         const rep = await (pc as unknown as { getStats: () => Promise<Map<string, RtcReport>> }).getStats();
-        let fw = 0, fh = 0, fps = 0, bytes = 0, ts = 0, frames = -1;
+        let fw = 0, fh = 0, fps = 0, bytes = 0, ts = 0, frames = -1, limit: string | undefined;
         rep.forEach(r => {
           if (r.type === "outbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
             bytes = r.bytesSent ?? bytes; ts = r.timestamp ?? ts;
             frames = r.framesEncoded ?? r.framesSent ?? frames;
             if (r.framesPerSecond) fps = r.framesPerSecond;
             if (r.frameWidth) { fw = r.frameWidth; fh = r.frameHeight ?? 0; }
+            if (r.qualityLimitationReason && r.qualityLimitationReason !== "none") limit = r.qualityLimitationReason;
           } else if (r.type === "media-source") {
             if (!fw && r.width) { fw = r.width; fh = r.height ?? 0; }
             if (!fps && r.framesPerSecond) fps = r.framesPerSecond;
@@ -904,7 +946,7 @@ class ProviderEngine {
         if (frames >= 0) prevFrames = frames;
         if (gen !== this.camGen) return;
         if (progressed) { this.lastFlowAt = Date.now(); this.restartAttempts = 0; }
-        this.rtcStats = { fps: Math.round(fps), w: fw, h: fh, kbps };
+        this.rtcStats = { fps: Math.round(fps), w: fw, h: fh, kbps, limit };
         this.publish();
       } catch { /* stats unavailable this tick */ } finally { statsBusy = false; }
     }, 1000);
@@ -958,7 +1000,16 @@ class ProviderEngine {
         } else if (m.type === "stats") {
           // The controller's honest view: is a clean picture actually coming out of the decoder?
           const rx = parseRxStats(m);
-          if (rx && gen === this.camGen) { this.rxStats = rx; this.publish(); }
+          if (rx && gen === this.camGen) {
+            this.rxStats = rx;
+            // Follow the controller's bitrate cap (it lowers it when the link overruns, lifts it when clean).
+            if (rx.capKbps !== this.rtcCapKbps) {
+              const before = effectiveBitrate(this.config.bitrate, this.rtcCapKbps);
+              this.rtcCapKbps = rx.capKbps;
+              if (effectiveBitrate(this.config.bitrate, rx.capKbps) !== before) void this.applyEncodingLive();
+            }
+            this.publish();
+          }
         }
       } catch { /* ignore a malformed signal */ }
     };
