@@ -14,8 +14,8 @@ import {
 import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
 import {
-  ASPECT_OPTIONS, lensLabel, ORIENT_OPTIONS, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS, RTC_FPS_OPTIONS,
-  type ProviderEngineState,
+  ASPECT_OPTIONS, describeRxStats, lensLabel, ORIENT_OPTIONS, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS,
+  RTC_FPS_OPTIONS, type ProviderEngineState,
 } from "@/src/services/providerEngine";
 import { DEFAULT_PHONE_DEVICE_NAME } from "./providerUtil";
 
@@ -68,6 +68,8 @@ export function PhoneProvider({
 
   const cfg = st.config;
   const streaming = st.rtcState === "connected";
+  // What the controller actually decodes (the sender's stats only say frames are going out).
+  const rx = st.assignedHere && st.rxStats ? describeRxStats(st.rxStats) : null;
   const ready = st.identityReady && st.configLoaded;
   // Preview shape follows the stream (portrait frames are taller than wide). Other phones have no
   // sender stats, so they work it out from the settings.
@@ -172,7 +174,7 @@ export function PhoneProvider({
                     <SegmentedControl options={RTC_FPS_OPTIONS} value={cfg.rtcFps} onChange={v => providerEngine.updateConfig({ rtcFps: v })} />
                   </FormRow>
                   <Divider />
-                  <FormRow label="Bitrate" hint="Mbps ceiling — the quality knob. WebRTC adapts below it; applies live. Higher = cleaner (esp. at 60 fps / 1080p).">
+                  <FormRow label="Bitrate" hint="Mbps the phone sends at — the quality knob; applies live. Higher = cleaner, but over Wi-Fi more gets lost and resent; 12 is plenty for 1080p.">
                     <SegmentedControl options={RTC_BITRATE_OPTIONS} value={String(cfg.bitrate)} onChange={v => providerEngine.updateConfig({ bitrate: Number(v) })} />
                   </FormRow>
                   {lenses.length > 1 && (
@@ -211,8 +213,11 @@ export function PhoneProvider({
                   <Text style={type.caption}>
                     {!st.assignedHere
                       ? `Streamed by ${st.assignedPhoneName || "the linked phone"} · controller view of “${name}”.`
-                      : `WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · ${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
+                      : `WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · sending ${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
                   </Text>
+                  {rx && streaming && (
+                    <Text style={[type.caption, rx.bad && styles.rxBad]}>{rx.text}</Text>
+                  )}
                 </>
               )}
             </Card>
@@ -304,6 +309,7 @@ export function PhoneProvider({
           {st.rtcStats && (streaming) && (
             <Text style={styles.dimMeta}>{`${st.rtcStats.fps} fps · ${st.rtcStats.w}×${st.rtcStats.h}`}</Text>
           )}
+          {rx?.bad && streaming && <Text style={[styles.dimMeta, styles.rxBad]}>{rx.text}</Text>}
           <Text style={styles.dimHint}>Tap to wake</Text>
         </Pressable>
       )}
@@ -329,6 +335,7 @@ const styles = StyleSheet.create({
   valueKey: { ...type.body, color: colors.text },
   valueVal: { ...type.mono, color: colors.textSecondary },
   note: { marginTop: spacing.sm },
+  rxBad: { color: colors.warning },
 
   // Dim (kiosk) overlay
   dimOverlay: {

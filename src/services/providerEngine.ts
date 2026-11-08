@@ -147,6 +147,44 @@ export type Lens = { id: string; label: string; facing?: string };
 export type RtcStats = { fps: number; w: number; h: number; kbps: number };
 
 /**
+ * The controller's side of the stream, sent once a second over the signaling socket. The sender's
+ * own stats only say frames are going out; these say whether a clean picture is coming out the other
+ * end (lost packets are NACKed; an unrecoverable loss freezes the picture until a key frame).
+ */
+export type RxStats = {
+  /** Frames arriving per second (complete or not). */
+  rxFps: number;
+  /** Clean pictures decoded per second — what the preview, snapshots and vision actually get. */
+  decodedFps: number;
+  /** Frames dropped (incomplete, or not decodable while waiting for a key frame), since the stream began. */
+  dropped: number;
+  /** Packets that never arrived in time / that were lost and then retransmitted. */
+  lost: number;
+  recovered: number;
+  /** Key frames requested (PLI) / received. */
+  keyRequests: number;
+  keyFrames: number;
+  /** Packets were lost: the picture is frozen on the last clean frame until a key frame arrives. */
+  waitingForKeyFrame: boolean;
+  /** Ms since the last clean picture (-1 = none yet). */
+  msSincePicture: number;
+  reason?: string;
+};
+
+/** Parses a controller `{type:"stats"}` signal; null if it isn't one. */
+export function parseRxStats(m: unknown): RxStats | null {
+  const o = m as Record<string, unknown> | null;
+  if (!o || o.type !== "stats") return null;
+  const n = (k: string) => (typeof o[k] === "number" && Number.isFinite(o[k]) ? (o[k] as number) : 0);
+  return {
+    rxFps: n("rxFps"), decodedFps: n("decodedFps"), dropped: n("dropped"), lost: n("lost"), recovered: n("recovered"),
+    keyRequests: n("keyRequests"), keyFrames: n("keyFrames"), waitingForKeyFrame: o.waitingForKeyFrame === true,
+    msSincePicture: typeof o.msSincePicture === "number" ? o.msSincePicture : -1,
+    reason: typeof o.reason === "string" ? o.reason : undefined,
+  };
+}
+
+/**
  * Force the H.264 encoder's start/min/max bitrate via SDP. `maxBitrate` from setParameters is only a
  * ceiling; the live rate is chosen by WebRTC's bandwidth estimator (BWE), which — when the receiver
  * sends no usable REMB/transport-cc feedback (SIPSorcery) — never ramps past its ~300–600 kbps start
@@ -181,6 +219,26 @@ function forceBitrateSdp(sdp: string, bps: number): string {
   return out.join("\r\n");
 }
 
+/**
+ * One honest line about what the controller is getting: clean pictures decoded per second, frames
+ * dropped, packets lost / resent. `bad` = the picture is frozen (waiting for a key frame) or
+ * decoding well below what arrives.
+ */
+export function describeRxStats(rx: RxStats): { text: string; bad: boolean } {
+  const fps = (v: number) => (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+  if (rx.waitingForKeyFrame) {
+    const since = rx.msSincePicture >= 0 ? ` for ${(rx.msSincePicture / 1000).toFixed(1)} s` : "";
+    return {
+      text: `Controller: picture frozen${since} — packets were lost, waiting for a key frame (asked ${rx.keyRequests}×). ${rx.dropped} frames dropped.`,
+      bad: true,
+    };
+  }
+  const parts = [`Controller: ${fps(rx.decodedFps)} fps decoded`];
+  if (rx.dropped > 0) parts.push(`${rx.dropped} frames dropped`);
+  if (rx.lost > 0 || rx.recovered > 0) parts.push(`${rx.lost} packets lost, ${rx.recovered} resent`);
+  return { text: parts.join(" · ") + ".", bad: rx.rxFps >= 2 && rx.decodedFps < rx.rxFps * 0.5 };
+}
+
 const isFront = (l: Lens) => { const f = (l.facing || "").toLowerCase(); return f === "front" || f === "user"; };
 
 /** Short label for a lens in the picker: the front camera, else a numbered lens (labels vary by OEM).
@@ -205,6 +263,8 @@ export type ProviderEngineState = {
   camId: string | null;
   rtcState: string;
   rtcStats: RtcStats | null;
+  /** The controller's receive-side stats (null until it reports; older controllers never do). */
+  rxStats: RxStats | null;
   devLive: boolean;
   values: Record<string, number>;
   lenses: Lens[];
@@ -237,6 +297,7 @@ class ProviderEngine {
   private camId: string | null = null;
   private rtcState = "";
   private rtcStats: RtcStats | null = null;
+  private rxStats: RxStats | null = null;
   private devLive = false;
   private values: Record<string, number> = {};
   private lenses: Lens[] = [];
@@ -307,6 +368,7 @@ class ProviderEngine {
       camId: this.camId,
       rtcState: this.rtcState,
       rtcStats: this.rtcStats,
+      rxStats: this.rxStats,
       devLive: this.devLive,
       values: this.values,
       lenses: this.assignedHere ? this.lenses : this.config.lenses,
@@ -702,6 +764,7 @@ class ProviderEngine {
     this.pc = null;
     this.rtcState = "";
     this.rtcStats = null;
+    this.rxStats = null;
   }
 
   /**
@@ -892,6 +955,10 @@ class ProviderEngine {
           await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: m.sdp }));
         } else if (m.type === "ice" && m.candidate) {
           await pc.addIceCandidate(new RTCIceCandidate(m.candidate));
+        } else if (m.type === "stats") {
+          // The controller's honest view: is a clean picture actually coming out of the decoder?
+          const rx = parseRxStats(m);
+          if (rx && gen === this.camGen) { this.rxStats = rx; this.publish(); }
         }
       } catch { /* ignore a malformed signal */ }
     };
