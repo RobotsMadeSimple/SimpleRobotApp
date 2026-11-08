@@ -698,19 +698,23 @@ var c=document.getElementById('c'),ctx=c.getContext('2d');
 var _ws=null,_timer=null,_lastUrl=null,_gen=0;
 
 // Tool overlay drawn over every frame: each tool's region (as used this frame when there is a
-// result, else as configured), its found points / lines / pose (a small axis cross), grid cells
-// coloured pass / fail, and tools that did not run dimmed. The host pushes it in with setOverlay.
+// result, else as configured), its found points / lines / pose (a small axis cross), matched
+// pattern outlines with their scores, grid cells coloured pass / fail, and tools that did not run dimmed. The host pushes it in with setOverlay.
 // An outline (and its cells) in "norm" space is scaled by the frame size, a "px" one is drawn as-is;
-// points, lines and poses are always pixels. The canvas is the frame at its natural size, so result
-// pixels map straight onto it.
+// points, lines and poses are always pixels of the frame vision ran on (each item's frame [w, h]).
+// The canvas is whatever frame the feed sent, which can be a downscaled preview of that one (a phone
+// stream's live preview is), so each item is drawn in frame units scaled onto the canvas.
 var _ov=[];
 window.setOverlay=function(o){_ov=o||[];};
 function drawOverlay(){
   if(!_ov.length||!c.width||!c.height)return;
-  var W=c.width,H=c.height,m=Math.min(W,H),lw=Math.max(2,Math.round(m*0.004));
+  var cw=c.width,ch=c.height,lw0=Math.max(2,Math.round(Math.min(cw,ch)*0.004)),W,H,m,lw;
   ctx.save();ctx.lineJoin='round';
   for(var i=0;i<_ov.length;i++){
-    var o=_ov[i];var sx=o.space==='norm'?W:1,sy=o.space==='norm'?H:1;
+    var o=_ov[i];
+    W=o.frame&&o.frame[0]>0?o.frame[0]:cw;H=o.frame&&o.frame[1]>0?o.frame[1]:ch;
+    ctx.setTransform(cw/W,0,0,ch/H,0,0);m=Math.min(W,H);lw=lw0*Math.min(W/cw,H/ch);
+    var sx=o.space==='norm'?W:1,sy=o.space==='norm'?H:1;
     function X(p){return p[0]*sx;} function Y(p){return p[1]*sy;}
     ctx.globalAlpha=o.dim?0.35:1;
     function poly(pts,fill){if(!pts||pts.length<2)return;ctx.beginPath();ctx.moveTo(X(pts[0]),Y(pts[0]));
@@ -727,6 +731,13 @@ function drawOverlay(){
         ctx.font='bold '+Math.max(11,Math.round(m*0.028))+'px sans-serif';
         var tx=X(top)+4,ty=Y(top)>m*0.05?Y(top)-lw*2:Y(top)+m*0.04;
         ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.6)';ctx.strokeText(o.label,tx,ty);ctx.fillStyle=o.color;ctx.fillText(o.label,tx,ty);}}
+    // A matching tool's pattern outlines where each match was found, then each match's score.
+    if(o.contours){ctx.lineWidth=lw;ctx.strokeStyle='#4ade80';ctx.fillStyle='rgba(0,0,0,0)';
+      for(var oi=0;oi<o.contours.length;oi++){var C=o.contours[oi];if(!C||C.length<2)continue;
+        ctx.beginPath();ctx.moveTo(C[0][0],C[0][1]);for(var cj=1;cj<C.length;cj++)ctx.lineTo(C[cj][0],C[cj][1]);ctx.closePath();ctx.stroke();}}
+    if(o.labels){ctx.font='bold '+Math.max(11,Math.round(m*0.026))+'px sans-serif';
+      for(var la=0;la<o.labels.length;la++){var Lb=o.labels[la],lx=Lb[0]+lw*3,ly=Lb[1]-lw*3;
+        ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.65)';ctx.strokeText(Lb[2],lx,ly);ctx.fillStyle='#4ade80';ctx.fillText(Lb[2],lx,ly);}}
     if(o.lines){ctx.lineWidth=lw;ctx.strokeStyle='#facc15';for(var li=0;li<o.lines.length;li++){var L=o.lines[li];
       ctx.beginPath();ctx.moveTo(L[0],L[1]);ctx.lineTo(L[2],L[3]);ctx.stroke();}}
     if(o.points){ctx.fillStyle='#facc15';var pr=Math.max(2,lw);for(var pi=0;pi<o.points.length;pi++){var P=o.points[pi];

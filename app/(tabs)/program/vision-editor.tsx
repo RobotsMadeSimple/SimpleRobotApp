@@ -331,6 +331,14 @@ export default function VisionEditorScreen() {
     }
   }
 
+  /** The teach flow's check step: the pattern cut from a grabbed frame inside the drawn area, nothing saved. */
+  async function teachPreview(toolId: string, image: string, region: Region) {
+    if (!program.id) throw new Error("Wait a moment for the program to save, then try again.");
+    // Save first so the controller cuts it from the tool's image layer as it is on screen.
+    await robotClient.saveVisionProgram({ ...programRef.current, name: nameRef.current });
+    return robotClient.previewVisionTeach(program.id, toolId, image, region);
+  }
+
   async function toggleRunning() {
     if (transitioning) return;
     let id = program.id;
@@ -680,6 +688,7 @@ export default function VisionEditorScreen() {
           onSetReference={() => setReference(pageTool.id)}
           onSetFixtureReference={(fixtureId, pose) => setProgram(p => ({ ...p, tools: p.tools.map(t => (t.id === fixtureId ? { ...t, reference: pose } : t)) }))}
           onTeach={() => teach(pageTool.id)}
+          onTeachPreview={(image, region) => teachPreview(pageTool.id, image, region)}
           onClose={() => setPage(null)}
         />
       )}

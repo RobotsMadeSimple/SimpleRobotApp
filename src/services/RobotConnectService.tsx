@@ -2,7 +2,7 @@
 import { enrichByAddress } from "./connectionStore";
 import { robotDiscovery } from "./RobotDiscoveryService";
 import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
-import { normalizeVisionProgram, type Pose } from "../models/visionTools";
+import { normalizeVisionProgram, type Pose, type Region } from "../models/visionTools";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -2149,6 +2149,20 @@ export class RobotConnectService {
   public async teachVisionTool(programId: string, toolId: string): Promise<string | null> {
     const data: any = await this.sendCommand('TeachVisionTool', { programId, toolId });
     return data?.taught ?? null;
+  }
+
+  /**
+   * Cuts a template from `image` (a data URL / base64 frame) inside `region` — e.g. a rotated
+   * rectangle drawn round the part, whose angle becomes the pattern's 0° — without changing or
+   * saving the program. Returns the template (to store in params.template) and a preview PNG
+   * (base64) with its outlines drawn.
+   */
+  public async previewVisionTeach(programId: string, toolId: string, image: string, region: Region)
+    : Promise<{ template: Record<string, unknown> | null; preview: string | null; taught: string | null }> {
+    const data: any = await this.sendCommand('TeachVisionTool', { programId, toolId, image, region, preview: true });
+    let template: Record<string, unknown> | null = null;
+    try { template = data?.template ? (typeof data.template === 'string' ? JSON.parse(data.template) : data.template) : null; } catch { template = null; }
+    return { template, preview: data?.preview ?? null, taught: data?.taught ?? null };
   }
 
   /** One tool's result drawn over its own input layer (a debug view), as a JPEG. */

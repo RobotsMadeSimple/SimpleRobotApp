@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { AlertTriangle, Check, Crosshair, Pencil, Plus, Sparkles, X } from "lucide-react-native";
+import { BackHandler, Image, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { AlertTriangle, Camera, Check, Crosshair, Pencil, Plus, Sparkles, X } from "lucide-react-native";
 import { Button, FormRow, PageHeader, SegmentedControl, accents, colors, radii, spacing } from "@/src/components/ui/kit";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
@@ -9,7 +9,7 @@ import { StatusChip, fmtVisionValue, summarizeResult } from "@/src/components/ui
 import { ColorEntry, defaultColorEntry } from "@/src/models/robotModels";
 import {
   DISTANCE_MODES, FIXTURE_MODES, TOOL_META, canFeed, mainValueKey, orderProblems, regionOwner, regionSources, sourceSlots,
-  type Pose, type Region, type ToolGrid, type ToolLimit, type VisionProgram, type VisionResult, type VisionTool,
+  type PatternTemplate, type Pose, type Region, type ToolGrid, type ToolLimit, type VisionProgram, type VisionResult, type VisionTool,
 } from "@/src/models/visionTools";
 import { buildOverlay } from "@/src/vision/feedOverlay";
 import {
@@ -22,6 +22,7 @@ import { ParamFields, NumberStepper } from "./ParamFields";
 import { RegionDrawModal } from "./RegionDrawModal";
 import { ChoiceSheet, FormatPickerSheet, ToolTile } from "./ToolPickers";
 import { ColorEditModal } from "./ColorEditModal";
+import { TeachPatternModal, type TeachPreview } from "./TeachPatternModal";
 import { robotClient } from "@/src/services/RobotConnectService";
 
 type Frame = { width: number; height: number };
@@ -37,7 +38,7 @@ const shapeLabel = (r: Region | null | undefined) =>
  */
 export function ToolConfigPage({
   tool, program, result, frame, feedUrl, isRunning, transitioning, onToggleRunning,
-  snapshotUri, onFetchSnapshot, onChange, onChangeTool, onSetReference, onSetFixtureReference, onTeach, onClose,
+  snapshotUri, onFetchSnapshot, onChange, onChangeTool, onSetReference, onSetFixtureReference, onTeach, onTeachPreview, onClose,
 }: {
   tool: VisionTool;
   program: VisionProgram;
@@ -56,6 +57,8 @@ export function ToolConfigPage({
   /** Gives a fixture its reference (when a dependent region is drawn before it had one). */
   onSetFixtureReference: (fixtureId: string, pose: Pose) => void;
   onTeach: () => void;
+  /** Cuts a pattern from a grabbed frame inside an area (the teach flow), without saving anything. */
+  onTeachPreview: (image: string, region: Region) => Promise<TeachPreview>;
   onClose: () => void;
 }) {
   const paneLayout = usePaneLayout();
@@ -72,6 +75,7 @@ export function ToolConfigPage({
   const [formatsOpen, setFormatsOpen] = useState(false);
   const [colorEdit, setColorEdit] = useState<ColorEntry | null>(null);
   const [draw, setDraw] = useState<null | { which: "region" | "regionB"; initial: Region | null }>(null);
+  const [teachOpen, setTeachOpen] = useState(false);
   // "tool": this tool's result drawn over its own input image (the controller's debug view).
   const [view, setView] = useState<"live" | "tool">("live");
 
@@ -175,6 +179,7 @@ export function ToolConfigPage({
   const colors_ = Array.isArray(tool.params.colors) ? (tool.params.colors as ColorEntry[]) : [];
   const formats = Array.isArray(tool.params.formats) ? (tool.params.formats as string[]) : [];
   const hasTemplate = !!tool.params.template;
+  const pattern = tool.type === "patternMatch" && hasTemplate ? (tool.params.template as PatternTemplate) : null;
 
   const feedSection = (
     <View style={{ gap: 10 }}>
@@ -414,15 +419,33 @@ export function ToolConfigPage({
         </GroupCard>
       )}
 
-      {(tool.type === "contourMatch" || tool.type === "patternMatch") && (
+      {tool.type === "contourMatch" && (
         <GroupCard title="TEMPLATE" right={<StatusPillLite ok={hasTemplate} okText="Taught" noText="Not taught" />}>
-          <Text style={ves.paramDesc}>
-            {tool.type === "contourMatch"
-              ? "Place a good part inside the area and teach — its outline becomes what the tool looks for."
-              : "Place a good part inside the area and teach — the image patch becomes what the tool looks for."}
-          </Text>
+          <Text style={ves.paramDesc}>Place a good part inside the area and teach — its outline becomes what the tool looks for.</Text>
           <Button label={hasTemplate ? "Teach again from this image" : "Teach from this image"} variant="secondary" size="sm"
             icon={<Sparkles size={14} color={colors.textSecondary} />} onPress={onTeach} />
+        </GroupCard>
+      )}
+
+      {tool.type === "patternMatch" && (
+        <GroupCard title="PATTERN" right={<StatusPillLite ok={hasTemplate} okText="Taught" noText="Not taught" />}>
+          <Text style={ves.paramDesc}>
+            Grab a camera frame and draw a box round a good part, turned to line up with it. The pattern is learned from
+            inside the box, and the box&apos;s angle becomes 0° — found parts report their angle from it.
+          </Text>
+          {pattern && (
+            <View style={ves.groupRow}>
+              {!!pattern.png && (
+                <Image source={{ uri: `data:image/png;base64,${pattern.png}` }} style={st.patternThumb} resizeMode="contain" accessibilityLabel="Taught pattern" />
+              )}
+              <Text style={[st.mono, { flex: 1 }]}>
+                {pattern.width} × {pattern.height} px · taught at {fmtVisionValue(pattern.angle ?? 0)}°
+                {pattern.contours?.length ? ` · ${pattern.contours.length} outline${pattern.contours.length !== 1 ? "s" : ""}` : ""}
+              </Text>
+            </View>
+          )}
+          <Button label={hasTemplate ? "Teach again from the camera" : "Teach from the camera"} variant="secondary" size="sm"
+            icon={<Camera size={14} color={colors.textSecondary} />} onPress={() => setTeachOpen(true)} />
         </GroupCard>
       )}
 
@@ -586,6 +609,14 @@ export function ToolConfigPage({
         snapshotUri={snapshotUri}
         onFetchSnapshot={async () => { await onFetchSnapshot(); }}
       />
+      <TeachPatternModal
+        visible={teachOpen}
+        initialRegion={pattern?.region ?? null}
+        onGrab={onFetchSnapshot}
+        onPreview={onTeachPreview}
+        onSave={template => { setParam("template", template); setTeachOpen(false); }}
+        onCancel={() => setTeachOpen(false)}
+      />
       <RegionDrawModal
         visible={draw !== null}
         title={tool.type === "findCorner" ? (draw?.which === "regionB" ? "Side B" : "Side A") : undefined}
@@ -703,4 +734,5 @@ const st = StyleSheet.create({
   valueVal: { fontSize: 14, fontWeight: "700", color: colors.text, fontVariant: ["tabular-nums"] },
   pill: { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: radii.pill, paddingHorizontal: 7, paddingVertical: 2 },
   pillText: { fontSize: 11, fontWeight: "700" },
+  patternThumb: { width: 56, height: 56, borderRadius: radii.sm, backgroundColor: colors.surfaceMuted },
 });

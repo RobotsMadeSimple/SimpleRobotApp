@@ -20,12 +20,18 @@ export type FeedOverlayItem = {
   dashed?: boolean;
   /** Space of `outline` and `cells`: "norm" is scaled by the frame size in the canvas, "px" drawn as-is. */
   space: "px" | "norm";
+  /** Size [w, h] of the frame the pixel coordinates are in — the live preview may be smaller. */
+  frame?: P;
   outline?: P[] | null;
   cells?: { pts: P[]; passed: boolean | null }[];
   /** Points, lines and the pose are always pixels. */
   points?: P[];
   lines?: [number, number, number, number][];
   pose?: { x: number; y: number; angle: number } | null;
+  /** Closed outlines in pixels — a matching tool's pattern placed at each match. */
+  contours?: P[][];
+  /** Text at a pixel point — e.g. a match's score beside it. */
+  labels?: [number, number, string][];
 };
 
 export const STATUS_COLORS = {
@@ -96,6 +102,8 @@ export function buildOverlay(
       points: (r?.points ?? []).map(toP),
       lines: (r?.lines ?? []).map(l => [l.x1, l.y1, l.x2, l.y2] as [number, number, number, number]),
       pose: r?.pose ? { x: r.pose.x, y: r.pose.y, angle: r.pose.angle } : null,
+      contours: (r?.contours ?? []).map(c => c.map(toP)),
+      labels: r?.contours?.length ? matchLabels(r) : undefined,
     });
 
     // findCorner's second side, as configured (its used outline is not reported separately).
@@ -108,5 +116,13 @@ export function buildOverlay(
     }
   }
   // Selected tool last, so it draws on top.
-  return items.sort((a, b) => Number(!!a.selected) - Number(!!b.selected));
+  return items.map(it => ({ ...it, frame: [W, H] as P })).sort((a, b) => Number(!!a.selected) - Number(!!b.selected));
+}
+
+/** Each match's score beside it (items with x, y and score), for tools that draw matched outlines. */
+function matchLabels(r: ToolResult): [number, number, string][] {
+  return (r.items ?? []).slice(0, 20).flatMap(it => {
+    const x = Number(it.x), y = Number(it.y), sc = Number(it.score);
+    return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(sc) ? [[x, y, sc.toFixed(2)] as [number, number, string]] : [];
+  });
 }

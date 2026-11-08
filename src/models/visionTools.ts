@@ -133,6 +133,8 @@ export type ToolResult = {
   lines?: { x1: number; y1: number; x2: number; y2: number }[];
   items?: Record<string, number | string>[];
   cells?: ToolCellResult[];
+  /** Closed outlines, pixels — a matching tool's pattern drawn where each match was found. */
+  contours?: VPoint[][];
   /** The region outline as actually used (after the fixture moved it), for the overlay. */
   region?: VPoint[];
 };
@@ -151,6 +153,17 @@ export type VisionResult = {
   timings?: Record<string, number>;
   /** "{toolId}: {message}". */
   errors?: string[];
+};
+
+/** A taught patternMatch template (params.template) — what the app reads of it. */
+export type PatternTemplate = {
+  png: string; width: number; height: number; originX: number; originY: number;
+  /** The taught area's angle in the image, degrees — output angles are relative to it. */
+  angle?: number;
+  /** Outlines in the patch's pixels. */
+  contours?: VPoint[][] | null;
+  /** The area it was taught from (normalized), when taught with the teach flow. */
+  region?: Region | null;
 };
 
 // ── RunVision step outputs ───────────────────────────────────────────────────
@@ -332,15 +345,17 @@ export const TOOL_META: Record<VisionToolType, ToolMeta> = {
   },
   patternMatch: {
     label: "Pattern match", category: "locate", region: "any", makesPose: true, grid: false,
-    description: "Find a taught image patch — best for printed or textured parts",
-    values: [v("count", "Count"), v("score", "Best score"), v("x", "X (best)"), v("y", "Y (best)"), v("angle", "Angle (best)")],
+    description: "Find a taught image patch at any position and angle — best for printed or textured parts",
+    values: [v("count", "Count"), v("score", "Best score"), v("x", "X (best)"), v("y", "Y (best)"), v("angle", "Angle (best, 0 = as taught)")],
     lists: ["items", "pose"],
-    defaults: { template: null, minScore: 0.7, angleRange: 0, angleStep: 5, maxCount: 1 },
+    defaults: { template: null, minScore: 0.7, angleRange: 180, angleStep: 5, maxCount: 1 },
     defaultLimits: { count: { min: 1, max: null } },
     fields: [
       { kind: "number", key: "minScore", label: "Min score", min: 0, max: 1, step: 0.05 },
-      { kind: "int", key: "angleRange", label: "Angle range (±°)", min: 0, max: 180, step: 5, desc: "0 searches without rotation (fastest)" },
-      { kind: "int", key: "angleStep", label: "Angle step (°)", min: 1, max: 45, showIf: p => Number(p.angleRange) > 0 },
+      { kind: "int", key: "angleRange", label: "Angle range (±°)", min: 0, max: 180, step: 5,
+        desc: "How far from the taught angle to search — 180 finds it at any angle, 0 only as taught (fastest)" },
+      { kind: "int", key: "angleStep", label: "Coarse angle step (°)", min: 1, max: 45, showIf: p => Number(p.angleRange) > 0,
+        desc: "Spacing of the first pass; each find is then refined to a fraction of a degree" },
       { kind: "int", key: "maxCount", label: "Max results", min: 1, max: 100 },
     ],
   },
