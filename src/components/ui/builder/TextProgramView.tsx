@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppState, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AlertCircle, AlertTriangle, Blocks, BookOpen, Check, Code, Loader, RotateCcw, SquarePen, WandSparkles, WifiOff } from "lucide-react-native";
+import { AlertCircle, AlertTriangle, BookOpen, Check, Code, Loader, RotateCcw, SquarePen, WandSparkles, WifiOff } from "lucide-react-native";
 import { Button, colors, radii, spacing } from "@/src/components/ui/kit";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import type {
@@ -453,14 +453,6 @@ export function TextProgramView({
     } catch { /* keep the user's text */ }
   };
 
-  const switchToBlocks = useCallback(async (): Promise<boolean> => {
-    if (textRef.current === appliedTextRef.current || phaseRef.current !== "ready") { onSwitchToBlocks(); return true; }
-    const r = await runParse(textRef.current, true);
-    if (r?.ok) { onSwitchToBlocks(); return true; }
-    setLeaveSheet(true);
-    return false;
-  }, [onSwitchToBlocks, runParse, phaseRef]);
-
   useEffect(() => {
     leaveGuard = async () => {
       if (textRef.current === appliedTextRef.current || phaseRef.current !== "ready") return true;
@@ -586,16 +578,12 @@ export function TextProgramView({
         {status}
         <View style={{ flex: 1 }} />
         {modalEditing ? (
-          <>
-            <ToolButton label="Blocks" icon={Blocks} onPress={switchToBlocks} />
-            <ToolButton label="Edit" icon={SquarePen} primary disabled={readOnly} onPress={() => openFullscreen()} />
-          </>
+          <ToolButton label="Edit" icon={SquarePen} primary disabled={readOnly} onPress={() => openFullscreen()} />
         ) : (
           <>
             <ToolButton label="Format" icon={WandSparkles} disabled={readOnly || !parseOk} onPress={format} />
             <ToolButton label="Revert" icon={RotateCcw} disabled={!dirty} onPress={revert} />
             <ToolButton label="Apply" icon={Check} primary disabled={!dirty || readOnly} onPress={applyNow} />
-            <ToolButton label="Blocks" icon={Blocks} onPress={switchToBlocks} />
           </>
         )}
       </View>
