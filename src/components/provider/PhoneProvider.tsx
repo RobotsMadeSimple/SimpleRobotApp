@@ -103,6 +103,15 @@ export function PhoneProvider({
     providerEngine.setCamOn(on);
   }, [camPerm?.granted, requestCamPerm, st.assignedHere]);
 
+  // Assigning carries the device's settings over, so this phone starts streaming straight away if
+  // the camera was on — secure camera permission first so the engine can open the camera (denied:
+  // the camera switch flips off, the rest still carries over).
+  const onAssign = useCallback(async () => {
+    const camOk = !st.config.camOn || camPerm?.granted || (await requestCamPerm()).granted;
+    await providerEngine.assignHere();
+    if (!camOk) providerEngine.setCamOn(false);
+  }, [st.config.camOn, camPerm?.granted, requestCamPerm]);
+
   // Back always lands on the I/O page. A phone set up as a device opens straight onto this screen at
   // launch, so there's often no I/O page under it and a plain "go back" would leave the I/O tab.
   const backToIo = useCallback(() => router.dismissTo("/io"), []);
@@ -161,7 +170,7 @@ export function PhoneProvider({
               </Text>
               <Button
                 label={st.assignedPhoneId ? "Assign this phone instead" : "Assign this phone"}
-                onPress={() => providerEngine.assignHere()}
+                onPress={onAssign}
               />
             </Card>
             )}

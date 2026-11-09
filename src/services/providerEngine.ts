@@ -753,7 +753,7 @@ class ProviderEngine {
     // A provider tag (autostart) is an explicit "make THIS phone the provider" action — claim it.
     if (this.pendingAutostart) {
       this.pendingAutostart = false;
-      await this.assignHere();
+      await this.assignHere({ start: false });   // started just below, camera on
       this.camOn = true;
     } else if (this.assignedHere) {
       this.camOn = this.config.camOn;   // resume the saved streaming intent after a reconnect / restart
@@ -775,8 +775,10 @@ class ProviderEngine {
 
   // ── Assignment ───────────────────────────────────────────────────────────────
   /** Claim this device for THIS phone: record the assignment on the controller, remember it locally,
-   *  release any device this phone previously provided, and enable the provider UI. */
-  async assignHere() {
+   *  release any device this phone previously provided, and enable the provider UI. The device keeps
+   *  every saved setting, so this phone carries on where the previous one left off — streaming the
+   *  camera and sensors that were on (unless `start` is false: the caller starts them itself). */
+  async assignHere(opts: { start?: boolean } = {}) {
     await this.ensureIdentity();
     const deviceId = this.deviceId;
     if (!deviceId || !this.thisPhoneId) return;
@@ -784,10 +786,25 @@ class ProviderEngine {
     // Release a different device this phone used to provide, so a phone only ever serves one device.
     await this.releasePreviousAssignment(deviceId);
 
+    // Take the settings over exactly as last saved: the previous phone may have changed them since
+    // this phone's last sync. An edit made here that is still waiting to be written is newer — keep it.
+    try {
+      const raw = (await robotClient.getDevices()).find(d => d.id === deviceId)?.providerConfig;
+      if (raw && !this.persistTimer && this.deviceId === deviceId) this.config = this.sanitizeConfig(JSON.parse(raw));
+    } catch { /* keep the synced copy */ }
+    if (this.deviceId !== deviceId) return; // device switched mid-assign
+
     this.config = { ...this.config, assignedPhoneId: this.thisPhoneId, assignedPhoneName: this.thisPhoneName };
     this.configLoaded = true;
+    this.lastLocalEdit = Date.now();   // hold the sync, so a read from before this write can't undo it
     this.persistConfigNow();
     setAssignedDeviceId(deviceId, this.deviceName);
+    if (opts.start !== false) {
+      this.camOn = this.config.camOn;
+      this.restartAttempts = 0;
+      if (this.camOn) this.rebuildCamera();
+      this.rebuildSensors();
+    }
     this.syncForeground();
     this.publish();
   }
