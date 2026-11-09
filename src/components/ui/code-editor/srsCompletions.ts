@@ -119,8 +119,9 @@ export function stepSnippet(s: SrsStepSpec): string {
   return text;
 }
 
+/** One word, so an untouched placeholder still reads as a single value (`Vision_program`). */
 function placeholder(label: string) {
-  return label.replace(/[{}$\\]/g, "").trim() || "value";
+  return label.replace(/[{}$\\]/g, "").trim().replace(/\s+/g, "_") || "value";
 }
 
 /** One snapshot of what the editor can complete, from the catalog + robot names + symbols. */
