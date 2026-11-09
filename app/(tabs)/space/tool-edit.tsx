@@ -1,17 +1,18 @@
-import { useIsWide } from "@/src/components/ui/responsive";
 import {
   Button,
-  buttonTextColor,
-  Card,
   colors,
-  FormRow,
-  InfoTip,
   PageHeader,
   Screen,
-  SectionHeader,
   spacing,
-  type,
 } from "@/src/components/ui/kit";
+import {
+  EditorCard,
+  FieldGroup,
+  FieldHint,
+  FieldLabel,
+  SectionHeading,
+  TeachButton,
+} from "@/src/components/space/EditorCard";
 import {
   EMPTY_OFFSET_DRAFT,
   LocalInput,
@@ -24,7 +25,6 @@ import {
 import { useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { Crosshair } from "lucide-react-native";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 
@@ -36,7 +36,6 @@ export default function ToolEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const tools  = useTools();
   const robot  = useSelectedRobot();
-  const isWide = useIsWide();
   const isAstro = robot?.robotType === "ASTRO";
 
   const isNew    = !id || id === "new";
@@ -88,42 +87,49 @@ export default function ToolEditPage() {
   const title = isNew ? "New Tool" : "Edit Tool";
   const axes: OffsetAxis[] = isAstro ? ["x", "y", "z", "rz"] : ["x", "y", "z", "rx", "ry", "rz"];
 
-  const nameSection = (
-    <>
-      <SectionHeader title="Tool" />
-      <Card style={s.formCard}>
-        <FormRow label="Name">
-          <LocalInput
-            value={draft.name}
-            onChange={v => set({ name: v })}
-            placeholder="e.g. Gripper"
-            autoCapitalize="words"
-            returnKeyType="next"
-          />
-        </FormRow>
+  const identity = (
+    <FieldGroup>
+      <View>
+        <FieldLabel text="Name" />
+        <LocalInput
+          value={draft.name}
+          onChange={v => set({ name: v })}
+          placeholder="e.g. Gripper"
+          autoCapitalize="words"
+          returnKeyType="next"
+        />
         {nameClash && <Text style={s.error}>Another tool already has this name.</Text>}
-        <FormRow label="Description">
-          <LocalInput
-            value={draft.description}
-            onChange={v => set({ description: v })}
-            placeholder="Optional"
-            returnKeyType="next"
-          />
-        </FormRow>
-      </Card>
-    </>
+      </View>
+      <View>
+        <FieldLabel text="Description" />
+        <LocalInput
+          value={draft.description}
+          onChange={v => set({ description: v })}
+          placeholder="Optional"
+          returnKeyType="next"
+        />
+      </View>
+    </FieldGroup>
   );
 
-  const offsetSection = (
-    <>
-      <SectionHeader
-        title="TCP offset  (mm / °)"
-        right={<InfoTip text="The tool center point's offset and rotation relative to the robot flange. This is the point that gets driven to saved coordinates while this tool is active." />}
+  // The TCP offset, with the teach wizard (ASTRO only) right beside it since teaching fills it in.
+  const offset = (
+    <FieldGroup>
+      <SectionHeading
+        title="TCP offset"
+        unit="mm / °"
+        tip="The tool center point's offset and rotation relative to the robot flange. This is the point that gets driven to saved coordinates while this tool is active."
+        action={isAstro ? <TeachButton onPress={openTeach} /> : undefined}
       />
-      <Card>
-        <OffsetGrid draft={draft} axes={axes} onChange={(a, v) => set({ [a]: v })} />
-      </Card>
-    </>
+      <OffsetGrid draft={draft} axes={axes} onChange={(a, v) => set({ [a]: v })} />
+      {isAstro && (
+        <FieldHint>
+          {isNew
+            ? "Teach touches one point from several wrist angles and works out X/Y for you, or enter it by hand."
+            : "Teach re-teaches X/Y by touching one point from several wrist angles. Z and rotation are kept."}
+        </FieldHint>
+      )}
+    </FieldGroup>
   );
 
   return (
@@ -144,33 +150,8 @@ export default function ToolEditPage() {
       />
 
       <Screen>
-        {/* Teach the planar TCP by touching one point from several wrist angles (ASTRO only). */}
-        {isAstro && (
-          <Card style={s.teachCard}>
-            <Text style={s.teachText}>
-              {isNew
-                ? "Touch one point from several wrist angles and the X/Y offset is worked out for you — or enter it by hand below."
-                : "Re-teach this tool's X/Y offset by touching one point from several wrist angles. Z and rotation are kept."}
-            </Text>
-            <Button
-              label="Teach with wizard"
-              icon={<Crosshair size={16} color={buttonTextColor("primary")} />}
-              onPress={openTeach}
-            />
-          </Card>
-        )}
-
-        {isWide ? (
-          <View style={s.wideRow}>
-            <View style={s.wideCol}>{nameSection}</View>
-            <View style={s.wideCol}>{offsetSection}</View>
-          </View>
-        ) : (
-          <>
-            {nameSection}
-            {offsetSection}
-          </>
-        )}
+        {/* The whole tool setup in one card; split in two halves on desktop. */}
+        <EditorCard left={[identity]} right={[offset]} />
       </Screen>
     </KeyboardAvoidingView>
   );
@@ -178,13 +159,5 @@ export default function ToolEditPage() {
 
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
-
-  teachCard: { gap: spacing.md },
-  teachText: { ...type.body, color: colors.textMuted },
-
-  wideRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
-  wideCol: { flex: 1, gap: spacing.md },
-
-  formCard: { gap: spacing.md },
-  error: { fontSize: 12, color: colors.danger, marginTop: -spacing.sm },
+  error: { fontSize: 12, color: colors.danger, marginTop: spacing.xs },
 });

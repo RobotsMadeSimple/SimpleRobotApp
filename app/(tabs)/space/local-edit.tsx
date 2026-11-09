@@ -1,17 +1,19 @@
-import { useIsWide } from "@/src/components/ui/responsive";
 import {
-  accents,
   Button,
-  Card,
   colors,
-  FormRow,
-  InfoTip,
   PageHeader,
   Screen,
-  SectionHeader,
   spacing,
   type,
 } from "@/src/components/ui/kit";
+import {
+  EditorCard,
+  FieldGroup,
+  FieldHint,
+  FieldLabel,
+  SectionHeading,
+  TeachButton,
+} from "@/src/components/space/EditorCard";
 import {
   EMPTY_OFFSET_DRAFT,
   LocalInput,
@@ -23,37 +25,32 @@ import {
 import { useLocals, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { Grid3x3 } from "lucide-react-native";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 
 type Pose = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
 /**
- * The teach card reads the live position on its own, so the ~20Hz status broadcast re-renders
- * only this card and not the form fields.
+ * Teach reads the live position on its own, so the ~20Hz status broadcast re-renders only this
+ * button and the pose line below, not the form fields.
  */
-function TeachFromPositionCard({ isNew, onTeach }: { isNew: boolean; onTeach: (p: Pose) => void }) {
+function TeachFromPositionButton({ onTeach }: { onTeach: (p: Pose) => void }) {
   const status = useRobotStatus();
   return (
-    <Card style={s.teachCard}>
-      <Text style={s.teachText}>
-        {isNew
-          ? "Jog the robot to the frame's origin and take its position as the offset — or enter it by hand below."
-          : "Re-teach this local from the robot's current position. Its offset and rotation are replaced when you save."}
-      </Text>
-      <Text style={s.poseText}>
-        {status.x.toFixed(1)}, {status.y.toFixed(1)}, {status.z.toFixed(1)}
-        {"  ·  R "}
-        {status.rx.toFixed(1)}°, {status.ry.toFixed(1)}°, {status.rz.toFixed(1)}°
-      </Text>
-      <Button
-        label="Teach from current position"
-        icon={<Grid3x3 size={16} color={colors.onAccent} />}
-        style={s.teachBtn}
-        onPress={() => onTeach({ x: status.x, y: status.y, z: status.z, rx: status.rx, ry: status.ry, rz: status.rz })}
-      />
-    </Card>
+    <TeachButton
+      onPress={() => onTeach({ x: status.x, y: status.y, z: status.z, rx: status.rx, ry: status.ry, rz: status.rz })}
+    />
+  );
+}
+
+function LivePose() {
+  const status = useRobotStatus();
+  return (
+    <Text style={s.poseText}>
+      Now {status.x.toFixed(1)}, {status.y.toFixed(1)}, {status.z.toFixed(1)}
+      {"  ·  R "}
+      {status.rx.toFixed(1)}°, {status.ry.toFixed(1)}°, {status.rz.toFixed(1)}°
+    </Text>
   );
 }
 
@@ -64,7 +61,6 @@ function TeachFromPositionCard({ isNew, onTeach }: { isNew: boolean; onTeach: (p
 export default function LocalEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const locals = useLocals();
-  const isWide = useIsWide();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (locals.find(l => l.id === id) ?? null);
@@ -112,42 +108,50 @@ export default function LocalEditPage() {
 
   const title = isNew ? "New Local" : "Edit Local";
 
-  const nameSection = (
-    <>
-      <SectionHeader title="Local" />
-      <Card style={s.formCard}>
-        <FormRow label="Name">
-          <LocalInput
-            value={draft.name}
-            onChange={v => set({ name: v })}
-            placeholder="e.g. Workbench A"
-            autoCapitalize="words"
-            returnKeyType="next"
-          />
-        </FormRow>
+  const identity = (
+    <FieldGroup>
+      <View>
+        <FieldLabel text="Name" />
+        <LocalInput
+          value={draft.name}
+          onChange={v => set({ name: v })}
+          placeholder="e.g. Workbench A"
+          autoCapitalize="words"
+          returnKeyType="next"
+        />
         {nameClash && <Text style={s.error}>Another local already has this name.</Text>}
-        <FormRow label="Description">
-          <LocalInput
-            value={draft.description}
-            onChange={v => set({ description: v })}
-            placeholder="Optional"
-            returnKeyType="next"
-          />
-        </FormRow>
-      </Card>
-    </>
+      </View>
+      <View>
+        <FieldLabel text="Description" />
+        <LocalInput
+          value={draft.description}
+          onChange={v => set({ description: v })}
+          placeholder="Optional"
+          returnKeyType="next"
+        />
+      </View>
+    </FieldGroup>
   );
 
-  const offsetSection = (
-    <>
-      <SectionHeader
-        title="Offset  (mm / °)"
-        right={<InfoTip text="Where this frame's origin sits in world coordinates, and how it is rotated. Points measured while the local is active are relative to it." />}
+  // The offset, with Teach right beside it since teaching from the current position fills it in.
+  const offset = (
+    <FieldGroup>
+      <SectionHeading
+        title="Offset"
+        unit="mm / °"
+        tip="Where this frame's origin sits in world coordinates, and how it is rotated. Points measured while the local is active are relative to it."
+        action={<TeachFromPositionButton onTeach={teach} />}
       />
-      <Card>
-        <OffsetGrid draft={draft} axes={["x", "y", "z", "rx", "ry", "rz"]} onChange={(a, v) => set({ [a]: v })} />
-      </Card>
-    </>
+      <OffsetGrid draft={draft} axes={["x", "y", "z", "rx", "ry", "rz"]} onChange={(a, v) => set({ [a]: v })} />
+      <View style={s.hintBlock}>
+        <FieldHint>
+          {isNew
+            ? "Teach takes the robot's current position as the frame's origin, or enter it by hand."
+            : "Teach replaces the offset and rotation with the robot's current position when you save."}
+        </FieldHint>
+        <LivePose />
+      </View>
+    </FieldGroup>
   );
 
   return (
@@ -168,19 +172,8 @@ export default function LocalEditPage() {
       />
 
       <Screen>
-        <TeachFromPositionCard isNew={isNew} onTeach={teach} />
-
-        {isWide ? (
-          <View style={s.wideRow}>
-            <View style={s.wideCol}>{nameSection}</View>
-            <View style={s.wideCol}>{offsetSection}</View>
-          </View>
-        ) : (
-          <>
-            {nameSection}
-            {offsetSection}
-          </>
-        )}
+        {/* The whole local setup in one card; split in two halves on desktop. */}
+        <EditorCard left={[identity]} right={[offset]} />
       </Screen>
     </KeyboardAvoidingView>
   );
@@ -188,15 +181,7 @@ export default function LocalEditPage() {
 
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
-
-  teachCard: { gap: spacing.md },
-  teachText: { ...type.body, color: colors.textMuted },
   poseText: { ...type.mono, fontSize: 12, color: colors.textFaint },
-  teachBtn: { backgroundColor: accents.purple },
-
-  wideRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
-  wideCol: { flex: 1, gap: spacing.md },
-
-  formCard: { gap: spacing.md },
-  error: { fontSize: 12, color: colors.danger, marginTop: -spacing.sm },
+  hintBlock: { gap: spacing.xs },
+  error: { fontSize: 12, color: colors.danger, marginTop: spacing.xs },
 });

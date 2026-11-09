@@ -1,12 +1,8 @@
-import { usePaneLayout } from "@/src/components/ui/responsive";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Button,
-  buttonTextColor,
-  Card,
   colors,
   Divider,
-  InfoTip,
   Input,
   PageHeader,
   radii,
@@ -16,11 +12,19 @@ import {
   spacing,
   type,
 } from "@/src/components/ui/kit";
+import {
+  EditorCard,
+  FieldGroup,
+  FieldHint,
+  FieldLabel,
+  SectionHeading,
+  TeachButton,
+} from "@/src/components/space/EditorCard";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids, usePoints } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronRight, Crosshair, X } from "lucide-react-native";
+import { ChevronRight, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -96,23 +100,12 @@ function OptionalCountInput({
   );
 }
 
-/** Small field label (matches the kit FormRow label) with an optional info tip. */
-function FieldLabel({ text, tip }: { text: string; tip?: string }) {
-  return (
-    <View style={s.labelRow}>
-      <Text style={s.label} numberOfLines={1}>{text}</Text>
-      {!!tip && <InfoTip text={tip} size={13} />}
-    </View>
-  );
-}
-
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function GridEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const grids  = useGrids();
   const points = usePoints();
-  const isDesktop = usePaneLayout() === "desktop";
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (grids.find(g => g.id === id) ?? null);
@@ -181,7 +174,7 @@ export default function GridEditPage() {
           // The whole grid setup lives in one card: plain field labels and hairline
           // dividers instead of a section header + card per field.
           const identity = (
-            <View style={s.group}>
+            <FieldGroup>
               <View>
                 <FieldLabel text="Name" />
                 <Input
@@ -204,26 +197,14 @@ export default function GridEditPage() {
                   <ChevronRight size={16} color={colors.textFaint} />
                 </AnimatedPressable>
               </View>
-            </View>
+            </FieldGroup>
           );
 
           // Row/column step offsets, with the teach wizard right beside them since
           // teaching is what fills them in (it replaces the base point and offsets).
           const offsets = (
-            <View style={s.group}>
-              <View style={s.offsetsHeader}>
-                <View style={s.offsetsTitle}>
-                  <Text style={s.label}>Step offsets</Text>
-                  <Text style={s.unit}>mm per step</Text>
-                </View>
-                <Button
-                  label="Teach"
-                  size="sm"
-                  variant="secondary"
-                  icon={<Crosshair size={14} color={buttonTextColor("secondary")} />}
-                  onPress={openTeach}
-                />
-              </View>
+            <FieldGroup>
+              <SectionHeading title="Step offsets" unit="mm per step" action={<TeachButton onPress={openTeach} />} />
               <View>
                 <View style={s.axisRow}>
                   <View style={s.axisRowLabel} />
@@ -245,12 +226,12 @@ export default function GridEditPage() {
                   </View>
                 ))}
               </View>
-              <Text style={s.hint}>
+              <FieldHint>
                 {isNew
                   ? "Teach jogs the robot to the grid's corners and works these out for you, or enter them by hand."
                   : "Teach re-jogs the robot to the grid's corners and replaces the base point and offsets."}
-              </Text>
-            </View>
+              </FieldHint>
+            </FieldGroup>
           );
 
           const sizeAndRotation = (
@@ -277,29 +258,13 @@ export default function GridEditPage() {
             </View>
           );
 
-          if (isDesktop) {
-            // Desktop: identity + size on the left, step geometry on the right, still one card.
-            return (
-              <Card padded={false} style={s.cardRow}>
-                <View style={[s.cardCol, s.cardSection]}>
-                  {identity}
-                  <Divider style={s.divider} />
-                  {sizeAndRotation}
-                </View>
-                <Divider vertical style={s.vDivider} />
-                <View style={[s.cardCol, s.cardSection]}>{offsets}</View>
-              </Card>
-            );
-          }
-
+          // Desktop: identity + size on the left, step geometry on the right, still one card.
           return (
-            <Card>
-              {identity}
-              <Divider style={s.divider} />
-              {offsets}
-              <Divider style={s.divider} />
-              {sizeAndRotation}
-            </Card>
+            <EditorCard
+              left={[identity, sizeAndRotation]}
+              right={[offsets]}
+              stacked={[identity, offsets, sizeAndRotation]}
+            />
           );
         })()}
       </Screen>
@@ -353,22 +318,6 @@ export default function GridEditPage() {
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
 
-  // ── The single setup card ─────────────────────────────────────────────────
-  group:   { gap: spacing.md },
-  divider: { marginVertical: spacing.lg - 2 },
-
-  // Desktop: two columns inside the one card, split by a hairline.
-  cardRow:     { flexDirection: "row", alignItems: "stretch" },
-  cardCol:     { flex: 1 },
-  cardSection: { padding: spacing.lg - 2 },
-  vDivider:    { marginHorizontal: 0 },
-
-  // Same look as the kit FormRow label.
-  labelRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.xs + 2 },
-  label:    { fontSize: 13, fontWeight: "600", color: colors.textSecondary, flexShrink: 1 },
-  unit:     { ...type.caption },
-  hint:     { ...type.caption, fontSize: 12 },
-
   pickerWell: {
     minHeight: 40,
     flexDirection: "row",
@@ -382,9 +331,6 @@ const s = StyleSheet.create({
   },
   pickerWellText:        { flex: 1, fontSize: 14, color: colors.text },
   pickerWellPlaceholder: { color: colors.textFaint },
-
-  offsetsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-  offsetsTitle:  { flexDirection: "row", alignItems: "baseline", gap: spacing.sm, flexShrink: 1 },
 
   // Coordinate/position values use the mono type preset.
   input: { ...type.mono },
