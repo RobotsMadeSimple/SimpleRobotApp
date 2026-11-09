@@ -185,17 +185,28 @@ export default function GridEditPage() {
                   returnKeyType="next"
                 />
               </View>
-              <View>
-                <FieldLabel text="Base point" />
-                <AnimatedPressable style={s.pickerWell} onPress={() => setPointPickerOpen(true)}>
-                  <Text
-                    style={[s.pickerWellText, !draft.basePointName && s.pickerWellPlaceholder]}
-                    numberOfLines={1}
-                  >
-                    {draft.basePointName || "Select point…"}
-                  </Text>
-                  <ChevronRight size={16} color={colors.textFaint} />
-                </AnimatedPressable>
+              {/* Rotation turns the grid around its base point, so the two sit together. */}
+              <View style={s.pairRow}>
+                <View style={s.baseCol}>
+                  <FieldLabel text="Base point" />
+                  <AnimatedPressable style={s.pickerWell} onPress={() => setPointPickerOpen(true)}>
+                    <Text
+                      style={[s.pickerWellText, !draft.basePointName && s.pickerWellPlaceholder]}
+                      numberOfLines={1}
+                    >
+                      {draft.basePointName || "Select point…"}
+                    </Text>
+                    <ChevronRight size={16} color={colors.textFaint} />
+                  </AnimatedPressable>
+                </View>
+                <View style={s.rotationCol}>
+                  <FieldLabel text="Rotation °" tip="Z-axis rotation applied around the base point." />
+                  <SignedNumberInput
+                    value={draft.rotation}
+                    onChange={v => set({ rotation: v })}
+                    placeholder="0"
+                  />
+                </View>
               </View>
             </FieldGroup>
           );
@@ -234,26 +245,18 @@ export default function GridEditPage() {
             </FieldGroup>
           );
 
-          const sizeAndRotation = (
-            <View style={s.triRow}>
-              <View style={s.triCol}>
+          const size = (
+            <View style={s.pairRow}>
+              <View style={s.sizeCol}>
                 <FieldLabel
                   text="Rows"
                   tip="Row and column count only cap the grid for display — leave either blank for an unlimited grid in that direction."
                 />
                 <OptionalCountInput value={draft.rowCount} onChange={v => set({ rowCount: v })} />
               </View>
-              <View style={s.triCol}>
+              <View style={s.sizeCol}>
                 <FieldLabel text="Columns" />
                 <OptionalCountInput value={draft.colCount} onChange={v => set({ colCount: v })} />
-              </View>
-              <View style={s.triCol}>
-                <FieldLabel text="Rotation °" tip="Z-axis rotation applied around the base point." />
-                <SignedNumberInput
-                  value={draft.rotation}
-                  onChange={v => set({ rotation: v })}
-                  placeholder="0"
-                />
               </View>
             </View>
           );
@@ -261,9 +264,9 @@ export default function GridEditPage() {
           // Desktop: identity + size on the left, step geometry on the right, still one card.
           return (
             <EditorCard
-              left={[identity, sizeAndRotation]}
+              left={[identity, size]}
               right={[offsets]}
-              stacked={[identity, offsets, sizeAndRotation]}
+              stacked={[identity, offsets, size]}
             />
           );
         })()}
@@ -344,9 +347,11 @@ const s = StyleSheet.create({
     fontSize: 11, fontWeight: "600", color: colors.textFaint, textAlign: "center",
   },
 
-  // Rows / Columns / Rotation share one row.
-  triRow: { flexDirection: "row", gap: spacing.sm + 2 },
-  triCol: { flex: 1, minWidth: 0 },
+  // Base point + Rotation, and Rows + Columns, each share one row.
+  pairRow:     { flexDirection: "row", gap: spacing.sm + 2 },
+  baseCol:     { flex: 2, minWidth: 0 },
+  rotationCol: { flex: 1, minWidth: 0 },
+  sizeCol:     { flex: 1, minWidth: 0 },
 
   // ── Point picker modal ────────────────────────────────────────────────────
   overlay: {
