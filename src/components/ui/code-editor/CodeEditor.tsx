@@ -11,6 +11,10 @@ import { useEditorSync } from "./useEditorSync";
  * Commands are injected as `window.__srs.apply(…)`; events come back through onMessage.
  * Commands sent before the page reports "ready" are queued and flushed then.
  *
+ * Android may kill the WebView's render process while the app is in the background. The page
+ * is then rebuilt (a fresh WebView, keyed) from the latest text this side has seen — the user's
+ * typing, not the text it was first opened with — and the cursor is put back where it was.
+ *
  * See CodeEditor.web.tsx for the browser half; Metro picks by platform.
  */
 export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEditor(props, ref) {
@@ -20,12 +24,18 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   const [ready, setReady] = useState(false);
   const cb = useRef(props);
   cb.current = props;
+  // The latest text and cursor (typed, or set through the handle) — what a rebuilt page restores.
+  const lastText = useRef(props.initialText);
+  const lastCursor = useRef<{ line: number; col: number } | null>(null);
+  const restoring = useRef(false);
+  const [generation, setGeneration] = useState(0);
 
-  // The HTML is built once: later text changes go through setText, never a reload.
+  // The HTML is built once per WebView: later text changes go through setText, never a reload.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const html = useMemo(() => makeCodeEditorHtml({ text: props.initialText, readOnly: !!props.readOnly }), []);
+  const html = useMemo(() => makeCodeEditorHtml({ text: lastText.current, readOnly: !!cb.current.readOnly }), [generation]);
 
   const send = useCallback((cmd: EditorCommand) => {
+    if (cmd.type === "setText") lastText.current = cmd.text;
     if (!readyRef.current) { queue.current.push(cmd); return; }
     webRef.current?.injectJavaScript(`window.__srs&&window.__srs.apply(${JSON.stringify(cmd)});true;`);
   }, []);
@@ -40,13 +50,17 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
       case "ready": {
         readyRef.current = true;
         const pending = queue.current; queue.current = [];
+        // A rebuilt page: back to where the cursor was (no focus — the keyboard stays down).
+        if (restoring.current && lastCursor.current) pending.push({ type: "jumpTo", ...lastCursor.current, focus: false });
         if (pending.length) webRef.current?.injectJavaScript(`window.__srs&&window.__srs.applyAll(${JSON.stringify(pending)});true;`);
         setReady(true);
-        p.onReady?.();
+        // The owner's onReady is for the first load (e.g. its opening jump), not a rebuild.
+        if (!restoring.current) p.onReady?.();
+        restoring.current = false;
         break;
       }
-      case "change": p.onChange?.(ev.text); break;
-      case "cursor": p.onCursor?.(ev.line, ev.col); break;
+      case "change": lastText.current = ev.text; p.onChange?.(ev.text); break;
+      case "cursor": lastCursor.current = { line: ev.line, col: ev.col }; p.onCursor?.(ev.line, ev.col); break;
       case "focus": p.onFocusChange?.(ev.focused); break;
       case "toggleBreakpoint": p.onToggleBreakpoint?.(ev.line); break;
       case "tapLine": p.onTapLine?.(ev.line); break;
@@ -55,8 +69,20 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     }
   }, []);
 
+  // The page is gone (Android reclaimed the render process, iOS's content process ended): that
+  // WebView cannot be reused, so mount a fresh one built from the latest text; state re-syncs on
+  // its "ready".
+  const rebuild = useCallback(() => {
+    readyRef.current = false;
+    queue.current = [];
+    restoring.current = true;
+    setReady(false);
+    setGeneration(g => g + 1);
+  }, []);
+
   return (
     <WebView
+      key={generation}
       ref={webRef}
       source={{ html }}
       style={[{ backgroundColor: "#ffffff" }, props.style]}
@@ -70,9 +96,8 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
       overScrollMode="never"
       hideKeyboardAccessoryView
       keyboardDisplayRequiresUserAction={false}
-      // A reload (the OS reclaimed the WebView) starts over: re-queue state on the next "ready".
-      onContentProcessDidTerminate={() => { readyRef.current = false; setReady(false); webRef.current?.reload(); }}
-      onRenderProcessGone={() => { readyRef.current = false; setReady(false); webRef.current?.reload(); }}
+      onContentProcessDidTerminate={rebuild}
+      onRenderProcessGone={rebuild}
       onMessage={onMessage}
     />
   );

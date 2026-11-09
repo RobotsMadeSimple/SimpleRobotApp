@@ -80,6 +80,7 @@ import { cloneForPaste, detachedCopy, useStepClipboard } from "@/src/components/
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
+import { loadTextDraft } from "@/src/components/ui/builder/textDraft";
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, programFromDoc, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
 import { EditorModeToggle, EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
@@ -379,6 +380,15 @@ export default function BuilderScreen() {
       setLocalLoading(false);
     });
   }, []);
+
+  // Text the OS cut off last time (the app was killed in the background with the text view
+  // open and the text not saved): open in Text, where the view brings it back.
+  const draftChecked = useRef(false);
+  useEffect(() => {
+    if (!programId || draftChecked.current) return;
+    draftChecked.current = true;
+    loadTextDraft(programId).then(t => { if (t !== null) setEditorMode("text"); }).catch(() => {});
+  }, [programId]);
 
   // Load existing cover image when editing a robot program
   useEffect(() => {
@@ -1573,6 +1583,7 @@ export default function BuilderScreen() {
       problems={validationProblems}
       breakpoints={breakpoints}
       runningStepId={runningStepId}
+      draftId={programId}
     />
   );
 

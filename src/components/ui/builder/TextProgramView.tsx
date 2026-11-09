@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { AppState, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AlertCircle, AlertTriangle, Blocks, BookOpen, Check, Code, Loader, RotateCcw, SquarePen, WandSparkles, WifiOff } from "lucide-react-native";
 import { Button, colors, radii, spacing } from "@/src/components/ui/kit";
@@ -23,6 +23,7 @@ import { useExpressionEnv } from "./expressions/ExpressionEnv";
 import { StepTypePicker } from "./StepTypePicker";
 import { newId } from "./stepUtils";
 import { useStepCatalog } from "./useStepCatalog";
+import { clearTextDraft, loadTextDraft, saveTextDraft } from "./textDraft";
 import { findRefEntry } from "@/src/docs/manual";
 import { openStepReference } from "@/src/docs/navigation";
 import type { BreakpointsView } from "./useBreakpoints";
@@ -60,11 +61,18 @@ export type TextProgramViewProps = {
   breakpoints?: BreakpointsView;
   /** The step the running program is on (status currentStepId), for the line highlight. */
   runningStepId?: string | null;
+  /**
+   * The program's stable id (none for a program never saved). The working text is kept on the
+   * device under it while the view is open, so a cold start after the OS killed the app in the
+   * background gets the text back (textDraft.ts).
+   */
+  draftId?: string;
 };
 
 type Phase = "loading" | "ready" | "unsupported" | "offline" | "error";
 
 const PARSE_DEBOUNCE_MS = 450;
+const DRAFT_DEBOUNCE_MS = 500;
 const RUNNING = new Set(["Starting", "Running", "Finishing", "Stopping"]);
 
 // ── Leave guard ───────────────────────────────────────────────────────────────
@@ -159,7 +167,7 @@ function errorText(e: unknown): string {
 // ── View ──────────────────────────────────────────────────────────────────────
 
 export function TextProgramView({
-  program, onApply, onSwitchToBlocks, connected, problems: validationProblems, breakpoints, runningStepId,
+  program, onApply, onSwitchToBlocks, connected, problems: validationProblems, breakpoints, runningStepId, draftId,
 }: TextProgramViewProps) {
   const { width, height: winH } = useWindowDimensions();
   // Touch devices (and phone-width web, so it can be tested) edit full screen above the keyboard.
@@ -231,6 +239,13 @@ export function TextProgramView({
   const initialTextRefSet = useRef(false);
   const phaseRef = useLatest(phase);
   const [fullInitial, setFullInitial] = useState("");
+  // The working-text draft (see writeDraft): the program it is kept under, whether the first print
+  // has looked for one yet, the text the view opened with, and whether this text was restored.
+  const draftIdRef = useLatest(draftId);
+  const draftReady = useRef(false);
+  const openText = useRef<string | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [restored, setRestored] = useState(false);
 
   useEffect(() => () => { mounted.current = false; }, []);
 
@@ -291,8 +306,23 @@ export function TextProgramView({
       setMap(r.map);
       setTextProblems(null);
       setParseOk(true);
-      if (initialTextRefSet.current) setAllText(r.text);
-      else { initialTextRefSet.current = true; textRef.current = r.text; setText(r.text); setInitialText(r.text); }
+      if (initialTextRefSet.current) { setAllText(r.text); setRestored(false); }
+      else {
+        // First print: text the OS cut off last time (the app was killed in the background
+        // before it was saved) comes back in place of the printed program.
+        const kept = draftIdRef.current ? await loadTextDraft(draftIdRef.current) : null;
+        if (!mounted.current) return;
+        const start = kept !== null && kept !== r.text ? kept : r.text;
+        openText.current = r.text;
+        initialTextRefSet.current = true; textRef.current = start; setText(start); setInitialText(start);
+        draftReady.current = true;
+        if (start !== r.text) {
+          setRestored(true);
+          setPhase("ready");
+          runParse(start, true);
+          return;
+        }
+      }
       setPhase("ready");
       // Problems for the fresh text (validation mapped to lines), without applying anything.
       runParse(r.text, false);
@@ -301,12 +331,50 @@ export function TextProgramView({
       if (isNotImplementedCommand(e) || isUnsupportedCommand(e)) setPhase("unsupported");
       else { setPhase("error"); setPhaseMsg(errorText(e)); }
     }
-  }, [connected, runParse, setAllText]);
-  // Enter the view (and reconnects): print the document.
+  }, [connected, runParse, setAllText, draftIdRef]);
+  /** Back online with the text as typed: check (and apply) it again, without re-printing. */
+  const recheckText = useCallback(() => {
+    setPhase("ready");
+    runParse(textRef.current, true);
+  }, [runParse]);
+  // Enter the view: print the document. A reconnect (the socket drops while the app is in the
+  // background) re-prints only when nothing is unapplied — text still being typed, or with
+  // errors, is kept and checked again instead of being printed over.
   useEffect(() => {
-    if (connected) formatFromDocument(programRef.current);
-    else setPhase("offline");
-  }, [connected, formatFromDocument, programRef]);
+    if (connected) {
+      if (initialTextRefSet.current && textRef.current !== appliedTextRef.current) recheckText();
+      else formatFromDocument(programRef.current);
+    } else setPhase("offline");
+  }, [connected, formatFromDocument, programRef, recheckText]);
+
+  // The working text on the device (textDraft.ts), for a cold start after the OS killed the app.
+  // Written shortly after typing stops and at once when the app leaves the foreground; removed
+  // when the text is back to what the view opened with, and when the view closes normally.
+  const writeDraft = useCallback(() => {
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    const id = draftIdRef.current;
+    if (!id || !draftReady.current) return;
+    if (textRef.current === openText.current) clearTextDraft(id);
+    else saveTextDraft(id, textRef.current);
+  }, [draftIdRef]);
+  useEffect(() => {
+    if (!draftReady.current) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(writeDraft, DRAFT_DEBOUNCE_MS);
+  }, [text, writeDraft]);
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", s => { if (s !== "active") writeDraft(); });
+    const idRef = draftIdRef; // the latest id at teardown (a ref that tracks the prop, not a node)
+    return () => {
+      sub.remove();
+      // Closed while in the foreground (Blocks, Save, Discard, leaving the builder): nothing to
+      // bring back. Torn down in the background (the OS is reclaiming the app): keep it.
+      if (AppState.currentState === "active") {
+        if (draftTimer.current) clearTimeout(draftTimer.current);
+        if (idRef.current) clearTextDraft(idRef.current);
+      } else writeDraft();
+    };
+  }, [writeDraft, draftIdRef]);
 
   // The document changed from outside (undo/redo in the toolbar, a revision restored): re-print,
   // unless it is the echo of our own apply.
@@ -504,6 +572,10 @@ export function TextProgramView({
       {phase === "offline" && (
         <Banner tone="warning" icon={<WifiOff size={14} color={colors.warning} />}
           text="Not connected — the text is read-only until the controller is back." />
+      )}
+      {restored && (
+        <Banner tone="warning" icon={<RotateCcw size={14} color={colors.warning} />}
+          text="Restored the text you were editing when the app closed — it is not saved yet." />
       )}
       {parseUnsupported && (
         <Banner tone="warning" icon={<AlertTriangle size={14} color={colors.warning} />}
