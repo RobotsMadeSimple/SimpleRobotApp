@@ -6,7 +6,7 @@
 import { Compartment, EditorSelection, EditorState, RangeSet, StateEffect, StateField, type Extension } from "@codemirror/state";
 import {
   Decoration, type DecorationSet, EditorView, GutterMarker, drawSelection, gutter, highlightActiveLine,
-  highlightActiveLineGutter, keymap, lineNumbers,
+  highlightActiveLineGutter, keymap, lineNumbers, tooltips,
 } from "@codemirror/view";
 import { HighlightStyle, StreamLanguage, bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
@@ -109,6 +109,36 @@ const baseTheme = EditorView.theme({
   ".cm-lintRange-warning": { backgroundImage: "none", textDecoration: `underline wavy ${C.warning}`, textUnderlineOffset: "3px" },
   ".cm-placeholder": { color: C.faint },
 });
+
+// ── Touch: keep hover/lint tooltips clear of the caret handle ─────────────────
+
+/** Height of the teardrop selection handle a touch browser draws under the caret (CSS px), plus a gap. */
+const CARET_HANDLE_CLEARANCE = 32;
+
+/**
+ * On a touch screen a tap is also a hover, so the lint tooltip opens right at the caret — and the
+ * system's teardrop handle under the caret covers its first characters. Lint tooltips already ask
+ * to sit above the line; this keeps them inside the editor (never over whatever sits above it,
+ * such as the line-help bar on web) and, when there is no room above so CodeMirror flips them
+ * below, drops them past the handle. Mouse pointers keep CodeMirror's default placement.
+ */
+function touchTooltipPlacement(): Extension {
+  const coarse = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    && window.matchMedia("(pointer: coarse)").matches;
+  if (!coarse) return [];
+  return [
+    tooltips({
+      tooltipSpace: view => {
+        const html = view.dom.ownerDocument.documentElement;
+        return { top: Math.max(0, view.dom.getBoundingClientRect().top), left: 0, right: html.clientWidth, bottom: html.clientHeight };
+      },
+    }),
+    EditorView.theme({
+      ".cm-tooltip-hover.cm-tooltip-below": { marginTop: `${CARET_HANDLE_CLEARANCE}px` },
+      ".cm-tooltip-hover.cm-tooltip-above": { marginTop: "-4px" },
+    }),
+  ];
+}
 
 // ── Breakpoint gutter ─────────────────────────────────────────────────────────
 
@@ -251,6 +281,7 @@ export function createSrsEditor(parent: HTMLElement, opts: SrsEditorOptions): Ed
     languageConf.of(makeLanguage()),
     syntaxHighlighting(srsHighlight),
     baseTheme,
+    touchTooltipPlacement(),
     runLineField,
     autocompletion({ override: [source], activateOnTyping: true, icons: false, maxRenderedOptions: 40, positionInfo }),
     keymap.of([
