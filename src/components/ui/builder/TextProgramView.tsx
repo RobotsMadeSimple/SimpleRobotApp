@@ -590,6 +590,8 @@ export function TextProgramView({
             </View>
             <ProblemStrip problems={shownProblems} onSelect={p => fullRef.current?.jumpTo(p.line, p.col, true)} />
             <KeyRow send={send} onInsertStep={() => setPickerOpen(true)} />
+            {/* Keyboard down: keep the key row above the system navigation / home bar. */}
+            {kbTop == null && Platform.OS !== "web" && <View style={{ height: insets.bottom }} />}
           </View>
           {fullscreen && (
             <StepTypePicker visible={pickerOpen} onPick={insertStep} onClose={() => setPickerOpen(false)} isBackgroundMode={!!program.isBackground} />
