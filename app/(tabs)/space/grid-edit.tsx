@@ -185,28 +185,17 @@ export default function GridEditPage() {
                   returnKeyType="next"
                 />
               </View>
-              {/* Rotation turns the grid around its base point, so the two sit together. */}
-              <View style={s.pairRow}>
-                <View style={s.baseCol}>
-                  <FieldLabel text="Base point" />
-                  <AnimatedPressable style={s.pickerWell} onPress={() => setPointPickerOpen(true)}>
-                    <Text
-                      style={[s.pickerWellText, !draft.basePointName && s.pickerWellPlaceholder]}
-                      numberOfLines={1}
-                    >
-                      {draft.basePointName || "Select point…"}
-                    </Text>
-                    <ChevronRight size={16} color={colors.textFaint} />
-                  </AnimatedPressable>
-                </View>
-                <View style={s.rotationCol}>
-                  <FieldLabel text="Rotation °" tip="Z-axis rotation applied around the base point." />
-                  <SignedNumberInput
-                    value={draft.rotation}
-                    onChange={v => set({ rotation: v })}
-                    placeholder="0"
-                  />
-                </View>
+              <View>
+                <FieldLabel text="Base point" />
+                <AnimatedPressable style={s.pickerWell} onPress={() => setPointPickerOpen(true)}>
+                  <Text
+                    style={[s.pickerWellText, !draft.basePointName && s.pickerWellPlaceholder]}
+                    numberOfLines={1}
+                  >
+                    {draft.basePointName || "Select point…"}
+                  </Text>
+                  <ChevronRight size={16} color={colors.textFaint} />
+                </AnimatedPressable>
               </View>
             </FieldGroup>
           );
@@ -236,6 +225,17 @@ export default function GridEditPage() {
                     ))}
                   </View>
                 ))}
+                {/* Rotation: one value (degrees around Z at the base point), spanning the X/Y/Z columns. */}
+                <View style={[s.axisRow, s.axisRowGap]}>
+                  <Text style={[s.axisRowLabel, s.axisRowLabelText]}>Rotation °</Text>
+                  <View style={s.axisCol}>
+                    <SignedNumberInput
+                      value={draft.rotation}
+                      onChange={v => set({ rotation: v })}
+                      placeholder="0"
+                    />
+                  </View>
+                </View>
               </View>
               <FieldHint>
                 {isNew
@@ -340,18 +340,16 @@ const s = StyleSheet.create({
 
   axisRow:          { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   axisRowGap:       { marginTop: spacing.sm },
-  axisRowLabel:     { width: 58 },
+  axisRowLabel:     { width: 74 },
   axisRowLabelText: { fontSize: 13, fontWeight: "500", color: colors.textMuted },
   axisCol:          { flex: 1, minWidth: 0 },
   axisLabel: {
     fontSize: 11, fontWeight: "600", color: colors.textFaint, textAlign: "center",
   },
 
-  // Base point + Rotation, and Rows + Columns, each share one row.
-  pairRow:     { flexDirection: "row", gap: spacing.sm + 2 },
-  baseCol:     { flex: 2, minWidth: 0 },
-  rotationCol: { flex: 1, minWidth: 0 },
-  sizeCol:     { flex: 1, minWidth: 0 },
+  // Rows + Columns share one row.
+  pairRow: { flexDirection: "row", gap: spacing.sm + 2 },
+  sizeCol: { flex: 1, minWidth: 0 },
 
   // ── Point picker modal ────────────────────────────────────────────────────
   overlay: {
