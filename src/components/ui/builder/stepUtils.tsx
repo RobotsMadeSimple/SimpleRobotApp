@@ -2,6 +2,8 @@ import {
   ArrowRight,
   Bookmark,
   Camera,
+  Circle,
+  FileDown,
   ChevronsRight,
   GitBranch,
   CornerUpLeft,
@@ -9,6 +11,7 @@ import {
   Cpu,
   Brackets,
   Gauge,
+  Scale,
   Globe,
   Grid3x3,
   Hash,
@@ -26,6 +29,7 @@ import {
   OctagonX,
   PauseCircle,
   Play,
+  Plug,
   Radio,
   RefreshCw,
   RotateCw,
@@ -36,10 +40,27 @@ import {
   Home,
   LocateFixed,
   Zap,
+  StickyNote,
+  SkipForward,
+  CornerDownLeft,
+  Flag,
+  TriangleAlert,
+  Split,
+  ShieldCheck,
+  MapPin,
+  Percent,
+  List,
+  MessageCircleQuestionMark,
+  Spline,
 } from "lucide-react-native";
 import React from "react";
-import { ConditionGroup, ElseIfBranch, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS, JsonKeyValue, JsonInboundMapping } from "@/src/models/robotModels";
+import { ConditionGroup, FieldSpec, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS } from "@/src/models/robotModels";
 import { accents, colors } from "@/src/components/ui/kit";
+import { findPluginStep, pluginDisplayName } from "./usePluginContributions";
+import { outputsSummary, paramsSummary } from "./pluginSteps";
+import { mapStepTree } from "@/src/models/stepTree";
+import { blockBodyFrames, type ScopeFrame } from "./scopeFrames";
+import { stepSpecFor } from "./useStepCatalog";
 
 // ── ID generation ──────────────────────────────────────────────────────────────
 
@@ -88,20 +109,15 @@ export function backfillPointIds(steps: ProgramStep[], points: Point[] | undefin
   if (!points || points.length === 0) return steps;
   const idByName = new Map(points.map(p => [p.name, p.id] as const));
   const isMove = (t: StepType) => t === "MoveL" || t === "MoveJ" || t === "JumpL" || t === "JumpJ";
-  const walk = (list: ProgramStep[]): ProgramStep[] => list.map(s => {
-    let next = s;
+  // Every nested body (loop, if/else, switch, try/catch) via stepTree.
+  return steps.map(root => mapStepTree(root, s => {
     if (isMove(s.type) && s.pointName && !s.pointId
         && !s.gridPoint && !s.stackPoint && !s.varPointName && !s.pointNameExpr) {
       const id = idByName.get(s.pointName);
-      if (id) next = { ...next, pointId: id };
+      if (id) return { ...s, pointId: id };
     }
-    if (next.loopSteps)      next = { ...next, loopSteps:      walk(next.loopSteps) };
-    if (next.ifSteps)        next = { ...next, ifSteps:        walk(next.ifSteps) };
-    if (next.elseSteps)      next = { ...next, elseSteps:      walk(next.elseSteps) };
-    if (next.elseIfBranches) next = { ...next, elseIfBranches: next.elseIfBranches.map(b => ({ ...b, steps: walk(b.steps) })) };
-    return next;
-  });
-  return walk(steps);
+    return s;
+  }));
 }
 
 // ── Step label ─────────────────────────────────────────────────────────────────
@@ -122,6 +138,7 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
         hasToolOff  ? "toolOffset" : null,
         hasOffset   ? "offset"     : null,
         hasOverride ? "override"   : null,
+        moveStopTag(step),
       ].filter(Boolean).join("  ");
       const base = step.gridPoint
         ? `${step.type}  →  Grid Point`
@@ -140,14 +157,25 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       const val   = step.outputValue ? "ON" : "OFF";
       const pulse = step.pulseMs && step.pulseMs > 0 ? `  pulse ${step.pulseMs} ms` : "";
       if (card === "relay") return `Relay ${num}  →  ${val}${pulse}`;
-      if (card === "nano")  return `Nano · Pin ${num}  →  ${val}${pulse}`;
+      if (card === "io")  return `IO · Pin ${num}  →  ${val}${pulse}`;
       return `STB · Output ${num}  →  ${val}${pulse}`;
     }
+    case "Tare":
+      return `Tare Load Cell${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}`;
+    case "ReadLoadCell":
+      return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `  (${step.loadCellUnit})` : ""}`;
+    case "StartRecording":
+      return `Start Recording${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}  →  $${step.recordVariableName ?? "?"}`;
+    case "StopRecording":
+      return `Stop Recording${step.loadCellPin != null ? `  (Pin ${step.loadCellPin})` : ""}`;
+    case "ExportData":
+      return `Export ${(step.exportFormat ?? "csv").toUpperCase()}  →  ${step.exportPath ?? "?"}`;
     case "Wait": {
       if (step.waitMode === 'condition') {
         const g = step.waitCondition;
         const condStr = g && (g.items ?? []).length > 0
-          ? ((g.items ?? []).length === 1 ? `${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}` : `${g.combinator} of ${(g.items ?? []).length} conds`)
+          ? ((g.items ?? []).length === 1 ? conditionItemText(g.items[0])
+              : conditionHasMixedJoins(g) ? conditionGroupText(g) : `${g.combinator} of ${(g.items ?? []).length} conds`)
           : "condition";
         return step.waitTimeoutMs ? `Wait  ${condStr}  (${step.waitTimeoutMs} ms max)` : `Wait  ${condStr}`;
       }
@@ -160,8 +188,8 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       if (step.loopMode === 'while') {
         const g = step.loopWhileCondition;
         if (!g || (g.items ?? []).length === 0) return "While  (no condition)";
-        if ((g.items ?? []).length === 1) return `While  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
-        return `While  ${g.combinator} of ${(g.items ?? []).length} conditions`;
+        if ((g.items ?? []).length === 1) return `While  ${conditionItemText(g.items[0])}`;
+        return conditionHasMixedJoins(g) ? `While  ${conditionGroupText(g)}` : `While  ${g.combinator} of ${(g.items ?? []).length} conditions`;
       }
       const loopExpr = step.expressions?.loopCount;
       const loopVal  = loopExpr ? loopExpr : (step.loopCount === 0 ? "∞" : (step.loopCount ?? 1));
@@ -186,8 +214,8 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
     case "IfCondition": {
       const g = step.condition;
       if (!g || (g.items ?? []).length === 0) return "If (no conditions)";
-      if ((g.items ?? []).length === 1) return `If  ${g.items[0].left} ${g.items[0].operator} ${g.items[0].right}`;
-      return `If  ${g.combinator} of ${(g.items ?? []).length} conditions`;
+      if ((g.items ?? []).length === 1) return `If  ${conditionItemText(g.items[0])}`;
+      return conditionHasMixedJoins(g) ? `If  ${conditionGroupText(g)}` : `If  ${g.combinator} of ${(g.items ?? []).length} conditions`;
     }
     case "SetTool":    return step.toolName  ? `Set Tool  →  ${step.toolName}`  : "Set Tool  →  None";
     case "SetLocal":   return step.localName ? `Set Local  →  ${step.localName}` : "Set Local  →  None";
@@ -202,15 +230,17 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
     case "AuxMove": {
       const axis = step.auxAxisIndex ?? 0;
       const isAbs = step.auxAbsolute;
+      const tag = moveStopTag(step);
+      const withTag = (label: string) => tag ? `${label}  (${tag})` : label;
       if (step.auxUnit && step.auxDistance != null) {
         const val = isAbs ? `→ ${step.auxDistance}` : (step.auxDistance >= 0 ? `+${step.auxDistance}` : `${step.auxDistance}`);
-        return `Aux Move  ·  Axis ${axis}  ·  ${val} ${step.auxUnit}`;
+        return withTag(`Aux Move  ·  Axis ${axis}  ·  ${val} ${step.auxUnit}`);
       }
       if (step.auxSteps != null) {
         const val = isAbs ? `→ ${step.auxSteps}` : (step.auxSteps >= 0 ? `+${step.auxSteps}` : `${step.auxSteps}`);
-        return `Aux Move  ·  Axis ${axis}  ·  ${val} steps`;
+        return withTag(`Aux Move  ·  Axis ${axis}  ·  ${val} steps`);
       }
-      return `Aux Move  ·  Axis ${axis}`;
+      return withTag(`Aux Move  ·  Axis ${axis}`);
     }
     case "AuxContinuous":
       return `Aux Run  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s`;
@@ -221,7 +251,8 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
     case "GripperAction": {
       const ga = step.gripperAction ?? "Open";
       const detail = ga === "GripTo" ? `Grip to ${step.gripTargetMm ?? "?"} mm` : ga;
-      return `Gripper  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${detail}`;
+      const tag = moveStopTag(step);
+      return `Gripper  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${detail}${tag ? `  (${tag})` : ""}`;
     }
     case "ConveyorAction": {
       const a = step.conveyorAction ?? "RunForward";
@@ -257,8 +288,37 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return step.httpReceiveName
         ? `HTTP Receive  ←  ${step.httpReceiveName}`
         : "HTTP Receive";
+    case "Plugin":
+      return pluginStepTitle(step);
     case "Unknown":
       return step.unknownStepType ? `Unknown (${step.unknownStepType})` : "Unknown Step";
+    // Program editor v2
+    case "Note":
+      return (step.comment ?? "").split("\n")[0].trim() || (step.noteStyle === "section" ? "Section" : "Note");
+    case "LoopControl":
+      return step.loopControl === "continue" ? "Next Iteration" : "Break Loop";
+    case "EndProgram":
+      return step.statusMessage ? `End Program: ${step.statusMessage}` : "End Program";
+    case "RaiseError":
+      return step.errorMessage ? `Raise Error: ${step.errorMessage}` : "Raise Error";
+    case "Switch":
+      return step.switchExpr ? `Switch ${step.switchExpr}` : "Switch";
+    case "ListOp":
+      return step.variableName ? `$${step.variableName}.${step.listAction ?? "append"}` : "List";
+    case "Prompt":
+      return step.promptMessage ? `Prompt: ${step.promptMessage}` : "Prompt";
+    case "Try":
+      return step.tryRetries ? `Try  (retry ×${step.tryRetries})` : "Try";
+    case "SetSpeedFactor":
+      return `Speed Factor  →  ${step.expressions?.speedFactor ?? `${step.speedFactor ?? 100} %`}`;
+    case "SavePosition":
+      return step.savePositionTo === "point"
+        ? `Save Position  →  ${movePointName(step, points, "?")}`
+        : `Save Position  →  ${step.variableName ? `$${step.variableName}` : "?"}`;
+    case "MoveC":
+      return `MoveC  →  ${movePointName(step, points, "?")}`;
+    case "Return":
+      return "Return";
     default:              return step.type;
   }
 }
@@ -272,6 +332,11 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "JumpL":
     case "JumpJ":        return <ArrowRight    size={size} color={color} />;
     case "SetOutput":    return <Zap           size={size} color={color} />;
+    case "Tare":         return <Scale         size={size} color={color} />;
+    case "ReadLoadCell": return <Gauge         size={size} color={color} />;
+    case "StartRecording": return <Circle      size={size} color={color} />;
+    case "StopRecording":  return <Square      size={size} color={color} />;
+    case "ExportData":     return <FileDown    size={size} color={color} />;
     case "Wait":         return <Clock         size={size} color={color} />;
     case "Loop":         return <RefreshCw     size={size} color={color} />;
     case "StatusUpdate": return <MessageSquare size={size} color={color} />;
@@ -307,6 +372,19 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "HttpRequest":       return <Globe         size={size} color={color} />;
     case "CaptureImage":       return <Camera        size={size} color={color} />;
     case "HttpReceive":        return <Inbox         size={size} color={color} />;
+    case "Plugin":             return <Plug          size={size} color={color} />;
+    case "Note":               return <StickyNote    size={size} color={color} />;
+    case "LoopControl":        return <SkipForward   size={size} color={color} />;
+    case "Return":             return <CornerDownLeft size={size} color={color} />;
+    case "EndProgram":         return <Flag          size={size} color={color} />;
+    case "RaiseError":         return <TriangleAlert size={size} color={color} />;
+    case "Switch":             return <Split         size={size} color={color} />;
+    case "Try":                return <ShieldCheck   size={size} color={color} />;
+    case "SavePosition":       return <MapPin        size={size} color={color} />;
+    case "SetSpeedFactor":     return <Percent       size={size} color={color} />;
+    case "ListOp":             return <List          size={size} color={color} />;
+    case "Prompt":             return <MessageCircleQuestionMark size={size} color={color} />;
+    case "MoveC":              return <Spline        size={size} color={color} />;
     case "Unknown":            return <HelpCircle    size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
@@ -320,6 +398,11 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   JumpL:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Jump Linear"  },
   JumpJ:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Jump Joint"   },
   SetOutput:    { accent: "#ea580c", iconBg: "#fed7aa", iconColor: "#ea580c", label: "Set Output"   },
+  Tare:         { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Tare Load Cell" },
+  ReadLoadCell: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Read Load Cell" },
+  StartRecording:{ accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Start Recording" },
+  StopRecording: { accent: "#0d9488", iconBg: "#ccfbf1", iconColor: "#0d9488", label: "Stop Recording" },
+  ExportData:    { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Export Data" },
   Wait:         { accent: "#d97706", iconBg: "#fde68a", iconColor: "#b45309", label: "Wait"         },
   Loop:         { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Loop"         },
   StatusUpdate: { accent: "#475569", iconBg: "#e2e8f0", iconColor: "#475569", label: "Status Update"},
@@ -355,6 +438,21 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   HttpRequest:     { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Request"        },
   CaptureImage:     { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Capture Image"       },
   HttpReceive:      { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Receive"        },
+  // Ink/slate: the one kit tone no built-in family uses, so plugin blocks read as "external".
+  Plugin:           { accent: colors.surfaceDark, iconBg: colors.border, iconColor: colors.surfaceDark, label: "Plugin" },
+  // Program editor v2
+  Note:             { accent: "#64748b", iconBg: "#f1f5f9", iconColor: "#64748b", label: "Note"                },
+  LoopControl:      { accent: "#7c3aed", iconBg: "#ddd6fe", iconColor: "#7c3aed", label: "Break / Next"        },
+  Return:           { accent: "#16a34a", iconBg: "#bbf7d0", iconColor: "#16a34a", label: "Return"              },
+  EndProgram:       { accent: "#374151", iconBg: "#f3f4f6", iconColor: "#374151", label: "End Program"         },
+  RaiseError:       { accent: "#dc2626", iconBg: "#fee2e2", iconColor: "#dc2626", label: "Raise Error"         },
+  Switch:           { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Switch"              },
+  Try:              { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Try"                 },
+  SavePosition:     { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Save Position"       },
+  SetSpeedFactor:   { accent: "#0284c7", iconBg: "#e0f2fe", iconColor: "#0284c7", label: "Set Speed Factor"    },
+  ListOp:           { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "List"                },
+  Prompt:           { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Prompt"              },
+  MoveC:            { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Arc"            },
   Unknown:          { accent: "#9ca3af", iconBg: "#f3f4f6", iconColor: "#6b7280", label: "Unknown Step"        },
 };
 
@@ -379,6 +477,27 @@ export function fmtMoveModifiers(step: ProgramStep): string[] {
   ].filter(Boolean) as string[];
 }
 
+/**
+ * A move step's optional stop condition as one detail line:
+ * `stop when  $io.Nano.Load_Cell >= 2000  → $contact  fired → $hit`, or `record when …`.
+ * Null when the step has none.
+ */
+export function fmtMoveStop(step: ProgramStep): string | null {
+  const g = step.moveStopCondition;
+  if (!g) return null;
+  const verb = step.moveStopMode === "record" ? "record when" : "stop when";
+  const parts = [`${verb}  ${conditionGroupText(g)}`];
+  if (step.moveStopPositionVariableName) parts.push(`→ $${step.moveStopPositionVariableName}`);
+  if (step.moveStopFlagVariableName)     parts.push(`fired → $${step.moveStopFlagVariableName}`);
+  return parts.join("  ");
+}
+
+/** Short label suffix for a move step with a stop condition — "stop on condition" / "record on condition". */
+export function moveStopTag(step: ProgramStep): string | null {
+  if (!step.moveStopCondition) return null;
+  return step.moveStopMode === "record" ? "record on condition" : "stop on condition";
+}
+
 // ── fmtSetVar (needed by stepDetail and stepLabel) ────────────────────────────
 
 export function fmtSetVar(varName: string | undefined, expr: string | undefined): string {
@@ -394,12 +513,48 @@ export function fmtSetVar(varName: string | undefined, expr: string | undefined)
 
 // ── Condition formatting ──────────────────────────────────────────────────────
 
+/** The text a condition item shows: its expression, or the legacy left/op/right rebuilt as one. */
+export function conditionItemText(i: { expr?: string; left?: string; operator?: string; right?: string }): string {
+  if (i.expr != null) return i.expr;
+  return [i.left, i.operator, i.right].filter(s => s && s.length > 0).join(" ");
+}
+
 /** Spells out every item of a condition group joined by AND/OR (not just a count). */
 export function fmtConditionFull(group: ConditionGroup | undefined): string {
+  return conditionGroupText(group);
+}
+
+/** The joiner between item i-1 and item i: the item's own `join`, else the group default. */
+export function effectiveJoin(group: ConditionGroup, i: number): "AND" | "OR" {
+  const own = group.items?.[i]?.join;
+  if (own === "AND" || own === "OR") return own;
+  return group.combinator === "ANY" ? "OR" : "AND";
+}
+
+/** True when the group mixes AND and OR joiners, i.e. precedence matters to how it reads. */
+export function conditionHasMixedJoins(group: ConditionGroup | undefined): boolean {
+  const n = group?.items?.length ?? 0;
+  if (n < 3) return false;
+  const first = effectiveJoin(group!, 1);
+  for (let i = 2; i < n; i++) if (effectiveJoin(group!, i) !== first) return true;
+  return false;
+}
+
+/**
+ * The group as text, with AND binding tighter than OR: `A and B or C` → `(A AND B) OR C`.
+ * Mirrors the controller's evaluation order (an OR of AND-runs).
+ */
+export function conditionGroupText(group: ConditionGroup | undefined): string {
   const items = group?.items ?? [];
   if (items.length === 0) return "(no conditions)";
-  const join = group!.combinator === "ANY" ? "  OR  " : "  AND  ";
-  return items.map(i => `${i.left || "?"} ${i.operator} ${i.right || "?"}`).join(join);
+  const runs: string[][] = [[conditionItemText(items[0]) || "?"]];
+  for (let i = 1; i < items.length; i++) {
+    const t = conditionItemText(items[i]) || "?";
+    if (effectiveJoin(group!, i) === "OR") runs.push([t]); else runs[runs.length - 1].push(t);
+  }
+  return runs
+    .map(r => (runs.length > 1 && r.length > 1) ? `(${r.join("  AND  ")})` : r.join("  AND  "))
+    .join("  OR  ");
 }
 
 // ── Step detail ───────────────────────────────────────────────────────────────
@@ -424,6 +579,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.type === "MoveL" && step.blend)
         lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
+      const stopLine = fmtMoveStop(step);
+      if (stopLine) lines.push(stopLine);
       return lines.join('\n');
     }
     case "JumpL":
@@ -448,6 +605,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (step.type === "JumpL" && step.blend)
         lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
+      const stopLine = fmtMoveStop(step);
+      if (stopLine) lines.push(stopLine);
       return lines.join('\n');
     }
     case "SetOutput": {
@@ -455,10 +614,24 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const num   = step.outputNumber ?? 1;
       const val   = step.outputValue ? "ON" : "OFF";
       const label = card === "relay" ? `Relay ${num}  →  ${val}`
-                  : card === "nano"  ? `Nano · Pin ${num}  →  ${val}`
+                  : card === "io"  ? `IO · Pin ${num}  →  ${val}`
                   :                    `STB · Output ${num}  →  ${val}`;
       const lines = [label];
       if (step.pulseMs && step.pulseMs > 0) lines.push(`Pulse  ${step.pulseMs} ms${step.pulseBlocking ? "  (blocking)" : ""}`);
+      return lines.join('\n');
+    }
+    case "Tare":
+      return `Tare Load Cell${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
+    case "ReadLoadCell":
+      return `Read Load Cell  →  $${step.variableName ?? "?"}${step.loadCellUnit ? `\nunit: ${step.loadCellUnit}` : ""}`;
+    case "StartRecording":
+      return `Start Recording  →  $${step.recordVariableName ?? "?"}${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
+    case "StopRecording":
+      return `Stop Recording${step.loadCellPin != null ? `\nPin ${step.loadCellPin}` : ""}`;
+    case "ExportData": {
+      const lines = [`Export ${(step.exportFormat ?? "csv").toUpperCase()}  →  ${step.exportPath ?? "?"}`];
+      const n = (step.exportColumns ?? []).length;
+      if (n) lines.push(`${n} column${n === 1 ? "" : "s"}`);
       return lines.join('\n');
     }
     case "Wait": {
@@ -496,11 +669,10 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
     case "RunVision": {
       const lines: string[] = [];
       if (step.visionProgramName) lines.push(`→ ${step.visionProgramName}`);
-      if (step.visionZoneVar) lines.push(`zone → $${step.visionZoneVar}`);
-      else if (step.visionZoneId) lines.push(`zone override`);
-      const outN = (step.visionOutputs?.length ?? 0) + (step.colorOutputs?.length ?? 0)
-        + (step.polygonOutputs?.length ?? 0) + (step.arucoOutputs?.length ?? 0);
-      if (outN > 0) lines.push(`${outN} output${outN !== 1 ? "s" : ""} → variables`);
+      if (step.passVariable) lines.push(`pass → $${step.passVariable}`);
+      const outs = (step.toolOutputs ?? []).filter(o => o.toolId && o.variable);
+      if (outs.length === 1) lines.push(`${outs[0].value} → $${outs[0].variable}`);
+      else if (outs.length > 1) lines.push(`${outs.length} outputs → variables`);
       return lines.length ? lines.join("\n") : null;
     }
     case "SaveImage":
@@ -552,7 +724,8 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       parts.push(step.auxAbsolute ? "absolute" : "relative");
       if (step.auxVelocity != null) parts.push(`${step.auxVelocity} ${unit}/s`);
       if (step.auxWaitForDone === false) parts.push("no wait");
-      return parts.join("  ·  ");
+      const stopLine = fmtMoveStop(step);
+      return stopLine ? `${parts.join("  ·  ")}\n${stopLine}` : parts.join("  ·  ");
     }
     case "AuxContinuous":
       return `Axis ${step.auxAxisIndex ?? 0}  ·  ${step.auxVelocity ?? 800} steps/s  (continuous)`;
@@ -562,7 +735,9 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       return step.auxEnable === false ? "Disable motor drivers" : "Enable motor drivers";
     case "GripperAction": {
       const ga = step.gripperAction ?? "Open";
-      return ga === "GripTo" ? `Gripper · grip to ${step.gripTargetMm ?? "?"} mm` : `Gripper · ${ga}`;
+      const line = ga === "GripTo" ? `Gripper · grip to ${step.gripTargetMm ?? "?"} mm` : `Gripper · ${ga}`;
+      const stopLine = fmtMoveStop(step);
+      return stopLine ? `${line}\n${stopLine}` : line;
     }
     case "ConveyorAction": {
       const a = step.conveyorAction ?? "RunForward";
@@ -707,13 +882,73 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (timeout != null) lines.push(`timeout: ${timeout / 1000}s`);
       return lines.length ? lines.join("\n") : null;
     }
+    case "Plugin": {
+      const c = findPluginStep(step.pluginId, step.pluginStepId);
+      const lines = [pluginStepTitle(step)];
+      const params = paramsSummary(step, c);
+      if (params) lines.push(params);
+      const outs = outputsSummary(step);
+      if (outs) lines.push(outs);
+      return lines.join("\n");
+    }
     case "Unknown":
       return step.unknownStepType
         ? `Original type: "${step.unknownStepType}" — delete this step to fix the program`
         : "Unrecognized step — delete this step to fix the program";
+    // Program editor v2 — the catalog's summary template, with a plain line where it is empty.
+    case "LoopControl":
+      return step.loopControl === "continue" ? "Skips the rest of this pass" : "Leaves the enclosing loop";
+    case "Return":
+      return "Back to the caller (ends a main program)";
+    case "EndProgram":
+      return step.statusMessage ? `"${step.statusMessage}"` : "Finishes the program here";
+    case "RaiseError":
+      return `${step.errorCode || "userError"}: ${step.errorMessage || "(no message)"}`;
+    case "Switch":
+      return step.switchExpr?.trim() ? `on ${step.switchExpr}` : "No value set";
+    case "Try": {
+      const parts: string[] = [];
+      if (step.tryRetries) parts.push(`retry ×${step.tryRetries}${step.tryRetryDelayMs ? ` every ${step.tryRetryDelayMs} ms` : ""}`);
+      parts.push(step.catchCodes?.length ? `catches ${step.catchCodes.join(", ")}` : "catches any runtime error");
+      if (step.errorVariableName) parts.push(`message → $${step.errorVariableName}`);
+      return parts.join("  ·  ");
+    }
+    case "MoveC": {
+      const via = step.viaPointNameExpr || step.viaPointName || "?";
+      const lines = [`→ ${movePointName(step, points, "?")}  via ${via}`];
+      const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} mm/s` : null);
+      if (spd) lines.push(spd);
+      lines.push(...fmtMoveModifiers(step));
+      return lines.join("\n");
+    }
+    case "Prompt": {
+      const lines = [step.promptMessage ? `"${step.promptMessage}"` : "(no message)"];
+      const buttons = (step.promptButtons ?? []).filter(Boolean);
+      const extra: string[] = [];
+      if (buttons.length) extra.push(buttons.join(" / "));
+      if (step.promptInput && step.promptInput !== "none") extra.push(`${step.promptInput} input`);
+      if (step.promptTimeoutMs) extra.push(`timeout ${step.promptTimeoutMs} ms`);
+      if (extra.length) lines.push(extra.join("  ·  "));
+      return lines.join("\n");
+    }
+    case "Note":
+      return step.comment ?? null;
     default:
-      return null;
+      return catalogSummary(step, points);
   }
+}
+
+// ── Plugin step title ─────────────────────────────────────────────────────────
+
+/**
+ * `<plugin name> · <step label>` from the cached contributions, falling back to the
+ * raw ids while they load or when the plugin is no longer installed.
+ */
+export function pluginStepTitle(step: ProgramStep): string {
+  const c = findPluginStep(step.pluginId, step.pluginStepId);
+  const plugin = c?.pluginName || pluginDisplayName(step.pluginId);
+  const label  = c?.step.label || step.pluginStepId || "?";
+  return `${plugin} · ${label}`;
 }
 
 // ── Step type list, map, and categories ───────────────────────────────────────
@@ -725,6 +960,11 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "JumpL",        label: "Jump Linear",   desc: "Lift, move linearly over the target, then lower — avoids obstacles" },
   { type: "JumpJ",        label: "Jump Joint",    desc: "Lift, move via joint interpolation over the target, then lower — avoids obstacles" },
   { type: "SetOutput",    label: "Set Output",    desc: "Turn a digital output ON or OFF" },
+  { type: "Tare",         label: "Tare Load Cell", desc: "Zero a load cell (set its current reading to 0)" },
+  { type: "ReadLoadCell", label: "Read Load Cell", desc: "Read a load cell's weight into a variable" },
+  { type: "StartRecording", label: "Start Recording", desc: "Record a load cell into a list variable" },
+  { type: "StopRecording", label: "Stop Recording", desc: "Stop recording and store the captured samples into its list variable" },
+  { type: "ExportData", label: "Export Data", desc: "Write variables to a CSV or JSON file (configurable columns; $variable / $time_ms in the path)" },
   { type: "Wait",         label: "Wait",          desc: "Pause execution for a set duration" },
   { type: "Loop",         label: "Loop",          desc: "Repeat a block of steps N times" },
   { type: "StatusUpdate", label: "Status Update", desc: "Publish a message, warning, or error to the monitor" },
@@ -759,13 +999,26 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "HttpRequest",   label: "HTTP Request",           desc: "POST a JSON payload to a server and optionally load values from the response back into program variables" },
   { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with HTTP Request to send it to a server" },
   { type: "HttpReceive",    label: "HTTP Receive",           desc: "Wait for an incoming HTTP POST to a named webhook endpoint — other robots or servers can trigger this step by POSTing to /webhook/{name}" },
+  // Program editor v2 (labels/descriptions mirror the controller's step catalog)
+  { type: "MoveC",          label: "Move Arc",               desc: "Move along a circular arc through a via point to the end target" },
+  { type: "SavePosition",   label: "Save Position",          desc: "Store the current position in a Points list or a saved point" },
+  { type: "SetSpeedFactor", label: "Set Speed Factor",       desc: "Scale this program's move speeds by a percentage" },
+  { type: "Switch",         label: "Switch",                 desc: "Run the case whose value equals an expression" },
+  { type: "LoopControl",    label: "Break / Next",           desc: "Leave the enclosing loop, or skip to its next iteration" },
+  { type: "Try",            label: "Try",                    desc: "Run steps; on a runtime error retry them or run the catch steps" },
+  { type: "RaiseError",     label: "Raise Error",            desc: "Fail with a message — caught by an enclosing Try, otherwise ends the program" },
+  { type: "Return",         label: "Return",                 desc: "Leave the routine (or end the program)" },
+  { type: "EndProgram",     label: "End Program",            desc: "Finish the program now, from anywhere" },
+  { type: "Note",           label: "Note",                   desc: "A note or section header — not executed" },
+  { type: "ListOp",         label: "List",                   desc: "Append, insert, remove, set, sort or copy list elements" },
+  { type: "Prompt",         label: "Prompt",                 desc: "Ask the operator: show a message with buttons and an optional input" },
 ];
 
 export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
 
 export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
-  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram",
-  "SetTool", "SetSpeedL", "SetSpeedJ", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram", "MoveC",
+  "SetTool", "SetSpeedL", "SetSpeedJ", "SetSpeedFactor", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
 ]);
 
 /**
@@ -782,7 +1035,7 @@ export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
  */
 export type StepCategoryKey =
   | "motion" | "motionSettings" | "flow" | "variables"
-  | "io" | "vision" | "background" | "comms";
+  | "io" | "vision" | "background" | "comms" | "plugins";
 
 export type StepCategory = {
   key: StepCategoryKey;
@@ -801,31 +1054,31 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram"],
+    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "MoveC", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram", "SavePosition"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,
     desc: "Change how later moves behave: speed, blending, tool and frame.",
     color: "#0284c7", soft: "#e0f2fe",
-    types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius", "SetTool", "SetLocal", "ClearLocal"],
+    types: ["SetSpeedL", "SetSpeedJ", "SetBlendRadius", "SetSpeedFactor", "SetTool", "SetLocal", "ClearLocal"],
   },
   {
     key: "flow", label: "Logic & Flow", icon: GitBranch,
     desc: "Decide what runs next — branches, loops, jumps and pauses.",
     color: accents.purple, soft: accents.purpleSoft,
-    types: ["IfCondition", "Loop", "CallRoutine", "Label", "GoToLabel", "PauseProgram"],
+    types: ["IfCondition", "Switch", "Loop", "LoopControl", "Try", "RaiseError", "CallRoutine", "Return", "Label", "GoToLabel", "PauseProgram", "EndProgram", "Note"],
   },
   {
     key: "variables", label: "Variables & Timing", icon: Hash,
     desc: "Store values, count time, and wait before continuing.",
     color: colors.warning, soft: colors.warningSoft,
-    types: ["SetVariable", "StopwatchControl", "Wait"],
+    types: ["SetVariable", "ListOp", "StopwatchControl", "Wait"],
   },
   {
     key: "io", label: "I/O & Aux Axes", icon: Zap,
     desc: "Drive digital outputs and auxiliary stepper axes.",
     color: accents.orange, soft: accents.orangeSoft,
-    types: ["SetOutput", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
+    types: ["SetOutput", "Tare", "ReadLoadCell", "StartRecording", "StopRecording", "ExportData", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
   },
   {
     key: "vision", label: "Vision", icon: ScanSearch,
@@ -843,14 +1096,26 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "comms", label: "Communication", icon: Radio,
     desc: "Talk to the operator and to other machines over HTTP.",
     color: "#0f766e", soft: "#f0fdfa",
-    types: ["HttpRequest", "HttpReceive", "StatusUpdate"],
+    types: ["Prompt", "HttpRequest", "HttpReceive", "StatusUpdate"],
   },
 ];
+
+/**
+ * Plugin-contributed blocks. Not in STEP_CATEGORIES: its tiles are one per
+ * (plugin, step) from GetPluginContributions, so the picker renders it from that
+ * list and hides it when no plugin is installed.
+ */
+export const PLUGIN_CATEGORY: StepCategory = {
+  key: "plugins", label: "Plugins", icon: Plug,
+  desc: "Steps provided by installed plugins.",
+  color: colors.surfaceDark, soft: colors.background,
+  types: ["Plugin"],
+};
 
 /** The category a step type belongs to (undefined only for Unknown steps). */
 export const STEP_CATEGORY_OF: Partial<Record<StepType, StepCategory>> =
   Object.fromEntries(
-    STEP_CATEGORIES.flatMap(cat => cat.types.map(t => [t, cat] as const))
+    [...STEP_CATEGORIES, PLUGIN_CATEGORY].flatMap(cat => cat.types.map(t => [t, cat] as const))
   ) as Partial<Record<StepType, StepCategory>>;
 
 /** Category for a step type, falling back to a neutral "Other" family. */
@@ -877,55 +1142,145 @@ export type DragInfo = {
   toIndex: number;
 };
 
-// ── Scope navigation ──────────────────────────────────────────────────────────
+/// ── Scope navigation ──────────────────────────────────────────────────────────
+// The scope helpers live in the pure scopeFrames module (testable outside React Native).
 
-export type ScopeFrame = {
-  kind: 'loop' | 'ifTrue' | 'elseIf' | 'else';
-  stepId: string;
-  label: string;
-  branchId?: string;
-};
+export {
+  SCOPE_ROLE, bodyOf, caseValuesText, frameResolves, getStepsAtScope, isBlockStep, setStepsAtScope, withBody,
+} from "./scopeFrames";
+export type { ScopeFrame, ScopeKind } from "./scopeFrames";
 
-export function getStepsAtScope(rootSteps: ProgramStep[], stack: ScopeFrame[]): ProgramStep[] {
-  let current = rootSteps;
-  for (const frame of stack) {
-    const parent = current.find(s => s.id === frame.stepId);
-    if (!parent) break;
-    switch (frame.kind) {
-      case 'loop':   current = parent.loopSteps ?? []; break;
-      case 'ifTrue': current = parent.ifSteps ?? []; break;
-      case 'else':   current = parent.elseSteps ?? []; break;
-      case 'elseIf': current = parent.elseIfBranches?.find(b => b.id === frame.branchId)?.steps ?? []; break;
-    }
-  }
-  return current;
+/** Every body a block step shows; a Loop's body is labelled like its row (for the breadcrumb). */
+export function bodyFrames(step: ProgramStep, points?: Point[]): Omit<ScopeFrame, "stepId">[] {
+  return blockBodyFrames(step, s => stepLabel(s, points));
 }
 
-export function setStepsAtScope(
-  rootSteps: ProgramStep[],
-  stack: ScopeFrame[],
-  newSteps: ProgramStep[]
-): ProgramStep[] {
-  if (stack.length === 0) return newSteps;
-  const [head, ...tail] = stack;
-  return rootSteps.map(s => {
-    if (s.id !== head.stepId) return s;
-    switch (head.kind) {
-      case 'loop':
-        return { ...s, loopSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.loopSteps ?? [], tail, newSteps) };
-      case 'ifTrue':
-        return { ...s, ifSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.ifSteps ?? [], tail, newSteps) };
-      case 'else':
-        return { ...s, elseSteps: tail.length === 0 ? newSteps : setStepsAtScope(s.elseSteps ?? [], tail, newSteps) };
-      case 'elseIf':
-        return {
-          ...s,
-          elseIfBranches: (s.elseIfBranches ?? []).map(b =>
-            b.id === head.branchId
-              ? { ...b, steps: tail.length === 0 ? newSteps : setStepsAtScope(b.steps, tail, newSteps) }
-              : b
-          ),
-        };
+// ── New steps (factories) ─────────────────────────────────────────────────────
+
+/** The step types added by program editor v2; their defaults come from the catalog. */
+const V2_TYPES = new Set<StepType>([
+  "Note", "LoopControl", "Return", "EndProgram", "RaiseError", "Switch", "Try",
+  "SavePosition", "SetSpeedFactor", "ListOp", "Prompt", "MoveC",
+]);
+
+/** Kinds whose catalog default is a plain value worth stamping onto a new step. */
+const STAMPED_KINDS = new Set(["enum", "bool", "number", "integer", "text", "textList"]);
+
+/**
+ * Per-type starting values the catalog cannot express (fresh ids, empty bodies), and the
+ * built-in fallback for an older controller without a catalog.
+ */
+function builtInDefaults(type: StepType): Partial<ProgramStep> {
+  switch (type) {
+    case "SetBlendRadius": return { blendRadius: 10 };
+    case "SetOutput":      return { outputNumber: 1, outputValue: true };
+    case "Wait":           return { waitMs: 500 };
+    case "Loop":           return { loopCount: 1, loopSteps: [] };
+    case "Label":          return { labelId: newId() };
+    case "IfCondition":    return { condition: { combinator: "ALL", items: [] }, ifSteps: [] };
+    case "CncProgram":     return { cncProgramSteps: [] };
+    case "GripperAction":  return { auxAxisIndex: 0, gripperAction: "Open" };
+    case "ConveyorAction": return { auxAxisIndex: 0, conveyorAction: "RunForward" };
+    case "RotaryIndex":    return { auxAxisIndex: 0, rotaryDirection: 1, rotaryCount: 1 };
+    case "Note":           return { comment: "", noteStyle: "note" };
+    case "LoopControl":    return { loopControl: "break" };
+    case "RaiseError":     return { errorMessage: "" };
+    case "Switch":         return { switchExpr: "", switchCases: [{ id: newId(), values: ["1"], steps: [] }] };
+    case "Try":            return { trySteps: [], catchSteps: [], tryRetries: 0 };
+    case "SavePosition":   return { savePositionTo: "variable", savePositionMode: "replace" };
+    case "SetSpeedFactor": return { speedFactor: 100 };
+    case "ListOp":         return { listAction: "append" };
+    case "Prompt":         return { promptMessage: "", promptButtons: ["OK"], promptInput: "none" };
+    default:               return {};
+  }
+}
+
+/**
+ * A new step of `type` with its starting values: the catalog's defaults for the v2 blocks (enum,
+ * number and list fields), then the per-type values above. Only the fields a type uses are set —
+ * an older build stamped forty unrelated fields onto every step.
+ */
+export function newStep(type: StepType): ProgramStep {
+  const fromCatalog: Record<string, unknown> = {};
+  if (V2_TYPES.has(type)) {
+    for (const f of stepSpecFor(type)?.fields ?? []) {
+      if (f.hidden || f.default == null || !STAMPED_KINDS.has(f.kind) || f.props) continue;
+      fromCatalog[f.key] = Array.isArray(f.default) ? [...f.default] : f.default;
     }
+  }
+  return { id: newId(), type, ...(fromCatalog as Partial<ProgramStep>), ...builtInDefaults(type) };
+}
+
+// ── Catalog row summaries ─────────────────────────────────────────────────────
+
+/** One field's value as row text ("" when unset). */
+function summaryValue(step: ProgramStep, f: FieldSpec, points?: Point[]): string {
+  const raw = step as unknown as Record<string, unknown>;
+  const expr = f.exprKey ? step.expressions?.[f.exprKey] : undefined;
+  if (expr) return expr;
+  switch (f.kind) {
+    case "target":
+      if (f.key === "via") return step.viaPointNameExpr || step.viaPointName || "";
+      return step.gridPoint ? "grid point" : step.stackPoint ? "stack point"
+        : step.pointNameExpr || (step.pointId || step.pointName ? movePointName(step, points, "") : "");
+    case "pointRef": return step.pointId || step.pointName ? movePointName(step, points, "") : "";
+    case "varWrite": case "varRead": case "listVar": {
+      const v = raw[f.key];
+      return typeof v === "string" && v ? `$${v}` : "";
+    }
+    case "condition": {
+      const g = raw[f.key] as ConditionGroup | undefined;
+      return g?.items?.length ? conditionGroupText(g) : "";
+    }
+    case "textList": {
+      const v = raw[f.key];
+      return Array.isArray(v) ? v.filter(Boolean).join(", ") : "";
+    }
+    case "bool": {
+      const v = raw[f.key];
+      return v === true ? "on" : v === false ? "off" : "";
+    }
+    case "enum": {
+      const v = raw[f.key];
+      if (v == null || v === "") return "";
+      return f.options?.find(o => String(o.value) === String(v))?.label.toLowerCase() ?? String(v);
+    }
+    default: {
+      // Reference fields name the thing through their second prop (localId → localName).
+      const name = f.props && f.props.length > 1 ? raw[f.props[1]] : undefined;
+      const v = name ?? raw[f.key];
+      if (v == null || v === "") return "";
+      if (typeof v === "number") return f.unit ? `${v} ${f.unit}` : String(v);
+      return typeof v === "string" ? v : "";
+    }
+  }
+}
+
+/**
+ * A step's row summary from its catalog template (`→ {target} · {speed}`): each `{key}` becomes
+ * the field's value, and a ` · ` part whose fields are all unset — or, for a decorated part like
+ * `retry {tryRetries}`, still at their default — is dropped. Null without a catalog entry.
+ */
+export function catalogSummary(step: ProgramStep, points?: Point[]): string | null {
+  const spec = stepSpecFor(step.type);
+  if (!spec?.summary) return null;
+  const byKey = new Map(spec.fields.map(f => [f.key, f]));
+  const raw = step as unknown as Record<string, unknown>;
+  const parts = spec.summary.split(" · ").map(part => {
+    const keys = [...part.matchAll(/\{(\w+)\}/g)].map(m => m[1]);
+    const decorated = part.replace(/\{\w+\}/g, "").trim().length > 0;
+    let any = false;
+    const text = part.replace(/\{(\w+)\}/g, (_m, key: string) => {
+      const f = byKey.get(key);
+      if (!f) return "";
+      const v = summaryValue(step, f, points);
+      const atDefault = f.default != null && JSON.stringify(raw[key]) === JSON.stringify(f.default);
+      if (v && !(decorated && atDefault)) any = true;
+      return v;
+    });
+    return keys.length === 0 || any ? text.trim() : "";
   });
+  // A template that writes `${key}` around a variable field already has its `$`.
+  const out = parts.filter(Boolean).join("  ·  ").replace(/\$\$/g, "$");
+  return out || null;
 }

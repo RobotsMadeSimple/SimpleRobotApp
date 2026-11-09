@@ -182,7 +182,7 @@ export default function JointLimitsScreen() {
       ],
     );
   };
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(tabs)/robot/config"));
+  const goBack = () => router.dismissTo("/(tabs)/robot/config");
   const exit = () => leave(goBack);
 
   const capture = (which: "min" | "max") => {

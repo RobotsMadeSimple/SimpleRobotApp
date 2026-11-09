@@ -22,9 +22,13 @@ export const ROUTE_LABELS: Record<string, string> = {
   "phone-programs":  "Local Programs",
   "robot-programs":  "Programs",
   routines:          "Routines",
+  background:        "Background",
   vision:            "Vision",
   "vision-editor":   "Vision Editor",
   "inspection":      "Inspection",
+  manual:            "Manual",
+  "manual-chapter":  "Chapter",
+  "manual-step":     "Instruction",
 
   // Control
   jog: "Jog & Teach",
@@ -34,18 +38,23 @@ export const ROUTE_LABELS: Record<string, string> = {
   cameras:           "Cameras",
   configure:         "Configure",
   "configure-relay": "Configure Relay",
-  nanos:             "Nano IO",
+  ioDevices:             "Nano IO",
   relay:             "Relay",
   stb:               "STB Servos",
 
   // Space
   grids:        "Grids",
   "grid-edit":  "Edit Grid",
+  "grid-teach": "Teach Grid",
   stacks:       "Stacks",
   "stack-edit": "Edit Stack",
+  "stack-teach": "Teach Stack",
   locals:       "Locals",
+  "local-edit": "Edit Local",
   points:       "Points",
   tools:        "Tools",
+  "tool-edit":  "Edit Tool",
+  "teach-tcp":  "Teach TCP",
 };
 
 /** Label for a route segment: the map entry, or Title Case of the slug. */

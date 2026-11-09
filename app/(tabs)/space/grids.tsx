@@ -76,7 +76,7 @@ export default function GridsPage() {
           <EmptyState
             icon={<Grid3x3 size={40} color={colors.textFaint} />}
             title="No Grids"
-            subtitle="Tap below to define a 2D position array."
+            subtitle="Add one, then teach it by jogging to its corners or enter the offsets by hand."
           />
         }
         ListFooterComponent={

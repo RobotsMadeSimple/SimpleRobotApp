@@ -3,18 +3,26 @@ import {
 import { VisionResults } from "@/src/components/ui/VisionResults";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { BuiltProgram,
+  PauseReason,
   ProgramStatus,
-  ProgramStep,
   ProgramSummary,
   ProgramVariableSnapshot,
-  VisionResult, imageDataUri, isListVariable } from "@/src/models/robotModels";
+  VisionResult, VisionTool, imageDataUri, isListVariable } from "@/src/models/robotModels";
 import { useBuiltPrograms,
   useBuiltProgramsLoaded,
+  useConnected,
+  usePoints,
   useProgramSummaries,
   useRobotStatus,
   useSelectedRobot } from "@/src/providers/RobotProvider";
 import { useActionPending } from "@/src/hooks/useActionPending";
-import { robotClient } from "@/src/services/RobotConnectService";
+import { isNotImplementedCommand, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
+import { useBreakpoints } from "@/src/components/ui/builder/useBreakpoints";
+import { useStepCatalog } from "@/src/components/ui/builder/useStepCatalog";
+import { stepLabel } from "@/src/components/ui/builder/stepUtils";
+import { findStep, walkSteps } from "@/src/models/stepTree";
+import { findBackgroundStatus } from "@/src/models/backgroundStatus";
+import { ProgramStepTrace, type TraceHighlight } from "@/src/components/ui/program/ProgramStepTrace";
 import { router,
   Tabs,
   useFocusEffect,
@@ -27,8 +35,11 @@ import { AlertTriangle,
   Edit2,
   Gauge,
   Layers,
+  LayoutDashboard,
+  PauseCircle,
   Play,
   Square,
+  StepForward,
   Trash2,
   XCircle } from "lucide-react-native";
 import { useCallback,
@@ -51,6 +62,7 @@ import {
 // are looking at it. React Native's own Image blanks and then fades in on every source
 // change, which on a board updating each ply reads as a flicker rather than a move.
 import { Image as ExpoImage } from "expo-image";
+import { ExpandBadge, LiveViewerModal } from "@/src/components/vision/LiveViewerModal";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
@@ -175,7 +187,26 @@ function MarqueeText({ text, style }: { text: string; style?: object }) {
   );
 }
 
+// ── Debugging (controller docs/program-language.md §4.2, §7.3) ───────────────
 
+/** What the pause-reason chip says, and a one-line hint about what Continue / Step do. */
+const PAUSE_TEXT: Record<PauseReason, { label: string; hint: string }> = {
+  breakpoint: { label: "Paused at breakpoint", hint: "Continue runs on to the next breakpoint. Step runs just the next step." },
+  step:       { label: "Paused · stepping",    hint: "Step runs the next step and pauses again. Continue runs on normally." },
+  pauseStep:  { label: "Paused by a Pause step", hint: "The program asked to pause here. Continue carries on." },
+  user:       { label: "Paused by operator",   hint: "Stopped from the app. Continue carries on from here." },
+};
+
+/**
+ * The error code behind a program error, when the controller reports one: an `errorCode` field
+ * if the status has it, else a leading "code:" / "[code]" that names a known catalog code.
+ */
+function errorCodeOf(p: ProgramSummary, known: Set<string>): string | null {
+  const field = (p as { errorCode?: unknown }).errorCode;
+  if (typeof field === "string" && field) return field;
+  const m = /^\s*\[?([a-zA-Z][a-zA-Z0-9_]*)\]?\s*:\s/.exec(p.errorDescription ?? "");
+  return m && known.has(m[1]) ? m[1] : null;
+}
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -196,7 +227,7 @@ export default function MonitorProgramScreen() {
   const builtProgram  = builtPrograms.find((p) => p.name === programName) ?? null;
   const isBuilt       = builtProgram !== null;
   const isBackground  = builtProgram?.isBackground ?? false;
-  const bgRunning     = (robotStatus.backgroundPrograms ?? []).find(b => b.name === programName) ?? null;
+  const bgRunning     = builtProgram ? findBackgroundStatus(robotStatus.backgroundPrograms, builtProgram) : null;
 
   // Toolpath of the CNC block currently executing — polled from the robot,
   // which resolves the origin anchor and runtime variables when the block
@@ -263,8 +294,97 @@ export default function MonitorProgramScreen() {
 
   // Spinner while an action is being applied — see useActionPending for when it
   // clears (status change, a new start, or the background-running flag flipping).
-  const [pending, setPending] = useActionPending(program, !!bgRunning);
+  // A Step press leaves the status at Stopped, so the paused-at step moving is its signal.
+  const [pending, setPending] = useActionPending(program, `${!!bgRunning}|${program?.pausedAtStepId ?? ""}`);
   const [deleting, setDeleting] = useState(false);
+
+  // ── Debugging: breakpoints, step mode, live push ───────────────────────────
+  const connected   = useConnected();
+  const points      = usePoints();
+  const catalog     = useStepCatalog(connected);
+  const breakpoints = useBreakpoints(builtProgram?.id);
+  // "no" once the controller has refused a debug command (an older build, or before the
+  // debugger landed) — the page then says so instead of failing on every press.
+  const [debugSupport, setDebugSupport] = useState<"unknown" | "yes" | "no">("unknown");
+  const markDebugError = (e: unknown): boolean => {
+    if (isNotImplementedCommand(e) || isUnsupportedCommand(e)) { setDebugSupport("no"); return true; }
+    return false;
+  };
+
+  // Steps deleted in the editor take their breakpoints with them.
+  const stepIdsKey = useMemo(
+    () => (builtProgram ? [...walkSteps(builtProgram.steps)].map(x => x.step.id).join(" ") : ""),
+    [builtProgram],
+  );
+  const retainBreakpoints = breakpoints.retain;
+  useEffect(() => {
+    if (stepIdsKey) retainBreakpoints(stepIdsKey.split(" "));
+  }, [stepIdsKey, retainBreakpoints]);
+
+  // While the run is live (running or paused), a breakpoint change applies straight away.
+  const runLive = !isBackground && isBuilt && !!program &&
+    (program.status === "Running" || program.status === "Starting" || program.status === "Finishing" || program.status === "Stopped");
+  const bpKey = breakpoints.list.join(" ");
+  useEffect(() => {
+    if (!runLive || debugSupport === "no") return;
+    robotClient.setBreakpoints(bpKey ? bpKey.split(" ") : [])
+      .then(() => setDebugSupport("yes"))
+      .catch(e => { markDebugError(e); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bpKey, runLive]);
+
+  // Run (with this device's breakpoints) or start in step mode. A controller without the
+  // debugger refuses the options rather than running from the top; offer a plain run instead.
+  const runBuilt = (stepMode: boolean, label: string) => {
+    setPending(label);
+    const bps = breakpoints.list;
+    robotClient.executeBuiltProgramDebug(programName, { breakpoints: bps, stepMode })
+      .then(() => { if (stepMode || bps.length > 0) setDebugSupport("yes"); })
+      .catch(e => {
+        setPending(null);
+        if (markDebugError(e)) {
+          appAlert(
+            stepMode ? "Stepping not available" : "Breakpoints not available",
+            stepMode
+              ? "This controller cannot run a program one step at a time yet."
+              : "This controller cannot pause at breakpoints yet. Run the program without them?",
+            stepMode
+              ? [{ text: "OK" }]
+              : [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Run", onPress: () => { setPending(label); robotClient.executeBuiltProgram(programName).catch(() => {}); } },
+                ],
+          );
+        } else {
+          appAlert("Could not start", e instanceof Error ? e.message : String(e));
+        }
+      });
+  };
+
+  const stepOnce = () => {
+    setPending("Step");
+    robotClient.stepBuiltProgram()
+      .then(() => setDebugSupport("yes"))
+      .catch(e => {
+        setPending(null);
+        if (markDebugError(e)) appAlert("Stepping not available", "This controller cannot run one step at a time yet. Use Continue.");
+        else appAlert("Could not step", e instanceof Error ? e.message : String(e));
+      });
+  };
+
+  // The program's speed factor (SetSpeedFactor), read live while the run is on.
+  const [polledFactor, setPolledFactor] = useState<number | null>(null);
+  const speedFactor = runLive ? polledFactor : null;
+  useEffect(() => {
+    if (!runLive) return;
+    let cancelled = false;
+    const poll = () => robotClient.evaluateExpression("$program.speedFactor", programName)
+      .then(r => { if (!cancelled) setPolledFactor(r.ok ? r.value ?? null : null); })
+      .catch(() => { if (!cancelled) setPolledFactor(null); });
+    poll();
+    const t = setInterval(poll, 1000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [runLive, programName]);
 
   // Image — fetched once on mount
   const [image, setImage] = useState<string | null>(null);
@@ -322,28 +442,23 @@ export default function MonitorProgramScreen() {
 
   // ── Vision snapshot polling ────────────────────────────────────────────────
   const [visionSnapshots, setVisionSnapshots] = useState<Record<string, string | null>>({});
+  // The vision step whose debug frame is open full screen (it keeps updating there).
+  const [fullFrameId, setFullFrameId] = useState<string | null>(null);
   const [visionResults, setVisionResults]     = useState<Record<string, VisionResult | null>>({});
+  // Tool lists of the vision programs this program runs, for naming the tools in their results.
+  const [visionTools, setVisionTools]         = useState<Record<string, VisionTool[]>>({});
 
   const visionSteps: { id: string; name: string }[] = [];
   if (builtProgram) {
     const seen = new Set<string>();
-    // Walk nested step lists too — a RunVision step can live inside a loop,
-    // an if/else-if/else branch, or a CNC sub-program.
-    const collect = (steps: ProgramStep[] | undefined) => {
-      if (!steps) return;
-      for (const step of steps) {
-        if (step.type === 'RunVision' && step.visionProgramId && !seen.has(step.visionProgramId)) {
-          seen.add(step.visionProgramId);
-          visionSteps.push({ id: step.visionProgramId, name: step.visionProgramName ?? step.visionProgramId });
-        }
-        collect(step.loopSteps);
-        collect(step.ifSteps);
-        collect(step.elseSteps);
-        collect(step.cncProgramSteps);
-        step.elseIfBranches?.forEach(b => collect(b.steps));
+    // Walk nested step lists too — a RunVision step can live inside a loop, a branch, a
+    // switch case, a try/catch body or a CNC sub-program.
+    for (const { step } of walkSteps(builtProgram.steps)) {
+      if (step.type === 'RunVision' && step.visionProgramId && !seen.has(step.visionProgramId)) {
+        seen.add(step.visionProgramId);
+        visionSteps.push({ id: step.visionProgramId, name: step.visionProgramName ?? step.visionProgramId });
       }
-    };
-    collect(builtProgram.steps);
+    }
   }
   const visionStepsRef = useRef<{ id: string; name: string }[]>(visionSteps);
   visionStepsRef.current = visionSteps;
@@ -384,6 +499,11 @@ export default function MonitorProgramScreen() {
         }
       };
 
+      if (visionStepsRef.current.length > 0) {
+        robotClient.getVisionPrograms()
+          .then(({ programs }) => { if (!cancelled) setVisionTools(Object.fromEntries(programs.map(p => [p.id, p.tools]))); })
+          .catch(() => {});
+      }
       fetchSnapshots();
       const interval = setInterval(fetchSnapshots, 1500);
       return () => {
@@ -568,8 +688,34 @@ export default function MonitorProgramScreen() {
       (p.status === "Running" || p.status === "Starting" || p.status === "Finishing")
   );
 
+  // Debugger state. A paused built program shows why, and the step it runs next.
+  const paused       = program.status === "Stopped";
+  const pauseReason  = paused ? program.pauseReason ?? null : null;
+  const pauseText    = pauseReason ? PAUSE_TEXT[pauseReason] ?? null : null;
+  const isErrored    = program.status === "Error";
+  const traceId      = paused ? (program.pausedAtStepId ?? program.currentStepId ?? null) : (program.currentStepId ?? null);
+  const traceHighlight: TraceHighlight | null =
+    isErrored ? "error" : paused ? "paused" : isActivelyRunning ? "running" : null;
+  const pausedStep   = paused && program.pausedAtStepId && builtProgram ? findStep(builtProgram.steps, program.pausedAtStepId) : undefined;
+  const failedStep   = isErrored && program.currentStepId && builtProgram ? findStep(builtProgram.steps, program.currentStepId) : undefined;
+  const errorCodes   = catalog.catalog?.errorCodes ?? [];
+  const errorCode    = isErrored ? errorCodeOf(program, new Set(errorCodes.map(c => c.code))) : null;
+  const errorSpec    = errorCode ? errorCodes.find(c => c.code === errorCode) : undefined;
+  const debuggable   = isBuilt && !isBackground;
+
   const theme = STATUS_THEME[program.status] ?? STATUS_THEME.Ready;
-  const buttons = isRunnable ? [] : getButtons(program, isBuilt);
+  // A paused built program: Continue / Step / Stop. Run Again keeps this device's breakpoints.
+  const buttons: ActionBtn[] = isRunnable ? []
+    : debuggable && paused ? [
+        { label: "Continue", bg: colors.accent,  onPress: () => robotClient.startProgram(programName) },
+        { label: "Step",     bg: colors.textSecondary, onPress: stepOnce },
+        { label: "Stop",     bg: colors.danger,  onPress: () => robotClient.abortProgram(programName) },
+      ]
+    : debuggable && program.status === "Complete" ? [
+        { label: "Run Again", bg: colors.success, onPress: () => { robotClient.resetProgram(programName).catch(() => {}); runBuilt(false, "Run Again"); } },
+        { label: "Exit",      bg: colors.textSecondary, onPress: () => robotClient.abortProgram(programName) },
+      ]
+    : getButtons(program, isBuilt);
   const showActions = buttons.length > 0 || isRunnable;
 
   // Alert banner derived values
@@ -728,6 +874,54 @@ export default function MonitorProgramScreen() {
             </Text>
           </View>
 
+          {/* ── Why it is paused, and the step Continue / Step run next ── */}
+          {pauseText && (
+            <View style={styles.pauseBox}>
+              <View style={styles.pauseChipRow}>
+                <View style={styles.pauseChip}>
+                  <PauseCircle size={13} color={colors.warning} />
+                  <Text style={styles.pauseChipText}>{pauseText.label}</Text>
+                </View>
+              </View>
+              {pausedStep && (
+                <Text style={styles.pauseStep} numberOfLines={2}>
+                  <Text style={styles.pauseStepLabel}>NEXT  </Text>{stepLabel(pausedStep, points)}
+                </Text>
+              )}
+              <Text style={styles.pauseHint}>{pauseText.hint}</Text>
+            </View>
+          )}
+
+          {/* ── Error details: message, code (catchable or not) and the failing step ── */}
+          {isErrored && !!(program.errorDescription || failedStep) && (
+            <View style={styles.errorBox}>
+              <View style={styles.errorHead}>
+                <XCircle size={14} color={colors.danger} />
+                <Text style={styles.errorTitle}>{errorSpec?.label ?? "Program error"}</Text>
+                {!!errorCode && (
+                  <View style={styles.errorCodeChip}>
+                    <Text style={styles.errorCodeText}>{errorCode}</Text>
+                  </View>
+                )}
+              </View>
+              {!!program.errorDescription && <Text style={styles.errorMsg}>{program.errorDescription}</Text>}
+              {failedStep && (
+                <Text style={styles.errorMeta} numberOfLines={2}>
+                  <Text style={styles.pauseStepLabel}>AT  </Text>{stepLabel(failedStep, points)}
+                </Text>
+              )}
+              {!!errorCode && (
+                <Text style={styles.errorMeta}>
+                  {!errorSpec
+                    ? "A code of the program's own (Raise Error). A Try block that catches it can recover."
+                    : errorSpec.catchable
+                    ? "A Try block around this step can catch this error and retry or recover."
+                    : "This error always ends the program; a Try block cannot catch it."}
+                </Text>
+              )}
+            </View>
+          )}
+
           {/* ── Action buttons ── */}
           {isBackground ? (
             <View style={styles.inlineActions}>
@@ -738,7 +932,7 @@ export default function MonitorProgramScreen() {
                   loading={pending === "Stop"}
                   style={[styles.actionBtn, { backgroundColor: colors.danger }]}
                   textStyle={styles.actionBtnText}
-                  onPress={() => { setPending("Stop"); robotClient.stopBackgroundProgram(programName).catch(() => {}); }}
+                  onPress={() => { setPending("Stop"); robotClient.stopBackgroundProgram(programName, builtProgram?.id).catch(() => {}); }}
                 />
               ) : (
                 <ActionButton
@@ -747,25 +941,38 @@ export default function MonitorProgramScreen() {
                   loading={pending === "Start"}
                   style={[styles.actionBtn, { backgroundColor: colors.success }]}
                   textStyle={styles.actionBtnText}
-                  onPress={() => { setPending("Start"); robotClient.startBackgroundProgram(programName).catch(() => {}); }}
+                  onPress={() => { setPending("Start"); robotClient.startBackgroundProgram(programName, builtProgram?.id).catch(() => {}); }}
                 />
               )}
             </View>
           ) : showActions ? (
             <View style={styles.inlineActions}>
               {isRunnable ? (
-                <ActionButton
-                  label={anotherBuiltRunning ? "Another Program Running" : "Run Program"}
-                  icon={<Play size={15} color={colors.onAccent} />}
-                  loading={pending === "Run Program"}
-                  disabled={anotherBuiltRunning}
-                  style={[styles.actionBtn, { backgroundColor: anotherBuiltRunning ? colors.textFaint : colors.success }]}
-                  textStyle={styles.actionBtnText}
-                  onPress={() => { setPending("Run Program"); robotClient.executeBuiltProgram(programName).catch(() => {}); }}
-                />
+                <>
+                  <ActionButton
+                    label={anotherBuiltRunning ? "Another Program Running" : "Run Program"}
+                    icon={<Play size={15} color={colors.onAccent} />}
+                    loading={pending === "Run Program"}
+                    disabled={anotherBuiltRunning}
+                    style={[styles.actionBtn, { flex: 2, backgroundColor: anotherBuiltRunning ? colors.textFaint : colors.success }]}
+                    textStyle={styles.actionBtnText}
+                    onPress={() => runBuilt(false, "Run Program")}
+                  />
+                  {!anotherBuiltRunning && (
+                    <ActionButton
+                      label="Step"
+                      icon={<StepForward size={15} color={colors.onAccent} />}
+                      loading={pending === "Step Through"}
+                      disabled={pending !== null}
+                      style={[styles.actionBtn, { backgroundColor: colors.textSecondary }]}
+                      textStyle={styles.actionBtnText}
+                      onPress={() => runBuilt(true, "Step Through")}
+                    />
+                  )}
+                </>
               ) : (
                 buttons.map((btn) => {
-                  const isStartAction = isBuilt && (btn.label === "Continue" || btn.label === "Run Again");
+                  const isStartAction = isBuilt && (btn.label === "Continue" || btn.label === "Run Again" || btn.label === "Step");
                   const blocked = isStartAction && anotherBuiltRunning;
                   return (
                     <ActionButton
@@ -786,6 +993,14 @@ export default function MonitorProgramScreen() {
           {/* Edit / Delete now sit inside the progress card, under the run controls. */}
           {isBuilt && (
             <View style={[styles.managementRow, { marginTop: 10 }]}>
+              <ActionButton
+                label={(builtProgram?.displayPageHtml || (builtProgram?.displayPageLayout?.widgets?.length ?? 0) > 0) ? "Display" : "Display Page"}
+                icon={<LayoutDashboard size={15} color={colors.accent} />}
+                style={styles.editBtn}
+                textStyle={styles.editBtnText}
+                spinnerColor={colors.accent}
+                onPress={() => router.push(`/program/display-page?name=${encodeURIComponent(programName)}`)}
+              />
               <ActionButton
                 label="Edit"
                 icon={<Edit2 size={15} color={colors.accent} />}
@@ -825,6 +1040,27 @@ export default function MonitorProgramScreen() {
             </View>
           )}
         </View>
+
+        {/* ── Steps: run highlight + breakpoints ── */}
+        {builtProgram && (
+          <>
+            <View style={styles.gapBand} />
+            <View style={styles.section}>
+              <ProgramStepTrace
+                steps={builtProgram.steps}
+                points={points}
+                highlightId={traceId}
+                highlight={traceHighlight}
+                breakpoints={debuggable ? breakpoints : null}
+              />
+              {debuggable && debugSupport === "no" && (
+                <Text style={styles.debugNote}>
+                  This controller does not support breakpoints or stepping yet — the program runs straight through.
+                </Text>
+              )}
+            </View>
+          </>
+        )}
 
         {/* ── Variables ── */}
         {displayVars.length > 0 && (
@@ -991,6 +1227,19 @@ export default function MonitorProgramScreen() {
                   );
                 })()}
               </TouchableOpacity>
+              {/* The program's own factor (Set Speed Factor) scales the operator override. */}
+              {speedFactor != null && (
+                <View style={styles.speedFactorRow}>
+                  <Text style={styles.posSubLabel}>PROGRAM FACTOR</Text>
+                  <Text style={styles.posSubValue}>{Math.round(speedFactor)}%</Text>
+                  <Text style={styles.posSubDot}>·</Text>
+                  <Text style={styles.posSubLabel}>MOVES RUN AT</Text>
+                  <Text style={[styles.posSubValue, { color: colors.text }]}>
+                    {Math.round((s?.speedOverridePercent ?? 100) * speedFactor / 100)}%
+                  </Text>
+                  <InfoTip text="A Set Speed Factor step scales this program's moves on top of the speed override. It resets to 100% when the program ends." />
+                </View>
+              )}
             </View>
           </>
         )}
@@ -1036,13 +1285,16 @@ export default function MonitorProgramScreen() {
                     {dataUri ? (
                       // Also a live frame, replaced on every poll, so the same no-fade
                       // treatment as the image variables above.
-                      <ExpoImage
-                        source={{ uri: dataUri }}
-                        style={styles.snapshotImage}
-                        contentFit="contain"
-                        transition={0}
-                        cachePolicy="none"
-                      />
+                      <TouchableOpacity activeOpacity={0.9} onPress={() => setFullFrameId(id)} accessibilityLabel="View full screen">
+                        <ExpoImage
+                          source={{ uri: dataUri }}
+                          style={styles.snapshotImage}
+                          contentFit="contain"
+                          transition={0}
+                          cachePolicy="none"
+                        />
+                        <ExpandBadge onPress={() => setFullFrameId(id)} />
+                      </TouchableOpacity>
                     ) : (
                       <View style={styles.snapshotPlaceholder}>
                         <Camera size={24} color={colors.borderStrong} />
@@ -1051,10 +1303,16 @@ export default function MonitorProgramScreen() {
                         </Text>
                       </View>
                     )}
-                    <VisionResults result={visionResults[id] ?? null} />
+                    <VisionResults result={visionResults[id] ?? null} tools={visionTools[id]} />
                   </View>
                 );
               })}
+              <LiveViewerModal
+                visible={!!fullFrameId}
+                onClose={() => setFullFrameId(null)}
+                feedUrl={fullFrameId ? visionSnapshots[fullFrameId] ?? null : null}
+                title={visionSteps.find(v => v.id === fullFrameId)?.name}
+              />
             </View>
           </>
         )}
@@ -1247,6 +1505,35 @@ const styles = StyleSheet.create({
   // Between colors.text and colors.textSecondary with no exact token; left literal.
   stepDescText:        { fontSize: 14, color: "#1f2937", lineHeight: 20 },
   stepDescPlaceholder: { color: colors.borderStrong },
+
+  // ── Debugging: pause reason, error details ────────────────────────────────
+  pauseBox: {
+    borderRadius: 10, padding: spacing.md, gap: 6,
+    backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: "#fde68a",
+  },
+  pauseChipRow: { flexDirection: "row" },
+  pauseChip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  pauseChipText: { fontSize: 12, fontWeight: "700", color: colors.warning },
+  pauseStep: { fontSize: 13, color: colors.text, fontWeight: "600" },
+  pauseStepLabel: { fontSize: 10, fontWeight: "800", color: colors.textFaint, letterSpacing: 0.6 },
+  pauseHint: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
+  errorBox: {
+    borderRadius: 10, padding: spacing.md, gap: 6,
+    backgroundColor: colors.dangerSoft, borderWidth: 1, borderColor: "#fecaca",
+  },
+  errorHead: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  errorTitle: { fontSize: 13, fontWeight: "800", color: colors.danger },
+  errorCodeChip: { backgroundColor: colors.surface, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  errorCodeText: { fontSize: 11, fontWeight: "700", color: colors.danger, fontFamily: "monospace" },
+  errorMsg: { fontSize: 13, color: colors.text, lineHeight: 19 },
+  errorMeta: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
+  debugNote: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
+  speedFactorRow: {
+    flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.xs, paddingTop: spacing.sm,
+  },
 
   // ── Inline actions (inside progress section) ──────────────────────────────
   inlineActions: {

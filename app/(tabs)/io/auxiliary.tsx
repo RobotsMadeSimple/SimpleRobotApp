@@ -1,20 +1,29 @@
 import { JogButton } from "@/src/components/ui/JogButton";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { ios } from "@/src/components/ui/io/ioShared";
+import { DeviceStatusBar, FirmwareChip, ios, IORow } from "@/src/components/ui/io/ioShared";
 import { useIsWide } from "@/src/components/ui/responsive";
+import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { AuxAxisChannelState, AuxDeviceState, auxStepsPerUnit, auxUnitLabel } from "@/src/models/robotModels";
+import {
+  AuxAxisChannelState,
+  AuxDeviceState,
+  auxStepsPerUnit,
+  auxUnitLabel,
+  deviceSupports,
+} from "@/src/models/robotModels";
 import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
   Gauge,
+  Pencil,
   Settings2,
   Square,
 } from "lucide-react-native";
 import { auxRoleMeta } from "@/src/components/ui/io/auxRoles";
+import { useKeyboardHeight } from "@/src/platform/keyboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { ReactNode, useEffect, useRef, useState } from "react";
+import React, { ReactNode, useEffect, useState } from "react";
 import {
   Modal,
   StyleSheet,
@@ -23,6 +32,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS, useSharedValue } from "react-native-reanimated";
 
 import {
   accents,
@@ -41,7 +52,6 @@ import {
   shadows,
   spacing,
   StatTile,
-  StatusPill,
   type,
 } from "@/src/components/ui/kit";
 
@@ -50,6 +60,12 @@ import {
 const AUX_JOG_VELOCITY = 800;
 const AUX_JOG_ACCEL    = 3200;
 const AUX_JOG_DECEL    = 5000;
+// Ceiling on any step rate we ask of the Uno. Its software step loop tops out around 10 kHz;
+// above that the firmware's velocity bookkeeping runs ahead of the pulses it can actually emit,
+// so a soft-stop computes a braking distance for a speed the motor never reached and the axis
+// keeps stepping long after release.
+const AUX_MAX_STEP_HZ  = 10000;
+const clampStepHz = (hz: number) => Math.max(1, Math.min(AUX_MAX_STEP_HZ, Math.round(hz)));
 
 // Aux Stepper Axis device-type tint (matches the purple used for this device
 // type on the IO index page's icon tile), via the kit's purple accent family.
@@ -63,29 +79,44 @@ function AuxJogButton({
   deviceId,
   axisIndex,
   direction,
+  velocity = AUX_JOG_VELOCITY,
+  accel    = AUX_JOG_ACCEL,
+  decel    = AUX_JOG_DECEL,
+  label,
+  icon,
 }: {
   deviceId: string;
   axisIndex: number;
   direction: 1 | -1;
+  /** Jog speed magnitude (steps/s). Direction is applied from `direction`. */
+  velocity?: number;
+  /** Ramp (steps/s²) while held. */
+  accel?: number;
+  /** Braking rate (steps/s²) on release. Must suit `velocity`: braking distance is v²/2d. */
+  decel?: number;
+  /** Override the default ± label (e.g. "Open" / "Close"). */
+  label?: string;
+  /** Override the default chevron. */
+  icon?: ReactNode;
 }) {
   const startJog = () =>
     robotClient.jogAux({
       deviceId,
       axis:     axisIndex,
-      velocity: AUX_JOG_VELOCITY * direction,
-      accel:    AUX_JOG_ACCEL,
+      velocity: clampStepHz(velocity) * direction,
+      accel,
     });
 
   const stopJog = () =>
-    robotClient.jogAux({ deviceId, axis: axisIndex, velocity: 0, decel: AUX_JOG_DECEL });
+    robotClient.jogAux({ deviceId, axis: axisIndex, velocity: 0, decel });
 
   return (
     <JogButton
-      label={direction === -1 ? "−" : "+"}
+      label={label ?? (direction === -1 ? "−" : "+")}
       icon={
-        direction === -1
+        icon ?? (direction === -1
           ? <ChevronLeft  size={26} color={AUX_TINT} />
-          : <ChevronRight size={26} color={AUX_TINT} />
+          : <ChevronRight size={26} color={AUX_TINT} />)
       }
       iconPosition={direction === -1 ? "left" : "right"}
       onStart={startJog}
@@ -148,6 +179,7 @@ function AuxSetPositionModal({
   const unitLabel = auxUnitLabel(axis);
   const spu       = auxStepsPerUnit(axis);
   const [value, setValue] = useState("");
+  const kb        = useKeyboardHeight(); // lift the sheet clear of the keyboard (Modals aren't resized)
 
   const g         = gripperGeom(axis);
   const isGripper = axis.role === "Gripper" && g.ok;
@@ -166,7 +198,7 @@ function AuxSetPositionModal({
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <View style={[styles.modalBackdrop, { paddingBottom: kb }]}>
         <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
             <View style={styles.modalTitleRow}>
@@ -231,10 +263,13 @@ function AuxSetPositionModal({
 }
 
 
-// ── GripperControls ─────────────────────────────────────────────────────────
-// Open / Close drive the jaws to the configured gap limits; "grip to X" drives to
-// an absolute gap in between. All are absolute moves computed from the axis's
-// dead-reckoned position (controller MoveAux is relative, so we send the delta).
+// ── Gripper ───────────────────────────────────────────────────────────────────
+// Open / Close are hold-to-jog: the jaws travel open/closed while the button is
+// held and stop on release (at the gripper's configured open/close speed, braking at
+// the gripper's accel so the stop distance matches the speed). The gap slider picks
+// a target gap: the thumb follows the finger, and the jaws move once, on release.
+// Controller MoveAux is relative, so the move is the delta from the tracked gap. The
+// configured gap limits still drive programs and the Set-Position re-reference.
 
 function gripperGeom(axis: AuxAxisChannelState) {
   const spm    = auxStepsPerUnit(axis);            // steps per mm of jaw gap
@@ -251,17 +286,122 @@ function gripperGeom(axis: AuxAxisChannelState) {
   return { spm, open, closed, stroke, openVel, closeVel, accel, overTravel, ok: spm > 0 && open !== closed };
 }
 
+// Type an exact gap to drive the jaws to — the tap target is the slider's mm readout.
+function GripperGapModal({ lo, hi, currentMm, onMove, onClose }: {
+  lo: number;
+  hi: number;
+  currentMm: number;
+  onMove: (mm: number) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(currentMm.toFixed(1));
+  const n     = parseFloat(value);
+  const valid = isFinite(n) && n >= lo && n <= hi;
+  const kb    = useKeyboardHeight(); // lift the sheet clear of the keyboard (Modals aren't resized)
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={[styles.modalBackdrop, { paddingBottom: kb }]}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalTitleRow}>
+              <Text style={styles.modalTitle}>Move to Gap</Text>
+              <InfoTip text="Drives the jaws to this exact gap at the gripper's configured open/close speed." />
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <FormRow label={`Gap (mm, ${lo.toFixed(0)}–${hi.toFixed(0)})`}>
+            <Input
+              value={value}
+              onChangeText={setValue}
+              placeholder={currentMm.toFixed(1)}
+              keyboardType="decimal-pad"
+              returnKeyType="done"
+              autoFocus
+              selectTextOnFocus
+              onSubmitEditing={() => { if (valid) { onMove(n); onClose(); } }}
+            />
+          </FormRow>
+          <View style={styles.setPosBtnRow}>
+            <Button label="Cancel" variant="secondary" onPress={onClose} style={styles.setPosBtn} />
+            <Button
+              label="Move"
+              disabled={!valid}
+              onPress={() => { onMove(n); onClose(); }}
+              style={[styles.setPosBtn, { backgroundColor: AUX_TINT }]}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Drag-to-position slider for the gripper gap. The thumb follows the tracked jaw gap
+// when idle and the finger while dragging; it reports the chosen mm value once, on release.
+// Tapping the mm readout opens the exact-gap entry.
+function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onPressValue }: {
+  lo: number;
+  hi: number;
+  trackedMm: number;
+  tint: string;
+  onEnd: (mm: number) => void;
+  onPressValue: () => void;
+}) {
+  const [barW, setBarW]       = useState(1);
+  const [dragFrac, setDragFrac] = useState<number | null>(null);
+  // Last fraction, kept on the UI thread so onFinalize can report it without a JS ref
+  // (reads/writes stay off the render path, which the react-compiler lint requires).
+  const lastFrac = useSharedValue(0);
+
+  const span     = hi - lo;
+  const idleFrac = span > 0 ? Math.max(0, Math.min(1, (trackedMm - lo) / span)) : 0;
+  const frac     = dragFrac ?? idleFrac;
+  const toMm     = (f: number) => lo + Math.max(0, Math.min(1, f)) * span;
+
+  const update   = (f: number) => setDragFrac(f);
+  const finishAt = (f: number) => { setDragFrac(null); onEnd(toMm(f)); };
+
+  const pan = Gesture.Pan()
+    .onBegin(e  => { "worklet"; const f = Math.max(0, Math.min(1, e.x / barW)); lastFrac.value = f; runOnJS(update)(f); })
+    .onUpdate(e => { "worklet"; const f = Math.max(0, Math.min(1, e.x / barW)); lastFrac.value = f; runOnJS(update)(f); })
+    .onFinalize(() => { "worklet"; runOnJS(finishAt)(lastFrac.value); });
+
+  return (
+    <View style={styles.sliderWrap}>
+      <View style={styles.sliderHeader}>
+        <Text style={styles.sliderLabel}>GAP</Text>
+        <TouchableOpacity onPress={onPressValue} hitSlop={8} activeOpacity={0.6} style={styles.sliderValueBtn}
+          accessibilityRole="button" accessibilityLabel="Move to an exact gap">
+          <Text style={[styles.sliderValue, { color: tint }]}>{toMm(frac).toFixed(1)} mm</Text>
+          <Pencil size={12} color={tint} />
+        </TouchableOpacity>
+      </View>
+      <GestureDetector gesture={pan}>
+        <View style={styles.sliderHit} onLayout={e => setBarW(e.nativeEvent.layout.width)}>
+          <View style={styles.sliderTrack}>
+            <View style={[styles.sliderFill, { width: `${frac * 100}%`, backgroundColor: tint }]} />
+          </View>
+          <View style={[styles.sliderThumb, { left: `${frac * 100}%`, borderColor: tint }]} />
+        </View>
+      </GestureDetector>
+      <View style={styles.sliderEnds}>
+        <Text style={styles.sliderEnd}>Closed · {lo.toFixed(0)}</Text>
+        <Text style={styles.sliderEnd}>Open · {hi.toFixed(0)}</Text>
+      </View>
+    </View>
+  );
+}
+
 function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAxisChannelState }) {
-  const [target, setTarget] = useState("");
-  // Debounce guard: a quick double-tap on the same button (or a repeated submit) must not
-  // fire the move twice. A fresh identical request inside this window is ignored.
-  const lastFire = useRef<{ key: string; t: number }>({ key: "", t: 0 });
   const g = gripperGeom(axis);
+  const [gapModal, setGapModal] = useState(false);
 
   if (!g.ok) {
     return (
       <Text style={styles.needsConfig} numberOfLines={2}>
-        Set the jaw gap limits in configuration (gear icon) to enable Open / Close.
+        Set the jaw gap limits in configuration (gear icon) to enable the gripper controls.
       </Text>
     );
   }
@@ -269,37 +409,23 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
   const lo = Math.min(g.open, g.closed);
   const hi = Math.max(g.open, g.closed);
 
-  // toLimit = a full Open/Close that seats against a hard stop (vs a Grip to an in-between gap).
-  const gripTo = (mm: number, toLimit = false) => {
+  // Hold-to-jog speed (steps/s) per direction, from the gripper's configured open/close
+  // speed; accel falls back to the generic jog ramp when none is set. Open jogs toward the
+  // wider gap (positive velocity — StartAuxContinuous applies InvertDirection), Close narrower.
+  // The release brakes at the same rate it ramped: a jog at the gripper's speed with the
+  // generic (gentle) jog decel would coast for v²/2d steps — metres of travel at high speed.
+  const jogVelOpen  = clampStepHz(g.openVel  * g.spm);
+  const jogVelClose = clampStepHz(g.closeVel * g.spm);
+  const jogAccel    = g.accel > 0 ? Math.max(1, Math.round(g.accel * g.spm)) : AUX_JOG_ACCEL;
+  const jogDecel    = g.accel > 0 ? jogAccel : AUX_JOG_DECEL;
+
+  // One relative move from the tracked gap to the gap chosen on the slider.
+  const driveToGap = (mm: number) => {
     const clamped = Math.max(lo, Math.min(hi, mm));
-
-    // Drop an identical request that lands within the debounce window (double-tap protection).
-    const key = `${toLimit ? "L" : "G"}:${clamped}`;
-    const now = Date.now();
-    if (key === lastFire.current.key && now - lastFire.current.t < 500) return;
-
-    const curMm   = axis.position / g.spm;
-    // Which way we head: toward the wider gap for Open, the narrower for Close; a Grip follows
-    // the target vs the current position. Direction picks the speed and the over-travel sign.
-    const opening = toLimit ? clamped >= hi : clamped > curMm;
-
-    let delta: number;
-    if (toLimit) {
-      // Full Open/Close seats against a hard stop. Drive a guaranteed full-stroke (+ over-travel)
-      // move in the open/close direction regardless of the tracked position: over-driving the stop
-      // is harmless (the controller clamps the tracked position to the gap limits), and not relying
-      // on a possibly-stale position is what makes Open/Close reach the limit every time.
-      const strokeSteps = Math.round(g.stroke * g.spm);
-      const overSteps   = g.overTravel > 0 ? Math.round(g.overTravel * g.spm) : 0;
-      delta = (opening ? 1 : -1) * (strokeSteps + overSteps);
-    } else {
-      // Grip to an in-between gap has no hard stop, so it is relative to the current position.
-      delta = Math.round((clamped - curMm) * g.spm);
-    }
+    const delta = Math.round((clamped - axis.position / g.spm) * g.spm);
     if (delta === 0) return;
-
-    lastFire.current = { key, t: now };
-    const velSteps   = Math.max(1, Math.round((opening ? g.openVel : g.closeVel) * g.spm));
+    const opening    = delta > 0;
+    const velSteps   = clampStepHz((opening ? g.openVel : g.closeVel) * g.spm);
     const accelSteps = g.accel > 0 ? Math.max(1, Math.round(g.accel * g.spm)) : undefined;
     robotClient.moveAux(device.deviceId, axis.axisIndex, delta, velSteps, accelSteps, accelSteps);
   };
@@ -307,25 +433,42 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
   return (
     <View style={styles.gripperControls}>
       <View style={styles.jogRow}>
-        <AuxActionButton label="Open"  onPress={() => gripTo(g.open, true)} />
-        <AuxActionButton label="Close" onPress={() => gripTo(g.closed, true)} />
-      </View>
-      <View style={styles.gripToRow}>
-        <Input
-          value={target}
-          onChangeText={setTarget}
-          placeholder={`${lo.toFixed(0)}–${hi.toFixed(0)}`}
-          keyboardType="decimal-pad"
-          returnKeyType="go"
-          onSubmitEditing={() => { const n = parseFloat(target); if (isFinite(n)) gripTo(n); }}
-          style={styles.gripToInput}
+        <AuxJogButton
+          deviceId={device.deviceId}
+          axisIndex={axis.axisIndex}
+          direction={-1}
+          velocity={jogVelClose}
+          accel={jogAccel}
+          decel={jogDecel}
+          label="Close"
         />
-        <Text style={styles.gripToUnit}>mm</Text>
-        <AuxActionButton
-          label="Grip"
-          onPress={() => { const n = parseFloat(target); if (isFinite(n)) gripTo(n); }}
+        <AuxJogButton
+          deviceId={device.deviceId}
+          axisIndex={axis.axisIndex}
+          direction={1}
+          velocity={jogVelOpen}
+          accel={jogAccel}
+          decel={jogDecel}
+          label="Open"
         />
       </View>
+      <GripperSlider
+        lo={lo}
+        hi={hi}
+        trackedMm={axis.position / g.spm}
+        tint={AUX_TINT}
+        onEnd={driveToGap}
+        onPressValue={() => setGapModal(true)}
+      />
+      {gapModal && (
+        <GripperGapModal
+          lo={lo}
+          hi={hi}
+          currentMm={axis.position / g.spm}
+          onMove={driveToGap}
+          onClose={() => setGapModal(false)}
+        />
+      )}
     </View>
   );
 }
@@ -335,6 +478,15 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
 function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: boolean }) {
   const router = useRouter();
   const [setPosAxis, setSetPosAxis] = useState<AuxAxisChannelState | null>(null);
+
+  // The Uno's spare-pin digital IO rides the shared IO-device stream under this device's id.
+  const ioDevice = useIoDevices().find(d => d.id === device.deviceId);
+  const ioPins   = ioDevice?.pins ?? [];
+  // A board whose firmware reports its capabilities but lacks `io` can't do pin IO at all;
+  // legacy firmware (no capability report) is assumed able, as before.
+  const ioSupported = deviceSupports(device, "io");
+  const configureIo = () =>
+    router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: device.deviceId, kind: "aux" } });
 
   // Role-specific action controls that replace the default ± jog buttons.
   const renderAxisControls = (axis: AuxAxisChannelState) => {
@@ -452,73 +604,104 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
           title="Axes"
           right={<InfoTip text="Each axis is an independent stepper channel. Hold the arrows to jog; tap the gear to set its axis type, steps per revolution, gear ratio, and direction." />}
         />
-        {(() => {
-          const axisRows = device.axes.map((axis, i) => {
-            const meta      = auxRoleMeta(axis.role);
-            const RoleIcon  = meta.icon;
-            const hasRole   = !!axis.role && axis.role !== "Generic";
-            const roleLabel = hasRole ? meta.label : null;
-            const row = (
-              <View style={styles.axisRow}>
-                <View style={styles.axisIndexBadge}>
-                  <Text style={styles.axisIndexText}>{axis.axisIndex}</Text>
-                </View>
-                <View style={[styles.roleIcon, hasRole && styles.roleIconOn]}>
-                  <RoleIcon size={18} color={hasRole ? AUX_TINT : colors.textFaint} />
-                </View>
-                <View style={ios.rowInfo}>
-                  <Text style={ios.rowLabel} numberOfLines={1}>
-                    {axis.name || `Axis ${axis.axisIndex}`}
-                  </Text>
-                  <Text style={ios.rowSub} numberOfLines={1}>
-                    {roleLabel ? `${roleLabel}  ·  ${posLabel(axis)}` : posLabel(axis)}
-                  </Text>
-                </View>
-                <AnimatedPressable
-                  style={styles.axisConfigBtn}
-                  onPress={() => setSetPosAxis(axis)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Crosshair size={16} color={colors.textFaint} />
-                </AnimatedPressable>
-                <AnimatedPressable
-                  style={styles.axisConfigBtn}
-                  onPress={() => router.push({ pathname: "/io/aux-axis", params: { deviceId: device.deviceId, axis: String(axis.axisIndex) } })}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Settings2 size={16} color={colors.textFaint} />
-                </AnimatedPressable>
-                {renderAxisControls(axis)}
-              </View>
-            );
-            // Wide: each axis gets its own card in a 2-column grid instead of
-            // one long stacked list. Narrow: unchanged flat rows in one Card.
-            if (isWide) {
-              return (
-                <View key={axis.axisIndex} style={styles.axisGridItem}>
-                  <Card padded={false}>{row}</Card>
-                </View>
+        {device.axes.length === 0 ? (
+          <Card padded={false}>
+            <Text style={ios.emptyCard}>No axes configured.</Text>
+          </Card>
+        ) : (
+          <View style={isWide ? styles.axisGrid : styles.axisStack}>
+            {device.axes.map(axis => {
+              const meta      = auxRoleMeta(axis.role);
+              const RoleIcon  = meta.icon;
+              const hasRole   = !!axis.role && axis.role !== "Generic";
+              const roleLabel = hasRole ? meta.label : "Generic";
+              // Each axis is its own self-contained card: an icon + identity header,
+              // then its role-specific controls below. Reads as an independent piece.
+              const card = (
+                <Card padded={false}>
+                  <View style={styles.axisHeader}>
+                    <View style={styles.roleIcon}>
+                      <RoleIcon size={20} color={AUX_TINT} />
+                    </View>
+                    <View style={styles.axisHeaderInfo}>
+                      <Text style={styles.axisName} numberOfLines={1}>
+                        {axis.name || `Axis ${axis.axisIndex}`}
+                      </Text>
+                      <Text style={styles.axisSub} numberOfLines={1}>
+                        {`${roleLabel}  ·  ${posLabel(axis)}`}
+                      </Text>
+                    </View>
+                    <AnimatedPressable
+                      style={styles.axisConfigBtn}
+                      onPress={() => setSetPosAxis(axis)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Set position"
+                    >
+                      <Crosshair size={16} color={colors.textFaint} />
+                    </AnimatedPressable>
+                    <AnimatedPressable
+                      style={styles.axisConfigBtn}
+                      onPress={() => router.push({ pathname: "/io/aux-axis", params: { deviceId: device.deviceId, axis: String(axis.axisIndex) } })}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Settings2 size={16} color={colors.textFaint} />
+                    </AnimatedPressable>
+                  </View>
+                  <Divider inset />
+                  <View style={styles.axisControls}>
+                    {renderAxisControls(axis)}
+                  </View>
+                </Card>
               );
-            }
-            return (
-              <React.Fragment key={axis.axisIndex}>
-                {row}
-                {i < device.axes.length - 1 && <Divider inset />}
-              </React.Fragment>
-            );
-          });
+              return isWide
+                ? <View key={axis.axisIndex} style={styles.axisGridItem}>{card}</View>
+                : <React.Fragment key={axis.axisIndex}>{card}</React.Fragment>;
+            })}
+          </View>
+        )}
+      </View>
 
-          if (device.axes.length === 0) {
-            return (
-              <Card padded={false}>
-                <Text style={ios.emptyCard}>No axes configured.</Text>
-              </Card>
-            );
-          }
-          return isWide
-            ? <View style={styles.axisGrid}>{axisRows}</View>
-            : <Card padded={false}>{axisRows}</Card>;
-        })()}
+      <View style={{ gap: spacing.md }}>
+        <SectionHeader
+          title="IO Pins"
+          right={ioSupported ? (
+            <AnimatedPressable style={styles.ioConfigLink} onPress={configureIo} hitSlop={8}>
+              <Settings2 size={15} color={AUX_TINT} />
+              <Text style={styles.ioConfigText}>Configure</Text>
+            </AnimatedPressable>
+          ) : undefined}
+        />
+        {!ioSupported ? (
+          <Card>
+            <Text style={styles.ioEmpty}>
+              This board&apos;s firmware has no IO-pin support — flash AuxStepperDriver 1.1.0 or newer.
+            </Text>
+          </Card>
+        ) : ioPins.length === 0 ? (
+          <Card>
+            <Text style={styles.ioEmpty}>
+              Configure the Uno&apos;s spare pins (D9–D11, A0–A5) as inputs or outputs to add digital IO to this device.
+            </Text>
+          </Card>
+        ) : (
+          <Card padded={false}>
+            {ioPins.map((pin, i) => (
+              <React.Fragment key={pin.pin}>
+                <IORow
+                  label={pin.name || `Pin ${pin.pin}`}
+                  sublabel={`${device.deviceName} · D${pin.pin}`}
+                  type={pin.type}
+                  value={pin.value}
+                  onToggle={pin.type === "Output"
+                    ? () => robotClient.setIoOutput(device.deviceId, pin.pin, !pin.value)
+                    : undefined}
+                />
+                {i < ioPins.length - 1 && <Divider inset />}
+              </React.Fragment>
+            ))}
+          </Card>
+        )}
       </View>
     </>
   );
@@ -550,21 +733,11 @@ export default function AuxPage() {
       <PageHeader
         title={device ? device.deviceName : "Aux Stepper"}
         subtitle={device ? "External stepper driver" : "Device not found"}
-        right={
-          device ? (
-            <View style={styles.headerActions}>
-              <StatusPill
-                label={device.connected ? "Connected" : "Offline"}
-                tone={device.connected ? "success" : "danger"}
-                dot
-              />
-            </View>
-          ) : undefined
-        }
       />
       <Screen>
         {device ? (
           <>
+            <DeviceStatusBar connected={device.connected} chips={<FirmwareChip device={device} />} />
             <View style={styles.statRow}>
               <StatTile label="Axes" value={device.axes.length} icon={Gauge}
                         tint={[AUX_TINT, AUX_TINT_SOFT]} style={styles.statTile} />
@@ -591,40 +764,60 @@ export default function AuxPage() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  axisRow: {
+  jogRow:        { flexDirection: "row", gap: spacing.sm },
+  axisConfigBtn: { padding: spacing.xs, marginLeft: 2 },
+
+  // ── Per-axis card: icon + identity header, then its controls below ──────────
+  axisStack:       { gap: spacing.md },
+  axisHeader: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 3,
+    paddingVertical: spacing.sm + 2,
     gap: spacing.sm + 2,
   },
-  axisIndexBadge: {
-    width: 36, height: 22,
-    borderRadius: radii.sm - 4,
-    backgroundColor: AUX_TINT_SOFT,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  axisIndexText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5, color: AUX_TINT },
+  axisHeaderInfo: { flex: 1, minWidth: 0 },
+  axisName: { ...type.body, fontWeight: "700", color: colors.text },
+  axisSub:  { ...type.caption, color: colors.textMuted },
+  axisControls: { padding: spacing.md, gap: spacing.sm },
 
-  jogRow:        { flexDirection: "row", gap: spacing.sm },
-  axisConfigBtn: { padding: spacing.xs, marginRight: 2 },
-
-  // Role icon badge on each axis row (what the motor drives, at a glance).
+  // Role icon tile on each axis card (what the motor drives, at a glance).
   roleIcon: {
-    width: 30, height: 30,
-    borderRadius: radii.sm - 2,
+    width: 38, height: 38,
+    borderRadius: radii.sm,
     justifyContent: "center", alignItems: "center",
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: AUX_TINT_SOFT,
   },
-  roleIconOn: { backgroundColor: AUX_TINT_SOFT },
 
-  // Gripper controls: Open/Close row + grip-to-distance row.
-  gripperControls: { gap: spacing.sm },
-  gripToRow:   { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  gripToInput: { width: 70 },
-  gripToUnit:  { ...type.caption, color: colors.textFaint, marginLeft: -2 },
-  needsConfig: { ...type.caption, color: colors.textFaint, maxWidth: 150, lineHeight: 15 },
+  // Gripper controls: Open/Close jog row + live gap slider.
+  gripperControls: { gap: spacing.md },
+  needsConfig: { ...type.caption, color: colors.textFaint, lineHeight: 16 },
+
+  // ── Gripper gap slider (live drag-to-position) ──────────────────────────────
+  sliderWrap:   { gap: 4 },
+  sliderHeader: { flexDirection: "row", alignItems: "center" },
+  sliderLabel:  { fontSize: 12, fontWeight: "700", color: colors.textSecondary, letterSpacing: 0.5 },
+  sliderValueBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: radii.sm, backgroundColor: colors.surfaceMuted },
+  sliderValue:  { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  sliderHit:    { height: 40, justifyContent: "center" },
+  sliderTrack:  { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden" },
+  sliderFill:   { height: 6, borderRadius: 3 },
+  sliderThumb: {
+    position: "absolute",
+    top: (40 - 24) / 2,
+    width: 24, height: 24, borderRadius: 12,
+    marginLeft: -12,
+    backgroundColor: colors.surface,
+    borderWidth: 3,
+  },
+  sliderEnds: { flexDirection: "row", justifyContent: "space-between" },
+  sliderEnd:  { fontSize: 11, color: colors.textFaint },
+
+  // ── IO Pins section ─────────────────────────────────────────────────────────
+  ioConfigLink: { flexDirection: "row", alignItems: "center", gap: 4 },
+  ioConfigText: { fontSize: 13, fontWeight: "700", color: AUX_TINT },
+  ioEmpty:      { ...type.caption, color: colors.textMuted, lineHeight: 17 },
 
   reRefHint:    { ...type.caption, color: colors.textMuted, lineHeight: 16 },
   reRefDivider: { marginVertical: spacing.md },
@@ -648,7 +841,6 @@ const styles = StyleSheet.create({
   axisGrid:     { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   axisGridItem: { flexBasis: "48%", flexGrow: 1, minWidth: 320 },
 
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   statRow:       { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   statTile:      { flex: 1, minWidth: 130 },
 

@@ -16,7 +16,7 @@ const OPTIONS: { label: string; value: FrameOption }[] = [
 ];
 
 const HINTS: Record<FrameOption, string> = {
-  default:    "As before: blob points in pixels, polygon and ArUco centers normalized (0–1).",
+  default:    "Positions in image pixels (the same as Pixel).",
   pixel:      "All points in image pixels.",
   normalized: "All points as fractions of the image (0–1), independent of resolution.",
   robot:      "Points in robot X/Y (mm) with Z at the calibrated plane — usable directly as move targets. Needs a calibrated camera.",
@@ -24,7 +24,7 @@ const HINTS: Record<FrameOption, string> = {
 
 /**
  * RunVision "Output frame" selector (docs/camera-calibration.md › Using a calibration).
- * "Default" leaves `outputFrame` unset so existing programs keep today's behaviour.
+ * "Default" leaves `outputFrame` unset, which the controller reads as pixels.
  * With "robot" on an uncalibrated camera it warns inline and links to the wizard; the
  * controller's validator reports the same problem as `cameraNotCalibrated`.
  */

@@ -3,7 +3,7 @@ import { GestureResponderEvent, StyleProp, ViewStyle } from "react-native";
 import { Trash2 } from "lucide-react-native";
 import { AnimatedPressable } from "./AnimatedPressable";
 
-/** Trash-icon delete button with a press scale/opacity animation. */
+/** Trash-icon delete button with a press scale/opacity animation. No haptic — deleting is silent. */
 export function DeleteIconButton({
   onPress,
   size = 16,

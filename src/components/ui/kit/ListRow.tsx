@@ -3,6 +3,7 @@ import { ReactNode } from "react";
 import { GestureResponderEvent, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { withHaptic } from "@/src/components/ui/haptics";
 import { Card } from "./Card";
 import { IconTile } from "./IconTile";
 import { colors, spacing, type } from "./theme";
@@ -59,7 +60,7 @@ export function ListRow({
   if (!card) {
     if (onPress || onLongPress) {
       return (
-        <AnimatedPressable style={[styles.row, styles.flat, style]} onPress={onPress} onLongPress={onLongPress}>
+        <AnimatedPressable style={[styles.row, styles.flat, style]} onPress={withHaptic("selection", onPress)} onLongPress={withHaptic("medium", onLongPress)}>
           {content}
         </AnimatedPressable>
       );

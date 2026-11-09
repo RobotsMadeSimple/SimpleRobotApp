@@ -16,6 +16,9 @@ import { colors } from "@/src/components/ui/kit";
 import { NavRail } from "@/src/components/ui/NavRail";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
+import { PromptDialog } from "@/src/components/ui/program/PromptDialog";
+import { MockKeyboard } from "@/src/components/dev/MockKeyboard";
+import { ProviderAutoStart } from "@/src/components/provider/ProviderAutoStart";
 import { RobotProvider } from "@/src/providers/RobotProvider";
 import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { StatusBar } from "expo-status-bar";
@@ -28,9 +31,14 @@ export default function Layout() {
         <SafeAreaProvider>
           <RobotProvider>
             <StatusBar style="dark" />
+            <ProviderAutoStart />
             <TabLayout />
             <AppAlertHost />
             <FaultRecoveryOverlay />
+            {/* A running program's operator prompt, answerable from any screen. */}
+            <PromptDialog />
+            {/* Web-only fake keyboard for the Playwright keyboard audit; renders nothing unless enabled. */}
+            <MockKeyboard />
           </RobotProvider>
         </SafeAreaProvider>
       </ActionSheetProvider>

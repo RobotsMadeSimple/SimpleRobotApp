@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { GestureResponderEvent, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { withHaptic } from "@/src/components/ui/haptics";
 import { colors, radii, shadows, spacing } from "./theme";
 
 type Props = {
@@ -19,7 +20,7 @@ export function Card({ children, onPress, onLongPress, style, padded = true }: P
   const base = [styles.card, padded && styles.padded, style];
   if (onPress || onLongPress) {
     return (
-      <AnimatedPressable style={base} onPress={onPress} onLongPress={onLongPress}>
+      <AnimatedPressable style={base} onPress={withHaptic("selection", onPress)} onLongPress={withHaptic("medium", onLongPress)}>
         {children}
       </AnimatedPressable>
     );

@@ -5,7 +5,7 @@ import { accents, colors, spacing, type } from "@/src/components/ui/kit";
 
 /**
  * Every function the controller's evaluator knows, with its signature and what it does.
- * Tapping one inserts `name(` at the caret.
+ * Tapping one inserts `name(` at the caret, or just the name for a property such as `.length`.
  *
  * Rendered inline inside ExpressionEditorModal rather than in a sheet of its own: the
  * reference and the expression being written belong on the same screen, and a sheet over
@@ -15,7 +15,8 @@ export function FunctionsList({ functions, search, onInsert }: {
   functions: ExpressionFunction[];
   /** Filter shared with the modal's other reference sections. */
   search: string;
-  onInsert: (name: string) => void;
+  /** Gets the text to insert: `name(` for a call, the bare name for a property. */
+  onInsert: (token: string) => void;
 }) {
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -33,7 +34,7 @@ export function FunctionsList({ functions, search, onInsert }: {
         <TouchableOpacity
           key={f.name}
           style={[styles.row, i < shown.length - 1 && styles.rowBorder]}
-          onPress={() => onInsert(f.name)}
+          onPress={() => onInsert(f.signature.includes("(") ? `${f.name}(` : f.name)}
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel={`Insert ${f.name}`}

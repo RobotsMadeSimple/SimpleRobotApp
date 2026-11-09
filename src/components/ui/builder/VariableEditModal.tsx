@@ -11,8 +11,8 @@ import {
   View,
 } from "react-native";
 import { Check, ChevronDown, Minus, Plus, X } from "lucide-react-native";
-import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { colors, accents } from "@/src/components/ui/kit";
+import { useKeyboardStableCard } from "@/src/platform/keyboard";
 import {
   ListElementType,
   ProgramVariable,
@@ -21,12 +21,21 @@ import {
   itemScalar,
   numberItem,
   variableList,
+  type ParamMode,
 } from "@/src/models/robotModels";
 import { ms } from "./builderStyles";
 import { ExpressionInput } from "./NumericInputs";
 import { newId } from "./stepUtils";
 
 export type VarType = "number" | "boolean" | "list" | "stopwatch" | "string" | "image" | "computed";
+
+/** The routine-parameter choices (ProgramVariable.paramMode) with what each does. */
+const PARAM_MODES: { value: ParamMode | "none"; label: string; hint: string }[] = [
+  { value: "none",  label: "No",     hint: "An ordinary variable of this routine." },
+  { value: "in",    label: "In",     hint: "Set from the caller's argument before the routine runs (its value here is the default)." },
+  { value: "out",   label: "Out",    hint: "Copied into the caller's chosen variable when the routine returns." },
+  { value: "inOut", label: "In-Out", hint: "Set from the caller's argument, and copied back when the routine returns." },
+];
 
 /**
  * Module scope rather than rebuilt per render — it is a constant, and the trigger button
@@ -43,7 +52,7 @@ const TYPE_OPTIONS: { key: VarType; label: string; desc: string; color: string; 
   { key: "image",     label: "Image",     desc: "A camera frame, from CaptureImage",   color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
   { key: "list",      label: "List",      desc: "Numbers, booleans, points or records", color: "#7c3aed", bg: "#f5f3ff", border: "#c4b5fd" },
   { key: "stopwatch", label: "Stopwatch", desc: "Elapsed milliseconds",                color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
-  { key: "computed",  label: "Computed",  desc: "A formula, re-evaluated every time it is read", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
+  { key: "computed",  label: "Property",  desc: "A formula, re-evaluated every time it is read", color: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
 ];
 
 /**
@@ -83,17 +92,24 @@ export function VariableEditModal({
   visible,
   variable,
   defaultType,
+  defaultElementType,
   variables,
   onSave,
   onClose,
+  isRoutine,
 }: {
   visible: boolean;
   variable: ProgramVariable | null;
+  /** Editing a routine's variable: it can be made an In / Out / In-Out parameter. */
+  isRoutine?: boolean;
   defaultType?: VarType;
+  /** The element type a new list starts on (new variables only; lists default to Number). */
+  defaultElementType?: ListElementType;
   /**
    * The program's other variables, offered by the $var picker when the initial value is
-   * an expression. Optional — without it the field still accepts a typed expression, it
-   * just has nothing to insert.
+   * an expression, and checked so a new name does not collide with an existing one.
+   * Optional — without it the field still accepts a typed expression, it just has
+   * nothing to insert and nothing to check against.
    */
   variables?: ProgramVariable[];
   onSave: (v: ProgramVariable) => void;
@@ -117,7 +133,9 @@ export function VariableEditModal({
   const [listValues, setListValues] = useState<string[]>([]);
   const [isGlobal,          setIsGlobal]          = useState(false);
   const [displayOnMonitor,  setDisplayOnMonitor]  = useState(false);
+  const [isInput,           setIsInput]           = useState(false);
   const [isPersistent,      setIsPersistent]      = useState(false);
+  const [paramMode,         setParamMode]         = useState<ParamMode | undefined>(undefined);
   /**
    * The Computed kind's formula and its "Is boolean" toggle. Kept apart from valueExpr /
    * the Boolean kind so switching between Computed and a stored kind in the picker does
@@ -127,6 +145,7 @@ export function VariableEditModal({
   const [computedBool, setComputedBool] = useState(false);
 
   useEffect(() => {
+    setParamMode(variable?.paramMode);
     if (variable?.isComputed) {
       // Checked before the stored kinds: a computed variable's isBoolean is a display
       // flag on the formula, not the Boolean kind.
@@ -137,6 +156,7 @@ export function VariableEditModal({
       setComputedBool(variable.isBoolean ?? false);
       setIsGlobal(variable.isGlobal ?? false);
       setDisplayOnMonitor(variable.displayOnMonitor ?? false);
+      setIsInput(false); // computed variables cannot be seeded as inputs
       setIsPersistent(false);
       setValueExpr(undefined); setValue("0"); setStringVal(""); setListValues([]); setElemType("Number");
       return;
@@ -147,6 +167,7 @@ export function VariableEditModal({
       setDesc(variable.description ?? "");
       setIsGlobal(variable.isGlobal ?? false);
       setDisplayOnMonitor(variable.displayOnMonitor ?? false);
+      setIsInput(variable.isInput ?? false);
       setIsPersistent(variable.isPersistent ?? false);
       // Only the scalar branches below can reach the expression field, but it is restored
       // here for all of them — a variable switched to a list and back keeps what was typed.
@@ -184,7 +205,7 @@ export function VariableEditModal({
         setStringVal(""); setListValues([]);
       }
     } else {
-      setName(""); setValue("0"); setValueExpr(undefined); setStringVal(""); setDesc(""); setVarType(defaultType ?? "number"); setElemType("Number"); setListValues([]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
+      setName(""); setValue("0"); setValueExpr(undefined); setStringVal(""); setDesc(""); setVarType(defaultType ?? "number"); setElemType(defaultElementType ?? "Number"); setListValues([]); setIsGlobal(false); setDisplayOnMonitor(false); setIsPersistent(false);
     }
   }, [variable, visible]);
 
@@ -196,8 +217,13 @@ export function VariableEditModal({
   const existingList = variable ? variableList(variable) : null;
   const keptItems    = existingList?.elementType === elemType ? existingList.items : [];
   const nameOk       = name.trim().length > 0 && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name.trim());
+  // Another variable (not the one being edited) already has this name. The builder
+  // upserts by id, so without this check a second variable with the same name would be
+  // appended and every `$name` reference would become ambiguous. Case-insensitive, as
+  // the controller keys variables.
+  const duplicate    = nameOk && (variables ?? []).some(v => v.id !== variable?.id && v.name.toLowerCase() === name.trim().toLowerCase());
   // A computed variable is nothing but its formula, so it cannot be saved without one.
-  const canSave      = nameOk && (varType !== "computed" || formula.trim().length > 0);
+  const canSave      = nameOk && !duplicate && (varType !== "computed" || formula.trim().length > 0);
   const selectedType = TYPE_OPTIONS.find(o => o.key === varType)!;
   const selectedElem = ELEMENT_OPTIONS.find(o => o.key === elemType)!;
   // A variable cannot open with its own value — it does not have one yet when the
@@ -273,11 +299,16 @@ export function VariableEditModal({
     ? <Text style={ms.hintText}>Stores a camera frame as a base64 JPEG. Populated by a <Text style={{ fontWeight: "600" }}>CaptureImage</Text> step at runtime.</Text>
     : <Text style={ms.hintText}>Referenced as <Text style={{ color: "#7c3aed", fontWeight: "600" }}>${name.trim() || "name"}</Text> in expressions.</Text>;
 
+  // The card keeps its height when the keyboard opens (the footer stays put and the keyboard draws
+  // over it); the focused field scrolls clear of the keyboard instead.
+  const { scrollRef: kbScrollRef, onScroll: kbOnScroll, onCardLayout: kbOnCardLayout,
+          cardStyle: kbCardStyle, contentPaddingBottom: kbPadBottom } = useKeyboardStableCard(visible);
+
   return (
     <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeAll}>
       <Pressable style={ms.overlay} onPress={closeAll}>
-        <Pressable style={ms.card} onPress={() => {}}>
+        <Pressable onLayout={kbOnCardLayout} style={[ms.card, kbCardStyle]} onPress={() => {}}>
           <View style={ms.header}>
             <View style={{ width: 18 }} />
             <Text style={ms.title}>{isNew ? "New Variable" : "Edit Variable"}</Text>
@@ -285,7 +316,8 @@ export function VariableEditModal({
               <X size={18} color={colors.textFaint} />
             </TouchableOpacity>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <ScrollView ref={kbScrollRef} onScroll={kbOnScroll} scrollEventThrottle={16} style={{ flexShrink: 1, minHeight: 0 }}
+            contentContainerStyle={{ paddingBottom: kbPadBottom }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
           <Text style={ms.fieldLabel}>NAME</Text>
           <TextInput
@@ -300,6 +332,9 @@ export function VariableEditModal({
           />
           {name.trim().length > 0 && !nameOk && (
             <Text style={ms.fieldError}>Use letters, digits, and _ only. Must start with a letter.</Text>
+          )}
+          {duplicate && (
+            <Text style={ms.fieldError}>{`A variable named $${name.trim()} already exists.`}</Text>
           )}
 
           {/* Type — opens the picker sheet below */}
@@ -601,6 +636,27 @@ export function VariableEditModal({
             returnKeyType="done"
           />
 
+          {isRoutine && varType !== "computed" && (
+            <>
+              <Text style={[ms.fieldLabel, { marginTop: 14 }]}>ROUTINE PARAMETER</Text>
+              <View style={ms.segRow}>
+                {PARAM_MODES.map(m => {
+                  const active = (paramMode ?? "none") === m.value;
+                  return (
+                    <TouchableOpacity key={m.value} style={[ms.seg, active && ms.segActive, { flex: 1 }]} activeOpacity={0.8}
+                      onPress={() => setParamMode(m.value === "none" ? undefined : m.value)}
+                      accessibilityRole="button" accessibilityLabel={`Parameter: ${m.label}`}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{m.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={ms.hintText}>
+                {PARAM_MODES.find(m => m.value === (paramMode ?? "none"))!.hint}
+              </Text>
+            </>
+          )}
+
           {(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image" || varType === "computed") && (
             <>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
@@ -616,6 +672,21 @@ export function VariableEditModal({
                   trackColor={{ false: colors.border, true: colors.accent }}
                 />
               </View>
+              {(varType === "number" || varType === "boolean" || varType === "string") && (
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Input (display page)</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, lineHeight: 15 }}>
+                      Let a custom display page set this value when it starts the program.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isInput}
+                    onValueChange={setIsInput}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                  />
+                </View>
+              )}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                 <View style={{ flex: 1, marginRight: 12 }}>
                   <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>Global Variable</Text>
@@ -707,8 +778,11 @@ export function VariableEditModal({
                   isImage:     varType === "image"     ? true : undefined,
                   isGlobal:        (varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") ? (isGlobal        || undefined) : undefined,
                   displayOnMonitor:(varType === "number" || varType === "boolean" || varType === "stopwatch" || varType === "string" || varType === "image") ? (displayOnMonitor || undefined) : undefined,
+                  isInput:         (varType === "number" || varType === "boolean" || varType === "string") ? (isInput || undefined) : undefined,
                   isPersistent:    (varType === "number" || varType === "boolean" || varType === "string"    || varType === "image") ? (isPersistent || undefined) : undefined,
                   description: desc.trim() || undefined,
+                  // Only a routine's variables are parameters; elsewhere an imported mode is kept as is.
+                  paramMode: isRoutine ? paramMode : variable?.paramMode,
                 });
                 onClose();
               }}
@@ -725,77 +799,81 @@ export function VariableEditModal({
 
     {/* Sibling of the modal, not a child — a Modal nested inside a Modal is unreliable,
         and every other picker in the builder is hung off the end the same way. */}
-    <BottomSheet
+    <TypeGridModal
       visible={visible && typePickerOpen}
       onClose={() => setTypePickerOpen(false)}
       title="Variable Type"
-    >
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
-        {TYPE_OPTIONS.map((opt, i) => {
-          const active = varType === opt.key;
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              onPress={() => pickType(opt.key)}
-              activeOpacity={0.7}
-              style={[
-                { flexDirection: "row", alignItems: "center", gap: 12,
-                  paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
-                active && { backgroundColor: opt.bg },
-              ]}
-            >
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : colors.text }}>
-                  {opt.label}
-                </Text>
-                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
-              </View>
-              {active && <Check size={16} color={opt.color} />}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
+      options={TYPE_OPTIONS}
+      selected={varType}
+      onSelect={k => pickType(k as VarType)}
+    />
 
-    {/* Only reachable while the type is List, which is the only state that renders its
-        trigger — but gated on varType anyway so a stale open flag cannot outlive it. */}
-    <BottomSheet
+    {/* Only reachable while the type is List, which is the only state that renders its trigger. */}
+    <TypeGridModal
       visible={visible && varType === "list" && elemPickerOpen}
       onClose={() => setElemPickerOpen(false)}
       title="List Of"
-    >
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
-        {ELEMENT_OPTIONS.map((opt, i) => {
-          const active = elemType === opt.key;
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              onPress={() => pickElem(opt.key)}
-              activeOpacity={0.7}
-              style={[
-                { flexDirection: "row", alignItems: "center", gap: 12,
-                  paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10 },
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.background },
-                active && { backgroundColor: opt.bg },
-              ]}
-            >
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: active ? "700" : "600",
-                  color: active ? opt.color : colors.text }}>
-                  {opt.label}
-                </Text>
-                <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{opt.desc}</Text>
-              </View>
-              {active && <Check size={16} color={opt.color} />}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
+      options={ELEMENT_OPTIONS}
+      selected={elemType}
+      onSelect={k => pickElem(k as ListElementType)}
+    />
     </>
+  );
+}
+
+/** A centred grid modal (like the step type picker) so every type — including the last ones — is
+ * visible at once, rather than scrolling off the bottom of a sheet. */
+function TypeGridModal({ visible, onClose, title, options, selected, onSelect }: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  options: { key: string; label: string; desc: string; color: string; bg: string; border: string }[];
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ms.overlay} onPress={onClose}>
+        <Pressable style={[ms.card, { maxHeight: "86%" }]} onPress={() => {}}>
+          <View style={ms.header}>
+            <View style={{ width: 18 }} />
+            <Text style={ms.title}>{title}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
+              <X size={18} color={colors.textFaint} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 6 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+              {options.map(opt => {
+                const active = selected === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => onSelect(opt.key)}
+                    activeOpacity={0.75}
+                    style={{
+                      width: "47%", minWidth: 140,
+                      borderRadius: 12, borderWidth: 1.5,
+                      borderColor: active ? opt.color : colors.border,
+                      backgroundColor: active ? opt.bg : colors.surface,
+                      padding: 12,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: opt.color }} />
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: active ? opt.color : colors.text, flex: 1 }} numberOfLines={1}>
+                        {opt.label}
+                      </Text>
+                      {active && <Check size={15} color={opt.color} />}
+                    </View>
+                    <Text style={{ fontSize: 12, color: colors.textFaint, marginTop: 4 }}>{opt.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }

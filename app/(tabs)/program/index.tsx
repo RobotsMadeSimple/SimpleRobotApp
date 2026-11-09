@@ -1,12 +1,14 @@
 import { usePaneLayout } from "@/src/components/ui/responsive";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
+import { findBackgroundStatus } from "@/src/models/backgroundStatus";
 import { useBuiltPrograms, useConnected, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
 import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { router, useFocusEffect } from "expo-router";
-import { AlertTriangle, Box, Cpu, Gauge, PlayCircle, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
+import { openManual } from "@/src/docs/navigation";
+import { AlertTriangle, BookOpen, Box, Cpu, Gauge, Layers, PlayCircle, Plug, Repeat2, ScanSearch, Smartphone, XCircle } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -40,6 +42,8 @@ import {
 const ROUTINE_TINT = { color: accents.purple, bg: accents.purpleSoft };
 const LOCAL_TINT    = { color: accents.orange, bg: accents.orangeSoft };
 const VISION_TINT   = { color: accents.cyan,   bg: accents.cyanSoft };
+const MANUAL_TINT   = { color: colors.success, bg: colors.successSoft };
+const BACKGROUND_TINT = { color: accents.pink, bg: accents.pinkSoft };
 
 // ── Status theming ─────────────────────────────────────────────────────────────
 // Collapsed onto the same handful of tones StatusPill uses (success/accent/
@@ -269,8 +273,12 @@ export default function ProgramScreen() {
 
   const builtNames = new Set(builtPrograms.map(p => p.name));
 
+  // Background programs show on their own page (and its row below), not as "Now Running".
+  const backgroundNames = new Set(builtPrograms.filter(p => p.isBackground).map(p => p.name));
+  const mainSummaries   = programSummaries.filter(p => !backgroundNames.has(p.name));
+
   const isActiveStatus = (s: ProgramStatus) => s !== "Ready";
-  const activePrograms = programSummaries.filter(p => isActiveStatus(p.status));
+  const activePrograms = mainSummaries.filter(p => isActiveStatus(p.status));
 
   // Track the last program that was in a non-Ready state so it stays visible
   const lastRanNameRef = useRef<string | null>(null);
@@ -284,21 +292,28 @@ export default function ProgramScreen() {
     activePrograms.length > 0
       ? activePrograms[0]
       : lastRanNameRef.current
-        ? (programSummaries.find(p => p.name === lastRanNameRef.current) ?? null)
+        ? (mainSummaries.find(p => p.name === lastRanNameRef.current) ?? null)
         : null;
 
   function anotherBuiltRunning(forName: string) {
-    return programSummaries.some(
+    return mainSummaries.some(
       p => p.name !== forName && builtNames.has(p.name) &&
         (p.status === "Running" || p.status === "Starting" || p.status === "Finishing")
     );
   }
 
-  const robotProgramCount = builtPrograms.filter(p => !p.isRoutine).length +
+  // Background programs have their own page and count, so Programs leaves them out.
+  const robotProgramCount = builtPrograms.filter(p => !p.isRoutine && !p.isBackground).length +
     programSummaries.filter(p => !builtNames.has(p.name)).length;
   const routineCount      = builtPrograms.filter(p => p.isRoutine).length;
+  const backgroundList    = builtPrograms.filter(p => p.isBackground && !p.isRoutine);
+  const backgroundRunning = backgroundList.filter(p => findBackgroundStatus(robotStatus?.backgroundPrograms, p)).length;
 
-  const activeCount = programSummaries.filter(
+  // Plugins summary from the status poll (GetStatus.plugins, additive).
+  const pluginList     = robotStatus?.plugins ?? [];
+  const pluginsRunning = pluginList.filter(p => p.state === "running" || p.state === "degraded").length;
+
+  const activeCount = mainSummaries.filter(
     p => p.status === "Running" || p.status === "Starting" || p.status === "Finishing"
   ).length;
 
@@ -352,7 +367,7 @@ export default function ProgramScreen() {
         title="Programs"
         icon={Box}
         right={
-          <InfoTip text="A program is a full sequence the robot runs on its own. A routine is a reusable block of steps that programs call with a Call Routine step. Local Programs are drafts kept only on this device, not on the robot." />
+          <InfoTip text="A program is a full sequence the robot runs on its own. A routine is a reusable block of steps that programs call with a Call Routine step. A background program runs beside the main program without moving the arm. Local Programs are drafts kept only on this device, not on the robot." />
         }
       />
 
@@ -375,6 +390,15 @@ export default function ProgramScreen() {
             iconColor: ROUTINE_TINT.bg,
             onPress: () => router.navigate("/program/routines"),
           },
+          {
+            key: "background",
+            title: "Background",
+            subtitle: `${backgroundList.length} ${backgroundList.length === 1 ? "program" : "programs"}` +
+              (backgroundRunning > 0 ? ` · ${backgroundRunning} running` : ""),
+            icon: <Layers size={20} color={BACKGROUND_TINT.color} />,
+            iconColor: BACKGROUND_TINT.bg,
+            onPress: () => router.navigate("/program/background"),
+          },
           ...(localCount > 0
             ? [{
                 key: "local",
@@ -395,6 +419,24 @@ export default function ProgramScreen() {
                 onPress: () => router.navigate("/(tabs)/program/vision"),
               }]
             : []),
+          {
+            key: "plugins",
+            title: "Plugins",
+            subtitle: pluginList.length === 0
+              ? "External steps, functions, and services"
+              : `${pluginsRunning} running / ${pluginList.length} installed`,
+            icon: <Plug size={20} color={colors.accent} />,
+            iconColor: colors.accentSoft,
+            onPress: () => router.navigate("/(tabs)/program/plugins"),
+          },
+          {
+            key: "manual",
+            title: "Programming Manual",
+            subtitle: "Concepts, every instruction and its parameters",
+            icon: <BookOpen size={20} color={MANUAL_TINT.color} />,
+            iconColor: MANUAL_TINT.bg,
+            onPress: () => openManual(),
+          },
         ].map((item, i, arr) => (
           <View key={item.key}>
             <ListRow

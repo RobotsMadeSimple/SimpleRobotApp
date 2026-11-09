@@ -1,16 +1,18 @@
-// Cross-repo drift guard for the ProgramStep wire model.
+// Cross-repo drift guard for the program wire model.
 //
-// This object literal mirrors RobotControl.Tests/Golden/programstep.golden.json in
-// the SimpleRobotController repo and must stay assignable to ProgramStep — plain
-// `tsc --noEmit` (run in CI) fails on any unknown/mistyped field. Update BOTH files
-// together whenever the step model changes.
-import { ProgramStep } from "./robotModels";
+// These literals mirror RobotControl.Tests/Golden/*.golden.json in the SimpleRobotController
+// repo and must stay assignable to the app types — plain `tsc --noEmit` (run in CI) fails on
+// any unknown/mistyped field. Update BOTH sides together whenever the model changes:
+//   - goldenProgramStep    ↔ programstep.golden.json  (every ProgramStep field)
+//   - STEP_TYPES_ALL       ↔ steptypes.golden.json    (the StepType list, in controller enum order)
+//   - goldenBuiltProgram   ↔ builtprogram.golden.json (program + variable fields)
+// `npx tsx scripts/golden-check.mts` compares the two sides key by key (both directions).
+import { BuiltProgram, ProgramStep, StepType } from "./robotModels";
 
 export const goldenProgramStep = {
   id: "step-golden-1",
   type: "MoveL",
   name: "Golden step",
-  enabled: false,
   comment: "Golden comment",
   outputFrame: "robot",
   pointName: "P1",
@@ -29,9 +31,16 @@ export const goldenProgramStep = {
   outputNumber: 1,
   outputValue: true,
   outputCard: "stb",
-  outputNanoId: "nano-1",
+  outputDeviceId: "nano-1",
   pulseMs: 250,
   pulseBlocking: true,
+  loadCellDeviceId: "nano-1",
+  loadCellPin: 4,
+  loadCellUnit: "g",
+  moveStopCondition: { combinator: "ALL", items: [{ id: "ms-1", expr: "$io.Arduino_Nano.Load_Cell >= 2000" }] },
+  moveStopMode: "stop",
+  moveStopPositionVariableName: "contactPts",
+  moveStopFlagVariableName: "contactHit",
   waitMs: 500,
   loopCount: 3,
   loopSteps: [{ id: "nested-loop-1", type: "Wait", waitMs: 100 }],
@@ -53,20 +62,18 @@ export const goldenProgramStep = {
   elseIfBranches: [{ id: "elif-1", condition: { combinator: "ANY", items: [] }, steps: [{ id: "nested-elif-1", type: "Wait", waitMs: 100 }] }],
   elseSteps: [{ id: "nested-else-1", type: "Wait", waitMs: 100 }],
   toolName: "Gripper",
+  toolId: "tool-1",
   jointIndex: 2,
   jointValue: 90,
   localName: "Fixture1",
+  localId: "local-1",
   jumpZ: 50,
   jumpZStart: 40,
   jumpZEnd: 60,
   visionProgramId: "vp-1",
   visionProgramName: "Detect Parts",
-  visionZoneId: "zone-1",
-  visionZoneVar: "zoneVar",
-  visionOutputs: [{ inspectionId: "insp-1", countVar: "n", pointsVar: "pts", detectedVar: "found" }],
-  colorOutputs: [{ inspectionId: "cinsp-1", coverageVar: "cov", passedVar: "ok", cellsVar: "cells", cellsPassedVar: "cellsOk" }],
-  polygonOutputs: [{ inspectionId: "pinsp-1", countVar: "pc", foundVar: "pf", angleVar: "pa", centerXVar: "px", centerYVar: "py" }],
-  arucoOutputs: [{ inspectionId: "ainsp-1", countVar: "ac", foundVar: "af", firstIdVar: "aid", firstCenterXVar: "ax", firstCenterYVar: "ay" }],
+  passVariable: "visionOk",
+  toolOutputs: [{ toolId: "t1", value: "angle", variable: "edgeAngle" }, { toolId: "t5", value: "cells", variable: "whiteCells" }],
   varPointName: "pts",
   varPointIndex: "$i",
   pointNameExpr: "{$binPrefix}{$index}",
@@ -76,6 +83,10 @@ export const goldenProgramStep = {
   stopwatchVariableName: "timer",
   saveImagePath: "captures/img_$time_ms.jpg",
   saveImageCameraId: "cam-1",
+  recordVariableName: "forceData",
+  exportFormat: "csv",
+  exportPath: "exports/run_$time_ms.csv",
+  exportColumns: [{ key: "t", expr: "$t" }, { key: "data", expr: "", listVar: "forceData" }],
   waitMode: "condition",
   waitCondition: { combinator: "ALL", items: [{ id: "wc-1", left: "$stb.in1", operator: "==", right: "1" }] },
   waitTimeoutMs: 5000,
@@ -146,4 +157,125 @@ export const goldenProgramStep = {
     contourStarts: { "0": { x: 5, y: 5 } },
     expressions: { activeSpeed: "$feed * 2" },
   },
+  pluginId: "scale",
+  pluginStepId: "weigh",
+  pluginParams: { samples: "$n * 2", unit: "g", label: "Bin {$i}", stable: "true", target: "P1", weights: "history" },
+  pluginOutputs: [{ key: "grams", variableName: "weight" }, { key: "where", variableName: "pickPts" }],
+  pluginTimeoutMs: 5000,
+  jsonUrl: "http://192.168.4.10:8080/move",
+  jsonWaitForResponse: true,
+  jsonTimeoutMs: 5000,
+  jsonOutbound: [{ key: "n", expr: "$count" }, { key: "photo", expr: "", imageVar: "photo" }, { key: "board", expr: "", listVar: "cells" }],
+  jsonInbound: [{ key: "move", variableName: "move" }],
+  jsonImageOutbound: [{ key: "img", variableName: "photo" }],
+  captureImageVariableName: "photo",
+  captureImageCameraId: "cam-1",
+  httpReceiveName: "checkers",
+  httpReceiveTimeoutMs: 60000,
+  httpReceiveInbound: [{ key: "x", variableName: "x" }],
+  unknownStepType: "MoveWithForce",
+  enabled: true,
+  noteStyle: "section",
+  loopControl: "continue",
+  errorMessage: "No part at {$i}",
+  errorCode: "noPart",
+  switchExpr: "$bin",
+  switchCases: [{ id: "case-1", values: ["1", "2"], steps: [{ id: "nested-case-1", type: "Wait", waitMs: 100 }] }],
+  switchDefault: [{ id: "nested-default-1", type: "Wait", waitMs: 100 }],
+  trySteps: [{ id: "nested-try-1", type: "Wait", waitMs: 100 }],
+  catchSteps: [{ id: "nested-catch-1", type: "Note", comment: "ignored", noteStyle: "note" }],
+  tryRetries: 2,
+  tryRetryDelayMs: 500,
+  catchCodes: ["waitTimeout", "httpFailed"],
+  errorVariableName: "errMsg",
+  errorCodeVariableName: "errCode",
+  waitTimeoutAction: "error",
+  routineArgs: { height: "20", count: "$n" },
+  routineOutputs: [{ key: "found", variableName: "ok" }],
+  outputAction: "toggle",
+  savePositionTo: "variable",
+  savePositionMode: "append",
+  savePositionIndex: 0,
+  savePositionSource: "actual",
+  speedFactor: 50,
+  viaPointId: "point-guid-2",
+  viaPointName: "P2",
+  viaPointNameExpr: "$pts[1]",
+  arcTolerance: 0.1,
+  listAction: "insert",
+  listIndex: 0,
+  listValueExpr: "$grams",
+  listFields: { x: "$robot.x", z: "5" },
+  listSourceVariable: "vals",
+  listSortField: "value",
+  listSortDescending: true,
+  promptTitle: "Setup",
+  promptMessage: "Load the tray",
+  promptButtons: ["Continue", "Skip"],
+  promptInput: "number",
+  promptDefault: "10",
+  promptMin: 1,
+  promptMax: 50,
+  promptResultVariableName: "choice",
+  promptInputVariableName: "qty",
+  promptTimeoutMs: 60000,
+  promptTimeoutButton: 0,
 } satisfies ProgramStep;
+
+/**
+ * Every StepType, in the controller's enum order (steptypes.golden.json). The two assertions
+ * below fail tsc when the StepType union gains or loses a member that this list does not.
+ */
+export const STEP_TYPES_ALL = [
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "SetOutput", "Wait", "Loop", "StatusUpdate", "CallRoutine",
+  "SetSpeedL", "SetSpeedJ", "SetVariable", "PauseProgram", "Label", "GoToLabel", "IfCondition",
+  "SetTool", "RunHoming", "SetJointPosition", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable",
+  "GripperAction", "ConveyorAction", "RotaryIndex", "RunVision", "SetLocal", "ClearLocal",
+  "StartBackground", "StopBackground", "WaitForBackground", "StopwatchControl", "SaveImage",
+  "ThreadMove", "CncProgram", "SetBlendRadius", "HttpRequest", "CaptureImage", "HttpReceive",
+  "Plugin", "Tare", "ReadLoadCell", "StartRecording", "StopRecording", "ExportData", "Unknown",
+  "Note", "LoopControl", "Return", "EndProgram", "RaiseError", "Switch", "Try", "SavePosition",
+  "SetSpeedFactor", "ListOp", "Prompt", "MoveC",
+] as const satisfies readonly StepType[];
+
+type ListedStepType = (typeof STEP_TYPES_ALL)[number];
+// Both directions: every listed name is a StepType (satisfies above) and every StepType is listed.
+type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+export const STEP_TYPES_ALL_IS_COMPLETE: Exact<ListedStepType, StepType> = true;
+
+/** Mirrors builtprogram.golden.json. */
+export const goldenBuiltProgram = {
+  id: "program-golden-1",
+  name: "Golden program",
+  description: "Golden description",
+  steps: [{ id: "golden-step-1", type: "Note", comment: "Setup", noteStyle: "section" }],
+  variables: [
+    {
+      id: "var-golden-1",
+      name: "height",
+      value: 20,
+      valueExpression: "$robot.z",
+      items: [{ value: 1 }],
+      elementType: "Number",
+      description: "Golden variable",
+      isBoolean: false,
+      isGlobal: false,
+      displayOnMonitor: true,
+      isInput: false,
+      isStopwatch: false,
+      isPersistent: false,
+      isString: false,
+      stringValue: "",
+      isImage: false,
+      isComputed: false,
+      paramMode: "inOut",
+    },
+  ],
+  displayPageHtml: "<p>page</p>",
+  displayPageMode: "html",
+  lastUpdatedUnixMs: 1762480000000,
+  isRoutine: true,
+  isBackground: false,
+  killBackgroundOnStop: true,
+  editorMode: "text",
+} satisfies BuiltProgram;

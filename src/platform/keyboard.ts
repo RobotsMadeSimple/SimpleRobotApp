@@ -1,0 +1,146 @@
+import { useEffect, useRef, useState } from "react";
+import { Keyboard, Platform, TextInput, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type ScrollView } from "react-native";
+
+/**
+ * One keyboard signal for the whole app. Components that must stay clear of the keyboard
+ * (bottom sheets, modal footers, scroll-to-focused-field) subscribe here rather than to
+ * `Keyboard` directly, so that:
+ *  - native gets the real keyboard (keyboardWillShow on iOS for a smooth lift, keyboardDidShow
+ *    on Android where Will* never fires), and
+ *  - web gets the mock keyboard (src/components/dev/MockKeyboard.tsx), which lets the Playwright
+ *    keyboard audit (scripts/keyboard-audit.mjs) drive exactly the same code paths a phone would.
+ *
+ * `screenY` is the keyboard's top edge in window coordinates — compare a focused field's
+ * measureInWindow() bottom against it to know whether the field is covered.
+ */
+export type KeyboardInfo = { visible: boolean; height: number; screenY: number };
+
+type Listener = (k: KeyboardInfo) => void;
+
+const HIDDEN: KeyboardInfo = { visible: false, height: 0, screenY: Number.POSITIVE_INFINITY };
+
+// ── Web: a tiny emitter the mock keyboard drives ──────────────────────────────
+const webListeners = new Set<Listener>();
+let webState: KeyboardInfo = HIDDEN;
+
+/** Web only — called by the mock keyboard when it shows/hides. */
+export function __setMockKeyboard(k: KeyboardInfo | null) {
+  webState = k ?? HIDDEN;
+  webListeners.forEach(l => l(webState));
+}
+
+/** The current keyboard state (web: the mock's; native: best effort from Keyboard.metrics). */
+export function getKeyboard(): KeyboardInfo {
+  if (Platform.OS === "web") return webState;
+  const m = (Keyboard as any).metrics?.();
+  return m && (Keyboard as any).isVisible?.()
+    ? { visible: true, height: m.height, screenY: m.screenY }
+    : HIDDEN;
+}
+
+/** Subscribe to keyboard show/hide. Returns an unsubscribe. */
+export function addKeyboardListener(cb: Listener): () => void {
+  if (Platform.OS === "web") {
+    webListeners.add(cb);
+    return () => { webListeners.delete(cb); };
+  }
+  const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+  const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+  const s1 = Keyboard.addListener(showEvt, (e: any) => {
+    const height = e?.endCoordinates?.height ?? 0;
+    const screenY = e?.endCoordinates?.screenY ?? Number.POSITIVE_INFINITY;
+    cb({ visible: height > 0, height, screenY });
+  });
+  const s2 = Keyboard.addListener(hideEvt, () => cb(HIDDEN));
+  return () => { s1.remove(); s2.remove(); };
+}
+
+/**
+ * The keyboard's top edge in window coordinates (null when hidden), re-rendering on change.
+ * A centred/top-anchored modal caps its card to this so the card — and its scroll view —
+ * end above the keyboard, which is what lets a low field scroll clear of it.
+ */
+export function useKeyboardTop(): number | null {
+  const read = () => { const k = getKeyboard(); return k.visible ? k.screenY : null; };
+  const [top, setTop] = useState<number | null>(read);
+  useEffect(() => {
+    if (getKeyboard().visible) setTimeout(() => setTop(read()), 0);
+    return addKeyboardListener(k => setTop(k.visible ? k.screenY : null));
+  }, []);
+  return top;
+}
+
+/** The keyboard's current height (0 when hidden), re-rendering on change. */
+export function useKeyboardHeight(): number {
+  const [h, setH] = useState(() => getKeyboard().height);
+  useEffect(() => {
+    // An autoFocus field focuses at mount, before this effect subscribes — so the keyboard may
+    // already be up by now. Re-read it rather than wait for the next event (deferred, not sync).
+    const k = getKeyboard();
+    if (k.visible) setTimeout(() => setH(getKeyboard().height), 0);
+    return addKeyboardListener(k => setH(k.visible ? k.height : 0));
+  }, []);
+  return h;
+}
+
+/**
+ * A centred modal card that keeps its height when the keyboard opens: the card stays pinned to its
+ * keyboard-closed height (its footer never moves; the keyboard simply draws over it), the body
+ * gets bottom padding the size of the keyboard, and the focused field is scrolled clear of the
+ * keyboard's top. Wire it as:
+ *   <View onLayout={k.onCardLayout} style={[card, k.cardStyle]}>
+ *     <ScrollView ref={k.scrollRef} onScroll={k.onScroll} scrollEventThrottle={16}
+ *       style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: k.contentPaddingBottom }}>
+ */
+export function useKeyboardStableCard(active: boolean) {
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY   = useRef(0);
+  const [kbHeight, setKbHeight] = useState(0);
+  const [restHeight, setRestHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const adjust = (kbTop: number) => {
+      // Native exposes currentlyFocusedInput() (a host component with measureInWindow); react-native-web
+      // only has currentlyFocusedField(), which hands back the DOM node — measure that with its rect.
+      const state: any = (TextInput as any).State;
+      const focused: any = state?.currentlyFocusedInput?.() ?? state?.currentlyFocusedField?.();
+      const sv = scrollRef.current;
+      if (!focused || !sv) return;
+      const clear = (y: number, ht: number) => {
+        if (typeof y !== "number") return;
+        // The field plus the live-value line + "＋ Insert" chip a focused field renders beneath itself.
+        const overlap = (y + ht + 72) - kbTop;
+        if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollY.current + overlap), animated: true });
+      };
+      if (typeof focused.measureInWindow === "function") {
+        focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => clear(y, ht));
+      } else if (typeof focused.getBoundingClientRect === "function") {
+        const r = focused.getBoundingClientRect();
+        clear(r.top, r.height);
+      }
+    };
+    return addKeyboardListener(k => {
+      if (!k.visible) { setKbHeight(0); return; }
+      setKbHeight(k.height);
+      // Two frames to let the field settle, then again after the keyboard animation finishes.
+      requestAnimationFrame(() => requestAnimationFrame(() => adjust(k.screenY)));
+      setTimeout(() => adjust(k.screenY), 240);
+    });
+  }, [active]);
+
+  return {
+    kbHeight,
+    scrollRef,
+    onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => { scrollY.current = e.nativeEvent.contentOffset.y; },
+    // Track the card's natural height only while the keyboard is closed; that is what it keeps.
+    onCardLayout: (e: LayoutChangeEvent) => {
+      if (kbHeight > 0) return;
+      const h = Math.round(e.nativeEvent.layout.height);
+      if (h !== restHeight) setRestHeight(h);
+    },
+    cardStyle: kbHeight > 0 && restHeight != null ? { height: restHeight } : null,
+    // Room to scroll a bottom field up above the keyboard (the body extends behind it).
+    contentPaddingBottom: kbHeight > 0 ? kbHeight : 8,
+  };
+}

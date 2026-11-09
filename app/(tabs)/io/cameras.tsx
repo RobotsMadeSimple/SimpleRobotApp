@@ -9,20 +9,17 @@ import {
   SofiaSource, sofiaSourceOf, sofiaSourceProblem, SOURCE_OPTIONS,
 } from "@/src/components/ui/camera/cameraSource";
 import { router, useLocalSearchParams } from "expo-router";
-import { VisionCanvas } from "@/src/vision/VisionCanvas";
-import { CameraLiveFeed, makeCameraHtml } from "@/src/components/vision/CameraLiveFeed";
+import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
-import * as ScreenOrientation from "expo-screen-orientation";
+import { DeviceStatusBar } from "@/src/components/ui/io/ioShared";
 import {
   Camera,
   Check,
   ChevronDown,
-  X,
 } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -47,33 +44,6 @@ import {
   StatusPill,
   type,
 } from "@/src/components/ui/kit";
-
-// ── CameraFullscreenModal ─────────────────────────────────────────────────────
-// Unchanged orientation/feed logic; only the close affordance is restyled.
-
-function CameraFullscreenModal({ camera, onClose }: { camera: CameraState; onClose: () => void }) {
-  useEffect(() => {
-    ScreenOrientation.unlockAsync().catch(() => {});
-    return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {}); };
-  }, []);
-
-  const wsUrl = robotClient.cameraWsUrl(camera.id);
-  if (!wsUrl) return null;
-
-  return (
-    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <VisionCanvas
-          html={makeCameraHtml(wsUrl, true)}
-          style={{ flex: 1 }}
-        />
-        <TouchableOpacity style={styles.fullscreenClose} onPress={onClose} activeOpacity={0.8}>
-          <X size={18} color={colors.onAccent} />
-        </TouchableOpacity>
-      </View>
-    </Modal>
-  );
-}
 
 // ── ResolutionSheet ───────────────────────────────────────────────────────────
 
@@ -316,7 +286,6 @@ function CameraConfigFields({
 function CameraDetailPage({ camera }: { camera: CameraState }) {
   const wideContent = useWideContent();
   const isWide = useIsWide();
-  const [fullscreen,  setFullscreen]  = useState(false);
   const [name,        setName]        = useState(camera.name);
   const [deviceIndex, setDeviceIndex] = useState(String(camera.deviceIndex));
   const [width,       setWidth]       = useState(String(camera.width));
@@ -352,27 +321,13 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {fullscreen && Platform.OS !== 'web' && (
-        <CameraFullscreenModal camera={camera} onClose={() => setFullscreen(false)} />
-      )}
       <PageHeader
         title={camera.name}
         subtitle={cameraSourceSummary(camera)}
-        right={
-          <View style={styles.headerRight}>
-            {tag && <StatusPill label={tag} tone="accent" />}
-            <CameraCalibrationControls camera={camera} layout="inline" />
-            <StatusPill
-              label={camera.connected ? "Connected" : "Offline"}
-              tone={camera.connected ? "success" : "danger"}
-              dot
-            />
-          </View>
-        }
       />
       {(() => {
         const feed = camera.connected
-          ? <CameraLiveFeed cameraId={camera.id} onTap={() => setFullscreen(true)} />
+          ? <CameraLiveFeed cameraId={camera.id} />
           : (
             <View style={styles.feedPlaceholder}>
               <Camera size={28} color="#4b5563" />
@@ -383,6 +338,13 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
           <View style={styles.feedBlock}>
             {feed}
           </View>
+        );
+        const statusBar = (
+          <DeviceStatusBar
+            connected={camera.connected}
+            chips={tag ? <StatusPill label={tag} tone="accent" /> : undefined}
+            actions={<CameraCalibrationControls camera={camera} layout="inline" />}
+          />
         );
         const editables = (
           <>
@@ -417,6 +379,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
+                {statusBar}
                 {editables}
               </ScrollView>
               <View style={styles.camFeedPane}>{feedBlock}</View>
@@ -428,6 +391,7 @@ function CameraDetailPage({ camera }: { camera: CameraState }) {
             contentContainerStyle={[styles.scrollContent, wideContent]}
             showsVerticalScrollIndicator={false}
           >
+            {statusBar}
             {feedBlock}
             {editables}
           </ScrollView>
@@ -565,7 +529,6 @@ export default function CamerasPage() {
 const styles = StyleSheet.create({
   scrollContent: { paddingTop: spacing.lg + 8, paddingBottom: spacing.xxl + 8, paddingHorizontal: spacing.lg, gap: spacing.xl },
   fieldGap: { marginTop: spacing.md + 2 },
-  headerRight: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: spacing.sm },
 
   dropdownRow: {
     flexDirection: "row",
@@ -639,17 +602,5 @@ const styles = StyleSheet.create({
     width: "48%", minWidth: 380, maxWidth: 820,
     padding: spacing.lg,
     borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border,
-  },
-
-  fullscreenClose: {
-    position: "absolute",
-    top: 48,
-    right: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "center",
-    alignItems: "center",
   },
 });

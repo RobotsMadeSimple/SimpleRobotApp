@@ -7,11 +7,19 @@ export default function ProgramLayout() {
       <Stack.Screen name="monitor-program" options={{ headerShown: false }} />
       <Stack.Screen name="builder"  options={{ headerShown: false }} />
       <Stack.Screen name="routines"        options={{ headerShown: false }} />
+      <Stack.Screen name="background"      options={{ headerShown: false }} />
       <Stack.Screen name="robot-programs"  options={{ headerShown: false }} />
       <Stack.Screen name="phone-programs"  options={{ headerShown: false }} />
       <Stack.Screen name="vision"          options={{ headerShown: false }} />
       <Stack.Screen name="vision-editor"   options={{ headerShown: false }} />
       <Stack.Screen name="cnc-builder"     options={{ headerShown: false }} />
+      <Stack.Screen name="plugins"         options={{ headerShown: false }} />
+      <Stack.Screen name="plugin-detail"   options={{ headerShown: false }} />
+      <Stack.Screen name="display-page"      options={{ headerShown: false }} />
+      <Stack.Screen name="display-page-edit" options={{ headerShown: false }} />
+      <Stack.Screen name="manual"            options={{ headerShown: false }} />
+      <Stack.Screen name="manual-chapter"    options={{ headerShown: false }} />
+      <Stack.Screen name="manual-step"       options={{ headerShown: false }} />
     </Stack>
   );
 }

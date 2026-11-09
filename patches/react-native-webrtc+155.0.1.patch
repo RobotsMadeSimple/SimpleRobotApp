@@ -1,0 +1,364 @@
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java
+index 9095537..d6578f8 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/AbstractVideoCaptureController.java
+@@ -29,6 +29,13 @@ public abstract class AbstractVideoCaptureController {
+ 
+     protected CapturerEventsListener capturerEventsListener;
+ 
++    /** Extra clockwise turn (0/90/180/270) added to every captured frame, independent of the screen. */
++    protected volatile int extraRotation;
++
++    public int getExtraRotation() {
++        return extraRotation;
++    }
++
+     public AbstractVideoCaptureController(int width, int height, int fps) {
+         this.targetWidth = width;
+         this.targetHeight = height;
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
+index 1980f6c..55063ec 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraCaptureController.java
+@@ -54,6 +54,13 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
+             updateActualSize(cameraIndex, cameraName, videoCapturer);
+             CameraCaptureController.this.currentDeviceId = cameraIndex == -1 ? null : String.valueOf(cameraIndex);
+         }
++
++        // Every (re)opened session starts with WebRTC's stabilization choice; take EIS off.
++        @Override
++        public void onFirstFrameAvailable() {
++            super.onFirstFrameAvailable();
++            if (videoCapturer != null) CameraStabilization.disableVideoStabilization(videoCapturer);
++        }
+     };
+ 
+     public CameraCaptureController(Context context, CameraEnumerator cameraEnumerator, ReadableMap constraints) {
+@@ -62,6 +69,7 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
+         this.context = context;
+         this.cameraEnumerator = cameraEnumerator;
+         this.constraints = constraints;
++        if (constraints.hasKey("rotation")) this.extraRotation = ((constraints.getInt("rotation") % 360) + 360) % 360 / 90 * 90;
+     }
+ 
+     @Nullable
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java
+new file mode 100644
+index 0000000..6577710
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/CameraStabilization.java
+@@ -0,0 +1,89 @@
++package com.oney.WebRTCModule;
++
++import android.hardware.camera2.CameraCaptureSession;
++import android.hardware.camera2.CameraCharacteristics;
++import android.hardware.camera2.CameraDevice;
++import android.hardware.camera2.CameraMetadata;
++import android.hardware.camera2.CaptureRequest;
++import android.os.Handler;
++import android.util.Log;
++import android.util.Range;
++import android.view.Surface;
++
++import org.webrtc.VideoCapturer;
++
++import java.lang.reflect.Field;
++
++/**
++ * Turns electronic (video) stabilization off on a running Camera2 capture.
++ *
++ * WebRTC's Camera2Session enables EIS whenever a lens has no optical stabilization. EIS crops
++ * the frame (on Samsung ultrawides noticeably — the picture looks zoomed in next to the
++ * system camera app) and makes the image drift as it compensates, which is wrong for a fixed
++ * camera used for machine vision. The session's request is private, so once the first frame
++ * arrives we reach into the session and re-issue the same repeating request with EIS off
++ * (OIS stays on where the lens has it). Best-effort: any failure leaves capture as it was.
++ */
++final class CameraStabilization {
++    private static final String TAG = WebRTCModule.TAG;
++
++    private CameraStabilization() {}
++
++    static void disableVideoStabilization(VideoCapturer capturer) {
++        try {
++            Object session = field(findClass(capturer.getClass(), "org.webrtc.CameraCapturer"), "currentSession").get(capturer);
++            if (session == null || !"org.webrtc.Camera2Session".equals(session.getClass().getName())) return;
++            Class<?> sc = session.getClass();
++            Handler handler = (Handler) field(sc, "cameraThreadHandler").get(session);
++            handler.post(() -> {
++                try {
++                    CameraDevice device = (CameraDevice) field(sc, "cameraDevice").get(session);
++                    CameraCaptureSession captureSession = (CameraCaptureSession) field(sc, "captureSession").get(session);
++                    Surface surface = (Surface) field(sc, "surface").get(session);
++                    CameraCharacteristics chars = (CameraCharacteristics) field(sc, "cameraCharacteristics").get(session);
++                    Object format = field(sc, "captureFormat").get(session);
++                    int fpsUnit = field(sc, "fpsUnitFactor").getInt(session);
++                    if (device == null || captureSession == null || surface == null || chars == null || format == null) return;
++                    Object fr = field(format.getClass(), "framerate").get(format);
++                    int min = field(fr.getClass(), "min").getInt(fr), max = field(fr.getClass(), "max").getInt(fr);
++
++                    // Same request Camera2Session builds, except the stabilization choice.
++                    CaptureRequest.Builder b = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
++                    b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(min / fpsUnit, max / fpsUnit));
++                    b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
++                    b.set(CaptureRequest.CONTROL_AE_LOCK, false);
++                    b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF);
++                    b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
++                          has(chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION), CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
++                              ? CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON : CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF);
++                    if (has(chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES), CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO))
++                        b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
++                    b.addTarget(surface);
++                    captureSession.setRepeatingRequest(b.build(), null, handler);
++                    Log.d(TAG, "CameraStabilization: video stabilization off");
++                } catch (Throwable t) {
++                    Log.w(TAG, "CameraStabilization: could not re-issue the capture request", t);
++                }
++            });
++        } catch (Throwable t) {
++            Log.w(TAG, "CameraStabilization: capture session not reachable", t);
++        }
++    }
++
++    private static boolean has(int[] modes, int mode) {
++        if (modes == null) return false;
++        for (int m : modes) if (m == mode) return true;
++        return false;
++    }
++
++    private static Class<?> findClass(Class<?> c, String name) throws ClassNotFoundException {
++        for (Class<?> k = c; k != null; k = k.getSuperclass()) if (k.getName().equals(name)) return k;
++        throw new ClassNotFoundException(name);
++    }
++
++    private static Field field(Class<?> c, String name) throws NoSuchFieldException {
++        Field f = c.getDeclaredField(name);
++        f.setAccessible(true);
++        return f;
++    }
++}
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
+index a2e5098..4a9a7b7 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
+@@ -488,7 +488,7 @@ class GetUserMediaImpl {
+         videoCaptureController.setCapturerEventsListener(eventsEmitter);
+ 
+         VideoSource videoSource = pcFactory.createVideoSource(videoCapturer.isScreencast());
+-        videoCapturer.initialize(surfaceTextureHelper, reactContext, videoSource.getCapturerObserver());
++        videoCapturer.initialize(surfaceTextureHelper, reactContext, new RotatingCapturerObserver(videoSource.getCapturerObserver(), videoCaptureController));
+ 
+         VideoTrack track = pcFactory.createVideoTrack(id, videoSource);
+ 
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/RotatingCapturerObserver.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/RotatingCapturerObserver.java
+new file mode 100644
+index 0000000..b4e8f8b
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/RotatingCapturerObserver.java
+@@ -0,0 +1,40 @@
++package com.oney.WebRTCModule;
++
++import org.webrtc.CapturerObserver;
++import org.webrtc.VideoFrame;
++
++/**
++ * Adds the controller's extra rotation to every captured frame. WebRTC already turns each frame to
++ * match the screen; this turns it further, so the stream can face any way without rotating the app.
++ * The rotation is metadata: the encoder pipeline applies it (it does for the screen turn too).
++ */
++final class RotatingCapturerObserver implements CapturerObserver {
++    private final CapturerObserver inner;
++    private final AbstractVideoCaptureController controller;
++
++    RotatingCapturerObserver(CapturerObserver inner, AbstractVideoCaptureController controller) {
++        this.inner = inner;
++        this.controller = controller;
++    }
++
++    @Override
++    public void onCapturerStarted(boolean success) {
++        inner.onCapturerStarted(success);
++    }
++
++    @Override
++    public void onCapturerStopped() {
++        inner.onCapturerStopped();
++    }
++
++    @Override
++    public void onFrameCaptured(VideoFrame frame) {
++        int extra = controller.getExtraRotation();
++        if (extra == 0) {
++            inner.onFrameCaptured(frame);
++            return;
++        }
++        // Same buffer (the caller releases it after this returns), new rotation.
++        inner.onFrameCaptured(new VideoFrame(frame.getBuffer(), (frame.getRotation() + extra) % 360, frame.getTimestampNs()));
++    }
++}
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
+index d3bfe07..914c0ec 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
+@@ -979,7 +979,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
+     public void peerConnectionCreateOffer(int id, ReadableMap options, Promise promise) {
+         ThreadUtils.runOnExecutor(() -> {
+             PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+-            PeerConnection peerConnection = pco.getPeerConnection();
++            // The connection may already be closed (e.g. the stream restarted mid-offer).
++            PeerConnection peerConnection = pco == null ? null : pco.getPeerConnection();
+ 
+             if (peerConnection == null) {
+                 Log.d(TAG, "peerConnectionCreateOffer() peerConnection is null");
+@@ -1141,7 +1142,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
+     public void peerConnectionSetRemoteDescription(int id, ReadableMap desc, Promise promise) {
+         ThreadUtils.runOnExecutor(() -> {
+             PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+-            PeerConnection peerConnection = pco.getPeerConnection();
++            // The connection may already be closed (e.g. the stream restarted mid-offer).
++            PeerConnection peerConnection = pco == null ? null : pco.getPeerConnection();
+ 
+             if (peerConnection == null) {
+                 Log.d(TAG, "peerConnectionSetRemoteDescription() peerConnection is null");
+diff --git a/node_modules/react-native-webrtc/src/RTCUtil.ts b/node_modules/react-native-webrtc/src/RTCUtil.ts
+index 10e8499..77bb0f5 100644
+--- a/node_modules/react-native-webrtc/src/RTCUtil.ts
++++ b/node_modules/react-native-webrtc/src/RTCUtil.ts
+@@ -85,9 +85,15 @@ function normalizeMediaConstraints(constraints, mediaType) {
+                 facingMode: extractString(constraints, 'facingMode'),
+                 frameRate: extractNumber(constraints, 'frameRate'),
+                 height: extractNumber(constraints, 'height'),
+-                width: extractNumber(constraints, 'width')
++                width: extractNumber(constraints, 'width'),
++                // Extra clockwise turn (0/90/180/270) applied to every frame before encoding (Android).
++                rotation: extractNumber(constraints, 'rotation')
+             };
+ 
++            if (!c.rotation) {
++                delete c.rotation;
++            }
++
+             if (!c.deviceId) {
+                 delete c.deviceId;
+             }
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
+@@ -32,7 +32,10 @@
+     @Override
+     public VideoEncoder createEncoder(VideoCodecInfo codecInfo) {
+         if (codecInfo.name.equalsIgnoreCase("H264")) {
+-            return this.hardwareVideoEncoderFactory.createEncoder(codecInfo);
++            // Wrapped: a Java exception in the hardware encoder (e.g. no EGL context left) must not
++            // abort the app inside libwebrtc's JNI.
++            VideoEncoder hw = this.hardwareVideoEncoderFactory.createEncoder(codecInfo);
++            return hw == null ? null : new SafeVideoEncoder(hw);
+         }
+ 
+         return this.softwareVideoEncoderFactory.createEncoder(codecInfo);
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/SafeVideoEncoder.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/SafeVideoEncoder.java
+new file mode 100644
+index 0000000..da8c60f
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/SafeVideoEncoder.java
+@@ -0,0 +1,100 @@
++package com.oney.WebRTCModule.webrtcutils;
++
++import android.util.Log;
++
++import org.webrtc.VideoCodecStatus;
++import org.webrtc.VideoEncoder;
++import org.webrtc.VideoFrame;
++
++/**
++ * Wraps a Java video encoder (the hardware H.264 one) so a Java exception thrown inside it is
++ * turned into an error status instead of reaching libwebrtc's JNI layer. There an uncaught
++ * exception is a CHECK failure (jvm.cc "Check failed: false") that aborts the whole app — e.g.
++ * HardwareVideoEncoder.initEncode throwing GLException "Failed to create EGL context" when the
++ * process has run out of EGL contexts. With this the stream just stops encoding and the app's
++ * own watchdog restarts it.
++ */
++public class SafeVideoEncoder implements VideoEncoder {
++    private static final String TAG = "SafeVideoEncoder";
++    private final VideoEncoder inner;
++
++    public SafeVideoEncoder(VideoEncoder inner) {
++        this.inner = inner;
++    }
++
++    @Override
++    public boolean isHardwareEncoder() {
++        return inner.isHardwareEncoder();
++    }
++
++    @Override
++    public VideoCodecStatus initEncode(Settings settings, Callback callback) {
++        try {
++            return inner.initEncode(settings, callback);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "initEncode failed (" + settings.width + "x" + settings.height + "), not aborting", e);
++            try { inner.release(); } catch (RuntimeException ignored) { /* half-initialised */ }
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus release() {
++        try {
++            return inner.release();
++        } catch (RuntimeException e) {
++            Log.e(TAG, "release failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus encode(VideoFrame frame, EncodeInfo info) {
++        try {
++            return inner.encode(frame, info);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "encode failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus setRateAllocation(BitrateAllocation allocation, int framerate) {
++        try {
++            return inner.setRateAllocation(allocation, framerate);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "setRateAllocation failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public VideoCodecStatus setRates(RateControlParameters parameters) {
++        try {
++            return inner.setRates(parameters);
++        } catch (RuntimeException e) {
++            Log.e(TAG, "setRates failed", e);
++            return VideoCodecStatus.ERROR;
++        }
++    }
++
++    @Override
++    public ScalingSettings getScalingSettings() {
++        return inner.getScalingSettings();
++    }
++
++    @Override
++    public ResolutionBitrateLimits[] getResolutionBitrateLimits() {
++        return inner.getResolutionBitrateLimits();
++    }
++
++    @Override
++    public String getImplementationName() {
++        return inner.getImplementationName();
++    }
++
++    @Override
++    public EncoderInfo getEncoderInfo() {
++        return inner.getEncoderInfo();
++    }
++}

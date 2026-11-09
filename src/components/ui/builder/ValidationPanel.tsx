@@ -1,23 +1,58 @@
 import React from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ChevronRight, CircleAlert, TriangleAlert } from "lucide-react-native";
-import { ValidationProblem } from "@/src/models/robotModels";
+import { KnownValidationCode, ValidationProblem } from "@/src/models/robotModels";
 import { BottomSheet } from "@/src/components/ui/BottomSheet";
-import { colors, spacing, StatusPill } from "@/src/components/ui/kit";
+import { colors, radii, spacing, StatusPill } from "@/src/components/ui/kit";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * Header pill with the problem count: red when anything is an error, amber when
- * there are only warnings, nothing at all for a clean program.
+ * What to do about a problem, for codes whose controller message says what is wrong
+ * but not where to fix it. The message itself always comes from the controller.
  */
-export function ProblemsPill({ errorCount, warningCount, onPress }: {
-  errorCount: number; warningCount: number; onPress: () => void;
+export const PROBLEM_HINTS: Partial<Record<KnownValidationCode, string>> = {
+  unknownPlugin:         "Install the plugin (IO → Plugins) or delete this step.",
+  unknownPluginStep:     "The installed plugin no longer offers this step — update the plugin or delete the step.",
+  pluginNotRunning:      "Start the plugin from IO → Plugins before running the program.",
+  pluginParamMissing:    "Open the step and fill in the highlighted parameter.",
+  pluginParamEnum:       "Open the step and pick one of the listed options.",
+  pluginOutputType:      "Map the output to a variable of the matching kind.",
+  unknownPluginFunction: "Check the plugin's functions in the expression editor.",
+};
+
+/**
+ * Header pill with the problem count: red when anything is an error, amber when
+ * there are only warnings, nothing at all for a clean program. `compact` shows just
+ * the counts with their icons, sized like the toolbar's icon buttons (phone Save bar).
+ */
+export function ProblemsPill({ errorCount, warningCount, onPress, compact }: {
+  errorCount: number; warningCount: number; onPress: () => void; compact?: boolean;
 }) {
   if (errorCount === 0 && warningCount === 0) return null;
   const label = errorCount > 0
     ? plural(errorCount, "error") + (warningCount > 0 ? ` · ${plural(warningCount, "warning")}` : "")
     : plural(warningCount, "warning");
+  if (compact) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.7} hitSlop={6} accessibilityRole="button"
+        accessibilityLabel={`${label}. Show problems`}
+        style={[styles.chip, errorCount > 0 ? styles.chipError : styles.chipWarning]}>
+        {errorCount > 0 && (
+          <View style={styles.chipCount}>
+            <CircleAlert size={13} color={colors.danger} />
+            <Text style={[styles.chipText, { color: colors.danger }]}>{errorCount}</Text>
+          </View>
+        )}
+        {warningCount > 0 && (
+          <View style={styles.chipCount}>
+            <TriangleAlert size={13} color={colors.warning} />
+            <Text style={[styles.chipText, { color: colors.warning }]}>{warningCount}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7} hitSlop={6} accessibilityRole="button"
       accessibilityLabel={`${label}. Show problems`}>
@@ -69,6 +104,9 @@ export function ValidationPanel({ visible, problems, onClose, onSelect }: {
               <View style={[styles.dot, { backgroundColor: isError ? colors.danger : colors.warning }]} />
               <View style={styles.text}>
                 <Text style={styles.message}>{p.message}</Text>
+                {!!PROBLEM_HINTS[p.code as KnownValidationCode] && (
+                  <Text style={styles.hint}>{PROBLEM_HINTS[p.code as KnownValidationCode]}</Text>
+                )}
                 <Text style={styles.meta} numberOfLines={1}>
                   {[p.stepPath || (p.stepId ? "" : "Program"), p.field, p.code].filter(Boolean).join("  ·  ")}
                 </Text>
@@ -83,7 +121,15 @@ export function ValidationPanel({ visible, problems, onClose, onSelect }: {
 }
 
 const styles = StyleSheet.create({
-  summary:   { fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm },
+  chip: {
+    height: 34, flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    paddingHorizontal: spacing.sm, borderRadius: radii.sm, borderWidth: 1,
+  },
+  chipError:   { backgroundColor: colors.dangerSoft, borderColor: colors.danger + "55" },
+  chipWarning: { backgroundColor: colors.warningSoft, borderColor: colors.warning + "55" },
+  chipCount:   { flexDirection: "row", alignItems: "center", gap: 3 },
+  chipText:    { fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  summary:  { fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm },
   list:      { maxHeight: 420 },
   empty:     { fontSize: 13, color: colors.textFaint, textAlign: "center", paddingVertical: spacing.lg },
   row:       { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
@@ -92,4 +138,5 @@ const styles = StyleSheet.create({
   text:      { flex: 1, minWidth: 0 },
   message:   { fontSize: 14, color: colors.text },
   meta:      { fontSize: 11, color: colors.textFaint, marginTop: 2 },
+  hint:      { fontSize: 12, color: colors.textMuted, marginTop: 2 },
 });

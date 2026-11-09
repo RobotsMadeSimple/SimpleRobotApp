@@ -73,7 +73,7 @@ export default function StacksPage() {
           <EmptyState
             icon={<Layers size={40} color={colors.textFaint} />}
             title="No Stacks"
-            subtitle="Tap below to define a 1D position array."
+            subtitle="Add one, then teach it from the robot's position or enter the step by hand."
           />
         }
         ListFooterComponent={

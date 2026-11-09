@@ -1,5 +1,6 @@
 import { BuiltProgram, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
-import { ScopeFrame, newId } from "./stepUtils";
+import { ScopeFrame, bodyOf, frameResolves, newId } from "./stepUtils";
+import { mapStepTree } from "@/src/models/stepTree";
 
 /**
  * Everything the program builder lets the user edit, as one immutable value so the
@@ -25,16 +26,15 @@ export const EMPTY_DOC: EditorDoc = {
   killBackgroundOnStop: true,
 };
 
-/** Assign fresh ids to any steps that lost theirs during a server round-trip. */
+/** Assign fresh ids to any steps (and else-if branches / switch cases) that lost theirs
+ *  during a server round-trip. Every body kind is walked via stepTree. */
 export function rehydrateIds(src: ProgramStep[]): ProgramStep[] {
-  return src.map(s => ({
+  return src.map(root => mapStepTree(root, s => ({
     ...s,
     id: s.id || newId(),
-    loopSteps:      s.loopSteps      ? rehydrateIds(s.loopSteps)      : s.loopSteps,
-    ifSteps:        s.ifSteps        ? rehydrateIds(s.ifSteps)        : s.ifSteps,
-    elseSteps:      s.elseSteps      ? rehydrateIds(s.elseSteps)      : s.elseSteps,
-    elseIfBranches: s.elseIfBranches ? s.elseIfBranches.map(b => ({ ...b, id: b.id || newId(), steps: rehydrateIds(b.steps) })) : s.elseIfBranches,
-  }));
+    ...(s.elseIfBranches ? { elseIfBranches: s.elseIfBranches.map(b => ({ ...b, id: b.id || newId() })) } : {}),
+    ...(s.switchCases    ? { switchCases:    s.switchCases.map(c => ({ ...c, id: c.id || newId() })) }    : {}),
+  })));
 }
 
 /** The editable document for a stored program. */
@@ -62,7 +62,9 @@ export function programFromDoc(d: EditorDoc, id: string | undefined, lastUpdated
     lastUpdatedUnixMs,
     isRoutine: d.isRoutine,
     isBackground: d.isBackground || undefined,
-    killBackgroundOnStop: (!d.isRoutine && !d.isBackground) ? (d.killBackgroundOnStop || undefined) : undefined,
+    // Main programs only. Send false explicitly: the controller defaults a missing value to true,
+    // so dropping false would make turning it off impossible to save.
+    killBackgroundOnStop: (!d.isRoutine && !d.isBackground) ? d.killBackgroundOnStop : undefined,
   };
 }
 
@@ -84,17 +86,10 @@ export function validScopeDepth(steps: ProgramStep[], stack: ScopeFrame[]): numb
     const frame = stack[i];
     const parent = current.find(s => s.id === frame.stepId);
     if (!parent) return i;
-    // A branch list that is still absent is fine (the first step added creates it);
-    // only a missing parent step or else-if branch means the scope is gone.
-    if (frame.kind === "elseIf") {
-      const branch = parent.elseIfBranches?.find(b => b.id === frame.branchId);
-      if (!branch) return i;
-      current = branch.steps ?? [];
-    } else {
-      current = (frame.kind === "loop" ? parent.loopSteps
-        : frame.kind === "ifTrue" ? parent.ifSteps
-        : parent.elseSteps) ?? [];
-    }
+    // A body that is still absent is fine (the first step added creates it); only a missing
+    // parent step or a removed else-if branch / switch case means the scope is gone.
+    if (!frameResolves(parent, frame)) return i;
+    current = bodyOf(parent, frame) ?? [];
   }
   return stack.length;
 }

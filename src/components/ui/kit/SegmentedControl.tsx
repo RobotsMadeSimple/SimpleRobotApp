@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
+import { haptic } from "@/src/components/ui/haptics";
 import { colors, radii, shadows, spacing } from "./theme";
 
 type Option<T extends string> = {
@@ -37,7 +38,7 @@ export function SegmentedControl<T extends string>({
           <Pressable
             key={o.value}
             style={[styles.segment, size === "sm" && styles.segmentSm, selected && styles.selected]}
-            onPress={() => { if (!selected) onChange(o.value); }}
+            onPress={() => { if (!selected) { haptic("selection"); onChange(o.value); } }}
             accessibilityRole="button"
             accessibilityState={{ selected }}
           >

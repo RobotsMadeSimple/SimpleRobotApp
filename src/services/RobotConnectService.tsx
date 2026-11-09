@@ -1,13 +1,16 @@
 ﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
-import { enrichByAddress } from "./connectionStore";
-import { AuxDeviceState, BuiltProgram, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, Matrix3, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, Local, NanoState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { pickReachableEndpoint } from "./addressPick";
+import { enrichByAddress, knownEndpoints } from "./connectionStore";
+import { robotDiscovery } from "./RobotDiscoveryService";
+import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { normalizeVisionProgram, type Pose, type Region } from "../models/visionTools";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
 type ToolsListener            = (tools: Tool[])                          => void;
 type LocalsListener           = (locals: Local[])                        => void;
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
-type NanoIOListener           = (nanos: NanoState[])                     => void;
+type IoDevicesListener           = (ioDevices: IoDeviceState[])                     => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type AuxAxisListener          = (aux: AuxDeviceState[])                  => void;
 type CamerasListener          = (cameras: CameraState[])                 => void;
@@ -53,7 +56,7 @@ export class RobotConnectService {
   private readonly toolsTopic         = createTopic<Tool[]>();
   private readonly localsTopic        = createTopic<Local[]>();
   private readonly builtProgramsTopic = createTopic<BuiltProgram[]>();
-  private readonly nanoIOTopic        = createTopic<NanoState[]>();
+  private readonly ioDevicesTopic        = createTopic<IoDeviceState[]>();
   private readonly relayIOTopic       = createTopic<UsbRelayState | null>();
   private readonly auxAxisTopic       = createTopic<AuxDeviceState[]>();
   private readonly camerasTopic       = createTopic<CameraState[]>();
@@ -66,9 +69,10 @@ export class RobotConnectService {
   private tools:        Tool[]             = [];
   private locals:       Local[]            = [];
   private builtPrograms:  BuiltProgram[]                = [];
-  private nanoIO:         NanoState[]                   = [];
+  private ioDevices:         IoDeviceState[]                   = [];
   private relayIO:        UsbRelayState | null          = null;
   private lastRelayJson:  string                        = "";
+  private lastIoDevicesJson:  string                        = "";
   private auxAxis:        AuxDeviceState[]              = [];
   private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
@@ -125,6 +129,37 @@ export class RobotConnectService {
     this.connect();
   }
 
+  /** While reconnecting: if discovery now lists the selected robot (same serial) at another address —
+   *  it moved networks, or the address it was picked at isn't reachable from here — switch to that one. */
+  private followDiscoveredAddress() {
+    const selected = getSelectedRobot();
+    if (!selected?.serialNumber) return;
+    const found = robotDiscovery.find(selected.serialNumber);
+    if (!found || (found.ipAddress === selected.ipAddress && found.port === selected.port)) return;
+    console.log("[RobotWS] Robot found at", `${found.ipAddress}:${found.port}`, "— switching");
+    this.url = `ws://${found.ipAddress}:${found.port}/control`;
+    setSelectedRobot({ ...selected, ipAddress: found.ipAddress, port: found.port });
+  }
+
+  /** Every few failed reconnects: probe the other addresses the selected robot is known on
+   *  (saved/recent entries for the same robot) and switch to the best one that answers. */
+  private reconnectFailures = 0;
+  private tryKnownAddresses() {
+    if (++this.reconnectFailures % 5 !== 0) return;
+    const selected = getSelectedRobot();
+    if (!selected) return;
+    knownEndpoints(selected).then(async endpoints => {
+      if (endpoints.length <= 1) return;
+      const best = await pickReachableEndpoint(endpoints);
+      const cur = getSelectedRobot();
+      if (!best || this.connected || cur !== selected) return;
+      if (best.host === selected.ipAddress && best.port === selected.port) return;
+      console.log("[RobotWS] Robot answers at", `${best.host}:${best.port}`, "— switching");
+      this.url = `ws://${best.host}:${best.port}/control`;
+      setSelectedRobot({ ...selected, ipAddress: best.host, port: best.port });
+    }).catch(() => {});
+  }
+
   connect() {
     // Validate there is a url
     if (!this.url) return;
@@ -142,11 +177,16 @@ export class RobotConnectService {
       return;
 
     console.log("[RobotWS] Connecting to", this.url);
-    this.ws = new WebSocket(this.url);
+    // Handlers act only while this is still the current socket: one let go by disconnect()
+    // (e.g. still connecting to an address that never answered) must not touch the next one.
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
     this.connecting = true;
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (this.ws !== ws) { try { ws.close(); } catch {} return; }
       this.connecting = false;
+      this.reconnectFailures = 0;
       console.log("[RobotWS] Connected");
       this.emitStatus({ connected: true });
       this.startStatusPolling();
@@ -180,7 +220,8 @@ export class RobotConnectService {
       }).catch(() => {});
     };
 
-    this.ws.onclose = (event: any) => {
+    ws.onclose = (event: any) => {
+      if (this.ws !== ws) return;
       // React Native dispatches a bare Event for `error` with no detail, then
       // forwards the native failure text here as `reason`. This is the only
       // place the actual cause (refused, unreachable, ...) is visible.
@@ -191,16 +232,19 @@ export class RobotConnectService {
       this.cleanup();
 
       if (this.reconnect) {
+        this.followDiscoveredAddress();
+        this.tryKnownAddresses();
         setTimeout(() => this.connect(), this.reconnectIntervalMs);
       }
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
       // Deliberately quiet — the close handler above always follows and is the
       // one that carries the reason.
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       let data: any;
 
       try {
@@ -229,9 +273,16 @@ export class RobotConnectService {
     // A failed command must reject its caller — the server reports handler
     // errors as ok:false + error. Resolving these silently made failures
     // (e.g. configuring pins on a disconnected Nano) look like successes.
-    if (data.ok === false) {
+    // ParseProgramText's result has its own `ok` (false = the text has parse errors), which the
+    // server merges over the ack's. That is a normal answer, not a failure: it has no `error`.
+    const resultOk = data.command === "ParseProgramText" && data.error == null && Array.isArray(data.problems);
+    if (data.ok === false && !resultOk) {
       this.pendingAcks.delete(data.id);
-      pending.reject(data.error ?? `Command "${data.command}" failed`);
+      // badConfig-style failures name the offending field; keep it in the text so
+      // callers can highlight it (see toPluginConfigError).
+      pending.reject(typeof data.field === "string" && data.field
+        ? `${data.error ?? "failed"}${data.message ? `: ${data.message}` : ""} (field ${data.field})`
+        : data.error ?? `Command "${data.command}" failed`);
       return;
     }
 
@@ -258,9 +309,18 @@ export class RobotConnectService {
         if (!Array.isArray(data.backgroundPrograms)) {
           data.backgroundPrograms = [];
         }
+        if (typeof data.plugins === "string") {
+          try { data.plugins = JSON.parse(data.plugins); } catch { data.plugins = []; }
+        }
+        if (data.plugins !== undefined && !Array.isArray(data.plugins)) {
+          data.plugins = [];
+        }
         // Relay board state now rides along in the status broadcast so relays
         // changed by a running program update live (not just on page entry).
         this.updateRelayFromStatus(data.relay);
+        // Nano state likewise rides along so live values (load-cell readings in
+        // particular) update every poll, not only on GetIO at page entry.
+        this.updateIoDevicesFromStatus(data.ioDevices);
         this.emitStatus(data);
         break;
       
@@ -344,19 +404,36 @@ export class RobotConnectService {
     this.emitRelayIO();
   }
 
+  // Apply nano state carried in the status broadcast. `data.ioDevices` is a JSON string
+  // (same shape GetIO returns). Only reparse + emit when the string changed, so the
+  // 100ms poll re-renders nano consumers on real change (e.g. a streaming load cell)
+  // but not when every digital pin is steady.
+  private updateIoDevicesFromStatus(ioDevices: any) {
+    if (typeof ioDevices !== "string") return;
+    if (ioDevices === this.lastIoDevicesJson) return;
+    this.lastIoDevicesJson = ioDevices;
+    try {
+      const parsed = JSON.parse(ioDevices);
+      this.ioDevices = Array.isArray(parsed) ? (parsed as IoDeviceState[]) : [];
+    } catch {
+      this.ioDevices = [];
+    }
+    this.emitIoDevices();
+  }
+
   private decodeIO(data: any) {
     // Nano devices
-    if (!data.nanos) {
-      this.nanoIO = [];
+    if (!data.ioDevices) {
+      this.ioDevices = [];
     } else {
       try {
-        const parsed = JSON.parse(data.nanos);
-        this.nanoIO = Array.isArray(parsed) ? (parsed as NanoState[]) : [];
+        const parsed = JSON.parse(data.ioDevices);
+        this.ioDevices = Array.isArray(parsed) ? (parsed as IoDeviceState[]) : [];
       } catch {
-        this.nanoIO = [];
+        this.ioDevices = [];
       }
     }
-    this.emitNanoIO();
+    this.emitIoDevices();
 
     // USB relay board
     if (!data.relay) {
@@ -405,10 +482,16 @@ export class RobotConnectService {
 
   disconnect() {
     this.reconnect = false;
-    if (this.ws?.readyState === 1){
-      this.ws?.close();
+    // The socket being let go (open, or still connecting to an address that may never answer) is
+    // closed; its handlers ignore it from here on (see connect), so its late close can't tear down
+    // the next connection or start a reconnect. Report the disconnect here instead.
+    const old = this.ws;
+    const wasOpen = old?.readyState === 1;
+    if (old && old.readyState <= 1) {
+      try { old.close(); } catch {}
     }
     this.cleanup();
+    if (wasOpen) this.emitStatus({ connected: false });
   }
 
   private cleanup() {
@@ -460,7 +543,7 @@ export class RobotConnectService {
 
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
     // Non-primitive fields that require deep comparison
-    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms', 'jointReferenced']);
+    const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms', 'plugins', 'jointReferenced']);
 
     // Compare over the union of all keys so newly added fields are never silently skipped
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof RobotStatus>;
@@ -525,14 +608,14 @@ export class RobotConnectService {
     this.programImagesTopic.emit(this.programImages);
   }
 
-  onNanoIO(cb: NanoIOListener) {
-    const unsub = this.nanoIOTopic.on(cb);
-    cb(this.nanoIO);
+  onIoDevices(cb: IoDevicesListener) {
+    const unsub = this.ioDevicesTopic.on(cb);
+    cb(this.ioDevices);
     return unsub;
   }
 
-  private emitNanoIO() {
-    this.nanoIOTopic.emit(this.nanoIO);
+  private emitIoDevices() {
+    this.ioDevicesTopic.emit(this.ioDevices);
   }
 
   onRelayIO(cb: RelayIOListener) {
@@ -615,6 +698,7 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.tools = []; this.emitTools(); return; }
 
     this.tools = parsed.map((t: any): Tool => ({
+      id:                t.id                ?? t.Id                ?? undefined,
       name:              t.Name              ?? t.name              ?? "",
       description:       t.Description       ?? t.description       ?? "",
       lastUpdatedUnixMs: t.LastUpdatedUnixMs ?? t.lastUpdatedUnixMs ?? 0,
@@ -639,6 +723,7 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.locals = []; this.emitLocals(); return; }
 
     this.locals = parsed.map((l: any): Local => ({
+      id:                l.id                ?? l.Id                ?? undefined,
       name:              l.Name              ?? l.name              ?? "",
       description:       l.Description       ?? l.description       ?? "",
       lastUpdatedUnixMs: l.LastUpdatedUnixMs ?? l.lastUpdatedUnixMs ?? 0,
@@ -837,8 +922,14 @@ export class RobotConnectService {
     };
   }
 
-  public startProgram(programName: string) {
-    return this.sendCommand('StartProgram', { programName });
+  public startProgram(
+    programName: string,
+    programId?: string,
+    variables?: Record<string, number | string | boolean>,
+  ) {
+    // id resolved first (rename-proof), programName as fallback / for external programs.
+    // `variables` seeds the program's declared input variables before the run (display pages).
+    return this.sendCommand('StartProgram', { programName, programId, variables });
   }
 
   public stopProgram(programName: string) {
@@ -977,9 +1068,14 @@ export class RobotConnectService {
       description:         program.description,
       steps:               program.steps,
       variables:           program.variables,
+      displayPageHtml:     program.displayPageHtml,
+      displayPageMode:     program.displayPageMode,
+      displayPageLayout:   program.displayPageLayout,
       isRoutine:           program.isRoutine           ?? false,
       isBackground:        program.isBackground        ?? false,
       killBackgroundOnStop: program.killBackgroundOnStop ?? true,
+      // Omitted (undefined) when unset, so the controller keeps the stored view.
+      editorMode:          program.editorMode,
     };
   }
 
@@ -1050,16 +1146,102 @@ export class RobotConnectService {
         expression:   typeof v.expression === "string" ? v.expression : undefined,
         value:        typeof v.value === "number" || typeof v.value === "string" || typeof v.value === "boolean" ? v.value : undefined,
       })),
-      properties: wireArray(ack.properties).filter(isNamed).map(p => ({
-        name: stripSigil(p.name), description: str(p.description), type: str(p.type),
-      })),
-      functions: wireArray(ack.functions).filter(isNamed).map(f => ({
-        name: f.name, signature: str(f.signature) || `${f.name}()`, description: str(f.description),
-      })),
+      properties: wireArray(ack.properties).filter(isNamed).map(p => toExpressionProperty(p)),
+      functions: wireArray(ack.functions).filter(isNamed).map(f => toExpressionFunction(f)),
       io: wireArray(ack.io).filter(isNamed).map(i => ({
         name: stripSigil(i.name), description: str(i.description),
       })),
+      // Newer controllers group plugin symbols per plugin (docs/plugins.md §6).
+      plugins: ack.plugins === undefined ? undefined : wireArray(ack.plugins)
+        .filter(g => typeof g.id === "string" && g.id.length > 0)
+        .map(g => {
+          const id = g.id as string;
+          return {
+            id,
+            name: str(g.name) || id,
+            running: g.running === true,
+            functions: wireArray(g.functions).filter(isNamed).map(f => toExpressionFunction(f, id)),
+            properties: wireArray(g.properties).filter(isNamed).map(p => toExpressionProperty(p, id)),
+          };
+        }),
     };
+  }
+
+  // ── Program editor v2 (controller docs/program-language.md) ────────────────
+  //
+  // GetStepCatalog is real on a current controller. The text-language, prompt and debugger
+  // commands are registered but answer "notImplemented" until their packages land, which
+  // surfaces as NotImplementedCommandError; an older controller gives UnsupportedCommandError.
+  // Either way a caller can fall back (built-in step tables, no text view, no debugger).
+
+  /** Every step type's metadata (category, label, typed fields, text syntax) and the error codes. */
+  public async getStepCatalog(): Promise<StepCatalog> {
+    const ack = await this.request("GetStepCatalog", {});
+    return {
+      catalogVersion:  num(ack.catalogVersion, 0),
+      languageVersion: num(ack.languageVersion, 0),
+      categories:      wireArray(ack.categories) as unknown as StepCatalog["categories"],
+      errorCodes:      wireArray(ack.errorCodes) as unknown as StepCatalog["errorCodes"],
+      steps:           wireArray(ack.steps) as unknown as StepCatalog["steps"],
+      commonFields:    strArray(ack.commonFields),
+      legacyFields:    strArray(ack.legacyFields),
+    };
+  }
+
+  /** A program (possibly unsaved) as SRS text, with the step → line map. */
+  public async formatProgramText(program: BuiltProgram, opts: { includeIds?: boolean; includeHeader?: boolean } = {}): Promise<FormatProgramTextResult> {
+    // includeHeader adds the `@program {…}` line (name, kind) that a .srs file carries.
+    const ack = await this.request("FormatProgramText", {
+      program: this.builtProgramParams(program),
+      includeIds: opts.includeIds ?? false,
+      ...(opts.includeHeader ? { includeHeader: true } : {}),
+    });
+    return {
+      text:            str(ack.text),
+      languageVersion: num(ack.languageVersion, 0),
+      map:             wireArray(ack.map) as unknown as ProgramTextMapEntry[],
+    };
+  }
+
+  /**
+   * Parse SRS text. With `base` (the current document) the result keeps base's metadata and
+   * reconciles step ids against it. `validate` (default true) adds ValidateBuiltProgram
+   * problems mapped to lines. A parse error is a normal result (`ok: false`).
+   */
+  public async parseProgramText(text: string, opts: { base?: BuiltProgram; validate?: boolean } = {}): Promise<ParseProgramTextResult> {
+    // Not `request`: its ok:false check would treat "the text has errors" as a failed command.
+    let data: unknown;
+    try {
+      data = await this.sendCommand("ParseProgramText", {
+        text,
+        ...(opts.base ? { base: this.builtProgramParams(opts.base) } : {}),
+        validate: opts.validate ?? true,
+      });
+    } catch (e) {
+      throw toCommandError("ParseProgramText", e);
+    }
+    const ack = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+    return {
+      ok:       ack.ok !== false,
+      program:  ack.program ? wireProgram(ack.program, opts.base?.name ?? "") : undefined,
+      problems: wireArray(ack.problems) as unknown as TextProblem[],
+      map:      wireArray(ack.map) as unknown as ProgramTextMapEntry[],
+    };
+  }
+
+  /** Answer an operator prompt: the pressed button's index and, for an input prompt, the typed value. */
+  public async answerPrompt(promptId: string, button: number, value?: string | number): Promise<void> {
+    await this.request("AnswerPrompt", value === undefined ? { promptId, button } : { promptId, button, value: String(value) });
+  }
+
+  /** Run the paused foreground program's next step, then pause again. */
+  public async stepBuiltProgram(): Promise<void> {
+    await this.request("StepBuiltProgram", {});
+  }
+
+  /** Replace the running foreground program's breakpoints (step ids). */
+  public async setBreakpoints(stepIds: string[]): Promise<void> {
+    await this.request("SetBreakpoints", { stepIds });
   }
 
   /** Stored revisions of a program, newest first. */
@@ -1224,8 +1406,19 @@ export class RobotConnectService {
       .then(() => this.getProgramImages().catch(() => {}));
   }
 
-  public executeBuiltProgram(name: string) {
-    return this.sendCommand("ExecuteBuiltProgram", { name });
+  /**
+   * Run a built program. The debug options (run from a step, breakpoints, step mode) are sent
+   * only when given; a controller without the debugger refuses them (NotImplementedCommandError
+   * through `executeBuiltProgramDebug`) rather than running from the top.
+   */
+  public executeBuiltProgram(name: string, options?: ExecuteOptions) {
+    const debug = debugParams(options);
+    return this.sendCommand("ExecuteBuiltProgram", debug ? { name, ...debug } : { name });
+  }
+
+  /** executeBuiltProgram with debug options, rejecting with a typed error when refused. */
+  public async executeBuiltProgramDebug(name: string, options: ExecuteOptions): Promise<void> {
+    await this.request("ExecuteBuiltProgram", { name, ...(debugParams(options) ?? {}) });
   }
 
   /**
@@ -1244,12 +1437,14 @@ export class RobotConnectService {
     return this.sendCommand("StopBuiltProgram", { name });
   }
 
-  public startBackgroundProgram(name: string) {
-    return this.sendCommand("StartBackgroundProgram", { name });
+  public startBackgroundProgram(name: string, programId?: string) {
+    // Controller reads ProgramActionParams (programName/programId); id is resolved first (rename-proof).
+    return this.sendCommand("StartBackgroundProgram", { programName: name, programId });
   }
 
-  public stopBackgroundProgram(name: string) {
-    return this.sendCommand("StopBackgroundProgram", { name });
+  public stopBackgroundProgram(name: string, programId?: string) {
+    // Same params as Start: id first (rename-proof), then name.
+    return this.sendCommand("StopBackgroundProgram", { programName: name, programId });
   }
 
   /**
@@ -1290,22 +1485,160 @@ export class RobotConnectService {
     return this.sendCommand("GetIO");
   }
 
-  public setNanoOutput(nanoId: string, pin: number, value: boolean) {
-    return this.sendCommand("SetNanoOutput", { nanoId, pin, value });
+  public setIoOutput(deviceId: string, pin: number, value: boolean) {
+    return this.sendCommand("SetNanoOutput", { deviceId, pin, value });
   }
 
-  public setNeoPixel(nanoId: string, pin: number, colors: NeoPixelColor[]) {
-    return this.sendCommand("SetNeoPixel", { nanoId, pin, colors });
+  public setNeoPixel(deviceId: string, pin: number, colors: NeoPixelColor[]) {
+    return this.sendCommand("SetNeoPixel", { deviceId, pin, colors });
   }
 
-  public renameNanoPin(nanoId: string, pin: number, name: string) {
-    return this.sendCommand("RenameNanoPin", { nanoId, pin, name })
+  public renameIoPin(deviceId: string, pin: number, name: string) {
+    return this.sendCommand("RenameNanoPin", { deviceId, pin, name })
       .then(() => this.getIO().catch(() => {}));
   }
 
-  public configureNanoPin(nanoId: string, pin: number, type: string, pixelCount = 8) {
-    return this.sendCommand("ConfigureNanoPin", { nanoId, pin, type, pixelCount })
+  public configureIoPin(deviceId: string, pin: number, type: string, pixelCount = 8) {
+    return this.sendCommand("ConfigureNanoPin", { deviceId, pin, type, pixelCount })
       .then(() => this.getIO().catch(() => {}));
+  }
+
+  // ── Load cell (HX711) ──────────────────────────────────────────────────────
+
+  /** Configure a Nano pin pair as an HX711 load cell (dtPin = data, sckPin = clock). */
+  public configureLoadCell(deviceId: string, dtPin: number, sckPin: number, unit = "g") {
+    return this.sendCommand("ConfigureLoadCell", { deviceId, dtPin, sckPin, unit })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  /** Zero the load cell — capture its current raw reading as the tare offset. */
+  public tareLoadCell(deviceId: string, pin: number) {
+    return this.sendCommand("TareLoadCell", { deviceId, pin })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  /** Second calibration point: with a known weight on the cell, derive counts-per-gram. */
+  public calibrateLoadCell(deviceId: string, pin: number, knownGrams: number) {
+    return this.sendCommand("CalibrateLoadCell", { deviceId, pin, knownGrams })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  public setLoadCellUnit(deviceId: string, pin: number, unit: string) {
+    return this.sendCommand("SetLoadCellUnit", { deviceId, pin, unit })
+      .then(() => this.getIO().catch(() => {}));
+  }
+
+  // ── IO value history + recordings ────────────────────────────────────────────
+
+  /** Stable history channel key for a load cell (rename-proof: nano id + DT pin). */
+  public ioChannelForLoadCell(deviceId: string, pin: number): string {
+    return `io/${deviceId}/${pin}`;
+  }
+
+  /** WebSocket URL for a channel's live sample stream (backfills the last `windowMs`, then streams). */
+  public ioHistoryWsUrl(channelKey: string, windowMs: number): string | null {
+    if (!this.url) return null;
+    const base = this.url.replace(/\/control$/, "");
+    return `${base}/io/history/ws?channel=${encodeURIComponent(channelKey)}&window=${Math.round(windowMs)}`;
+  }
+
+  /**
+   * Open the live sample stream for one channel. `onBatch` is called with each arriving batch
+   * (oldest-first). Auto-reconnects until the returned close function is called.
+   */
+  public openIoHistoryStream(
+    channelKey: string,
+    windowMs: number,
+    onBatch: (samples: IoSample[]) => void,
+  ): () => void {
+    const url = this.ioHistoryWsUrl(channelKey, windowMs);
+    if (!url) return () => {};
+    let closed = false;
+    let ws: WebSocket | null = null;
+    let retry: any;
+    const open = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(url);
+        ws.onmessage = (ev: any) => {
+          try {
+            const msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+            if (msg && Array.isArray(msg.samples) && msg.samples.length) onBatch(msg.samples as IoSample[]);
+          } catch { /* ignore a malformed frame */ }
+        };
+        ws.onclose = () => { ws = null; if (!closed) retry = setTimeout(open, 1000); };
+        ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
+      } catch { if (!closed) retry = setTimeout(open, 1000); }
+    };
+    open();
+    return () => { closed = true; clearTimeout(retry); try { ws?.close(); } catch { /* noop */ } ws = null; };
+  }
+
+  private normIoWindow(w: any, channelKey = ""): IoHistoryWindow {
+    return {
+      channelKey: w?.channelKey ?? channelKey,
+      unit:       w?.unit ?? "g",
+      fromUnixMs: w?.fromUnixMs ?? 0,
+      toUnixMs:   w?.toUnixMs ?? 0,
+      samples:    Array.isArray(w?.samples) ? w.samples : [],
+    };
+  }
+
+  public async getIoHistoryConfig(): Promise<{ maxRetentionMs: number }> {
+    const d: any = await this.sendCommand("GetIoHistoryConfig");
+    return { maxRetentionMs: d?.maxRetentionMs ?? 600_000 };
+  }
+
+  public setIoHistoryRetention(maxRetentionMs: number) {
+    return this.sendCommand("SetIoHistoryRetention", { maxRetentionMs });
+  }
+
+  public async getIoHistoryWindow(
+    channelKey: string, fromUnixMs?: number, toUnixMs?: number, maxPoints?: number,
+  ): Promise<IoHistoryWindow> {
+    const d: any = await this.sendCommand("GetIoHistoryWindow", {
+      channelKey,
+      ...(fromUnixMs != null && { fromUnixMs }),
+      ...(toUnixMs   != null && { toUnixMs }),
+      ...(maxPoints  != null && { maxPoints }),
+    });
+    return this.normIoWindow(d?.window, channelKey);
+  }
+
+  public async startIoRecording(channelKey: string, name?: string): Promise<IoRecordingMeta> {
+    const d: any = await this.sendCommand("StartIoRecording", { channelKey, ...(name != null && { name }) });
+    return d?.recording as IoRecordingMeta;
+  }
+
+  public async stopIoRecording(id: string): Promise<IoRecordingMeta> {
+    const d: any = await this.sendCommand("StopIoRecording", { id });
+    return d?.recording as IoRecordingMeta;
+  }
+
+  public async listIoRecordings(): Promise<IoRecordingMeta[]> {
+    const d: any = await this.sendCommand("ListIoRecordings");
+    return Array.isArray(d?.recordings) ? d.recordings : [];
+  }
+
+  public async getIoRecordingWindow(
+    id: string, fromUnixMs?: number, toUnixMs?: number, maxPoints?: number,
+  ): Promise<{ window: IoHistoryWindow; recording: IoRecordingMeta | null }> {
+    const d: any = await this.sendCommand("GetIoRecordingWindow", {
+      id,
+      ...(fromUnixMs != null && { fromUnixMs }),
+      ...(toUnixMs   != null && { toUnixMs }),
+      ...(maxPoints  != null && { maxPoints }),
+    });
+    return { window: this.normIoWindow(d?.window), recording: d?.recording ?? null };
+  }
+
+  public async saveIoRecording(id: string): Promise<IoRecordingMeta> {
+    const d: any = await this.sendCommand("SaveIoRecording", { id });
+    return d?.recording as IoRecordingMeta;
+  }
+
+  public deleteIoRecording(id: string) {
+    return this.sendCommand("DeleteIoRecording", { id });
   }
 
   public setRobotIdentity(fields: { robotName?: string; robotType?: string }) {
@@ -1335,7 +1668,7 @@ export class RobotConnectService {
     m3Direction: number;
     m4Direction: number;
     enableStbCard: boolean;
-    enableNanoCards: boolean;
+    enableIoDevices: boolean;
     enableRelayCard: boolean;
     enableAuxAxis: boolean;
     enableCameras: boolean;
@@ -1392,7 +1725,7 @@ export class RobotConnectService {
     j1HomingDirection?: number;
     j4HomeOffsetDeg?: number;
     enableStbCard?: boolean;
-    enableNanoCards?: boolean;
+    enableIoDevices?: boolean;
     enableRelayCard?: boolean;
     enableAuxAxis?: boolean;
     enableCameras?: boolean;
@@ -1606,6 +1939,50 @@ export class RobotConnectService {
     });
   }
 
+  /** Add a "phone" camera the phone then pushes frames into over {@link cameraIngestUrl}. Returns its id. */
+  /** Reuse (or create) a "phone" camera with this name and return its id — idempotent across toggles. */
+  public async addPhoneCamera(name: string): Promise<string> {
+    const existing = (await this.listCameraStates()).find(c => c.name === name && c.sourceType === "phone");
+    if (existing) return existing.id;
+    await this.addCamera({ name, deviceIndex: 0, sourceType: "phone" });
+    // AddCamera doesn't echo the id; read it back from the refreshed list by matching the name.
+    const after = await this.listCameraStates();
+    return [...after].reverse().find(c => c.name === name && c.sourceType === "phone")?.id ?? "";
+  }
+
+  /** The id of the "phone" camera with this name, or "" — a read-only lookup (never creates one). */
+  public async findPhoneCamera(name: string): Promise<string> {
+    return (await this.listCameraStates()).find(c => c.name === name && c.sourceType === "phone")?.id ?? "";
+  }
+
+  private async listCameraStates(): Promise<CameraState[]> {
+    const data: any = await this.sendCommand("GetCameras");
+    try { return JSON.parse(data?.cameras ?? "[]") as CameraState[]; } catch { return []; }
+  }
+
+  // ── Phone data devices (native; readable as $device.<id>.<channel>) ──────────
+
+  /** Current data devices and their latest channel values. */
+  public async getDevices(): Promise<DeviceState[]> {
+    const data: any = await this.sendCommand("GetDevices");
+    try { return JSON.parse(data?.devices ?? "[]") as DeviceState[]; } catch { return []; }
+  }
+
+  /** Create a data device; returns its id (the controller assigns one). */
+  public async addDevice(name: string, enabled = true): Promise<string> {
+    const data: any = await this.sendCommand("AddDevice", { name, enabled });
+    return typeof data?.id === "string" ? data.id : "";
+  }
+
+  public removeDevice(id: string) {
+    return this.sendCommand("RemoveDevice", { id });
+  }
+
+  public setDeviceConfig(id: string, patch: { name?: string; enabled?: boolean; providerConfig?: string }) {
+    return this.sendCommand("SetDeviceConfig", { id, ...patch });
+  }
+
+
   /**
    * Open a stream URL, or log into a Sofia (DVRIP/XMeye) camera, once on the
    * controller and grab one frame (docs/network-cameras.md). A failed test
@@ -1690,6 +2067,53 @@ export class RobotConnectService {
     return this.url.replace(/\/control$/, '') + `/camera/${id}/ws`;
   }
 
+  /** WebSocket a phone connects to push JPEG frames IN for a "phone" camera. */
+  public cameraIngestUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/camera/${encodeURIComponent(id)}/ingest`;
+  }
+
+  /** WebSocket a phone connects to negotiate a WebRTC H.264 stream for a "phone" camera. */
+  public cameraWebrtcUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/camera/${encodeURIComponent(id)}/webrtc`;
+  }
+
+  /** WebSocket a phone connects to push data-channel values IN for a device. */
+  public deviceIngestUrl(id: string): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + `/devices/${encodeURIComponent(id)}/ingest`;
+  }
+
+  /**
+   * URL of a plugin's custom-GUI entry page (served by the controller). Points at the entry
+   * file itself (e.g. `…/plugins/<id>/ui/index.html`), not the `…/ui/` directory — the bare
+   * `…/ui` path is the UI WebSocket, so a directory URL collides with it. Relative assets +
+   * `ui-bridge.js` resolve against the entry's folder, and the bridge derives the socket URL from it.
+   */
+  public pluginUiUrl(id: string, entry: string): string | null {
+    const base = this.httpBaseUrl();
+    if (!base) return null;
+    return `${base}/plugins/${encodeURIComponent(id)}/${entry.replace(/^\/+/, '')}`;
+  }
+
+  /** Invoke a plugin UI action without the UI socket (the embedded GUI uses its own socket instead). */
+  public invokePluginAction(id: string, action: string, args?: Record<string, unknown>): Promise<any> {
+    return this.sendCommand('InvokePluginAction', { id, action, args: args ?? {} });
+  }
+
+  /** Calls an expression function `id.name(args)` and returns its numeric result. */
+  public async callPluginFunction(id: string, name: string, args: number[]): Promise<number> {
+    const data: any = await this.sendCommand('CallPluginFunction', { id, name, args });
+    return typeof data?.value === 'number' ? data.value : Number(data?.value);
+  }
+
+  /** Runs a plugin step once (for testing from the plugin page) and returns its outputs map. */
+  public async runPluginStep(id: string, stepId: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const data: any = await this.sendCommand('RunPluginStep', { id, stepId, params });
+    return (data?.outputs ?? {}) as Record<string, unknown>;
+  }
+
   public cameraSnapshotUrl(id: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/camera/${id}/snapshot` : null;
@@ -1700,7 +2124,8 @@ export class RobotConnectService {
   public async getVisionPrograms(): Promise<{ programs: VisionProgram[]; runningIds: string[] }> {
     const data: any = await this.sendCommand('GetVisionPrograms');
     let programs: VisionProgram[] = [];
-    try { programs = JSON.parse(data?.programs ?? '[]'); } catch { }
+    // Normalized so a program saved in the old zone format (dropped, not converted) still opens.
+    try { programs = (JSON.parse(data?.programs ?? '[]') as Partial<VisionProgram>[]).map(normalizeVisionProgram); } catch { }
     return { programs, runningIds: data?.runningIds ?? [] };
   }
 
@@ -1732,7 +2157,60 @@ export class RobotConnectService {
   public async getVisionResult(id: string): Promise<VisionResult | null> {
     const data: any = await this.sendCommand('GetVisionResult', { id });
     if (!data?.result) return null;
-    try { return JSON.parse(data.result) as VisionResult; } catch { return null; }
+    try {
+      const r = JSON.parse(data.result) as VisionResult;
+      // A result in the old per-inspection shape (an older controller) carries no tool list.
+      return Array.isArray(r?.tools) ? r : null;
+    } catch { return null; }
+  }
+
+  /**
+   * Captures the pose a fixture tool finds on the current frame as its reference (the teach pose
+   * dependent tools' regions are stored against). Returns the pose, or null when nothing was found.
+   */
+  public async setVisionToolReference(programId: string, toolId: string): Promise<Pose | null> {
+    // Uses the program's latest result and saves the program with the new reference.
+    const data: any = await this.sendCommand('SetVisionToolReference', { programId, toolId });
+    const ref = data?.reference;
+    if (!ref) return null;
+    try { return (typeof ref === 'string' ? JSON.parse(ref) : ref) as Pose; } catch { return null; }
+  }
+
+  /**
+   * Teaches a contourMatch / patternMatch tool its template from the program's latest camera
+   * frame inside the tool's region. The controller saves the template on the program — re-read
+   * the program to get it. Returns the controller's one-line summary of what was taught.
+   */
+  public async teachVisionTool(programId: string, toolId: string): Promise<string | null> {
+    const data: any = await this.sendCommand('TeachVisionTool', { programId, toolId });
+    return data?.taught ?? null;
+  }
+
+  /**
+   * Cuts a template from `image` (a data URL / base64 frame) inside `region` — e.g. a rotated
+   * rectangle drawn round the part, whose angle becomes the pattern's 0° — without changing or
+   * saving the program. Returns the template (to store in params.template) and a preview PNG
+   * (base64) with its outlines drawn.
+   */
+  public async previewVisionTeach(programId: string, toolId: string, image: string, region: Region)
+    : Promise<{ template: Record<string, unknown> | null; preview: string | null; taught: string | null }> {
+    const data: any = await this.sendCommand('TeachVisionTool', { programId, toolId, image, region, preview: true });
+    let template: Record<string, unknown> | null = null;
+    try { template = data?.template ? (typeof data.template === 'string' ? JSON.parse(data.template) : data.template) : null; } catch { template = null; }
+    return { template, preview: data?.preview ?? null, taught: data?.taught ?? null };
+  }
+
+  /** One tool's result drawn over its own input layer (a debug view), as a JPEG. */
+  public visionToolDebugUrl(programId: string, toolId: string): string | null {
+    const base = this.httpBaseUrl();
+    return base && programId ? `${base}/vision/${programId}/tool/${encodeURIComponent(toolId)}/debug` : null;
+  }
+
+  /** A JPEG of an image layer on the current frame, after its filters up to index `upTo` (inclusive). */
+  public visionLayerPreviewUrl(programId: string, layerId: string, upTo?: number): string | null {
+    const base = this.httpBaseUrl();
+    if (!base || !programId) return null;
+    return `${base}/vision/${programId}/layer/${encodeURIComponent(layerId)}` + (upTo != null ? `?upTo=${upTo}` : '');
   }
 
   public visionWsUrl(id: string): string | null {
@@ -1743,16 +2221,6 @@ export class RobotConnectService {
   public visionSnapshotUrl(id: string): string | null {
     const base = this.httpBaseUrl();
     return base ? `${base}/vision/${id}/snapshot` : null;
-  }
-
-  public visionPolygonDebugUrl(programId: string, inspectionId: string): string | null {
-    const base = this.httpBaseUrl();
-    return base ? `${base}/vision/${programId}/debug/polygon/${inspectionId}` : null;
-  }
-
-  public visionLineDebugUrl(programId: string, inspectionId: string): string | null {
-    const base = this.httpBaseUrl();
-    return base ? `${base}/vision/${programId}/debug/line/${inspectionId}` : null;
   }
 
   public visionAnnotatedUrl(id: string): string | null {
@@ -1830,6 +2298,148 @@ export class RobotConnectService {
     const base = this.httpBaseUrl();
     return base ? `${base}/dxf/${encodeURIComponent(name)}` : null;
   }
+
+  // ── Plugins (docs/plugins.md §7, §9) ───────────────────────────────────────
+
+  private pluginList(ack: Record<string, unknown>): PluginSummary[] {
+    return Array.isArray(ack.plugins) ? (ack.plugins as PluginSummary[]) : [];
+  }
+
+  public async getPlugins(): Promise<PluginSummary[]> {
+    return this.pluginList(await this.request("GetPlugins", {}));
+  }
+
+  public async getPlugin(id: string): Promise<PluginDetail> {
+    const ack = await this.request("GetPlugin", { id });
+    return ack.plugin as PluginDetail;
+  }
+
+  public async getPluginContributions(): Promise<PluginContributions> {
+    const ack = await this.request("GetPluginContributions", {});
+    return {
+      steps:      Array.isArray(ack.steps)      ? ack.steps      as PluginContributions["steps"]      : [],
+      functions:  Array.isArray(ack.functions)  ? ack.functions  as PluginContributions["functions"]  : [],
+      properties: Array.isArray(ack.properties) ? ack.properties as PluginContributions["properties"] : [],
+    };
+  }
+
+  public async setPluginEnabled(id: string, enabled: boolean): Promise<PluginSummary> {
+    return (await this.request("SetPluginEnabled", { id, enabled })).plugin as PluginSummary;
+  }
+
+  public async startPlugin(id: string): Promise<PluginSummary> {
+    return (await this.request("StartPlugin", { id })).plugin as PluginSummary;
+  }
+
+  public async stopPlugin(id: string): Promise<PluginSummary> {
+    return (await this.request("StopPlugin", { id })).plugin as PluginSummary;
+  }
+
+  public async restartPlugin(id: string): Promise<PluginSummary> {
+    return (await this.request("RestartPlugin", { id })).plugin as PluginSummary;
+  }
+
+  /** Throws PluginConfigError (with `field`) when the controller answers `badConfig`. */
+  public async setPluginConfig(id: string, config: PluginConfigValues): Promise<PluginSummary> {
+    try {
+      return (await this.request("SetPluginConfig", { id, config })).plugin as PluginSummary;
+    } catch (e) {
+      throw toPluginConfigError(e);
+    }
+  }
+
+  public async getPluginLogs(id: string, start?: number, end?: number): Promise<PluginLogPage> {
+    const ack = await this.request("GetPluginLogs", {
+      id,
+      ...(start !== undefined && { start }),
+      ...(end   !== undefined && { end }),
+    });
+    return {
+      id,
+      totalCount: typeof ack.totalCount === "number" ? ack.totalCount : 0,
+      start:      typeof ack.start === "number" ? ack.start : 0,
+      logs:       Array.isArray(ack.logs) ? ack.logs as string[] : [],
+    };
+  }
+
+  public async clearPluginLogs(id: string): Promise<void> {
+    await this.request("ClearPluginLogs", { id });
+  }
+
+  public async uninstallPlugin(id: string): Promise<void> {
+    await this.request("UninstallPlugin", { id });
+  }
+
+  public async reloadPlugins(): Promise<PluginSummary[]> {
+    return this.pluginList(await this.request("ReloadPlugins", {}));
+  }
+
+  public async rotatePluginToken(id: string): Promise<PluginDetail> {
+    return (await this.request("RotatePluginToken", { id })).plugin as PluginDetail;
+  }
+
+  /** The `ws://` address an `external` plugin connects to. */
+  public pluginWsUrl(): string | null {
+    if (!this.url) return null;
+    return this.url.replace(/\/control$/, '') + '/plugin';
+  }
+
+  /**
+   * Upload a plugin zip (`POST /plugins/install`). `fileUri` is a picker URI
+   * (file:// / content:// on native, blob: or data: on web); the bytes are read
+   * with fetch(uri).blob(). Rejects with PluginInstallError carrying the
+   * controller's 400 `code` (badZip | badManifest | idExists) and `message`.
+   */
+  public async installPluginZip(fileUri: string, opts: { replace?: boolean } = {}): Promise<{ id: string; plugin: PluginSummary }> {
+    const base = this.httpBaseUrl();
+    if (!base) throw new Error('Not connected');
+    const blob = await (await fetch(fileUri)).blob();
+    const res = await fetch(`${base}/plugins/install${opts.replace ? '?replace=true' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/zip' },
+      body: blob,
+    });
+    let body: any = null;
+    try { body = await res.json(); } catch { /* non-JSON error body */ }
+    if (!res.ok) {
+      throw new PluginInstallError(
+        typeof body?.error === 'string' ? body.error : `http${res.status}`,
+        typeof body?.message === 'string' && body.message ? body.message : `Install failed (${res.status})`,
+      );
+    }
+    return { id: body?.id ?? body?.plugin?.id ?? '', plugin: body?.plugin as PluginSummary };
+  }
+}
+
+// ── Plugin errors ────────────────────────────────────────────────────────────
+
+/** HTTP install failure; `code` is the controller's `error` (badZip / badManifest / idExists). */
+export class PluginInstallError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = "PluginInstallError";
+  }
+}
+
+/** SetPluginConfig rejected with `badConfig`; `field` names the offending key when given. */
+export class PluginConfigError extends Error {
+  constructor(public readonly code: string, message: string, public readonly field?: string) {
+    super(message);
+    this.name = "PluginConfigError";
+  }
+}
+
+// The controller reports ok:false as an `error` code plus optional `message`/`field`;
+// sendCommand rejects with just the `error` string, so the field name is recovered
+// from the text when the controller encodes it ("badConfig: samples", "badConfig (samples)",
+// "badConfig: ... field 'samples'").
+function toPluginConfigError(e: unknown): unknown {
+  if (!(e instanceof CommandFailedError)) return e;
+  const text = e.message;
+  const field =
+    /field\W+['"]?([A-Za-z0-9_]+)/i.exec(text)?.[1] ??
+    /badConfig\W+([A-Za-z0-9_]+)/.exec(text)?.[1];
+  return new PluginConfigError(/badConfig/i.test(text) ? "badConfig" : "failed", text, field);
 }
 
 // ── Wire helpers for the program-editor commands ─────────────────────────────
@@ -1850,6 +2460,31 @@ export class CommandFailedError extends Error {
   }
 }
 
+/**
+ * The controller knows the command but its behaviour has not landed yet (`notImplemented: …`).
+ * A subclass of CommandFailedError, so existing catch sites still treat it as a failure.
+ */
+export class NotImplementedCommandError extends CommandFailedError {
+  constructor(command: string, message: string) {
+    super(command, message);
+    this.name = "NotImplementedCommandError";
+  }
+}
+
+export function isNotImplementedCommand(e: unknown): e is NotImplementedCommandError {
+  return e instanceof NotImplementedCommandError;
+}
+
+/** The ExecuteBuiltProgram debug params, or null when none are set. */
+function debugParams(o: ExecuteOptions | undefined): Record<string, unknown> | null {
+  if (!o) return null;
+  const p: Record<string, unknown> = {};
+  if (o.startAtStepId) p.startAtStepId = o.startAtStepId;
+  if (o.breakpoints && o.breakpoints.length > 0) p.breakpoints = o.breakpoints;
+  if (o.stepMode) p.stepMode = true;
+  return Object.keys(p).length > 0 ? p : null;
+}
+
 export function isUnsupportedCommand(e: unknown): e is UnsupportedCommandError {
   return e instanceof UnsupportedCommandError;
 }
@@ -1862,6 +2497,7 @@ function toCommandError(command: string, reason: unknown): Error {
   if (reason instanceof Error) return reason;
   const text = typeof reason === "string" ? reason : reason == null ? "" : String(reason);
   if (/unknown\s*command/i.test(text)) return new UnsupportedCommandError(command);
+  if (/^notImplemented\b/.test(text)) return new NotImplementedCommandError(command, text);
   if (TRANSPORT_FAILURE.test(text)) return new Error(text);
   return new CommandFailedError(command, text || `${command} failed`);
 }
@@ -1887,6 +2523,25 @@ function isNamed(r: WireRecord): r is WireRecord & { name: string } {
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * A `GetExpressionSymbols` function entry. Inside a `plugins[]` group the controller may
+ * spell names bare (`tare`, as in the manifest) or qualified (`scale.tare`); both come
+ * out qualified so a group's entries insert the same text as the flat `functions` list.
+ */
+function toExpressionFunction(f: WireRecord & { name: string }, groupId?: string) {
+  const pluginId = typeof f.pluginId === "string" && f.pluginId ? f.pluginId : groupId;
+  const name = groupId && !f.name.includes(".") ? `${groupId}.${f.name}` : f.name;
+  return { name, signature: str(f.signature) || `${name}()`, description: str(f.description), pluginId };
+}
+
+/** A `GetExpressionSymbols` property entry; qualified the same way as functions. */
+function toExpressionProperty(p: WireRecord & { name: string }, groupId?: string) {
+  const pluginId = typeof p.pluginId === "string" && p.pluginId ? p.pluginId : groupId;
+  const bare = stripSigil(p.name);
+  const name = groupId && !bare.includes(".") ? `${groupId}.${bare}` : bare;
+  return { name, description: str(p.description), type: str(p.type), pluginId };
+}
 
 /** Symbols are stored without their `$` whichever way the controller spells them. */
 const stripSigil = (name: string): string => name.replace(/^\$/, "");

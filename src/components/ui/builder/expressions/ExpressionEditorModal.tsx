@@ -18,8 +18,12 @@ import { useIsWide } from "@/src/components/ui/responsive";
 import { useExpressionEnv } from "./ExpressionEnv";
 import { SymbolSections } from "./SymbolSections";
 import { FunctionsList } from "./FunctionsList";
+import { pluginGroupTitle, useSplitSymbols } from "./pluginSymbols";
 import { applyCompletion, completionsAt, insertAt, isExpressionText } from "./completions";
 import { useLiveValue } from "./useLiveValue";
+import { ms } from "../builderStyles";
+import { useActiveFieldRegistry } from "./ActiveField";
+import { ExpressionHelperModal } from "./ExpressionHelperPanel";
 
 // ── The standardized symbol strip ─────────────────────────────────────────────
 //
@@ -32,9 +36,9 @@ import { useLiveValue } from "./useLiveValue";
 /** `[label, inserted text]`. The label is the maths spelling, the insert is what the evaluator reads. */
 export type OpChip = [string, string];
 
-const OPERATOR_CHIPS: OpChip[]   = [["+", "+"], ["−", "-"], ["×", "*"], ["÷", "/"]];
-const GROUPING_CHIPS: OpChip[]   = [["(", "("], [")", ")"]];
-const COMPARISON_CHIPS: OpChip[] = [
+export const OPERATOR_CHIPS: OpChip[]   = [["+", "+"], ["−", "-"], ["×", "*"], ["÷", "/"]];
+export const GROUPING_CHIPS: OpChip[]   = [["(", "("], [")", ")"]];
+export const COMPARISON_CHIPS: OpChip[] = [
   ["==", "=="], ["!=", "!="], ["<", "<"], ["<=", "<="], [">", ">"], [">=", ">="],
   ["and", "and"], ["or", "or"],
 ];
@@ -59,7 +63,7 @@ export function variableToken(v: ProgramVariable): string {
 const NEWLINE = /\r?\n/g;
 
 /** A plain number evaluates to itself — everything else is worth asking the controller about. */
-function worthEvaluating(text: string): boolean {
+export function worthEvaluating(text: string): boolean {
   const t = text.trim();
   return !!t && !/^-?\d*\.?\d+$/.test(t);
 }
@@ -208,10 +212,20 @@ function EditorCard({
   // a program variable of the same name.
   const shownGlobals = (env?.symbols?.variables ?? [])
     .filter(v => v.isGlobal && !localNames.has(v.name.toLowerCase()) && matches(v.name));
-  const functions    = env?.symbols?.functions ?? [];
+  // Built-in functions; plugin ones (scale.tare) are listed under their plugin below.
+  const split        = useSplitSymbols();
+  const functions    = split.functions;
+  const pluginFns    = split.plugins
+    .map(g => ({
+      g,
+      fns: g.functions.filter(f => !q || f.name.toLowerCase().includes(q)
+        || f.description.toLowerCase().includes(q) || g.name.toLowerCase().includes(q)),
+    }))
+    .filter(x => x.fns.length > 0);
+  const allFunctionCount = env?.symbols?.functions.length ?? 0;
 
   const hasReference = shownVars.length + shownContext.length + shownGlobals.length > 0
-    || (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) + functions.length > 0;
+    || (env?.symbols?.properties.length ?? 0) + (env?.symbols?.io.length ?? 0) + allFunctionCount > 0;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -365,11 +379,17 @@ function EditorCard({
           {functions.length > 0 && (
             <>
               <SectionHeader title="Functions" />
-              <FunctionsList functions={functions} search={search} onInsert={name => insertToken(`${name}(`)} />
+              <FunctionsList functions={functions} search={search} onInsert={insertToken} />
             </>
           )}
         </>
       )}
+      {pluginFns.map(({ g, fns }) => (
+        <React.Fragment key={g.id}>
+          <SectionHeader title={pluginGroupTitle(g)} />
+          <FunctionsList functions={fns} search="" onInsert={insertToken} />
+        </React.Fragment>
+      ))}
     </ScrollView>
   );
 
@@ -413,12 +433,7 @@ function EditorCard({
  * so the keyboard can never cover what is being edited and the adders are the same
  * everywhere. Expressions keep their purple, with an `fx` badge as the affordance.
  */
-export function ExpressionField({
-  value, onChange, title, placeholder, hint,
-  variables, contextVariables, contextLabel,
-  comparisons, extraOps,
-  style, accent = accents.purple, clearable = true,
-}: {
+export type ExpressionFieldProps = {
   value: string;
   /** Called with the committed text on Done, and with "" when the field is cleared. */
   onChange: (next: string) => void;
@@ -435,36 +450,115 @@ export function ExpressionField({
   /** Tint for expression text — lets a screen keep its own accent. */
   accent?: string;
   clearable?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
+};
+
+/**
+ * Every expression-capable field. When an ExpressionFieldProvider + host are in scope it edits
+ * INLINE with the keyboard-docked tool bar; otherwise it falls back to the tap-to-open sheet.
+ */
+/**
+ * An expression-capable field, edited INLINE. You type the value and any operators (`+ - * /`,
+ * comparisons) straight from the keyboard; the one affordance is an "Insert variable" chip that
+ * opens the same centred modal selector the rest of the app uses (variables, caller vars, read-only
+ * properties and IO), so nothing is hidden behind a keyboard or a bottom sheet. Commits live.
+ */
+export function ExpressionField({
+  value, onChange, title, placeholder,
+  variables, contextVariables, contextLabel, extraOps,
+  style, accent = accents.purple, clearable = true,
+}: ExpressionFieldProps) {
+  const env = useExpressionEnv();
+  const registry = useActiveFieldRegistry();
+  const inputRef  = useRef<TextInput | null>(null);
+  const selRef    = useRef({ start: value.length, end: value.length });
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyRef    = useRef("ef-" + Math.random().toString(36).slice(2));
+  // A stable wrapper the registry can hold that always reaches the latest insert (which captures
+  // the current value + caret).
+  const insertRef    = useRef<(t: string) => void>(() => {});
+  const stableInsert = useRef((t: string) => insertRef.current(t)).current;
+  const [forcedSel, setForcedSel] = useState<{ start: number; end: number } | null>(null);
+  const [helperOpen, setHelperOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [caret, setCaret] = useState(value.length);   // completions depend on the caret, so track it in state
+  const wide = useIsWide();
   const isExpr = isExpressionText(value);
-  const shown  = value.trim();
+  const live = useLiveValue(env, value, worthEvaluating(value));
+  // Insert affordance is clutter when you're not editing — show it only while the field is focused
+  // (or the helper it launched is open, so tapping it doesn't make the row vanish mid-tap).
+  const showChips = focused || helperOpen;
+
+  // ── Autocomplete ("ghost" suggestions) ──────────────────────────────────────
+  const localVars = useMemo(
+    () => [...(variables ?? []), ...(contextVariables ?? [])],
+    [variables, contextVariables]);
+  // The token being typed ($name… or a bare function word) → matching completions.
+  const completion = useMemo(
+    () => (env ? completionsAt(value, Math.min(caret, value.length), env.symbols, localVars) : null),
+    [env, value, caret, localVars]);
+  // No active token but focused at a spot where a value belongs (empty, or just after an operator /
+  // space) → offer the field's variables to drop straight in. This is the "tap to autofill" case.
+  const fallback = useMemo(() => {
+    if (completion) return null;
+    const before = value.slice(0, Math.min(caret, value.length));
+    const atValueStart = before.length === 0 || /[\s(,+\-*/<>=!&|]$/.test(before);
+    if (!atValueStart) return null;
+    const items = localVars.map(v => ({
+      kind: "variable" as const, label: "$" + v.name, insert: variableToken(v), computed: v.isComputed,
+    }));
+    return items.length ? items.slice(0, 8) : null;
+  }, [completion, value, caret, localVars]);
+
+  useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
+
+  // Commit new text with the caret at a set spot; keep focus and the completions in sync.
+  function commitAt(next: string, caretPos: number) {
+    onChange(next.replace(NEWLINE, " "));
+    selRef.current = { start: caretPos, end: caretPos };
+    setCaret(caretPos);
+    setForcedSel({ start: caretPos, end: caretPos });
+    inputRef.current?.focus();
+  }
+  // Splice a token at the caret, spacing it off a preceding word/value; commit live and keep focus.
+  function insert(token: string) {
+    const at = Math.min(selRef.current.end, value.length);
+    const next = insertAt(value, at, token);
+    commitAt(next, next.length - (value.length - at));
+  }
+  insertRef.current = insert;
+  // Replace the token being typed with a chosen completion.
+  function applyComp(startAt: number, text: string) {
+    const at = Math.min(caret, value.length);
+    commitAt(applyCompletion(value, startAt, at, text), startAt + text.length);
+  }
 
   return (
     <View>
-      {/* The clear × is a SIBLING of the open-editor touchable, not a child —
-          nesting role="button" inside role="button" renders <button><button>
-          on web (react-native-web maps the role to a real element), which
-          React DOM rejects as invalid nesting at hydration. */}
       <View style={[style, s.fieldBox]}>
-        <TouchableOpacity
-          style={s.fieldMain}
-          onPress={() => setOpen(true)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`${title}: ${shown || "empty"}. Opens the expression editor.`}
-        >
-          <Text
-            style={[s.fieldText, !shown && { color: colors.textFaint }, shown && isExpr && { color: accent }]}
-            numberOfLines={1}
-          >
-            {shown || placeholder || "0"}
-          </Text>
-          {/* The affordance: faint on a plain value (this field can take an expression),
-              in the accent once it holds one. */}
-          <Text style={[s.fx, { color: isExpr && shown ? accent : colors.textFaint }]}>fx</Text>
-        </TouchableOpacity>
-        {clearable && shown.length > 0 && (
+        <TextInput
+          ref={inputRef}
+          style={[s.fieldText, isExpr && { color: accent }]}
+          value={value}
+          onChangeText={next => { onChange(next.replace(NEWLINE, " ")); setForcedSel(null); }}
+          onSelectionChange={e => { selRef.current = e.nativeEvent.selection; setCaret(e.nativeEvent.selection.start); }}
+          selection={forcedSel ?? undefined}
+          placeholder={placeholder ?? "0"}
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          multiline
+          blurOnSubmit={false}
+          onFocus={() => {
+            if (blurTimer.current) clearTimeout(blurTimer.current);
+            setFocused(true);
+            registry?.activate({ key: keyRef.current, insert: stableInsert });
+          }}
+          onBlur={() => {
+            blurTimer.current = setTimeout(() => { setFocused(false); registry?.deactivate(keyRef.current); }, 150);
+          }}
+          accessibilityLabel={title}
+        />
+        {clearable && value.trim().length > 0 && (
           <TouchableOpacity onPress={() => onChange("")} hitSlop={8} activeOpacity={0.7} style={s.fieldClear}
             accessibilityRole="button" accessibilityLabel={`Clear ${title}`}>
             <X size={13} color={colors.textFaint} />
@@ -472,23 +566,69 @@ export function ExpressionField({
         )}
       </View>
 
-      <ExpressionEditorModal
-        visible={open}
-        title={title}
-        hint={hint}
-        initialText={value}
-        placeholder={placeholder}
-        variables={variables}
-        contextVariables={contextVariables}
-        contextLabel={contextLabel}
-        comparisons={comparisons}
-        extraOps={extraOps}
-        onCancel={() => setOpen(false)}
-        onCommit={next => { setOpen(false); onChange(next); }}
-      />
+      {/* Autocomplete "ghost" suggestions for the token being typed, or the field's variables when
+          you focus an empty / value-ready spot. Tap one to drop it in. */}
+      {focused && (completion || fallback) && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always"
+          style={s.suggestions} contentContainerStyle={s.suggestionsContent}>
+          {(completion
+            ? completion.items.map(item => ({
+                key: `${item.kind}:${item.label}`, label: item.label, kind: item.kind, computed: item.computed,
+                onPress: () => applyComp(completion.start, item.insert),
+              }))
+            : (fallback ?? []).map(item => ({
+                key: `fb:${item.label}`, label: item.label, kind: item.kind, computed: item.computed,
+                onPress: () => insert(item.insert),
+              }))
+          ).map(sg => (
+            <TouchableOpacity key={sg.key} style={s.suggestion} activeOpacity={0.7} onPress={sg.onPress}>
+              <Text style={[s.suggestionText, { color: KIND_TINT[sg.kind] }]}>
+                {sg.label}{sg.computed && <Text style={s.computedTag}>  ƒ</Text>}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Live value / error, only when there is something to say. */}
+      {live.kind === "value" && <Text style={s.inlineLive} numberOfLines={1}>= {live.text}</Text>}
+      {live.kind === "error" && <Text style={s.inlineLiveErr} numberOfLines={2}>{live.text}</Text>}
+
+      {/* Insert — one button opens the full insert panel (variables, properties, functions, plugins)
+          as a modal on narrow screens; on wide the always-visible side panel handles it. Field-
+          specific quick tokens sit beside it. */}
+      {showChips && (!wide || (extraOps?.length ?? 0) > 0) && (
+        <View style={s.inlineChips}>
+          {!wide && (
+            <TouchableOpacity onPress={() => setHelperOpen(true)} activeOpacity={0.7}
+              style={s.insertChip} accessibilityRole="button" accessibilityLabel="Insert variable, property or function">
+              <Text style={s.insertChipText}>＋ Insert</Text>
+            </TouchableOpacity>
+          )}
+          {(extraOps ?? []).map(([label, ins]) => (
+            <TouchableOpacity key={`x:${ins}`} onPress={() => insert(ins)} activeOpacity={0.7}
+              style={s.opChip} accessibilityRole="button" accessibilityLabel={`Insert ${label}`}>
+              <Text style={s.opChipText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {!wide && (
+        <ExpressionHelperModal
+          visible={helperOpen}
+          onClose={() => setHelperOpen(false)}
+          variables={variables}
+          contextVariables={contextVariables}
+          contextLabel={contextLabel ?? "Caller Variables"}
+          onInsert={stableInsert}
+        />
+      )}
     </View>
   );
 }
+
+/** Centred modal (same shell as the variable selector) listing built-in + plugin functions. */
 
 function OpButton({ label, wide, onPress }: { label: string; wide?: boolean; onPress: () => void }) {
   return (
@@ -608,4 +748,23 @@ const s = StyleSheet.create({
   fieldText:  { flex: 1, fontSize: 14, color: colors.text },
   fx:         { fontSize: 12, fontWeight: "700", fontStyle: "italic" },
   fieldClear: { paddingLeft: 2 },
+
+  // Inline field: live value/error + the insert-chip row beneath the input.
+  inlineLive:    { fontSize: 12, fontWeight: "700", color: colors.success, marginTop: 5 },
+  inlineLiveErr: { fontSize: 12, color: colors.danger, marginTop: 5 },
+  inlineChips:   { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 7 },
+  insertChip: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: radii.sm,
+    backgroundColor: "#ede9fe", borderWidth: 1, borderColor: "#c4b5fd",
+  },
+  insertChipText: { fontSize: 13, fontWeight: "700", color: accents.purple },
+
+  // Function picker modal
+  fnSearchBox: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1,
+    borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: 10,
+    backgroundColor: colors.surfaceMuted, marginBottom: 8 },
+  fnSearchInput: { flex: 1, fontSize: 14, color: colors.text, paddingVertical: 9 },
+  fnGroupHdr: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.4,
+    marginTop: 10, marginBottom: 4 },
 });

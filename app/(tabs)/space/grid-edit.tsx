@@ -1,22 +1,25 @@
-import { useIsWide } from "@/src/components/ui/responsive";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   Button,
-  Card,
   colors,
   Divider,
-  FormRow,
-  InfoTip,
   Input,
   PageHeader,
   radii,
   RadioRow,
   Screen,
-  SectionHeader,
   shadows,
   spacing,
   type,
 } from "@/src/components/ui/kit";
+import {
+  EditorCard,
+  FieldGroup,
+  FieldHint,
+  FieldLabel,
+  SectionHeading,
+  TeachButton,
+} from "@/src/components/space/EditorCard";
 import { Grid } from "@/src/models/robotModels";
 import { useGrids, usePoints } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -103,7 +106,6 @@ export default function GridEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const grids  = useGrids();
   const points = usePoints();
-  const isWide = useIsWide();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (grids.find(g => g.id === id) ?? null);
@@ -122,10 +124,12 @@ export default function GridEditPage() {
 
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
 
-  // Sync draft if the grid loads after navigation (grids from context may lag)
+  // Sync draft if the grid loads after navigation (grids from context may lag), and again
+  // when the saved grid itself changes — e.g. after re-teaching it in the wizard.
+  const existingKey = existing ? JSON.stringify(existing) : "";
   useEffect(() => {
     if (existing) setDraft({ ...existing });
-  }, [existing?.id]);
+  }, [existingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (fields: Partial<Grid>) => setDraft(d => ({ ...d, ...fields }));
 
@@ -136,6 +140,17 @@ export default function GridEditPage() {
   }
 
   const canSave = draft.name.trim().length > 0;
+
+  // Teach opens the corner wizard. A saved grid is re-taught in place (same id); a new one is
+  // created by the wizard, so it replaces this blank page and Done returns to the grid list.
+  function openTeach() {
+    if (isNew) {
+      const name = draft.name.trim();
+      router.replace(name ? `/space/grid-teach?name=${encodeURIComponent(name)}` : "/space/grid-teach");
+    } else {
+      router.push(`/space/grid-teach?id=${encodeURIComponent(draft.id)}`);
+    }
+  }
 
   return (
     <KeyboardAvoidingView
@@ -151,151 +166,108 @@ export default function GridEditPage() {
           { label: isNew ? "New Grid" : "Edit Grid" },
         ]}
         backTo="/space/grids"
-        right={
-          <Button label="Save" size="sm" onPress={handleSave} disabled={!canSave} />
-        }
+        right={<Button label="Save" size="sm" onPress={handleSave} disabled={!canSave} />}
       />
 
       <Screen>
         {(() => {
-          const nameSection = (
-            <>
-              <SectionHeader title="Name" />
-              <Card>
+          // The whole grid setup lives in one card: plain field labels and hairline
+          // dividers instead of a section header + card per field.
+          const identity = (
+            <FieldGroup>
+              <View>
+                <FieldLabel text="Name" />
                 <Input
                   value={draft.name}
                   onChangeText={v => set({ name: v })}
                   placeholder="e.g. Pallet A"
                   autoCapitalize="words"
                   returnKeyType="next"
-                  style={s.nameInput}
                 />
-              </Card>
-            </>
-          );
-
-          const baseSection = (
-            <>
-              <SectionHeader title="Base point" />
-              <Card padded={false}>
-                <AnimatedPressable style={s.pickerRow} onPress={() => setPointPickerOpen(true)}>
-                  <Text style={[s.pickerRowText, !draft.basePointName && s.pickerRowPlaceholder]}>
+              </View>
+              <View>
+                <FieldLabel text="Base point" />
+                <AnimatedPressable style={s.pickerWell} onPress={() => setPointPickerOpen(true)}>
+                  <Text
+                    style={[s.pickerWellText, !draft.basePointName && s.pickerWellPlaceholder]}
+                    numberOfLines={1}
+                  >
                     {draft.basePointName || "Select point…"}
                   </Text>
                   <ChevronRight size={16} color={colors.textFaint} />
                 </AnimatedPressable>
-              </Card>
-            </>
+              </View>
+            </FieldGroup>
           );
 
-          const rowOffsetSection = (
-            <>
-              <SectionHeader title="Row offset  (mm per row step)" />
-              <Card>
+          // Row/column step offsets, with the teach wizard right beside them since
+          // teaching is what fills them in (it replaces the base point and offsets).
+          const offsets = (
+            <FieldGroup>
+              <SectionHeading title="Step offsets" unit="mm per step" action={<TeachButton onPress={openTeach} />} />
+              <View>
                 <View style={s.axisRow}>
+                  <View style={s.axisRowLabel} />
                   {(["X", "Y", "Z"] as const).map(axis => (
-                    <View key={axis} style={s.axisCol}>
-                      <Text style={s.axisLabel}>{axis}</Text>
-                      <SignedNumberInput
-                        value={draft[`rowOffset${axis}` as "rowOffsetX"]}
-                        onChange={v => set({ [`rowOffset${axis}`]: v } as any)}
-                      />
-                    </View>
+                    <Text key={axis} style={[s.axisCol, s.axisLabel]}>{axis}</Text>
                   ))}
                 </View>
-              </Card>
-            </>
-          );
-
-          const colOffsetSection = (
-            <>
-              <SectionHeader title="Column offset  (mm per column step)" />
-              <Card>
-                <View style={s.axisRow}>
-                  {(["X", "Y", "Z"] as const).map(axis => (
-                    <View key={axis} style={s.axisCol}>
-                      <Text style={s.axisLabel}>{axis}</Text>
-                      <SignedNumberInput
-                        value={draft[`colOffset${axis}` as "colOffsetX"]}
-                        onChange={v => set({ [`colOffset${axis}`]: v } as any)}
-                      />
-                    </View>
-                  ))}
-                </View>
-              </Card>
-            </>
-          );
-
-          const sizeSection = (
-            <>
-              <SectionHeader
-                title="Grid size  (optional)"
-                right={<InfoTip text="Row and column count only cap the grid for display — leave either blank for an unlimited grid in that direction." />}
-              />
-              <Card padded={false}>
-                <View style={s.twoCol}>
-                  <FormRow label="Row count" style={s.twoColItem}>
-                    <OptionalCountInput
-                      value={draft.rowCount}
-                      onChange={v => set({ rowCount: v })}
+                {([["Row", "rowOffset"], ["Column", "colOffset"]] as const).map(([label, key]) => (
+                  <View key={key} style={[s.axisRow, s.axisRowGap]}>
+                    <Text style={[s.axisRowLabel, s.axisRowLabelText]}>{label}</Text>
+                    {(["X", "Y", "Z"] as const).map(axis => (
+                      <View key={axis} style={s.axisCol}>
+                        <SignedNumberInput
+                          value={draft[`${key}${axis}`]}
+                          onChange={v => set({ [`${key}${axis}`]: v } as Partial<Grid>)}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ))}
+                {/* Rotation: one value (degrees around Z at the base point), spanning the X/Y/Z columns. */}
+                <View style={[s.axisRow, s.axisRowGap]}>
+                  <Text style={[s.axisRowLabel, s.axisRowLabelText]}>Rotation °</Text>
+                  <View style={s.axisCol}>
+                    <SignedNumberInput
+                      value={draft.rotation}
+                      onChange={v => set({ rotation: v })}
+                      placeholder="0"
                     />
-                  </FormRow>
-                  <FormRow label="Column count" style={[s.twoColItem, s.twoColDivider]}>
-                    <OptionalCountInput
-                      value={draft.colCount}
-                      onChange={v => set({ colCount: v })}
-                    />
-                  </FormRow>
-                </View>
-              </Card>
-            </>
-          );
-
-          const rotationSection = (
-            <>
-              <SectionHeader title="Rotation" />
-              <Card>
-                <View style={s.rotationRow}>
-                  <SignedNumberInput
-                    value={draft.rotation}
-                    onChange={v => set({ rotation: v })}
-                    placeholder="0"
-                  />
-                  <Text style={s.rotationUnit}>°</Text>
-                </View>
-                <Text style={s.rotationHint}>Z-axis rotation applied around the base point</Text>
-              </Card>
-            </>
-          );
-
-          if (isWide) {
-            // Wide: identity/base info on the left, step geometry on the right —
-            // avoids one long skinny column of stacked cards.
-            return (
-              <View style={s.wideRow}>
-                <View style={s.wideCol}>
-                  {nameSection}
-                  {baseSection}
-                  {rotationSection}
-                </View>
-                <View style={s.wideCol}>
-                  {rowOffsetSection}
-                  {colOffsetSection}
-                  {sizeSection}
+                  </View>
                 </View>
               </View>
-            );
-          }
+              <FieldHint>
+                {isNew
+                  ? "Teach jogs the robot to the grid's corners and works these out for you, or enter them by hand."
+                  : "Teach re-jogs the robot to the grid's corners and replaces the base point and offsets."}
+              </FieldHint>
+            </FieldGroup>
+          );
 
+          const size = (
+            <View style={s.pairRow}>
+              <View style={s.sizeCol}>
+                <FieldLabel
+                  text="Rows"
+                  tip="Row and column count only cap the grid for display — leave either blank for an unlimited grid in that direction."
+                />
+                <OptionalCountInput value={draft.rowCount} onChange={v => set({ rowCount: v })} />
+              </View>
+              <View style={s.sizeCol}>
+                <FieldLabel text="Columns" />
+                <OptionalCountInput value={draft.colCount} onChange={v => set({ colCount: v })} />
+              </View>
+            </View>
+          );
+
+          // Desktop: identity + size on the left, step geometry on the right, still one card.
           return (
-            <>
-              {nameSection}
-              {baseSection}
-              {rowOffsetSection}
-              {colOffsetSection}
-              {sizeSection}
-              {rotationSection}
-            </>
+            <EditorCard
+              left={[identity, size]}
+              right={[offsets]}
+              stacked={[identity, offsets, size]}
+            />
           );
         })()}
       </Screen>
@@ -349,65 +321,35 @@ export default function GridEditPage() {
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
 
-  // Wide: two columns instead of one long stack of cards. Each column keeps
-  // its own vertical rhythm since Screen's `gap` only spaces its direct child.
-  wideRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
-  wideCol: { flex: 1, gap: spacing.md },
-
-  nameInput: { borderWidth: 0, backgroundColor: "transparent", paddingHorizontal: 0 },
+  pickerWell: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md - 2,
+    backgroundColor: colors.surfaceMuted,
+  },
+  pickerWellText:        { flex: 1, fontSize: 14, color: colors.text },
+  pickerWellPlaceholder: { color: colors.textFaint },
 
   // Coordinate/position values use the mono type preset.
   input: { ...type.mono },
 
-  axisRow: {
-    flexDirection: "row",
-    gap: spacing.sm + 2,
-  },
-  axisCol: { flex: 1 },
+  axisRow:          { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  axisRowGap:       { marginTop: spacing.sm },
+  axisRowLabel:     { width: 74 },
+  axisRowLabelText: { fontSize: 13, fontWeight: "500", color: colors.textMuted },
+  axisCol:          { flex: 1, minWidth: 0 },
   axisLabel: {
-    fontSize: 11, fontWeight: "600", color: colors.textFaint,
-    textAlign: "center", marginBottom: spacing.xs,
+    fontSize: 11, fontWeight: "600", color: colors.textFaint, textAlign: "center",
   },
 
-  twoCol: {
-    flexDirection: "row",
-  },
-  twoColItem: {
-    flex: 1,
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.md,
-  },
-  twoColDivider: {
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: colors.border,
-  },
-
-  rotationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm + 2,
-    marginBottom: spacing.xs,
-  },
-  rotationUnit: {
-    fontSize: 16, fontWeight: "600", color: colors.textMuted,
-  },
-  rotationHint: {
-    fontSize: 12, color: colors.textFaint,
-  },
-
-  pickerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.md + 1,
-  },
-  pickerRowText: {
-    ...type.body,
-    fontSize: 15,
-    color: colors.text,
-  },
-  pickerRowPlaceholder: { color: colors.textFaint },
+  // Rows + Columns share one row.
+  pairRow: { flexDirection: "row", gap: spacing.sm + 2 },
+  sizeCol: { flex: 1, minWidth: 0 },
 
   // ── Point picker modal ────────────────────────────────────────────────────
   overlay: {

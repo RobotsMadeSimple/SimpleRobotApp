@@ -10,6 +10,8 @@ export const ms = StyleSheet.create({
     justifyContent: "flex-start", alignItems: "center",
     paddingTop: 52, paddingHorizontal: spacing.xl,
   },
+  // Wide-mode two-pane: the helper panel and the edit card side by side.
+  wideRow: { flexDirection: "row", alignItems: "flex-start", gap: 16 },
   card: {
     width: "100%", maxWidth: 480, maxHeight: "88%",
     backgroundColor: colors.surface, borderRadius: radii.xl,
@@ -254,7 +256,10 @@ export const sharedStyles = StyleSheet.create({
     borderRadius: radii.lg,
     borderLeftWidth: 4,
     ...shadows.soft,
-    overflow: "hidden",
+    // NOTE: no `overflow: "hidden"` here. Combined with `elevation` (shadows.soft) on the same
+    // Android view it intermittently drops the card's content on a re-render (the step renders
+    // blank until the view is recreated — i.e. leaving/re-entering the block, not scrolling).
+    // The body sections round their own corners (loopCardBody) so clipping isn't needed.
   },
 
   stepCardHeader: {

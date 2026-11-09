@@ -1,4 +1,4 @@
-import { PinType } from "@/src/models/robotModels";
+import { DeviceFirmwareInfo, firmwareLabel, hasKnownFirmware, PinType } from "@/src/models/robotModels";
 import {
   Settings,
   ToggleLeft,
@@ -12,7 +12,63 @@ import {
   View,
 } from "react-native";
 
-import { accents, colors, radii, shadows, spacing, StatusPill, type } from "@/src/components/ui/kit";
+import { accents, colors, InfoTip, radii, shadows, spacing, StatusPill, type } from "@/src/components/ui/kit";
+
+// ── FirmwareChip ──────────────────────────────────────────────────────────────
+// Quiet caption-sized pill next to a board's status pill: "fw 1.1.0". Legacy
+// firmware that can't report its version shows "fw unknown" with a tip that
+// says why (and that flashing the latest sketch fixes it).
+
+export const LEGACY_FIRMWARE_TIP =
+  "Older firmware doesn't report its version or capabilities — flash the latest NanoEdgeDevice / AuxStepperDriver sketch.";
+
+export function FirmwareChip({ device }: { device: DeviceFirmwareInfo | null | undefined }) {
+  const known = hasKnownFirmware(device);
+  return (
+    <View style={fwStyles.wrap}>
+      <StatusPill label={firmwareLabel(device)} tone="neutral" style={fwStyles.pill} />
+      {!known && <InfoTip size={12} text={LEGACY_FIRMWARE_TIP} />}
+    </View>
+  );
+}
+
+const fwStyles = StyleSheet.create({
+  wrap: { flexDirection: "row", alignItems: "center", gap: 2 },
+  pill: { paddingVertical: 2, paddingHorizontal: spacing.xs + 2 },
+});
+
+// ── DeviceStatusBar ───────────────────────────────────────────────────────────
+// A device detail page's own status (connected / streaming, firmware, tags) and its page actions.
+// It sits at the top of the page body: the page header's right edge is kept for the robot's
+// connection status, so a device's status never stands in for it.
+
+export function DeviceStatusBar({ connected, status, chips, actions }: {
+  /** Shorthand for the usual Connected / Offline pill. */
+  connected?: boolean;
+  /** A custom status pill, used instead of `connected`. */
+  status?: React.ReactNode;
+  /** Extra chips after the status (firmware, tags). */
+  chips?: React.ReactNode;
+  /** Page actions on the right (Configure etc.). */
+  actions?: React.ReactNode;
+}) {
+  return (
+    <View style={dsStyles.bar}>
+      <View style={dsStyles.group}>
+        {status ?? (
+          <StatusPill label={connected ? "Connected" : "Offline"} tone={connected ? "success" : "danger"} dot />
+        )}
+        {chips}
+      </View>
+      {actions != null && <View style={dsStyles.group}>{actions}</View>}
+    </View>
+  );
+}
+
+const dsStyles = StyleSheet.create({
+  bar:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.sm },
+  group: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
+});
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
 //

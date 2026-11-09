@@ -5,12 +5,16 @@ export default function IOLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="stb" />
-      <Stack.Screen name="nanos" />
+      <Stack.Screen name="ioDevices" />
       <Stack.Screen name="relay" />
       <Stack.Screen name="auxiliary" />
       <Stack.Screen name="aux-axis" />
       <Stack.Screen name="cameras" />
       <Stack.Screen name="camera-calibrate" />
+      <Stack.Screen name="phone-provider" />
+      <Stack.Screen name="loadcell-calibrate" />
+      <Stack.Screen name="recordings" />
+      <Stack.Screen name="recording-detail" />
       <Stack.Screen name="configure" />
       <Stack.Screen name="configure-relay" />
     </Stack>

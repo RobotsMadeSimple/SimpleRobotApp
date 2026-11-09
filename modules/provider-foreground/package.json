@@ -1,0 +1,7 @@
+{
+  "name": "provider-foreground",
+  "version": "0.1.0",
+  "description": "Android foreground service that keeps the phone's camera/sensor stream alive in the background.",
+  "main": "index.ts",
+  "private": true
+}

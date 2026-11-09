@@ -17,4 +17,6 @@ export { PageHeader, type Crumb } from "./PageHeader";
 export { ROUTE_LABELS, labelForSegment } from "./routeLabels";
 export { HintBanner, InfoTip } from "./Hints";
 export { StatTile } from "./StatTile";
+export { CautionTriangle, CautionNote, cautionRowStyle } from "./CautionTriangle";
 export { PositionReadout, type ReadoutAxis } from "./PositionReadout";
+export { haptic, withHaptic, type HapticKind } from "@/src/components/ui/haptics";

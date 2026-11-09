@@ -6,12 +6,16 @@ export default function SpaceLayout() {
       <Stack.Screen name="index"  options={{ headerShown: false }} />
       <Stack.Screen name="points" options={{ headerShown: false }} />
       <Stack.Screen name="tools"  options={{ headerShown: false }} />
+      <Stack.Screen name="tool-edit" options={{ headerShown: false }} />
       <Stack.Screen name="teach-tcp" options={{ headerShown: false }} />
       <Stack.Screen name="locals" options={{ headerShown: false }} />
+      <Stack.Screen name="local-edit" options={{ headerShown: false }} />
       <Stack.Screen name="grids"      options={{ headerShown: false }} />
       <Stack.Screen name="grid-edit"  options={{ headerShown: false }} />
+      <Stack.Screen name="grid-teach" options={{ headerShown: false }} />
       <Stack.Screen name="stacks"     options={{ headerShown: false }} />
       <Stack.Screen name="stack-edit" options={{ headerShown: false }} />
+      <Stack.Screen name="stack-teach" options={{ headerShown: false }} />
     </Stack>
   );
 }

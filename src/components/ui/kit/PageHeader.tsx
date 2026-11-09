@@ -28,8 +28,8 @@ type Props = {
    */
   crumbs?: Crumb[];
   /**
-   * Narrow-screen fallback target for the back affordance when there is no
-   * navigation history (deep link). Defaults to the parent crumb's href.
+   * Narrow-screen target for the back affordance. Defaults to the parent
+   * crumb's href.
    */
   backTo?: string;
   /** Show the connection status on narrow screens (wide shows it in the rail). Default true. */
@@ -71,10 +71,12 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
   const trail = crumbs ?? crumbsFromPath(pathname, title);
   const parent = trail.length > 1 ? trail[trail.length - 2] : undefined;
 
+  // Back is absolute: it always lands on the parent page, never "one step back" in history (which
+  // could be another tab or a page you came from sideways). dismissTo pops to the parent when it's
+  // already under this page, else replaces this page with it.
   const goBack = () => {
     if (onBack) return onBack();
-    if (router.canGoBack()) router.back();
-    else router.navigate((backTo ?? parent?.href ?? "/") as never);
+    router.dismissTo((backTo ?? parent?.href ?? "/") as never);
   };
 
   const goCrumb = (href: string) => {
@@ -89,7 +91,9 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
             Always rendered — a landing page shows its own name as the single
             crumb, so the bar is a consistent landmark on every wide screen. */}
         {(
-          <View style={styles.crumbBar}>
+          // Pad past the status bar: the app draws edge-to-edge, so without the top inset the crumb
+          // bar renders under the status bar and the system intercepts taps on the breadcrumbs.
+          <View style={[styles.crumbBar, { paddingTop: insets.top + spacing.md + 2 }]}>
             <View style={[styles.crumbRow, wideContent]}>
               {trail.map((crumb, i) => {
                 const last = i === trail.length - 1;
@@ -132,7 +136,7 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
     <View style={[styles.narrowBar, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.narrowRow}>
         {parent && (
-          <Pressable style={styles.backBtn} onPress={goBack} hitSlop={10}>
+          <Pressable style={styles.backBtn} onPress={goBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
             <ChevronLeft size={20} color={colors.accent} />
             <Text style={styles.backLabel} numberOfLines={1}>{parent.label}</Text>
           </Pressable>

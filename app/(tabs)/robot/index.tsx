@@ -1,6 +1,7 @@
 import { RobotCard } from "@/src/components/ui/RobotCards";
 import {
   Button,
+  buttonTextColor,
   Card,
   colors,
   Divider,
@@ -16,12 +17,12 @@ import {
   type,
 } from "@/src/components/ui/kit";
 import { usePaneLayout } from "@/src/components/ui/responsive";
-import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
 import { useRobots, useSelectedRobot } from "@/src/providers/RobotProvider";
-import { robotClient } from "@/src/services/RobotConnectService";
-import { connKey, isSaved, manualRobot, recordConnection, removeRecent, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
-import { ChevronDown, ChevronUp, Clock, Radar, Star, Wifi, WifiOff, X } from "lucide-react-native";
+import { addressesOf, isSaved, manualRobot, robotKey, sameRobot, removeRecent, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
+import { connectToRobot } from "@/src/services/robotConnect";
+import { ChevronDown, ChevronUp, Clock, QrCode, Radar, Star, Wifi, WifiOff, X } from "lucide-react-native";
+import { router } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import ConnectedRobot from "./connected-robot";
@@ -32,6 +33,8 @@ export default function Robot() {
   const { recents, saved } = useConnectionStore();
   const [manualIp, setManualIp] = useState("");
   const [showRecent, setShowRecent] = useState(false);
+  // The recent row whose other addresses are expanded (by robot key).
+  const [openAddrs, setOpenAddrs] = useState<string | null>(null);
 
   // Hooks must run unconditionally every render, so this is read before the
   // early Redirect below even though only the non-redirect branch needs it.
@@ -51,12 +54,11 @@ export default function Robot() {
     return <ConnectedRobot />;
   }
 
-  function connectRobot(robot: RobotInfo) {
-    recordConnection(robot);
-    setSelectedRobot(robot);
-    robotClient.connectTo(robot);
-    // No navigation needed — selecting a robot flips this screen to the
-    // connected dashboard in place (see the selectedRobot branch above).
+  // A remembered robot connects on the best of all its known addresses; `exact` uses just this one.
+  // No navigation needed — selecting a robot flips this screen to the connected dashboard in place
+  // (see the selectedRobot branch above).
+  function connectRobot(robot: RobotInfo, exact = false) {
+    connectToRobot(robot, { exact });
   }
 
   function connectManual() {
@@ -64,8 +66,16 @@ export default function Robot() {
     // so e.g. "192.168.1.50:9000" still resolves.
     const trimmed = manualIp.trim().replace(/:\d+$/, "");
     if (!trimmed) return;
-    connectRobot(manualRobot(trimmed));
+    connectRobot(manualRobot(trimmed), true);
   }
+
+  // The address a recent row shows: where discovery sees the robot now, else the one last used.
+  const shownAddress = (r: RobotInfo) => {
+    const live = robots.find(d => sameRobot(d, r));
+    return live ? { ip: live.ipAddress, port: live.port } : { ip: r.ipAddress, port: r.port };
+  };
+
+  const uniqueRobots = robots.filter((r, i) => robots.findIndex(o => sameRobot(o, r)) === i);
 
   // Label for a recent/saved entry: a learned robot name, else the raw address.
   const entryTitle = (r: RobotInfo) =>
@@ -96,6 +106,15 @@ export default function Robot() {
           <Button label="Connect" size="sm" onPress={connectManual} disabled={!manualIp.trim()} />
         </View>
 
+        <Button
+          label="Scan station tag"
+          variant="secondary"
+          size="sm"
+          icon={<QrCode size={16} color={buttonTextColor("secondary")} />}
+          onPress={() => router.navigate("/robot/scan-station")}
+          style={styles.scanBtn}
+        />
+
         {recents.length > 0 && (
           <>
             <Divider style={styles.lastIpDivider} />
@@ -113,25 +132,58 @@ export default function Robot() {
 
             {showRecent && (
               <View style={styles.recentList}>
-                {recents.map(r => (
-                  <View key={connKey(r)} style={styles.recentRow}>
-                    <TouchableOpacity style={styles.recentConnect} onPress={() => connectRobot(r)} activeOpacity={0.7}>
-                      <Text style={styles.recentName} numberOfLines={1}>{entryTitle(r)}</Text>
-                      <Text style={styles.recentSub} numberOfLines={1}>
-                        {r.robotType ? `${r.robotType} · ` : ""}{r.ipAddress}:{r.port}
-                      </Text>
-                    </TouchableOpacity>
-                    <Pressable onPress={() => toggleSaved(r)} hitSlop={8} style={styles.recentIcon}>
-                      {/* key flips with saved-state so the SVG remounts — react-native-svg
-                          otherwise keeps the old fill on an in-place color-only prop change
-                          (lucide builds its paths keyless), leaving the star stale on native. */}
-                      <Star key={isSaved(r) ? "on" : "off"} size={16} color={isSaved(r) ? colors.warning : colors.textFaint} fill={isSaved(r) ? colors.warning : "transparent"} />
-                    </Pressable>
-                    <Pressable onPress={() => removeRecent(r)} hitSlop={8} style={styles.recentIcon}>
-                      <X size={16} color={colors.textFaint} />
-                    </Pressable>
-                  </View>
-                ))}
+                {recents.map(r => {
+                  // One row per robot; its other addresses expand underneath.
+                  const key = robotKey(r);
+                  const shown = shownAddress(r);
+                  const others = addressesOf(r).filter(a => a.ip !== shown.ip || a.port !== shown.port);
+                  const open = openAddrs === key && others.length > 0;
+                  return (
+                    <View key={key}>
+                      <View style={styles.recentRow}>
+                        <TouchableOpacity style={styles.recentConnect} onPress={() => connectRobot(r)} activeOpacity={0.7}>
+                          <Text style={styles.recentName} numberOfLines={1}>{entryTitle(r)}</Text>
+                          <Text style={styles.recentSub} numberOfLines={1}>
+                            {r.robotType ? `${r.robotType} · ` : ""}{shown.ip}:{shown.port}
+                          </Text>
+                        </TouchableOpacity>
+                        {others.length > 0 && (
+                          <Pressable
+                            onPress={() => setOpenAddrs(open ? null : key)}
+                            hitSlop={8}
+                            style={styles.moreChip}
+                            accessibilityLabel={open ? "Hide other addresses" : "Show other addresses"}
+                          >
+                            <Text style={styles.moreChipText}>+{others.length}</Text>
+                            {open
+                              ? <ChevronUp   size={12} color={colors.textFaint} />
+                              : <ChevronDown size={12} color={colors.textFaint} />}
+                          </Pressable>
+                        )}
+                        <Pressable onPress={() => toggleSaved(r)} hitSlop={8} style={styles.recentIcon} accessibilityLabel={isSaved(r) ? "Unsave robot" : "Save robot"}>
+                          {/* key flips with saved-state so the SVG remounts — react-native-svg
+                              otherwise keeps the old fill on an in-place color-only prop change
+                              (lucide builds its paths keyless), leaving the star stale on native. */}
+                          <Star key={isSaved(r) ? "on" : "off"} size={16} color={isSaved(r) ? colors.warning : colors.textFaint} fill={isSaved(r) ? colors.warning : "transparent"} />
+                        </Pressable>
+                        <Pressable onPress={() => removeRecent(r)} hitSlop={8} style={styles.recentIcon} accessibilityLabel="Remove from recent">
+                          <X size={16} color={colors.textFaint} />
+                        </Pressable>
+                      </View>
+                      {open && others.map(a => (
+                        <TouchableOpacity
+                          key={`${a.ip}:${a.port}`}
+                          style={styles.addrRow}
+                          onPress={() => connectRobot({ ...r, ipAddress: a.ip, port: a.port }, true)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.recentSub} numberOfLines={1}>{a.ip}:{a.port}</Text>
+                          <Text style={styles.addrConnect}>Connect</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  );
+                })}
               </View>
             )}
           </>
@@ -141,7 +193,7 @@ export default function Robot() {
       <View style={styles.statRow}>
         <StatTile
           label="Robots Found"
-          value={robots.length}
+          value={uniqueRobots.length}
           icon={Radar}
           style={styles.statTile}
         />
@@ -155,15 +207,32 @@ export default function Robot() {
     </>
   );
 
-  const savedSection = saved.length > 0 ? (
+  // Dedupe: a saved robot that's also being discovered shows under "Discovered", so here we only
+  // list saved robots that aren't currently on the network — the reason the Saved list exists
+  // (reconnect to something you can't see right now). Matched by serial too, so a robot saved
+  // under its Tailscale address is hidden while it is discovered on the LAN.
+  const savedOffline = saved.filter(s => !robots.some(d => sameRobot(d, s)));
+
+  // Starred (saved) robots sort to the top of the discovered list, then alphabetically. One row per
+  // robot even if discovery reports it more than once (on several addresses).
+  const robotLabel = (r: typeof robots[number]) =>
+    (r.robotName && r.robotName !== "Manual" ? r.robotName : r.ipAddress) ?? "";
+  const sortedRobots = [...uniqueRobots].sort((a, b) => {
+    const sa = isSaved(a) ? 0 : 1;
+    const sb = isSaved(b) ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    return robotLabel(a).localeCompare(robotLabel(b));
+  });
+
+  const savedSection = savedOffline.length > 0 ? (
     <>
       <SectionHeader
-        title="Saved Connections"
+        title="Saved (offline)"
         icon={Star}
-        right={<InfoTip text="Starred connections are kept here so you can reconnect to a robot even when it isn't being discovered on the network. Tap the star to remove one." />}
+        right={<InfoTip text="Starred robots that aren't on the network right now — reconnect on any address they were reached on. Saved robots that are currently discovered appear under Discovered (with a filled star). Tap a star to remove one." />}
       />
       <View>
-        {saved.map(r => <RobotCard key={connKey(r)} robot={r} />)}
+        {savedOffline.map(r => <RobotCard key={robotKey(r)} robot={r} />)}
       </View>
     </>
   ) : null;
@@ -189,8 +258,8 @@ export default function Robot() {
         />
       ) : (
         <View>
-          {robots.map((r) => (
-            <RobotCard key={r.serialNumber || r.ipAddress} robot={r} />
+          {sortedRobots.map((r) => (
+            <RobotCard key={robotKey(r)} robot={r} />
           ))}
         </View>
       )}
@@ -221,6 +290,8 @@ export default function Robot() {
 const styles = StyleSheet.create({
   inputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm + 2 },
   input:    { flex: 1 },
+
+  scanBtn: { marginTop: spacing.sm },
 
   lastIpDivider: { marginTop: spacing.sm, marginBottom: 2 },
   recentHeader: {
@@ -269,6 +340,34 @@ const styles = StyleSheet.create({
   },
   recentIcon: {
     padding: 2,
+  },
+  moreChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+  },
+  moreChipText: {
+    ...type.caption,
+    color: colors.textFaint,
+    fontWeight: "600",
+  },
+  addrRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingLeft: spacing.md,
+    paddingRight: 2,
+  },
+  addrConnect: {
+    ...type.caption,
+    color: colors.accent,
+    fontWeight: "600",
+    marginLeft: "auto",
   },
 
   statRow:  { flexDirection: "row", gap: spacing.md },

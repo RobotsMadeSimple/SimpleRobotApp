@@ -4,35 +4,61 @@ import { Lock } from "lucide-react-native";
 import { ms } from "../builderStyles";
 import { accents, colors } from "@/src/components/ui/kit";
 import { useExpressionEnv } from "./ExpressionEnv";
+import { pluginGroupTitle, useSplitSymbols } from "./pluginSymbols";
 
 /**
  * "Properties" and "IO" sections for a variable picker that inserts into an
  * expression. Properties are read-only system values (`$robot.x`, `$time.hour`, …);
  * IO names read the boards. Picking one hands back its name without the `$`.
  */
-export function SymbolSections({ search, onPick }: { search: string; onPick: (name: string) => void }) {
+export function SymbolSections({ search, onPick, includePlugins = true, pluginsOnly = false }: {
+  search: string;
+  onPick: (name: string) => void;
+  /** Include plugin-contributed property groups ($scale.weight). */
+  includePlugins?: boolean;
+  /** Show ONLY the plugin property groups (for a dedicated Plugins tab). */
+  pluginsOnly?: boolean;
+}) {
   const env = useExpressionEnv();
+  const split = useSplitSymbols();
   if (!env?.symbols) return null;
   const q = search.trim().toLowerCase();
   const match = (name: string, description: string) =>
     !q || name.toLowerCase().includes(q) || description.toLowerCase().includes(q);
-  const properties = env.symbols.properties.filter(p => match(p.name, p.description));
+  const properties = split.properties.filter(p => match(p.name, p.description));
   const io = env.symbols.io.filter(i => match(i.name, i.description));
+  // Plugin properties ($scale.weight) under their plugin's name; a match on the
+  // plugin's name shows its whole group.
+  const pluginGroups = split.plugins
+    .map(g => ({ g, props: g.properties.filter(p => match(p.name, p.description) || match(g.name, "")) }))
+    .filter(x => x.props.length > 0);
 
   return (
     <>
-      <Section title="PROPERTIES · READ-ONLY" count={properties.length}>
-        {properties.map((p, i) => (
-          <SymbolRow key={p.name} name={p.name} description={p.description} tint={accents.cyan} readOnly
-            last={i === properties.length - 1} onPress={() => onPick(p.name)} />
-        ))}
-      </Section>
-      <Section title="IO" count={io.length}>
-        {io.map((x, i) => (
-          <SymbolRow key={x.name} name={x.name} description={x.description} tint={colors.success}
-            last={i === io.length - 1} onPress={() => onPick(x.name)} />
-        ))}
-      </Section>
+      {!pluginsOnly && (
+        <Section title="PROPERTIES · READ-ONLY" count={properties.length}>
+          {properties.map((p, i) => (
+            <SymbolRow key={p.name} name={p.name} description={p.description} tint={accents.cyan} readOnly
+              last={i === properties.length - 1} onPress={() => onPick(p.name)} />
+          ))}
+        </Section>
+      )}
+      {(pluginsOnly || includePlugins) && pluginGroups.map(({ g, props }) => (
+        <Section key={g.id} title={pluginGroupTitle(g).toUpperCase()} count={props.length}>
+          {props.map((p, i) => (
+            <SymbolRow key={p.name} name={p.name} description={p.description} tint={accents.cyan} readOnly
+              last={i === props.length - 1} onPress={() => onPick(p.name)} />
+          ))}
+        </Section>
+      ))}
+      {!pluginsOnly && (
+        <Section title="IO" count={io.length}>
+          {io.map((x, i) => (
+            <SymbolRow key={x.name} name={x.name} description={x.description} tint={colors.success}
+              last={i === io.length - 1} onPress={() => onPick(x.name)} />
+          ))}
+        </Section>
+      )}
     </>
   );
 }

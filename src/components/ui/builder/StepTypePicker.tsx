@@ -10,9 +10,10 @@ import {
   View,
 } from "react-native";
 import { ChevronLeft, OctagonX, Search, X } from "lucide-react-native";
-import { StepType } from "@/src/models/robotModels";
+import { PluginStepContribution, StepType } from "@/src/models/robotModels";
 import {
   BACKGROUND_RESTRICTED,
+  PLUGIN_CATEGORY,
   STEP_CATEGORIES,
   STEP_THEME,
   STEP_TYPES,
@@ -25,6 +26,7 @@ import {
 import { ms } from "./builderStyles";
 import { usePaneLayout } from "@/src/components/ui/responsive";
 import { colors, radii, shadows, spacing } from "@/src/components/ui/kit";
+import { usePluginContributions } from "./usePluginContributions";
 
 // ── Step type picker modal ────────────────────────────────────────────────────
 //
@@ -40,20 +42,33 @@ import { colors, radii, shadows, spacing } from "@/src/components/ui/kit";
 //
 // Picking a tile still calls onPick(type) exactly as before — this is
 // navigation and presentation only.
+//
+// Plugins — a ninth category, present only while some installed plugin
+// contributes steps (GetPluginContributions). One tile per (plugin, step);
+// picking one calls onPickPlugin. A plugin that is not running still lists its
+// steps, greyed with a "not running" hint, so a program can be written before
+// the plugin is started.
 
 export function StepTypePicker({
   visible,
   onPick,
+  onPickPlugin,
   onClose,
   isBackgroundMode = false,
 }: {
   visible: boolean;
   onPick: (type: StepType) => void;
+  onPickPlugin?: (contribution: PluginStepContribution) => void;
   onClose: () => void;
   isBackgroundMode?: boolean;
 }) {
+  const contributions = usePluginContributions();
+  const allPluginSteps = contributions.data.steps;
+  const pluginSteps = useMemo(() => (onPickPlugin ? allPluginSteps : []), [onPickPlugin, allPluginSteps]);
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState<StepCategoryKey | null>(null);
+  // Within the Plugins category, a second layer: pick a plugin, then its steps.
+  const [activePlugin, setActivePlugin] = useState<string | null>(null);
   const [gridWidth, setGridWidth] = useState(360);
   const paneLayout = usePaneLayout();
   const isWide = paneLayout !== "single";
@@ -63,8 +78,22 @@ export function StepTypePicker({
   const tileWidth = (gridWidth - GAP * (cols - 1)) / cols;
 
   useEffect(() => {
-    if (visible) { setSearch(""); setActiveCat(null); }
+    if (visible) { setSearch(""); setActiveCat(null); setActivePlugin(null); }
+    // Pick up plugins installed or started since the builder opened.
+    if (visible && onPickPlugin && contributions.status !== "unsupported") contributions.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
+
+  // Plugin steps grouped by plugin, for the plugin-name layer (Plugins → plugin → steps).
+  const pluginGroups = useMemo(() => {
+    const m = new Map<string, { pluginId: string; pluginName: string; running: boolean; steps: PluginStepContribution[] }>();
+    for (const c of pluginSteps) {
+      let g = m.get(c.pluginId);
+      if (!g) { g = { pluginId: c.pluginId, pluginName: c.pluginName, running: c.running, steps: [] }; m.set(c.pluginId, g); }
+      g.steps.push(c);
+    }
+    return [...m.values()].sort((a, b) => a.pluginName.localeCompare(b.pluginName));
+  }, [pluginSteps]);
 
   const q = search.trim().toLowerCase();
   const searchResults = useMemo(() => {
@@ -77,7 +106,70 @@ export function StepTypePicker({
     );
   }, [q]);
 
-  const activeCategory = activeCat ? STEP_CATEGORIES.find(c => c.key === activeCat) ?? null : null;
+  const pluginResults = useMemo(() => {
+    if (!q) return [];
+    return pluginSteps.filter(c =>
+      c.step.label.toLowerCase().includes(q) ||
+      (c.step.description ?? "").toLowerCase().includes(q) ||
+      c.pluginName.toLowerCase().includes(q) ||
+      PLUGIN_CATEGORY.label.toLowerCase().includes(q)
+    );
+  }, [q, pluginSteps]);
+
+  const activeCategory = activeCat === "plugins"
+    ? (pluginSteps.length > 0 ? PLUGIN_CATEGORY : null)
+    : activeCat ? STEP_CATEGORIES.find(c => c.key === activeCat) ?? null : null;
+  const selectedGroup = activePlugin ? pluginGroups.find(g => g.pluginId === activePlugin) ?? null : null;
+  const resultCount = (searchResults?.length ?? 0) + pluginResults.length;
+
+  function renderPluginTile(c: PluginStepContribution, opts?: { showCategory?: boolean }) {
+    const theme = STEP_THEME["Plugin"];
+    const subtitle = [c.pluginName, c.step.description].filter(Boolean).join(" — ");
+    return (
+      <TouchableOpacity
+        key={`${c.pluginId}/${c.step.id}`}
+        style={[pt.tile, { width: tileWidth }, !c.running && pt.tileNotRunning]}
+        onPress={() => { onPickPlugin?.(c); onClose(); }}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${c.step.label} — ${c.pluginName}${c.running ? "" : " (not running)"}`}
+      >
+        <View style={[pt.tileIcon, { backgroundColor: theme.iconBg }]}>
+          <StepIcon type="Plugin" size={20} color={theme.iconColor} />
+        </View>
+        <Text style={[pt.tileLabel, { color: theme.accent }]} numberOfLines={2}>{c.step.label}</Text>
+        <Text style={pt.tileSub} numberOfLines={2}>{subtitle}</Text>
+        {!c.running && <Text style={pt.notRunning}>not running</Text>}
+        {opts?.showCategory && (
+          <View style={[pt.catTag, { backgroundColor: PLUGIN_CATEGORY.soft }]}>
+            <Text style={[pt.catTagText, { color: PLUGIN_CATEGORY.color }]} numberOfLines={1}>{PLUGIN_CATEGORY.label}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }
+
+  function renderPluginGroupTile(g: { pluginId: string; pluginName: string; running: boolean; steps: PluginStepContribution[] }) {
+    const theme = STEP_THEME["Plugin"];
+    const count = g.steps.length;
+    return (
+      <TouchableOpacity
+        key={g.pluginId}
+        style={[pt.tile, { width: tileWidth }, !g.running && pt.tileNotRunning]}
+        onPress={() => setActivePlugin(g.pluginId)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${g.pluginName} — ${count} step${count !== 1 ? "s" : ""}${g.running ? "" : " (not running)"}`}
+      >
+        <View style={[pt.tileIcon, { backgroundColor: theme.iconBg }]}>
+          <StepIcon type="Plugin" size={20} color={theme.iconColor} />
+        </View>
+        <Text style={[pt.tileLabel, { color: theme.accent }]} numberOfLines={2}>{g.pluginName}</Text>
+        <Text style={pt.tileSub} numberOfLines={1}>{count} step{count !== 1 ? "s" : ""}</Text>
+        {!g.running && <Text style={pt.notRunning}>not running</Text>}
+      </TouchableOpacity>
+    );
+  }
 
   function renderBlockTile(s: typeof STEP_TYPES[0], opts?: { showCategory?: boolean }) {
     const theme      = STEP_THEME[s.type] ?? STEP_THEME["MoveL"];
@@ -116,12 +208,12 @@ export function StepTypePicker({
 
   function renderCategoryTile(cat: StepCategory) {
     const Icon = cat.icon;
-    const count = cat.types.length;
+    const count = cat.key === "plugins" ? pluginSteps.length : cat.types.length;
     return (
       <TouchableOpacity
         key={cat.key}
         style={[pt.catTile, { width: tileWidth }]}
-        onPress={() => setActiveCat(cat.key)}
+        onPress={() => { setActiveCat(cat.key); setActivePlugin(null); }}
         activeOpacity={0.7}
         accessibilityRole="button"
         accessibilityLabel={`${cat.label} — ${count} block${count !== 1 ? "s" : ""}`}
@@ -143,14 +235,14 @@ export function StepTypePicker({
             {activeCategory && !q ? (
               <TouchableOpacity
                 style={pt.backRow}
-                onPress={() => setActiveCat(null)}
+                onPress={() => { if (selectedGroup) setActivePlugin(null); else setActiveCat(null); }}
                 hitSlop={8}
                 activeOpacity={0.7}
                 accessibilityRole="button"
-                accessibilityLabel="Back to categories"
+                accessibilityLabel={selectedGroup ? "Back to plugins" : "Back to categories"}
               >
                 <ChevronLeft size={18} color={colors.textMuted} />
-                <Text style={ms.title} numberOfLines={1}>{activeCategory.label}</Text>
+                <Text style={ms.title} numberOfLines={1}>{selectedGroup ? selectedGroup.pluginName : activeCategory.label}</Text>
               </TouchableOpacity>
             ) : (
               <Text style={ms.title}>Add Step</Text>
@@ -187,15 +279,34 @@ export function StepTypePicker({
             onLayout={e => setGridWidth(e.nativeEvent.layout.width)}
           >
             {searchResults ? (
-              searchResults.length === 0 ? (
+              resultCount === 0 ? (
                 <Text style={ms.emptyHint}>No blocks match "{q}".</Text>
               ) : (
                 <>
                   <Text style={pt.resultCount}>
-                    {searchResults.length} block{searchResults.length !== 1 ? "s" : ""} found
+                    {resultCount} block{resultCount !== 1 ? "s" : ""} found
                   </Text>
                   <View style={pt.grid}>
                     {searchResults.map(s => renderBlockTile(s, { showCategory: true }))}
+                    {pluginResults.map(c => renderPluginTile(c, { showCategory: true }))}
+                  </View>
+                </>
+              )
+            ) : activeCategory?.key === "plugins" ? (
+              selectedGroup ? (
+                // Layer 3 — the chosen plugin's steps.
+                <>
+                  <CategoryBanner cat={activeCategory} />
+                  <View style={pt.grid}>
+                    {selectedGroup.steps.map(c => renderPluginTile(c))}
+                  </View>
+                </>
+              ) : (
+                // Layer 2 — one tile per plugin; tap to see its steps.
+                <>
+                  <CategoryBanner cat={activeCategory} />
+                  <View style={pt.grid}>
+                    {pluginGroups.map(g => renderPluginGroupTile(g))}
                   </View>
                 </>
               )
@@ -214,6 +325,7 @@ export function StepTypePicker({
               // vocabulary is visible at a glance and one tap opens a family.
               <View style={pt.grid}>
                 {STEP_CATEGORIES.map(cat => renderCategoryTile(cat))}
+                {pluginSteps.length > 0 && renderCategoryTile(PLUGIN_CATEGORY)}
               </View>
             )}
           </ScrollView>
@@ -318,6 +430,10 @@ const pt = StyleSheet.create({
     position: "relative",
   },
   tileRestricted: { opacity: 0.35 },
+  // Still selectable — only dimmed, unlike a restricted tile.
+  tileNotRunning: { opacity: 0.6, borderStyle: "dashed" },
+  tileSub: { fontSize: 10.5, color: colors.textMuted, textAlign: "center", lineHeight: 14 },
+  notRunning: { fontSize: 10, fontWeight: "700", color: colors.warning, letterSpacing: 0.3 },
   tileIcon: {
     width: 40, height: 40, borderRadius: radii.md,
     justifyContent: "center", alignItems: "center",

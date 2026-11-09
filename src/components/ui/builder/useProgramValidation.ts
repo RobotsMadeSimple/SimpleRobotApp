@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BuiltProgram, ProgramStep, ValidationProblem } from "@/src/models/robotModels";
 import { isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
-import { ScopeFrame, stepLabel } from "./stepUtils";
+import { ScopeFrame, bodyFrames, bodyOf } from "./stepUtils";
 
 export type ValidationState = {
   /** False once the controller has said it does not know ValidateBuiltProgram. */
@@ -55,15 +55,10 @@ export function useProgramValidation(program: BuiltProgram, enabled: boolean, de
 /** Problems on a step itself, and on anything nested inside it (loop body, branches). */
 export type StepProblems = { own: ValidationProblem[]; nested: ValidationProblem[] };
 
+// Every body of a block step with the scope frame that enters it (loop, if/else-if/else,
+// switch cases/default, try/catch) — one table in stepUtils, mirroring stepTree.
 function childLists(s: ProgramStep): { frame: Omit<ScopeFrame, "stepId">; steps: ProgramStep[] }[] {
-  return [
-    { frame: { kind: "loop" as const, label: stepLabel(s) }, steps: s.type === "Loop" ? s.loopSteps ?? [] : [] },
-    { frame: { kind: "ifTrue" as const, label: "IF" }, steps: s.ifSteps ?? [] },
-    ...(s.elseIfBranches ?? []).map((b, i) => ({
-      frame: { kind: "elseIf" as const, label: `ELSE IF ${i + 1}`, branchId: b.id }, steps: b.steps ?? [],
-    })),
-    { frame: { kind: "else" as const, label: "ELSE" }, steps: s.elseSteps ?? [] },
-  ];
+  return bodyFrames(s).map(frame => ({ frame, steps: bodyOf(s, frame) ?? [] }));
 }
 
 /** stepId → its problems, with each problem also listed as `nested` on every ancestor. */

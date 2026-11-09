@@ -10,6 +10,8 @@ export default function RobotLayout() {
         name="config"
         options={{ headerShown: false }}
       />
+      <Stack.Screen name="scan-station"   options={{ headerShown: false }} />
+      <Stack.Screen name="create-station" options={{ headerShown: false }} />
     </Stack>
   );
 }

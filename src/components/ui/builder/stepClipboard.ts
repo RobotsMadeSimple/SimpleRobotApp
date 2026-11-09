@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { ProgramStep } from "@/src/models/robotModels";
+import { mapStepTree } from "@/src/models/stepTree";
+import { newId } from "./stepUtils";
 
 // Module-level step clipboard shared across every builder instance. Entering a
 // routine pushes a NEW builder screen, so a per-component clipboard is lost when
@@ -33,4 +35,29 @@ function subscribe(cb: () => void): () => void {
 export function useStepClipboard(): [ProgramStep[], (steps: ProgramStep[]) => void] {
   const value = useSyncExternalStore(subscribe, getStepClipboard, getStepClipboard);
   return [value, setStepClipboard];
+}
+
+// ── Copies ────────────────────────────────────────────────────────────────────
+
+/**
+ * A fully independent copy of a step (steps are JSON-serialisable — they round-trip through the
+ * robot as JSON). The clipboard only ever holds these, so a later edit of the program can never
+ * reach into it.
+ */
+export function detachedCopy(step: ProgramStep): ProgramStep {
+  return JSON.parse(JSON.stringify(step));
+}
+
+/**
+ * A copy of `step` ready to paste: deep-cloned, then fresh ids for it and every step in every
+ * body (via stepTree), including else-if branch and switch case ids. Labels keep their labelId so
+ * a pasted Go To Label still finds its pasted Label.
+ */
+export function cloneForPaste(step: ProgramStep): ProgramStep {
+  return mapStepTree(detachedCopy(step), s => ({
+    ...s,
+    id: newId(),
+    ...(s.elseIfBranches ? { elseIfBranches: s.elseIfBranches.map(b => ({ ...b, id: newId() })) } : {}),
+    ...(s.switchCases    ? { switchCases:    s.switchCases.map(c => ({ ...c, id: newId() })) }    : {}),
+  }));
 }

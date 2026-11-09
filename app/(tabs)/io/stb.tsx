@@ -1,4 +1,4 @@
-import { IORow } from "@/src/components/ui/io/ioShared";
+import { DeviceStatusBar, IORow } from "@/src/components/ui/io/ioShared";
 import { useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react-native";
@@ -14,7 +14,6 @@ import {
   SectionHeader,
   spacing,
   StatTile,
-  StatusPill,
 } from "@/src/components/ui/kit";
 
 export default function StbPage() {
@@ -42,15 +41,9 @@ export default function StbPage() {
       <PageHeader
         title="STB4100"
         subtitle="Robot's built-in I/O board · USB HID"
-        right={
-          <StatusPill
-            label={status.driverConnected ? "Connected" : "Offline"}
-            tone={status.driverConnected ? "success" : "danger"}
-            dot
-          />
-        }
       />
       <Screen>
+        <DeviceStatusBar connected={status.driverConnected} />
         <View style={styles.statRow}>
           <StatTile label="Inputs Active" value={`${activeInputs}/${inputs.length}`} icon={ArrowDownToLine} style={styles.statTile} />
           <StatTile label="Outputs On" value={`${activeOutputs}/${outputs.length}`} icon={ArrowUpFromLine}

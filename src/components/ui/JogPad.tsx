@@ -2,6 +2,7 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef } from "react";
 import { AppState, AppStateStatus } from "react-native";
+import { haptic } from "@/src/components/ui/haptics";
 import { CartesianJogPanel, CartesianAxis } from "@/src/components/ui/jog/CartesianJogPanel";
 import { CartesianJoystickPanel } from "@/src/components/ui/jog/CartesianJoystickPanel";
 import { JointJogPanel, JointAxis } from "@/src/components/ui/jog/JointJogPanel";
@@ -17,6 +18,12 @@ const DEFAULT_SPEEDS = { Slow: 10, Normal: 100, Fast: 300 };
 // margin while cutting jog traffic ~85% vs the old 20ms firehose, which used to
 // leave StopJog stuck behind a congested socket over WiFi (laggy start/stop).
 export const JOG_HEARTBEAT_MS = 150;
+
+// While a continuous jog is held we fire a rapid train of light impacts so the
+// robot "rumbles" under the finger (expo-haptics has no sustained vibration, so
+// this loop fakes one). ~60ms blurs the taps into a buzz without over-driving
+// the taptic engine. Native only — haptic() no-ops on web/Electron.
+const JOG_RUMBLE_MS = 60;
 
 function buildSpeedMap(overrides?: { Slow: number; Normal: number; Fast: number }): Record<string, number> {
   const s = overrides ?? DEFAULT_SPEEDS;
@@ -87,6 +94,17 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides, padStyl
   const joyXYRef  = useRef<{ x: number; y: number } | null>(null); // analog X/Y stick
   const joyZRef   = useRef<number | null>(null);                 // analog Z stick (robot Z)
   const beatRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rumbleRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Rumble: a light-impact train for as long as a continuous jog is held ──────
+  const startRumble = useCallback(() => {
+    if (rumbleRef.current) return;
+    haptic("medium");                                        // a firm "engaged" tap on press
+    rumbleRef.current = setInterval(() => haptic("light"), JOG_RUMBLE_MS);
+  }, []);
+  const stopRumble = useCallback(() => {
+    if (rumbleRef.current) { clearInterval(rumbleRef.current); rumbleRef.current = null; }
+  }, []);
 
   // ── Heartbeat: compose the combined vector and send one command ───────────────
   const tick = useCallback(() => {
@@ -115,13 +133,15 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides, padStyl
     if (beatRef.current) return;
     tick();                                   // fire immediately so motion starts on press
     beatRef.current = setInterval(tick, JOG_HEARTBEAT_MS);
-  }, [tick]);
+    startRumble();
+  }, [tick, startRumble]);
 
   const maybeStop = useCallback(() => {
     if (activeRef.current.size > 0 || joyXYRef.current || joyZRef.current != null) return;
     if (beatRef.current) { clearInterval(beatRef.current); beatRef.current = null; }
+    stopRumble();
     robotClient.stopJog();
-  }, []);
+  }, [stopRumble]);
 
   // ── Full stop (navigation, backgrounding) ─────────────────────────────────────
   const stopJog = useCallback(() => {
@@ -129,8 +149,9 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides, padStyl
     joyXYRef.current = null;
     joyZRef.current = null;
     if (beatRef.current) { clearInterval(beatRef.current); beatRef.current = null; }
+    stopRumble();
     robotClient.stopJog();
-  }, []);
+  }, [stopRumble]);
 
   useFocusEffect(useCallback(() => () => stopJog(), [stopJog]));
   useEffect(() => {
@@ -147,6 +168,7 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides, padStyl
     if (isStep && jogMode !== "Tool" && !joystick) {
       const step = speedMap[selectedSpeed];
       const v = cartVec(axis, direction);
+      haptic("light");                          // discrete step move: one bump
       robotClient.offsetL({ x: v.x * step, y: v.y * step, z: v.z * step, rz: v.rz * step, speed: 100, accel: 200, decel: 1000 });
       return;
     }
@@ -163,6 +185,7 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides, padStyl
     if (isStep) {
       const stepDeg = jointStepMap[selectedSpeed] ?? 2;
       const v = jointVec(joint, direction);
+      haptic("light");                          // discrete step move: one bump
       robotClient.jogJ({ x: v.x * stepDeg, y: v.y * stepDeg, z: v.z * stepDeg, rz: v.rz * stepDeg, speed: 20, accel: 100, decel: 200 });
       return;
     }

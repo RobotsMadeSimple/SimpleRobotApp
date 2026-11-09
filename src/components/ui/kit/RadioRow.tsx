@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { withHaptic } from "@/src/components/ui/haptics";
 import { colors, spacing, type } from "./theme";
 
 type Props = {
@@ -27,7 +28,7 @@ export function RadioRow({ title, subtitle, subtitleNode, selected, onPress, rig
   return (
     <AnimatedPressable
       style={[styles.row, style]}
-      onPress={onPress}
+      onPress={withHaptic("selection", onPress)}
       accessibilityRole="radio"
       accessibilityState={{ selected }}
     >

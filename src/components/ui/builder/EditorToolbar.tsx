@@ -1,12 +1,24 @@
 import React, { ReactNode, useEffect, useRef } from "react";
 import { Platform, StyleSheet, TouchableOpacity, View } from "react-native";
-import { Redo2, Undo2 } from "lucide-react-native";
-import { colors, radii, spacing } from "@/src/components/ui/kit";
+import { Blocks, Code, Redo2, Undo2 } from "lucide-react-native";
+import { colors, radii, spacing, SegmentedControl } from "@/src/components/ui/kit";
+import type { EditorMode } from "@/src/models/robotModels";
+
+const EDITOR_MODES = [
+  { value: "blocks" as const, label: "Blocks", icon: (c: string, s: number) => <Blocks size={s} color={c} /> },
+  { value: "text" as const,   label: "Text",   icon: (c: string, s: number) => <Code size={s} color={c} /> },
+];
+
+/** The Blocks | Text switch for the program's editor view. */
+export function EditorModeToggle({ value, onChange }: { value: EditorMode; onChange: (m: EditorMode) => void }) {
+  return <SegmentedControl options={EDITOR_MODES} value={value} onChange={onChange} size="sm" style={styles.modeToggle} />;
+}
 
 /**
- * The builder's editing tools: undo / redo plus whatever the screen adds after them
- * (problem count, history). Rendered in the wide header's action slot, or as a slim
- * bar under the header on narrow screens where the header has no room.
+ * The builder's editing tools: the Blocks | Text view switch (when the screen passes
+ * `editorMode`), undo / redo, plus whatever the screen adds after them (problem count,
+ * history). Rendered in the wide header's action slot, or at the start of the bottom
+ * Save bar on narrow screens.
  */
 export function EditorToolbar({
   canUndo,
@@ -15,17 +27,24 @@ export function EditorToolbar({
   onRedo,
   children,
   variant,
+  editorMode,
+  onEditorModeChange,
 }: {
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
   children?: ReactNode;
-  variant: "header" | "bar";
+  variant: "header" | "footer";
+  editorMode?: EditorMode;
+  onEditorModeChange?: (mode: EditorMode) => void;
 }) {
   const mod = Platform.OS === "web" && typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl+";
   const content = (
     <>
+      {editorMode && onEditorModeChange && (
+        <EditorModeToggle value={editorMode} onChange={onEditorModeChange} />
+      )}
       <IconButton label={`Undo (${mod}Z)`} disabled={!canUndo} onPress={onUndo}>
         <Undo2 size={16} color={canUndo ? colors.textSecondary : colors.borderStrong} />
       </IconButton>
@@ -35,9 +54,7 @@ export function EditorToolbar({
       {children}
     </>
   );
-  return variant === "header"
-    ? <View style={styles.row}>{content}</View>
-    : <View style={styles.bar}><View style={styles.row}>{content}</View></View>;
+  return <View style={[styles.row, variant === "footer" && styles.footerRow]}>{content}</View>;
 }
 
 /** Square icon button matching undo/redo, for tools the screen adds to the toolbar. */
@@ -93,15 +110,7 @@ export function useUndoShortcuts({ enabled, onUndo, onRedo }: {
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  bar: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
+  footerRow: { gap: 6 },
   iconBtn: {
     width: 34,
     height: 34,
@@ -113,4 +122,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   iconBtnDisabled: { backgroundColor: colors.surfaceMuted },
+  modeToggle: { width: 150 },
 });

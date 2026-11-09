@@ -1,25 +1,120 @@
-﻿// ── Nano IO ───────────────────────────────────────────────────────────────────
+﻿import type { VisionToolOutput } from "./visionTools";
+// ── Nano IO ───────────────────────────────────────────────────────────────────
 
-export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured';
+export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured' | 'LoadCell';
 
-export type NanoPinState = {
+/** Display units for a load cell; grams is the master behind the scenes. */
+export type LoadCellUnit = 'g' | 'kg' | 'oz' | 'lb' | 'N';
+
+export type IoPinState = {
   pin: number;
   type: PinType;
   value: boolean;
   name: string;
-  nanoId: string;
+  deviceId: string;
   nanoName: string;
   pixelCount: number;
+  // Load cell (type === 'LoadCell') ─ grams is the master; the app converts to `unit` for display.
+  sckPin?: number;
+  raw?: number;
+  grams?: number;
+  unit?: LoadCellUnit;
+  tareOffset?: number;
+  countsPerGram?: number;
+  sampleRateHz?: number;
 };
 
-export type NanoState = {
+// ── Board firmware / capabilities ─────────────────────────────────────────────
+// Each serial board (NanoEdgeDevice, AuxStepperDriver) reports its sketch version
+// and what it can do. Legacy firmware reports neither: `firmwareVersion` is
+// null/"" and `capabilities` is null, and the UI then allows everything.
+
+/** Feature a board's firmware may advertise. */
+export type DeviceCapability = 'io' | 'neopixel' | 'loadcell' | 'stepper';
+
+/** The firmware fields shared by IoDeviceState and AuxDeviceState. */
+export type DeviceFirmwareInfo = {
+  /** Sketch version ("1.1.0"). null or "" = unknown / legacy firmware. */
+  firmwareVersion?: string | null;
+  /** Features the firmware advertises. null = unknown (legacy firmware). */
+  capabilities?: string[] | null;
+};
+
+/**
+ * True when the board can do `cap`. Unknown capabilities (legacy firmware that
+ * doesn't report them) count as supported — the UI only hides features a board
+ * has explicitly told us it lacks.
+ */
+export function deviceSupports(dev: DeviceFirmwareInfo | null | undefined, cap: DeviceCapability): boolean {
+  const caps = dev?.capabilities;
+  if (caps == null) return true;
+  return caps.includes(cap);
+}
+
+/** True when the board reported a firmware version (i.e. not legacy firmware). */
+export function hasKnownFirmware(dev: DeviceFirmwareInfo | null | undefined): boolean {
+  return !!dev?.firmwareVersion;
+}
+
+/** "fw 1.1.0", or "fw unknown" for legacy firmware. */
+export function firmwareLabel(dev: DeviceFirmwareInfo | null | undefined): string {
+  return hasKnownFirmware(dev) ? `fw ${dev!.firmwareVersion}` : 'fw unknown';
+}
+
+export type IoDeviceState = DeviceFirmwareInfo & {
   id: string;
   name: string;
   connected: boolean;
-  pins: NanoPinState[];
+  pins: IoPinState[];
 };
 
+/**
+ * The identifier-safe form of a nano or pin name for use in an expression symbol.
+ *
+ * Expression identifiers are `[A-Za-z0-9_]` only, so a nano named "Arduino Nano" with a pin
+ * "Load Cell" cannot be typed as `$io.Arduino Nano.Load Cell`. The controller publishes every
+ * IO value under the raw name AND, when the name holds other characters, an alias with every
+ * run of such characters replaced by one `_` (`io.Arduino_Nano.Load_Cell`). This mirrors that
+ * rule exactly, so a symbol the app composes resolves on the controller.
+ */
+export function ioSymbolName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]+/g, "_");
+}
+
+/** The `$io.<nano>.<pin>` expression symbol for an IO pin — a load cell reads in grams. */
+export function ioPinSymbol(nanoName: string, pinName: string): string {
+  return `$io.${ioSymbolName(nanoName)}.${ioSymbolName(pinName)}`;
+}
+
 export type NeoPixelColor = { r: number; g: number; b: number };
+
+// ── IO value history / recordings ──────────────────────────────────────────────
+// Mirrors the controller History models. A channel is addressed by a stable key
+// (`io/<deviceId>/<pin>` for load cells). Short sample keys keep high-rate batches small.
+
+/** One timestamped sample: t = unix ms, v = value (grams for a load cell), r = raw reading. */
+export type IoSample = { t: number; v: number; r: number };
+
+export type IoRecordingMeta = {
+  id: string;
+  channelKey: string;
+  name: string;
+  unit: LoadCellUnit;
+  label: string;
+  startUnixMs: number;
+  endUnixMs?: number | null;
+  sampleCount: number;
+  active: boolean;
+  saved: boolean;
+};
+
+export type IoHistoryWindow = {
+  channelKey: string;
+  unit: LoadCellUnit;
+  fromUnixMs: number;
+  toUnixMs: number;
+  samples: IoSample[];
+};
 
 // ── Aux Axis ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +151,7 @@ export type AuxAxisChannelState = {
   gripperOverTravelMm: number;
 };
 
-export type AuxDeviceState = {
+export type AuxDeviceState = DeviceFirmwareInfo & {
   connected: boolean;
   motorEnabled: boolean;
   deviceId: string;
@@ -125,8 +220,30 @@ export type CameraState = {
   hwaccel?: string;
 };
 
-export type CameraSourceType = "usb" | "network" | "sofia";
+export type CameraSourceType = "usb" | "network" | "sofia" | "phone";
 export type CameraTransport = "tcp" | "udp";
+
+/** One live value a phone/client pushed over `/devices/{id}/ingest`. */
+export type DeviceChannel = {
+  key: string;
+  value: number;
+  /** Optional unit label from the phone (informational). */
+  unit?: string;
+  /** Phone-supplied sample timestamp (Unix ms). */
+  unixMs: number;
+};
+
+/** A phone/client data device (native, not a plugin). Readable in expressions as `$device.<id>.<channel>`. */
+export type DeviceState = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** True while channel data has arrived recently. */
+  connected: boolean;
+  /** App-owned provider settings JSON (stored on the controller, pulled by whichever phone provides). */
+  providerConfig?: string;
+  channels: DeviceChannel[];
+};
 export type CameraStream = "Main" | "Extra1";
 export type CameraCodec = "h264" | "hevc";
 export type CameraDecoder = "opencv" | "ffmpeg";
@@ -264,154 +381,36 @@ export type UsbRelayState = {
 
 // ── Vision ────────────────────────────────────────────────────────────────────
 
-export type VisionZoneShape = 'Rectangle' | 'Circle' | 'Polygon';
+//
+// Vision programs are generic building blocks (image layers + an ordered tool list). The wire
+// model and the tool/filter catalogue live in ./visionTools; re-exported here so existing imports
+// of the program/result types keep working.
 
-export type VisionZoneGeometry = {
-  shape: VisionZoneShape;
-  // Rectangle
-  x: number; y: number; width: number; height: number;
-  /**
-   * Rectangle tilt in degrees, clockwise, about the rectangle's own centre.
-   *
-   * Optional rather than required because zones saved before rotation existed carry no such
-   * field, and absent has to read as 0 — declaring it required would have TypeScript promise
-   * a number that older programs do not actually have. Circles and polygons ignore it.
-   * Applied in pixel space; see the note on the controller's VisionZoneGeometry.
-   */
-  rotation?: number;
-  // Circle
-  cx: number; cy: number; radius: number;
-  // Polygon
-  points: [number, number][];
-};
+export type {
+  VisionProgram, VisionResult, VisionTool, VisionToolType, ImageLayer, VisionFilter, FilterType,
+  Region, RegionShape, ToolGrid, ToolLimit, Pose, ToolResult, ToolStatus, ToolCellResult, VPoint,
+  VisionToolOutput,
+} from "./visionTools";
 
-export type BlobDetectionParams = {
-  minArea: number;
-  maxArea: number;
-  filterByCircularity: boolean;
-  minCircularity: number;
-  filterByConvexity: boolean;
-  minConvexity: number;
-  filterByInertia: boolean;
-  minInertiaRatio: number;
-  minThreshold: number;
-  maxThreshold: number;
-  filterByColor: boolean;
-  blobColor: number; // 0=dark, 255=light
-};
-
-/**
- * Splits a zone into a rows×cols lattice over its bounding box, so an inspection pointing
- * at the zone is measured once per cell instead of once overall. Cells are clipped to the
- * zone shape. Absent, or 1×1, means no grid.
- *
- * Only color coverage inspections read this today; the other inspection types ignore it.
- */
-export type VisionZoneGrid = {
-  rows: number;
-  cols: number;
-};
-
-export type VisionZone = {
+/** One colour a pixel-count tool matches: RGB with a ± tolerance (0–100, × 2.55 per channel). */
+export type ColorEntry = {
   id: string;
-  name: string;
-  geometry: VisionZoneGeometry;
-  grid?: VisionZoneGrid;
+  r: number;
+  g: number;
+  b: number;
+  tolerance: number;
 };
 
-export type BlobInspection = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  zoneId: string | null;
-  blobParams: BlobDetectionParams;
-};
-
-export type PolygonInspection = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  zoneId: string | null;
-  sides: number;
-  minArea: number;
-  maxArea: number;
-  /** ApproxPolyDP accuracy factor — fraction of perimeter (0.01–0.1) */
-  epsilon: number;
-  minThreshold: number;
-  maxThreshold: number;
-  invertThreshold?: boolean;
-};
-
-export type PolygonResult = {
-  inspectionId: string;
-  name: string;
-  count: number;
-  found: boolean;
-  /** Orientation angle in degrees from MinAreaRect of the largest matching polygon */
-  angle: number;
-  /** Normalized centroid X (0–1) of the largest matching polygon */
-  centerX: number;
-  /** Normalized centroid Y (0–1) of the largest matching polygon */
-  centerY: number;
-};
-
-export type VisionProgram = {
-  id: string;
-  name: string;
-  description: string;
-  cameraId: string;
-  zones: VisionZone[];
-  inspections: BlobInspection[];
-  colorInspections?: ColorCoverageInspection[];
-  polygonInspections?: PolygonInspection[];
-  arucoInspections?: ArucoInspection[];
-  lineInspections?: LineInspection[];
-  barcodeInspections?: BarcodeInspection[];
-  /**
-   * Display order of inspections, as a flat list of inspection ids across all the typed
-   * lists above. Lets the user drag inspections into any order regardless of type. Ids
-   * missing from this list (e.g. a freshly added inspection) fall to the end in their
-   * type-grouped order; an empty/absent list means "keep the default type grouping".
-   */
-  inspectionOrder?: string[];
-  lastUpdatedUnixMs: number;
-};
-
-export type BlobResult       = { x: number; y: number; size: number };
-export type InspectionResult = { inspectionId: string; name: string; blobs: BlobResult[] };
-export type VisionResult     = { programId: string; timestampMs: number; inspections: InspectionResult[]; colorResults?: ColorCoverageResult[]; polygonResults?: PolygonResult[]; arucoResults?: ArucoResult[]; lineResults?: LineResult[]; barcodeResults?: BarcodeResult[]; timings?: Record<string, number> };
-
-export type ArucoResult = {
-  inspectionId: string;
-  name: string;
-  count: number;
-  found: boolean;
-  markers: { markerId: number; centerX: number; centerY: number }[];
-};
-
-export function defaultBlobParams(): BlobDetectionParams {
-  return {
-    minArea: 100, maxArea: 10000,
-    filterByCircularity: false, minCircularity: 0.5,
-    filterByConvexity:   false, minConvexity:   0.8,
-    filterByInertia:     false, minInertiaRatio: 0.1,
-    minThreshold: 10,   maxThreshold: 200,
-    filterByColor: false, blobColor: 0,
-  };
-}
-
-export function defaultGeometry(shape: VisionZoneShape): VisionZoneGeometry {
-  return {
-    shape,
-    x: 0.1, y: 0.1, width: 0.8, height: 0.8, rotation: 0,
-    cx: 0.5, cy: 0.5, radius: 0.3,
-    points: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
-  };
+export function defaultColorEntry(): ColorEntry {
+  return { id: `ce_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, r: 128, g: 128, b: 128, tolerance: 20 };
 }
 
 // ── Program builder ───────────────────────────────────────────────────────────
 
-export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Unknown';
+export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown'
+  // Program editor v2 (controller docs/program-language.md §4). Order mirrors the controller enum.
+  | 'Note' | 'LoopControl' | 'Return' | 'EndProgram' | 'RaiseError' | 'Switch' | 'Try' | 'SavePosition'
+  | 'SetSpeedFactor' | 'ListOp' | 'Prompt' | 'MoveC';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -456,292 +455,25 @@ export const THREAD_PRESETS: { label: string; pitch: number; group: 'metric' | '
 
 export type Vector6Val = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
-export type VisionStepOutput = {
-  inspectionId: string;
-  countVar?: string;
-  pointsVar?: string;
-  detectedVar?: string;
-};
-
-export type ColorEntry = {
-  id: string;
-  r: number;
-  g: number;
-  b: number;
-  /** 0–100: per-channel ± tolerance * 2.55 in RGB space */
-  tolerance: number;
-};
-
-export type ColorCoverageInspection = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  zoneId: string | null;
-  colors: ColorEntry[];
-  /** Minimum pixel coverage % required to pass. null = no minimum. */
-  minCoverage: number | null;
-  /** Maximum pixel coverage % allowed to pass. null = no maximum. */
-  maxCoverage: number | null;
-};
-
-/** One cell of a gridded color coverage inspection, measured on its own. */
-export type ColorCellResult = {
-  row: number;
-  col: number;
-  /** Row-major position in the grid: row * cols + col. */
-  index: number;
-  coverage: number;
-  passed: boolean;
-};
-
-export type ColorCoverageResult = {
-  inspectionId: string;
-  name: string;
-  /** Coverage over the whole zone, gridded or not. */
-  coverage: number;
-  /** Whole-zone min/max test — except on a gridded zone, where it means every cell passed. */
-  passed: boolean;
-  /** One entry per cell, row-major. Absent when the zone has no grid. */
-  cells?: ColorCellResult[];
-  /** How many cells passed. Absent when the zone has no grid. */
-  cellsPassed?: number;
-};
-
-export type ColorVisionStepOutput = {
-  inspectionId: string;
-  coverageVar?: string;
-  passedVar?: string;
-  /**
-   * Object-list variable filled with one record per grid cell — fields row, col, index,
-   * coverage, passed. Only meaningful when the inspection's zone has a grid.
-   */
-  cellsVar?: string;
-  /** Scalar variable filled with the number of cells that passed. */
-  cellsPassedVar?: string;
-};
-
-export type PolygonVisionStepOutput = {
-  inspectionId: string;
-  countVar?: string;
-  foundVar?: string;
-  angleVar?: string;
-  centerXVar?: string;
-  centerYVar?: string;
-};
-
-export type ArucoInspection = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  zoneId: string | null;
-  /** OpenCV predefined dictionary ID (1 = 4x4_100 default) */
-  dictionaryId: number;
-  minMarkerArea: number;
-  maxMarkerArea: number;
-};
-
-export type LineInspection = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  zoneId: string | null;
-  cannyThreshold1: number;
-  cannyThreshold2: number;
-  houghThreshold: number;
-  minLineLength: number;
-  maxLineGap: number;
-  filterByAngle: boolean;
-  minAngle: number;
-  maxAngle: number;
-};
-
-export type LineSegment = {
-  /** Normalized (0–1) start X */
-  x1: number;
-  /** Normalized (0–1) start Y */
-  y1: number;
-  /** Normalized (0–1) end X */
-  x2: number;
-  /** Normalized (0–1) end Y */
-  y2: number;
-  /** Undirected angle in degrees (0–180): 0=horizontal, 90=vertical */
-  angle: number;
-  /** Pixel length of the detected segment */
-  length: number;
-};
-
-export type LineResult = {
-  inspectionId: string;
-  name: string;
-  count: number;
-  found: boolean;
-  lines: LineSegment[];
-};
-
-export type LineVisionStepOutput = {
-  inspectionId: string;
-  countVar?: string;
-  foundVar?: string;
-  firstAngleVar?: string;
-  firstX1Var?: string;
-  firstY1Var?: string;
-  firstX2Var?: string;
-  firstY2Var?: string;
-};
-
-export type ArucoVisionStepOutput = {
-  inspectionId: string;
-  countVar?: string;
-  foundVar?: string;
-  firstIdVar?: string;
-  firstCenterXVar?: string;
-  firstCenterYVar?: string;
-};
-
-export const BARCODE_FORMATS: { id: string; label: string }[] = [
-  { id: 'QR_CODE',     label: 'QR Code'    },
-  { id: 'DATA_MATRIX', label: 'Data Matrix' },
-  { id: 'AZTEC',       label: 'Aztec'       },
-  { id: 'PDF_417',     label: 'PDF 417'     },
-  { id: 'CODE_128',    label: 'Code 128'    },
-  { id: 'CODE_39',     label: 'Code 39'     },
-  { id: 'EAN_13',      label: 'EAN-13'      },
-  { id: 'EAN_8',       label: 'EAN-8'       },
-  { id: 'UPC_A',       label: 'UPC-A'       },
-  { id: 'UPC_E',       label: 'UPC-E'       },
-];
-
-export type BarcodeInspection = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  zoneId: string | null;
-  /** ZXing BarcodeFormat names to scan for; empty = all formats */
-  formats: string[];
-};
-
-export type BarcodeCodeResult = {
-  value: string;
-  format: string;
-  centerX: number;
-  centerY: number;
-};
-
-export type BarcodeResult = {
-  inspectionId: string;
-  name: string;
-  count: number;
-  found: boolean;
-  codes: BarcodeCodeResult[];
-};
-
-export type BarcodeVisionStepOutput = {
-  inspectionId: string;
-  countVar?: string;
-  foundVar?: string;
-  firstValueVar?: string;
-  firstFormatVar?: string;
-};
-
-export function defaultBarcodeInspection(index: number): BarcodeInspection {
-  return {
-    id: `barcode_${Date.now()}`,
-    name: `Barcode ${index + 1}`,
-    enabled: true,
-    zoneId: null,
-    formats: [],
-  };
-}
-
-export function defaultColorEntry(): ColorEntry {
-  return { id: `ce_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, r: 128, g: 128, b: 128, tolerance: 20 };
-}
-
-export function defaultColorCoverageInspection(index: number): ColorCoverageInspection {
-  return {
-    id: `cinsp_${Date.now()}`,
-    name: `Color ${index + 1}`,
-    enabled: true,
-    zoneId: null,
-    colors: [],
-    minCoverage: 50,
-    maxCoverage: null,
-  };
-}
-
-export const ARUCO_DICTIONARIES: { id: number; label: string }[] = [
-  { id: -1, label: 'Auto Detect (All)' },
-  { id: 0,  label: '4x4  (50 IDs)'   },
-  { id: 1,  label: '4x4  (100 IDs)'  },
-  { id: 2,  label: '4x4  (250 IDs)'  },
-  { id: 3,  label: '4x4  (1000 IDs)' },
-  { id: 4,  label: '5x5  (50 IDs)'   },
-  { id: 5,  label: '5x5  (100 IDs)'  },
-  { id: 6,  label: '5x5  (250 IDs)'  },
-  { id: 7,  label: '5x5  (1000 IDs)' },
-  { id: 8,  label: '6x6  (50 IDs)'   },
-  { id: 9,  label: '6x6  (100 IDs)'  },
-  { id: 10, label: '6x6  (250 IDs)'  },
-  { id: 11, label: '6x6  (1000 IDs)' },
-  { id: 12, label: '7x7  (50 IDs)'   },
-  { id: 13, label: '7x7  (100 IDs)'  },
-  { id: 14, label: '7x7  (250 IDs)'  },
-  { id: 15, label: '7x7  (1000 IDs)' },
-  { id: 16, label: 'ArUco Original'  },
-];
-
-export function defaultArucoInspection(index: number): ArucoInspection {
-  return {
-    id: `arucoinsp_${Date.now()}`,
-    name: `ArUco ${index + 1}`,
-    enabled: true,
-    zoneId: null,
-    dictionaryId: -1,
-    minMarkerArea: 100,
-    maxMarkerArea: 100000,
-  };
-}
-
-export function defaultLineInspection(index: number): LineInspection {
-  return {
-    id: `lineinsp_${Date.now()}`,
-    name: `Line ${index + 1}`,
-    enabled: true,
-    zoneId: null,
-    cannyThreshold1: 50,
-    cannyThreshold2: 150,
-    houghThreshold: 50,
-    minLineLength: 30,
-    maxLineGap: 10,
-    filterByAngle: false,
-    minAngle: 0,
-    maxAngle: 180,
-  };
-}
-
-export function defaultPolygonInspection(index: number): PolygonInspection {
-  return {
-    id: `polyinsp_${Date.now()}`,
-    name: `Polygon ${index + 1}`,
-    enabled: true,
-    zoneId: null,
-    sides: 4,
-    minArea: 1000,
-    maxArea: 100000,
-    epsilon: 0.04,
-    minThreshold: 50,
-    maxThreshold: 200,
-    invertThreshold: false,
-  };
-}
-
 export type ConditionOp = '==' | '!=' | '>' | '>=' | '<' | '<=' | 'contains' | 'startsWith' | 'endsWith';
 
 export type ConditionItem = {
   id: string;
-  left: string;
-  operator: ConditionOp;
-  right: string;
+  /**
+   * A boolean expression — `$enabled`, `$speed > 5`, `$a == $b`. A bare variable is true when
+   * non-zero. This is how conditions are authored now; left/operator/right below are the legacy
+   * structured form, still read by the controller for older programs.
+   */
+  expr?: string;
+  /**
+   * How this item joins the one BEFORE it. Unset falls back to the group's `combinator`.
+   * AND binds tighter than OR: `A and B or C` reads as `(A and B) or C` — the controller
+   * evaluates the group as an OR of AND-runs.
+   */
+  join?: 'AND' | 'OR';
+  left?: string;
+  operator?: ConditionOp;
+  right?: string;
 };
 
 export type ConditionGroup = {
@@ -754,6 +486,35 @@ export type ElseIfBranch = {
   condition: ConditionGroup;
   steps: ProgramStep[];
 };
+
+/**
+ * One case of a Switch step: runs when the switch value equals any of `values` (each an
+ * expression, compared with == within 1e-9). First match wins; no fall-through.
+ */
+export type SwitchCase = {
+  id: string;
+  values: string[];
+  steps: ProgramStep[];
+};
+
+/** A routine out / in-out parameter (`key`) copied into a caller variable when the routine returns. */
+export type RoutineOutputMapping = { key: string; variableName: string };
+
+/** Note step style: a free note, or a section header that can collapse the steps up to the next one. */
+export type NoteStyle = 'note' | 'section';
+export type LoopControlAction = 'break' | 'continue';
+export type WaitTimeoutAction = 'continue' | 'error';
+export type OutputAction = 'set' | 'toggle';
+export type SavePositionTo = 'variable' | 'point';
+export type SavePositionMode = 'replace' | 'append' | 'insert' | 'set';
+export type SavePositionSource = 'actual' | 'target';
+export type ListAction =
+  | 'append' | 'insert' | 'removeAt' | 'clear' | 'set' | 'setField' | 'sort' | 'reverse' | 'copyFrom';
+export type PromptInput = 'none' | 'number' | 'text';
+/** A routine variable's parameter role. Absent = not a parameter. */
+export type ParamMode = 'in' | 'out' | 'inOut';
+/** A program's preferred editor view (app-owned). */
+export type EditorMode = 'blocks' | 'text';
 
 /**
  * One record in an object-list variable: named numeric fields. Numbers only — booleans are
@@ -851,6 +612,12 @@ export type ProgramVariable = {
   isGlobal?: boolean;
   /** When true, the current runtime value is shown on the monitor page while the program runs. */
   displayOnMonitor?: boolean;
+  /**
+   * When true, a program display page may seed this variable's value at launch — startProgram
+   * carries a `variables` map that overrides the declared initial value before the run. Only
+   * scalars/booleans/strings are seedable (not lists, images or computed variables).
+   */
+  isInput?: boolean;
   /** When true, this variable is a stopwatch — its value holds elapsed milliseconds, updated every tick at runtime. */
   isStopwatch?: boolean;
   /** When true, the runtime value is saved to disk when the program finishes and restored on the next run. */
@@ -874,6 +641,12 @@ export type ProgramVariable = {
    * See docs/expressions-and-variables.md section 7 in the controller.
    */
   isComputed?: boolean;
+  /**
+   * On a routine's variables: makes it a parameter. `in` is set from the caller's argument
+   * before the routine runs, `out` is copied to the caller's mapped variable when it returns,
+   * `inOut` both. Parameters share the caller's scope, so name them distinctly.
+   */
+  paramMode?: ParamMode;
 };
 
 /** True for a computed variable — readable in expressions, never a write target. */
@@ -973,14 +746,13 @@ export type ProgramStep = {
   id: string;
   type: StepType;
   name?: string;
+  /** Free text shown under the step in the editor. Never executed. A Note step's text. */
+  comment?: string;
   /**
-   * `false` = the executor skips this step (still counted for progress, logged as
-   * "[Skipped — disabled] …"). Absent or `true` runs it, so the editor only ever
-   * writes `false` and clears the field otherwise.
+   * `false` skips the step — and a block's whole body — at run time (it still counts as a
+   * step). Absent means enabled. Read through `isStepEnabled()`.
    */
   enabled?: boolean;
-  /** Free text shown under the step in the editor. Never executed. */
-  comment?: string;
   pointName?: string;
   /**
    * Stable id of the referenced saved point (preferred over pointName). Lets a move
@@ -1019,10 +791,34 @@ export type ProgramStep = {
   overrideRZ?: number;
   outputNumber?: number;
   outputValue?: boolean;
-  outputCard?: string;     // "stb" | "relay" | "nano"
-  outputNanoId?: string;   // only for nano
+  outputCard?: string;     // "stb" | "relay" | "io"
+  outputDeviceId?: string;   // only for nano
   pulseMs?: number;        // >0 = pulse; set to outputValue for pulseMs then flip
   pulseBlocking?: boolean; // when true, block program execution until pulse completes
+  // Load cell (Tare, ReadLoadCell)
+  loadCellDeviceId?: string;
+  loadCellPin?: number;
+  loadCellUnit?: string;   // ReadLoadCell: unit to store (default grams)
+  // Stop / record on condition — optional on move steps (MoveL, MoveJ, JumpL, JumpJ, AuxMove,
+  // GripperAction). The condition is evaluated every executor tick while the move is in flight;
+  // null/empty = feature off. A force limit is just `$io.<nano>.<loadcell> >= <grams>` (load cells
+  // read in grams; see ioPinSymbol()).
+  moveStopCondition?: ConditionGroup;
+  /**
+   * `stop` (default): the move ends where it is the first time the condition is true and the
+   * program continues with the next step. `record`: the move runs to its target; only the
+   * position at the first true evaluation is captured.
+   */
+  moveStopMode?: 'stop' | 'record';
+  /**
+   * Where to write the position at the moment the condition first became true. Robot moves: a
+   * Points list variable, replaced with exactly one element (the live robot position, so
+   * `$var[0]` reads it). Aux moves: a numeric variable receiving the axis position in its
+   * physical unit, or raw steps when the axis has no unit.
+   */
+  moveStopPositionVariableName?: string;
+  /** Numeric/boolean variable set when the move completes: 1 if the condition fired, 0 if not. */
+  moveStopFlagVariableName?: string;
   waitMs?: number;
   loopCount?: number;
   loopSteps?: ProgramStep[];
@@ -1047,15 +843,18 @@ export type ProgramStep = {
   ifSteps?: ProgramStep[];
   elseIfBranches?: ElseIfBranch[];
   elseSteps?: ProgramStep[];
-  // SetTool
+  // SetTool — toolId is the stable link (rename-proof); toolName is a display label / fallback.
   toolName?: string;
+  toolId?: string;
   // SetJointPosition — manually home one joint by declaring its value (no motion).
   // jointIndex: 0=J1/X, 1=Horizontal/Y, 2=Vertical/Z, 3=J4/RZ. jointValue is the literal;
   // an expressions.jointValue entry overrides it at runtime (e.g. an external reading).
   jointIndex?: number;
   jointValue?: number;
-  // SetLocal / ClearLocal — also used as per-step local override on move steps
+  // SetLocal / ClearLocal — also used as per-step local override on move steps.
+  // localId is the stable link (rename-proof); localName is a display label / fallback.
   localName?: string;
+  localId?: string;
   // JumpL / JumpJ
   jumpZ?: number;
   jumpZStart?: number;
@@ -1063,14 +862,12 @@ export type ProgramStep = {
   // RunVision
   visionProgramId?: string;
   visionProgramName?: string;
-  visionZoneId?: string;
-  visionZoneVar?: string;
-  visionOutputs?: VisionStepOutput[];
   /** Coordinate frame point outputs are written in ("robot" needs a calibrated camera). */
   outputFrame?: VisionOutputFrame;
-  colorOutputs?: ColorVisionStepOutput[];
-  polygonOutputs?: PolygonVisionStepOutput[];
-  arucoOutputs?: ArucoVisionStepOutput[];
+  /** Optional: the program's overall pass (0/1) is written here. */
+  passVariable?: string;
+  /** Tool values written to variables — any values key, or passed / cells / items / points / pose. */
+  toolOutputs?: VisionToolOutput[];
   /**
    * Superseded by pointNameExpr, which expresses the same thing as "$name[index]".
    * Still read so programs saved before the merge keep running; the builder rewrites
@@ -1148,6 +945,12 @@ export type ProgramStep = {
   jsonOutbound?: JsonKeyValue[];
   jsonInbound?: JsonInboundMapping[];
   jsonImageOutbound?: JsonImageMapping[];
+  // StartRecording — capture a load cell (loadCellDeviceId/loadCellPin) into this list variable (filled on StopRecording)
+  recordVariableName?: string;
+  // ExportData — write variable(s) to a file; exportColumns reuses the HttpRequest outbound row shape
+  exportFormat?: string;   // "csv" | "json"
+  exportPath?: string;     // $variable / $time_ms template
+  exportColumns?: JsonKeyValue[];
   // CaptureImage
   captureImageVariableName?: string;
   captureImageCameraId?: string;
@@ -1155,9 +958,96 @@ export type ProgramStep = {
   httpReceiveName?: string;
   httpReceiveTimeoutMs?: number;
   httpReceiveInbound?: JsonInboundMapping[];
+  // Plugin (docs/plugins.md §6) — a step contributed by an installed plugin.
+  /** Manifest `id` of the plugin that provides the step. */
+  pluginId?: string;
+  /** The plugin manifest's `steps[].id`. */
+  pluginStepId?: string;
+  /**
+   * One entry per declared param, every value TEXT interpreted by the param's type
+   * (number/boolean → expression, string → template, enum → option, point → point ref,
+   * list/image/variable → variable name). An absent key means the manifest default.
+   */
+  pluginParams?: Record<string, string>;
+  /** Which outputs to write and into which variable. Unmapped outputs are not written. */
+  pluginOutputs?: PluginStepOutput[];
+  /** Overrides the manifest step timeout (0 = none). Absent = manifest default. */
+  pluginTimeoutMs?: number;
   // Unknown — preserved original type name for display and recovery
   unknownStepType?: string;
+
+  // ── Program editor v2 (controller docs/program-language.md §4.1–4.3) ────────
+  // Note — text in `comment`.
+  noteStyle?: NoteStyle;
+  // LoopControl — leave the loop, or skip to its next iteration. Default "break".
+  loopControl?: LoopControlAction;
+  // RaiseError — message template (required) and an identifier code (default "userError").
+  // EndProgram uses `statusMessage` for its optional message.
+  errorMessage?: string;
+  errorCode?: string;
+  // Switch — `switchExpr` evaluated once; first equal case runs, else `switchDefault`.
+  switchExpr?: string;
+  switchCases?: SwitchCase[];
+  switchDefault?: ProgramStep[];
+  // Try — retry `trySteps` `tryRetries` times (`tryRetryDelayMs` apart), then run `catchSteps`.
+  // `catchCodes` empty = every catchable code. The error variables are text variables.
+  trySteps?: ProgramStep[];
+  catchSteps?: ProgramStep[];
+  tryRetries?: number;
+  tryRetryDelayMs?: number;
+  catchCodes?: string[];
+  errorVariableName?: string;
+  errorCodeVariableName?: string;
+  // Wait — what a condition wait does on timeout (default "continue").
+  waitTimeoutAction?: WaitTimeoutAction;
+  // CallRoutine parameters — param → expression (template for a text param); outputs back.
+  routineArgs?: Record<string, string>;
+  routineOutputs?: RoutineOutputMapping[];
+  // SetOutput — "toggle" flips the output; "set" (default) uses outputValue or expressions.outputValue.
+  outputAction?: OutputAction;
+  // SavePosition — into a Points list (`variableName`) or a saved point (`pointId`/`pointName`).
+  // `savePositionIndex` may be an expression under expressions.savePositionIndex.
+  savePositionTo?: SavePositionTo;
+  savePositionMode?: SavePositionMode;
+  savePositionIndex?: number;
+  savePositionSource?: SavePositionSource;
+  // SetSpeedFactor — percent 1–100 (expression key speedFactor).
+  speedFactor?: number;
+  // MoveC — the via point; the end target uses the normal target fields. arcTolerance in mm.
+  viaPointId?: string;
+  viaPointName?: string;
+  viaPointNameExpr?: string;
+  arcTolerance?: number;
+  // ListOp — mutates the list in `variableName`. listIndex may be an expression (expressions.listIndex).
+  listAction?: ListAction;
+  listIndex?: number;
+  listValueExpr?: string;
+  listFields?: Record<string, string>;
+  listSourceVariable?: string;
+  listSortField?: string;
+  listSortDescending?: boolean;
+  // Prompt — an operator dialog published in the program status, answered with AnswerPrompt.
+  promptTitle?: string;
+  promptMessage?: string;
+  promptButtons?: string[];
+  promptInput?: PromptInput;
+  promptDefault?: string;
+  promptMin?: number;
+  promptMax?: number;
+  /** A number variable receives the button index (from 0); a text variable its label. */
+  promptResultVariableName?: string;
+  promptInputVariableName?: string;
+  /** 0 / absent = wait forever. */
+  promptTimeoutMs?: number;
+  /** Button index chosen on timeout; absent = fail with promptTimeout. */
+  promptTimeoutButton?: number;
 };
+
+/** True unless the step is explicitly disabled (`enabled: false`). */
+export const isStepEnabled = (s: ProgramStep): boolean => s.enabled !== false;
+
+/** One output mapping of a Plugin step: manifest output `key` → program variable. */
+export type PluginStepOutput = { key: string; variableName: string };
 
 /** Hole position for CNC threading (robot coordinates, mm). */
 export type CncHole = { x: number; y: number };
@@ -1221,17 +1111,68 @@ export type CncSpec = {
   expressions?: Record<string, string>;
 };
 
+// ── Custom display pages ─────────────────────────────────────────────────────
+
+/** The kinds of widget the visual display-page builder can place. */
+export type DisplayWidgetType =
+  | "value"    // a variable's live value
+  | "gauge"    // a variable on a dial with min/max
+  | "boolean"  // a true/false lamp
+  | "graph"    // a live line chart (load cell, or a variable sampled over time)
+  | "image"    // a display-image variable
+  | "button"   // run / stop / seed-inputs action
+  | "text"     // static heading / caption
+  | "plugin";  // an embedded live plugin UI
+
+/**
+ * One widget on a display page. `x`/`y`/`w`/`h` are in grid cells (columns × auto rows); the
+ * compiler (displayCompiler) turns it into positioned bridge HTML. `config` is type-specific —
+ * see DISPLAY_WIDGET_DEFS for each type's fields.
+ */
+export type DisplayWidget = {
+  id: string;
+  type: DisplayWidgetType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  config: Record<string, any>;
+};
+
+/** A visual display-page layout: a grid of configured widgets. */
+export type DisplayPageLayout = {
+  /** Number of grid columns (cells across). */
+  cols: number;
+  /** Pixel height of one grid row. */
+  rowHeight: number;
+  widgets: DisplayWidget[];
+};
+
+/** Which editor authored the page — widgets compile to HTML; html is raw/uploaded. */
+export type DisplayPageMode = "widgets" | "html";
+
 export type BuiltProgram = {
   id?: string;
   name: string;
   description: string;
   steps: ProgramStep[];
   variables?: ProgramVariable[];
+  /**
+   * Custom display page — a dashboard that shows this program's variables/state/images/graphs
+   * and offers inputs + a run button, rendered in a sandboxed WebView via the host bridge.
+   * `displayPageMode` picks what renders: "widgets" compiles `displayPageLayout`, "html" (or
+   * absent, for older pages) renders `displayPageHtml` directly.
+   */
+  displayPageHtml?: string;
+  displayPageMode?: DisplayPageMode;
+  displayPageLayout?: DisplayPageLayout;
   lastUpdatedUnixMs: number;
   isRoutine?: boolean;
   isBackground?: boolean;
   /** When true, all running background programs are stopped when this program finishes. */
   killBackgroundOnStop?: boolean;
+  /** The program's preferred editor view, remembered per program. Absent = the app default. */
+  editorMode?: EditorMode;
 };
 
 // ── Program-editor services (docs/expressions-and-variables.md) ──────────────
@@ -1244,7 +1185,14 @@ export type KnownValidationCode =
   | "unknownGrid" | "unknownStack" | "unknownLabel" | "duplicateLabel" | "unknownVariable"
   | "unknownProperty" | "expressionSyntax" | "emptyLoop" | "emptyBranch" | "missingField"
   | "routineRecursion" | "disabledStep" | "unreachableStep" | "unusedVariable"
-  | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict";
+  | "computedCycle" | "computedVariable" | "computedGlobalScope" | "computedKindConflict"
+  | "untaughtGrid"
+  // Plugins (docs/plugins.md §6)
+  | "unknownPlugin" | "unknownPluginStep" | "pluginNotRunning" | "pluginParamMissing"
+  | "pluginParamEnum" | "pluginOutputType" | "unknownPluginFunction"
+  // Program editor v2 (docs/program-language.md §4.2–4.3)
+  | "loopControlOutsideLoop" | "unknownParam" | "paramMissing" | "paramOutputType"
+  | "duplicateCaseValue" | "unsupportedOnStep" | "pointWriteInBackground";
 
 /** One problem reported by `ValidateBuiltProgram`. */
 export type ValidationProblem = {
@@ -1272,9 +1220,21 @@ export type ExpressionSymbolVariable = {
   value?: number | string | boolean | null;
 };
 
-/** A read-only system variable such as `robot.x` (stored without the `$`). */
-export type ExpressionProperty = { name: string; description: string; type: string };
-export type ExpressionFunction = { name: string; signature: string; description: string };
+/**
+ * A read-only system variable such as `robot.x` (stored without the `$`). Plugin
+ * properties are named `<pluginId>.<name>` and carry their `pluginId`.
+ */
+export type ExpressionProperty = { name: string; description: string; type: string; pluginId?: string };
+/** Plugin functions are named `<pluginId>.<name>` and carry their `pluginId`. */
+export type ExpressionFunction = { name: string; signature: string; description: string; pluginId?: string };
+/** One plugin's contributions to expressions (`GetExpressionSymbols.plugins`), names fully qualified. */
+export type ExpressionPluginSymbols = {
+  id: string;
+  name: string;
+  running: boolean;
+  functions: ExpressionFunction[];
+  properties: ExpressionProperty[];
+};
 /** An IO name such as `stb.in1` (stored without the `$`). */
 export type ExpressionIoSymbol = { name: string; description: string };
 
@@ -1284,6 +1244,8 @@ export type ExpressionSymbols = {
   properties: ExpressionProperty[];
   functions: ExpressionFunction[];
   io: ExpressionIoSymbol[];
+  /** Newer controllers: the plugin functions/properties above, grouped per plugin. */
+  plugins?: ExpressionPluginSymbols[];
 };
 
 /** Result of `EvaluateExpression`. `ok: false` carries the evaluator's error text. */
@@ -1338,11 +1300,166 @@ export type ProgramSummary = {
   currentOffsetRX?: number; currentOffsetRY?: number; currentOffsetRZ?: number;
   currentToolOffsetX?: number;  currentToolOffsetY?: number;  currentToolOffsetZ?: number;
   currentToolOffsetRX?: number; currentToolOffsetRY?: number; currentToolOffsetRZ?: number;
+  /** Id of the step most recently started (built programs). Newer controllers only. */
+  currentStepId?: string | null;
+  /** Why a Stopped program is paused; null while running or once finished. */
+  pauseReason?: PauseReason | null;
+  /** The step the program runs next on Continue (breakpoint / step mode). */
+  pausedAtStepId?: string | null;
+  /** The operator prompt this program waits on; null when none. */
+  prompt?: ProgramPrompt | null;
   /** Flag set by mobile app — external program reads and consumes this */
   start: boolean;
   stop: boolean;
   reset: boolean;
   abort: boolean;
+};
+
+export type PauseReason = 'breakpoint' | 'step' | 'pauseStep' | 'user';
+
+/** An operator prompt in the program status. Answer with `answerPrompt(id, button, value?)`. */
+export type ProgramPrompt = {
+  id: string;
+  stepId: string;
+  programName: string;
+  title?: string | null;
+  message: string;
+  /** 1–4 labels; the answer's `button` is an index into this. */
+  buttons: string[];
+  input: PromptInput;
+  /** Evaluated default input, as text. */
+  default?: string | null;
+  min?: number | null;
+  max?: number | null;
+  /** 0 = no timeout. */
+  timeoutMs: number;
+  /** Unix ms the prompt was shown (for the countdown). */
+  shownUnixMs: number;
+};
+
+/** Options for `executeBuiltProgram` (debugging; refused by a controller without package B). */
+export type ExecuteOptions = {
+  /** Run from this step (enclosing loops start at iteration 0). */
+  startAtStepId?: string;
+  /** Pause before these steps. */
+  breakpoints?: string[];
+  /** Pause before every step. */
+  stepMode?: boolean;
+};
+
+// ── Step catalog (GetStepCatalog — docs/program-language.md §5.2) ────────────
+
+export type StepCategoryKey =
+  | "motion" | "motionSettings" | "flow" | "variables"
+  | "io" | "vision" | "background" | "comms" | "plugins";
+
+export type FieldKind =
+  | "number" | "integer" | "bool" | "enum" | "text" | "template" | "expr" | "condition"
+  | "varWrite" | "varRead" | "listVar"
+  | "pointRef" | "toolRef" | "localRef" | "gridRef" | "stackRef" | "routineRef" | "programRef"
+  | "visionRef" | "deviceRef" | "cameraRef" | "labelRef" | "pluginRef"
+  | "target" | "axes6" | "mappingOut" | "rows" | "exprMap" | "textList"
+  | "steps" | "branches" | "cases" | "json";
+
+export type FieldOption = { value: string | number; label: string };
+
+/** Show a field only when another field's value (as text; absent = its default) is one of `in`. */
+export type FieldShowIf = { field: string; in: string[] };
+
+export type FieldSpec = {
+  /** A ProgramStep property, or a composite: target, via, offset, override, toolOffset. */
+  key: string;
+  /** Text named-argument name; "" = positional only. */
+  arg: string;
+  /** 0-based positional slot in text, or null. */
+  position: number | null;
+  label: string;
+  /** UI section (GroupCard). */
+  group: string;
+  kind: FieldKind | (string & {});
+  unit?: string;
+  /** Placeholder default; null = program default / none. */
+  default: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: FieldOption[];
+  /** `step.expressions` key when an expression may replace the literal. */
+  exprKey: string | null;
+  /** Composite fields: every expressions key their parts may use. */
+  exprKeys?: string[];
+  required: boolean;
+  showIf?: FieldShowIf;
+  help?: string;
+  /** The ProgramStep properties this field stores into; absent = just `key`. */
+  props?: string[];
+  /** Variable pickers: number, boolean, string, image, stopwatch, list, list:<ElementType>. */
+  varKinds?: string[];
+  /** Not rendered by the generic editor. */
+  hidden?: boolean;
+};
+
+export type StepBodyKind = "steps" | "branches" | "cases" | "tryCatch" | "mapping";
+
+export type StepSpec = {
+  type: StepType;
+  category: StepCategoryKey;
+  label: string;
+  description: string;
+  keyword: string;
+  aliases: string[];
+  /** Runs in a background program (false = skipped there). */
+  background: boolean;
+  body: StepBodyKind | null;
+  syntax: string;
+  /** Row summary template with {fieldKey} placeholders; empty parts dropped. */
+  summary: string;
+  fields: FieldSpec[];
+};
+
+export type StepCategorySpec = { key: StepCategoryKey; label: string; description: string };
+export type ErrorCodeSpec = { code: string; label: string; catchable: boolean };
+
+export type StepCatalog = {
+  catalogVersion: number;
+  languageVersion: number;
+  categories: StepCategorySpec[];
+  errorCodes: ErrorCodeSpec[];
+  steps: StepSpec[];
+  /** Properties every step has (not repeated per step). */
+  commonFields: string[];
+  /** Legacy properties no editor writes. */
+  legacyFields: string[];
+};
+
+// ── Text language (SRS — docs/program-language.md §6.9) ──────────────────────
+
+/** 1-based lines and columns; columns are UTF-16 code units (JS indexing); endCol exclusive. */
+export type TextProblem = {
+  line: number;
+  col: number;
+  endLine: number;
+  endCol: number;
+  severity: ValidationSeverity;
+  code: string;
+  message: string;
+  stepId?: string;
+  field?: string;
+  source: "parse" | "validate";
+};
+
+/** Where a step sits in the text: lines [line, endLine], 1-based inclusive. */
+export type ProgramTextMapEntry = { stepId: string; stepPath: string; line: number; endLine: number };
+
+export type FormatProgramTextResult = { text: string; languageVersion: number; map: ProgramTextMapEntry[] };
+
+export type ParseProgramTextResult = {
+  /** False when any error-severity parse problem exists. */
+  ok: boolean;
+  /** The base program's metadata + parsed variables/steps, ids reconciled. */
+  program?: BuiltProgram;
+  problems: TextProblem[];
+  map: ProgramTextMapEntry[];
 };
 
 // ── Robot info / status ───────────────────────────────────────────────────────
@@ -1374,6 +1491,8 @@ export type Point = {
 }
 
 export type Tool = {
+  /** Stable id (rename-proof) — program steps link by this; name is a display/convenience alias. */
+  id?: string
   name: string
   description: string
   lastUpdatedUnixMs: number
@@ -1386,6 +1505,8 @@ export type Tool = {
 }
 
 export type Local = {
+  /** Stable id (rename-proof) — program steps link by this; name is a display/convenience alias. */
+  id?: string
   name: string
   description: string
   lastUpdatedUnixMs: number
@@ -1501,6 +1622,8 @@ export type RobotStatus = {
   // activePrograms live block; the controller no longer sends the full list every poll.
   programs: ProgramSummary[],
   lastProgramUpdate: number,
+  /** Additive (GetStatus.plugins): lets the IO index show a badge without extra calls. */
+  plugins?: PluginStatusEntry[],
 
   lastToolUpdate: number,
   activeTool: string,
@@ -1604,3 +1727,156 @@ export function createDefaultStatus(): RobotStatus {
     robotType: "ASTRO",
   };
 }
+
+
+// ── Plugins (docs/plugins.md §2, §3, §7) ─────────────────────────────────────
+
+export type PluginState =
+  | 'disabled' | 'stopped' | 'installing' | 'starting'
+  | 'running' | 'degraded' | 'crashed' | 'error';
+
+/** Plugin-reported health (`status` event); independent of the process state. */
+export type PluginStatusState = 'ok' | 'degraded' | 'error';
+
+export type PluginRuntime = 'python' | 'dotnet' | 'exe' | 'external';
+
+/** One entry of GetStatus.plugins. */
+export type PluginStatusEntry = {
+  id: string;
+  name: string;
+  state: PluginState;
+  statusState?: PluginStatusState | '' | null;
+};
+
+export type PluginParamType = 'number' | 'boolean' | 'string' | 'enum' | 'point' | 'list' | 'image' | 'variable';
+export type PluginOutputType = 'number' | 'boolean' | 'string' | 'point' | 'list' | 'image';
+
+export type PluginParamDef = {
+  key: string;
+  label: string;
+  type: PluginParamType;
+  default?: unknown;
+  options?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
+  required?: boolean;
+  help?: string;
+};
+
+export type PluginOutputDef = {
+  key: string;
+  label: string;
+  type: PluginOutputType;
+};
+
+export type PluginStepDef = {
+  id: string;
+  label: string;
+  description?: string;
+  params?: PluginParamDef[];
+  outputs?: PluginOutputDef[];
+  timeoutMs?: number;
+  cancellable?: boolean;
+};
+
+export type PluginFunctionDef = {
+  name: string;
+  signature?: string;
+  description?: string;
+  minArgs?: number;
+  maxArgs?: number;
+  timeoutMs?: number;
+};
+
+export type PluginPropertyDef = {
+  name: string;
+  description?: string;
+  type?: 'number' | 'boolean';
+};
+
+export type PluginConfigFieldType = 'string' | 'password' | 'number' | 'boolean' | 'enum';
+
+export type PluginConfigField = {
+  key: string;
+  label?: string;
+  type: PluginConfigFieldType;
+  default?: string | number | boolean;
+  help?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  required?: boolean;
+};
+
+export type PluginManifest = {
+  id: string;
+  name: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  protocolVersion?: number;
+  runtime?: PluginRuntime;
+  entry?: string;
+  args?: string[];
+  autoStart?: boolean;
+  configSchema?: PluginConfigField[];
+  steps?: PluginStepDef[];
+  functions?: PluginFunctionDef[];
+  properties?: PluginPropertyDef[];
+  /** A custom GUI the plugin ships; shown in a WebView on the plugin detail page. */
+  ui?: { entry: string; title?: string };
+};
+
+export type PluginSummary = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  runtime: PluginRuntime;
+  state: PluginState;
+  message: string;
+  enabled: boolean;
+  connected: boolean;
+  pid: number;
+  startedUnixMs: number;
+  restartCount: number;
+  lastExitCode?: number | null;
+  stepCount: number;
+  functionCount: number;
+  propertyCount: number;
+  hasConfig: boolean;
+  statusState: PluginStatusState | '' | null;
+  statusMessage: string;
+};
+
+export type PluginConfigValues = Record<string, string | number | boolean>;
+
+export type PluginDetail = PluginSummary & {
+  manifest: PluginManifest;
+  config: PluginConfigValues;
+  /** Present for runtime `external` only. */
+  token?: string;
+  properties: Record<string, number>;
+  logTail: string[];
+};
+
+/** GetPluginContributions: everything the builder needs in one call. */
+export type PluginStepContribution = { pluginId: string; pluginName: string; running: boolean; step: PluginStepDef };
+export type PluginFunctionContribution = { pluginId: string; pluginName: string; running: boolean; function: PluginFunctionDef };
+export type PluginPropertyContribution = { pluginId: string; pluginName: string; running: boolean; property: PluginPropertyDef; value?: number };
+
+export type PluginContributions = {
+  steps: PluginStepContribution[];
+  functions: PluginFunctionContribution[];
+  properties: PluginPropertyContribution[];
+};
+
+export type PluginLogPage = {
+  id: string;
+  totalCount: number;
+  start: number;
+  logs: string[];
+};

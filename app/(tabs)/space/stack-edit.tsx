@@ -1,22 +1,26 @@
-import { useIsWide } from "@/src/components/ui/responsive";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
 import {
   accents,
   Button,
-  Card,
   colors,
   Divider,
-  InfoTip,
   Input,
   PageHeader,
   radii,
   RadioRow,
   Screen,
-  SectionHeader,
   shadows,
   spacing,
   type,
 } from "@/src/components/ui/kit";
+import {
+  EditorCard,
+  FieldGroup,
+  FieldHint,
+  FieldLabel,
+  SectionHeading,
+  TeachButton,
+} from "@/src/components/space/EditorCard";
 import { RobotStack } from "@/src/models/robotModels";
 import { usePoints, useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -103,7 +107,6 @@ export default function StackEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const stacks = useStacks();
   const points = usePoints();
-  const isWide = useIsWide();
 
   const isNew    = !id || id === "new";
   const existing = isNew ? null : (stacks.find(s => s.id === id) ?? null);
@@ -121,9 +124,12 @@ export default function StackEditPage() {
 
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
 
+  // Sync draft if the stack loads after navigation, and again when the saved stack itself
+  // changes — e.g. after re-teaching it in the wizard.
+  const existingKey = existing ? JSON.stringify(existing) : "";
   useEffect(() => {
     if (existing) setDraft({ ...existing });
-  }, [existing?.id]);
+  }, [existingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (fields: Partial<RobotStack>) => setDraft(d => ({ ...d, ...fields }));
 
@@ -134,6 +140,17 @@ export default function StackEditPage() {
   }
 
   const canSave = draft.name.trim().length > 0;
+
+  // Teach opens the stack wizard. A saved stack is re-taught in place (same id); a new one is
+  // created by the wizard, so it replaces this blank page and Done returns to the stack list.
+  function openTeach() {
+    if (isNew) {
+      const name = draft.name.trim();
+      router.replace(name ? `/space/stack-teach?name=${encodeURIComponent(name)}` : "/space/stack-teach");
+    } else {
+      router.push(`/space/stack-teach?id=${encodeURIComponent(draft.id)}`);
+    }
+  }
 
   return (
     <KeyboardAvoidingView
@@ -162,99 +179,88 @@ export default function StackEditPage() {
 
       <Screen>
         {(() => {
-          const nameSection = (
-            <>
-              <SectionHeader title="Name" />
-              <Card>
+          // The whole stack setup lives in one card: plain field labels and hairline dividers.
+          const identity = (
+            <FieldGroup>
+              <View>
+                <FieldLabel text="Name" />
                 <Input
                   value={draft.name}
                   onChangeText={v => set({ name: v })}
                   placeholder="e.g. Tube Rack A"
                   autoCapitalize="words"
                   returnKeyType="next"
-                  style={s.nameInput}
                 />
-              </Card>
-            </>
-          );
-
-          const baseSection = (
-            <>
-              <SectionHeader title="Base point" />
-              <Card padded={false}>
-                <AnimatedPressable style={s.pickerRow} onPress={() => setPointPickerOpen(true)}>
-                  <Text style={[s.pickerRowText, !draft.basePointName && s.pickerRowPlaceholder]}>
+              </View>
+              <View>
+                <FieldLabel text="Base point" />
+                <AnimatedPressable style={s.pickerWell} onPress={() => setPointPickerOpen(true)}>
+                  <Text
+                    style={[s.pickerWellText, !draft.basePointName && s.pickerWellPlaceholder]}
+                    numberOfLines={1}
+                  >
                     {draft.basePointName || "Select point…"}
                   </Text>
                   <ChevronRight size={16} color={colors.textFaint} />
                 </AnimatedPressable>
-              </Card>
-            </>
+              </View>
+            </FieldGroup>
           );
 
-          const offsetSection = (
-            <>
-              <SectionHeader title="Step offset  (mm per index step)" />
-              <Card>
+          // The step offset, with the teach wizard right beside it since teaching is what fills
+          // it in (it replaces the base point and step).
+          const offset = (
+            <FieldGroup>
+              <SectionHeading
+                title="Step offset"
+                unit="mm per index step"
+                action={<TeachButton onPress={openTeach} />}
+              />
+              <View>
                 <View style={s.axisRow}>
                   {(["X", "Y", "Z"] as const).map(axis => (
+                    <Text key={axis} style={[s.axisCol, s.axisLabel]}>{axis}</Text>
+                  ))}
+                </View>
+                <View style={[s.axisRow, s.axisRowGap]}>
+                  {(["X", "Y", "Z"] as const).map(axis => (
                     <View key={axis} style={s.axisCol}>
-                      <Text style={s.axisLabel}>{axis}</Text>
                       <SignedNumberInput
-                        value={draft[`offset${axis}` as "offsetX"]}
-                        onChange={v => set({ [`offset${axis}`]: v } as any)}
+                        value={draft[`offset${axis}`]}
+                        onChange={v => set({ [`offset${axis}`]: v } as Partial<RobotStack>)}
                       />
                     </View>
                   ))}
                 </View>
-              </Card>
-            </>
-          );
-
-          const maxCountSection = (
-            <>
-              <SectionHeader
-                title="Max count  (optional — enables round-robin)"
-                right={<InfoTip text="When set, indices at or beyond the max count wrap back to the start via modulo, so a program can cycle through the same slots repeatedly." />}
-              />
-              <Card>
-                <View style={s.countRow}>
-                  <OptionalCountInput
-                    value={draft.maxCount}
-                    onChange={v => set({ maxCount: v })}
-                  />
-                </View>
-                <Text style={s.hint}>
-                  When set, indices ≥ max count wrap around via modulo.
-                </Text>
-              </Card>
-            </>
-          );
-
-          if (isWide) {
-            // Wide: identity/base info on the left, step geometry on the right —
-            // avoids one long skinny column of stacked cards.
-            return (
-              <View style={s.wideRow}>
-                <View style={s.wideCol}>
-                  {nameSection}
-                  {baseSection}
-                </View>
-                <View style={s.wideCol}>
-                  {offsetSection}
-                  {maxCountSection}
-                </View>
               </View>
-            );
-          }
+              <FieldHint>
+                {isNew
+                  ? "Teach jogs the robot to the first item and one more and works out the step for you, or enter it by hand."
+                  : "Teach re-jogs the robot to the stack's items and replaces the base point and step."}
+              </FieldHint>
+            </FieldGroup>
+          );
 
+          const maxCount = (
+            <View>
+              <FieldLabel
+                text="Max count"
+                tip="Optional. When set, indices at or beyond the max count wrap back to the start via modulo, so a program can cycle through the same slots repeatedly. Leave blank for no limit."
+              />
+              <OptionalCountInput
+                value={draft.maxCount}
+                onChange={v => set({ maxCount: v })}
+              />
+            </View>
+          );
+
+          // Desktop: identity + max count on the left, step geometry on the right, still one card.
           return (
-            <>
-              {nameSection}
-              {baseSection}
-              {offsetSection}
-              {maxCountSection}
-            </>
+            <EditorCard
+              left={[identity, maxCount]}
+              right={[offset]}
+              stacked={[identity, offset, maxCount]}
+            />
           );
         })()}
       </Screen>
@@ -312,48 +318,29 @@ const s = StyleSheet.create({
   // kit Button primary (accent blue), to match the app-wide Stacks color coding.
   saveBtn: { backgroundColor: accents.purple },
 
-  // Wide: two columns instead of one long stack of cards. Each column keeps
-  // its own vertical rhythm since Screen's `gap` only spaces its direct child.
-  wideRow: { flexDirection: "row", gap: spacing.lg, alignItems: "flex-start" },
-  wideCol: { flex: 1, gap: spacing.md },
-
-  nameInput: { borderWidth: 0, backgroundColor: "transparent", paddingHorizontal: 0 },
+  pickerWell: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md - 2,
+    backgroundColor: colors.surfaceMuted,
+  },
+  pickerWellText:        { flex: 1, fontSize: 14, color: colors.text },
+  pickerWellPlaceholder: { color: colors.textFaint },
 
   // Coordinate/position values use the mono type preset.
   input: { ...type.mono },
 
-  axisRow: {
-    flexDirection: "row",
-    gap: spacing.sm + 2,
-  },
-  axisCol: { flex: 1 },
+  axisRow:    { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  axisRowGap: { marginTop: spacing.xs },
+  axisCol:    { flex: 1, minWidth: 0 },
   axisLabel: {
-    fontSize: 11, fontWeight: "600", color: colors.textFaint,
-    textAlign: "center", marginBottom: spacing.xs,
+    fontSize: 11, fontWeight: "600", color: colors.textFaint, textAlign: "center",
   },
-
-  countRow: {
-    paddingHorizontal: spacing.md + 2,
-    paddingTop: spacing.md,
-  },
-  hint: {
-    fontSize: 12, color: colors.textFaint,
-    paddingHorizontal: spacing.md + 2, paddingTop: spacing.xs, paddingBottom: spacing.sm,
-  },
-
-  pickerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.md + 1,
-  },
-  pickerRowText: {
-    ...type.body,
-    fontSize: 15,
-    color: colors.text,
-  },
-  pickerRowPlaceholder: { color: colors.textFaint },
 
   // ── Point picker modal ────────────────────────────────────────────────────
   overlay: {

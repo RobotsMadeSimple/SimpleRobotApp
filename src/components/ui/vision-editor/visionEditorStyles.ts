@@ -19,7 +19,7 @@ export const ves = StyleSheet.create({
   },
   sheetTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: spacing.sm },
 
-  // Inspection config modal chrome
+  // Tool / layer settings page chrome
   configRoot: { flex: 1, backgroundColor: colors.background },
   configHeader: {
     flexDirection: "row", alignItems: "center",
@@ -78,7 +78,7 @@ export const ves = StyleSheet.create({
     fontSize: 13, color: colors.text,
   },
 
-  // Zone draw modal
+  // Region draw modal
   drawModalRoot:     { flex: 1, backgroundColor: "#000" }, // full-bleed camera viewfinder, intentionally not a token
   drawModalRootWide: { flexDirection: "row" },
   // The camera image lives here, sized to whatever the toolbar leaves. Canvas and
@@ -116,9 +116,7 @@ export const ves = StyleSheet.create({
   drawSaveBtnDisabled: { backgroundColor: "rgba(255,255,255,0.15)" },
   drawSaveText:        { color: colors.onAccent, fontSize: 13, fontWeight: "700" },
 
-  // Grid cell steppers + rotation reset — dark-toolbar twins of the light ones on the
-  // zone list. The old GRID on/off toggle is gone: the lattice now rides on the Grid
-  // shape, so there is nothing to toggle.
+  // Grid cell steppers + rotation reset on the dark draw toolbar.
   drawStepper:          { flexDirection: "row", alignItems: "center", gap: 3 },
   drawStepperLabel:     { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.55)", marginRight: 1 },
   drawStepBtn: {
@@ -179,7 +177,7 @@ export const ves = StyleSheet.create({
     letterSpacing: 0.6, marginBottom: 2,
   },
 
-  // Inspection type picker
+  // Tool picker icon tile
   typePickerIcon: {
     width: 36, height: 36, borderRadius: radii.sm,
     backgroundColor: accents.cyanSoft, // vision editor's own accent-soft tint — accents.cyanSoft

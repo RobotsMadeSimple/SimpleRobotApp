@@ -1,19 +1,22 @@
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from "@/src/components/ui/ProgramListLayout";
 import { BuiltProgram, ProgramSummary, imageDataUri } from "@/src/models/robotModels";
-import { useBuiltPrograms, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
-import { robotClient } from "@/src/services/RobotConnectService";
+import { useBuiltPrograms, useProgramSummaries } from "@/src/providers/RobotProvider";
+import { isNotImplementedCommand, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
-import { Box, Clock, Cpu, Layers, PlayCircle } from "lucide-react-native";
+import { Box, Clock, Cpu, FileDown, Layers, PlayCircle, Upload } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   Image,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { Card, IconTile, InfoTip, SectionHeader, StatTile, StatusPill, colors, spacing } from "@/src/components/ui/kit";
+import { ImportProgramTextSheet } from "@/src/components/ui/program/ImportProgramTextSheet";
+import { downloadSrsFile, forgetSrsDownloadFolder, pickSrsFile, programToSrsFile } from "@/src/services/srsFile";
 
 // ── Program Row ────────────────────────────────────────────────────────────────
 
@@ -24,10 +27,9 @@ function ProgramRow({
   lastUpdatedUnixMs,
   image,
   isBuilt,
-  isBackground,
-  isRunning,
   onPress,
   onDelete,
+  onExport,
 }: {
   name: string;
   description: string;
@@ -35,10 +37,10 @@ function ProgramRow({
   lastUpdatedUnixMs?: number;
   image: string | null;
   isBuilt: boolean;
-  isBackground?: boolean;
-  isRunning?: boolean;
   onPress: () => void;
   onDelete?: () => void;
+  /** Export as a Simple Robot Script (.srs) file. */
+  onExport?: () => void;
 }) {
   const metaParts: string[] = [];
   if (stepCount !== null) metaParts.push(`${stepCount} step${stepCount !== 1 ? "s" : ""}`);
@@ -61,19 +63,20 @@ function ProgramRow({
       <View style={s.cardBody}>
         <View style={s.nameRow}>
           <Text style={s.cardName} numberOfLines={1}>{name}</Text>
-          {isBackground ? (
-            <StatusPill label="BACKGROUND" tone="success" icon={<Layers size={10} color={colors.success} />} />
-          ) : isBuilt ? (
+          {isBuilt && (
             <StatusPill label="BUILT" tone="accent" icon={<Cpu size={10} color={colors.accent} />} />
-          ) : null}
-          {isBackground && isRunning && (
-            <StatusPill label="RUNNING" tone="success" dot />
           )}
         </View>
         {!!description && <Text style={s.cardDesc} numberOfLines={2}>{description}</Text>}
         {metaParts.length > 0 && <Text style={s.cardMeta}>{metaParts.join("  ·  ")}</Text>}
       </View>
 
+      {onExport && (
+        <TouchableOpacity onPress={onExport} style={s.exportBtn} hitSlop={6} activeOpacity={0.6}
+          accessibilityRole="button" accessibilityLabel={`Download ${name} as text (.srs)`}>
+          <FileDown size={17} color={colors.textMuted} />
+        </TouchableOpacity>
+      )}
       {onDelete && <DeleteIconButton onPress={onDelete} style={s.deleteBtn} />}
     </Card>
   );
@@ -114,29 +117,22 @@ function sortRegular(cards: RegularCard[], sort: SortState): RegularCard[] {
   ));
 }
 
-function sortBuilt(programs: BuiltProgram[], sort: SortState): BuiltProgram[] {
-  return [...programs].sort(bySort<BuiltProgram>(sort, p => p.name, p => p.lastUpdatedUnixMs ?? 0));
-}
-
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function RobotProgramsScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
-  const robotStatus      = useRobotStatus();
   const [images, setImages] = useState<Record<string, string | null>>({});
   const [search, setSearch] = useState("");
   const [sort, setSort]     = useState<SortState>(defaultSort());
+  const [importFile, setImportFile] = useState<{ fileName: string; text: string } | null>(null);
 
   useEffect(() => robotClient.onProgramImages(setImages), []);
 
-  const builtNames = new Set(builtPrograms.map(p => p.name));
-  const runningBackgroundNames = new Set(
-    (robotStatus.backgroundPrograms ?? []).map(b => b.name)
-  );
-
-  const backgroundPrograms = builtPrograms.filter(bp => bp.isBackground);
-  const regularPrograms    = builtPrograms.filter(bp => !bp.isRoutine && !bp.isBackground);
+  // Every built name (routines and background programs too) so none of them shows up again
+  // as a robot-only program. Background programs have their own page.
+  const builtNames      = new Set(builtPrograms.map(p => p.name));
+  const regularPrograms = builtPrograms.filter(bp => !bp.isRoutine && !bp.isBackground);
 
   const regularCards: RegularCard[] = regularPrograms.map(bp => ({
     summary: live(bp, programSummaries) ?? syntheticSummary(bp),
@@ -156,12 +152,8 @@ export default function RobotProgramsScreen() {
   );
   const allRegularCards  = [...filteredRegular, ...filteredExternal];
 
-  const filteredBackground = sortBuilt(
-    backgroundPrograms.filter(bp => matchesSearch(bp.name, bp.description, q)), sort
-  );
-
-  const isEmpty    = regularCards.length === 0 && externalCards.length === 0 && backgroundPrograms.length === 0;
-  const hasResults = allRegularCards.length > 0 || filteredBackground.length > 0;
+  const isEmpty    = regularCards.length === 0 && externalCards.length === 0;
+  const hasResults = allRegularCards.length > 0;
 
   function handleDelete(name: string) {
     appAlert("Delete Program", `Delete "${name}" from the robot? This cannot be undone.`, [
@@ -170,19 +162,40 @@ export default function RobotProgramsScreen() {
     ]);
   }
 
-  function handleDeleteBackground(name: string) {
-    appAlert("Delete Background Program", `Delete "${name}" from the robot? This cannot be undone.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => robotClient.deleteBuiltProgram(name).catch(() => {}) },
-    ]);
+  // Simple Robot Script (.srs) export / import (controller docs/program-language.md §6.12).
+  async function handleExport(bp: BuiltProgram) {
+    try {
+      const saved = await downloadSrsFile(bp.name, await programToSrsFile(bp));
+      if (saved) {
+        appAlert("Downloaded", `Saved ${saved.fileName} to ${saved.folder}.`, [
+          { text: "Change folder", onPress: () => { void forgetSrsDownloadFolder(); } },
+          { text: "OK", style: "cancel" },
+        ]);
+      }
+    } catch (e) {
+      appAlert("Download Failed", isNotImplementedCommand(e) || isUnsupportedCommand(e)
+        ? "This controller cannot turn programs into text yet."
+        : e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleImport() {
+    try {
+      const file = await pickSrsFile();
+      if (file) setImportFile(file);
+    } catch (e) {
+      appAlert("Import Failed", e instanceof Error ? e.message : String(e));
+    }
   }
 
   // Summary numbers, all from state already held by the provider.
+  // Background programs live on their own page, so they are left out of every number here.
+  const backgroundNames = new Set(builtPrograms.filter(bp => bp.isBackground).map(bp => bp.name));
   const runningNow = programSummaries.filter(
-    p => p.status === "Running" || p.status === "Starting" || p.status === "Finishing"
+    p => !backgroundNames.has(p.name) && (p.status === "Running" || p.status === "Starting" || p.status === "Finishing")
   ).length;
-  const stepTotal  = builtPrograms.filter(bp => !bp.isRoutine).reduce((n, bp) => n + bp.steps.length, 0);
-  const lastSaved  = builtPrograms.reduce((ms, bp) => Math.max(ms, bp.lastUpdatedUnixMs ?? 0), 0);
+  const stepTotal  = regularPrograms.reduce((n, bp) => n + bp.steps.length, 0);
+  const lastSaved  = regularPrograms.reduce((ms, bp) => Math.max(ms, bp.lastUpdatedUnixMs ?? 0), 0);
 
   const aside = isEmpty ? null : (
     <>
@@ -199,15 +212,6 @@ export default function RobotProgramsScreen() {
         icon={PlayCircle}
         tint={runningNow > 0 ? [colors.success, colors.successSoft] : undefined}
       />
-      {backgroundPrograms.length > 0 && (
-        <StatTile
-          label="Background"
-          value={backgroundPrograms.length}
-          icon={Layers}
-          hint={`${runningBackgroundNames.size} running`}
-          tint={[colors.success, colors.successSoft]}
-        />
-      )}
       <StatTile label="Steps total" value={stepTotal} icon={Cpu} />
       {lastSaved > 0 && <StatTile label="Last saved" value={relativeTime(lastSaved)} icon={Clock} />}
     </>
@@ -220,7 +224,14 @@ export default function RobotProgramsScreen() {
       crumbs={[{ label: "Program", href: "/program" }, { label: "Programs" }]}
       accentColor={colors.accent}
       addLabel="New Program"
+      addHint="Start from a blank program"
       onAdd={() => router.navigate("/program/builder")}
+      secondaryAdd={{
+        label: "Import from file",
+        hint: "Open a .srs program file",
+        icon: color => <Upload size={18} color={color} />,
+        onPress: handleImport,
+      }}
       search={search}
       onSearchChange={setSearch}
       sort={sort}
@@ -234,7 +245,9 @@ export default function RobotProgramsScreen() {
     >
       <SectionHeader
         title="Programs"
-        right={<InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller." />}
+        right={
+          <InfoTip text="BUILT programs were made in the step builder and can be edited here. Programs without the badge exist only on the controller. Download a program as a text file (.srs) with its download icon; Import (top right) adds a program from a .srs file." />
+        }
       />
       {allRegularCards.map(c => (
         <ProgramRow
@@ -247,38 +260,19 @@ export default function RobotProgramsScreen() {
           isBuilt={c.isBuilt}
           onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(c.summary.name)}`)}
           onDelete={c.isBuilt ? () => handleDelete(c.summary.name) : undefined}
+          onExport={c.isBuilt ? () => handleExport(c.bp) : undefined}
         />
       ))}
 
-      {filteredBackground.length > 0 && (
-        <>
-          <SectionHeader
-            title="Background Programs"
-            icon={Layers}
-            right={
-              <View style={s.sectionHeaderRight}>
-                <InfoTip text="Background programs run in parallel with the main program." />
-                <StatusPill label={`${filteredBackground.length}`} tone="neutral" />
-              </View>
-            }
-          />
-          {filteredBackground.map(bp => (
-            <ProgramRow
-              key={bp.name}
-              name={bp.name}
-              description={bp.description}
-              stepCount={bp.steps.length}
-              lastUpdatedUnixMs={bp.lastUpdatedUnixMs}
-              image={images[bp.name] ?? null}
-              isBuilt
-              isBackground
-              isRunning={runningBackgroundNames.has(bp.name)}
-              onPress={() => router.navigate(`/(tabs)/program/monitor-program?name=${encodeURIComponent(bp.name)}`)}
-              onDelete={() => handleDeleteBackground(bp.name)}
-            />
-          ))}
-        </>
-      )}
+      <ImportProgramTextSheet
+        file={importFile}
+        existingNames={builtPrograms.map(p => p.name)}
+        onClose={() => setImportFile(null)}
+        onImported={name => {
+          setImportFile(null);
+          appAlert("Program Imported", `"${name}" was saved to the robot.`);
+        }}
+      />
     </ProgramListLayout>
   );
 }
@@ -286,7 +280,6 @@ export default function RobotProgramsScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  sectionHeaderRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   card: {
     flexDirection: "row", alignItems: "center",
     padding: spacing.md + 2, gap: spacing.md,
@@ -300,4 +293,5 @@ const s = StyleSheet.create({
   cardMeta:   { fontSize: 11, color: colors.textFaint, marginTop: 2 },
 
   deleteBtn: { padding: 4 },
+  exportBtn: { padding: 4 },
 });

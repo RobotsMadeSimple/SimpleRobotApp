@@ -1,8 +1,7 @@
 import { Card, colors, radii, spacing, StatusPill, type } from "@/src/components/ui/kit";
-import { setSelectedRobot } from "@/src/connections/robotState";
 import { RobotInfo } from "@/src/models/robotModels";
-import { robotClient } from "@/src/services/RobotConnectService";
-import { isSaved, recordConnection, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
+import { allAddressesFor, isSaved, toggleSaved, useConnectionStore } from "@/src/services/connectionStore";
+import { connectToRobot } from "@/src/services/robotConnect";
 import { Star } from "lucide-react-native";
 import React from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
@@ -15,14 +14,14 @@ const defaultRobotImage = require("@/assets/images/no-robot.png");
 
 export function RobotCard({ robot }: { robot: RobotInfo }) {
   useConnectionStore(); // re-render when the saved/star state changes
+  // Starred is per robot (matched by serial), so it shows on whichever address the robot is on.
   const saved = isSaved(robot);
+  const otherAddresses = allAddressesFor(robot).length - 1;
 
   function setRobot() {
-    recordConnection(robot);
-    setSelectedRobot(robot);
-    robotClient.connectTo(robot);
-    // Selecting a robot flips the Robot tab's root screen to the connected
-    // dashboard in place — no navigation (which would stack a duplicate route).
+    // Picks among every address this robot is known on (see robotConnect). Selecting a robot
+    // flips the Robot tab's root screen to the connected dashboard in place — no navigation.
+    connectToRobot(robot);
   }
 
   const imageSource = robotImages[robot.robotType] ?? defaultRobotImage;
@@ -42,6 +41,11 @@ export function RobotCard({ robot }: { robot: RobotInfo }) {
           <Text style={[type.mono, styles.subtext]} numberOfLines={1}>
             {robot.ipAddress}:{robot.port}
           </Text>
+          {otherAddresses > 0 && (
+            <Text style={styles.more} numberOfLines={1}>
+              +{otherAddresses} more {otherAddresses === 1 ? "address" : "addresses"}
+            </Text>
+          )}
         </View>
 
         <View style={styles.rightCol}>
@@ -95,6 +99,7 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
   subtext: { color: colors.textFaint },
+  more: { fontSize: 12, color: colors.textFaint },
   rightCol: {
     alignItems: "center",
     gap: spacing.sm,

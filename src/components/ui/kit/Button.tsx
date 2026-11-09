@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { haptic, type HapticKind } from "@/src/components/ui/haptics";
 import { colors, radii, spacing } from "./theme";
 
 export type ButtonVariant =
@@ -33,9 +34,20 @@ type Props = {
   loading?: boolean;
   disabled?: boolean;
   onPress?: (e: GestureResponderEvent) => void;
+  /** Override the tap haptic, or pass `false` to silence it (defaults by variant). */
+  haptic?: HapticKind | false;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
+  /** Show only the icon (a square button); `label` becomes its accessibility label. */
+  iconOnly?: boolean;
 };
+
+/** Default haptic per variant: STOP/destructive warns, primary CTAs tap firmer, the rest tap light. */
+function defaultHaptic(variant: ButtonVariant): HapticKind {
+  return variant === "destructive" ? "warning"
+    : variant === "primary" ? "medium"
+    : "light";
+}
 
 /** Text/icon color to use inside each button variant (for `icon`). */
 export function buttonTextColor(variant: ButtonVariant): string {
@@ -51,10 +63,16 @@ export function buttonTextColor(variant: ButtonVariant): string {
  */
 export function Button({
   label, variant = "primary", size = "md", icon,
-  loading = false, disabled = false, onPress, style, textStyle,
+  loading = false, disabled = false, onPress, haptic: hapticKind, style, textStyle, iconOnly = false,
 }: Props) {
+  const squareOnly = iconOnly && icon != null;
   const inactive = disabled || loading;
   const textColor = buttonTextColor(variant);
+  const kind = hapticKind === undefined ? defaultHaptic(variant) : hapticKind;
+
+  const handlePress = onPress
+    ? (e: GestureResponderEvent) => { if (kind) haptic(kind); onPress(e); }
+    : undefined;
 
   return (
     <AnimatedPressable
@@ -62,17 +80,20 @@ export function Button({
         styles.base,
         sizeStyles[size],
         variantStyles[variant],
+        squareOnly && iconOnlyStyles[size],
         style,
         // After `style` so the dim survives a caller background override
         // (e.g. a device-tint save button still reads as disabled).
         inactive && styles.dimmed,
       ]}
       disabled={inactive}
-      onPress={inactive ? undefined : onPress}
+      onPress={inactive ? undefined : handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={squareOnly ? label : undefined}
     >
       {loading ? (
         <ActivityIndicator size="small" color={textColor} />
-      ) : (
+      ) : squareOnly ? icon : (
         <>
           {icon}
           <Text
@@ -103,6 +124,11 @@ const styles = StyleSheet.create({
 const sizeStyles = StyleSheet.create({
   md: { paddingVertical: spacing.md, paddingHorizontal: spacing.lg, minHeight: 44 },
   sm: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md + 2, minHeight: 36, borderRadius: radii.sm },
+});
+
+const iconOnlyStyles = StyleSheet.create({
+  md: { paddingHorizontal: 0, width: 44 },
+  sm: { paddingHorizontal: 0, width: 36 },
 });
 
 const variantStyles = StyleSheet.create({

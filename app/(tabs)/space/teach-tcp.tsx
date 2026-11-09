@@ -1,4 +1,4 @@
-import { router, Stack, useFocusEffect } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Check, Crosshair, Minus, Plus, RotateCcw, RotateCw } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, AppStateStatus, StyleSheet, Text, View } from "react-native";
@@ -126,12 +126,17 @@ function round(v: number, dp = 3) {
  *
  * The active tool is cleared on entry so the reported pose is the bare J4 centre, and
  * restored on leave unless the newly taught tool was saved + activated.
+ *
+ * Opened from a tool's editor. Route param `id`: re-teach that tool (found by its stable id, so a
+ * rename in the save step keeps it the same tool). Route param `name`: pre-fills a new tool's name.
  */
 export default function TeachTcpScreen() {
   const status = useRobotStatus();
   const robot = useSelectedRobot();
   const tools = useTools();
   const isAstro = (robot?.robotType ?? status.robotType) === "ASTRO";
+  const { id, name: nameParam } = useLocalSearchParams<{ id?: string; name?: string }>();
+  const target = id ? tools.find(t => t.id === id) ?? null : null;
 
   const STEPS = useMemo(
     () => ["Setup", ...Array.from({ length: TOUCHES }, (_, i) => `Touch ${i + 1}`), "Save"] as const,
@@ -141,7 +146,10 @@ export default function TeachTcpScreen() {
 
   const [step, setStep] = useState(0);
   const [touches, setTouches] = useState<(Touch | null)[]>(Array(TOUCHES).fill(null));
-  const [name, setName] = useState("TCP Tool");
+  const [name, setName] = useState(target?.name ?? (nameParam || "TCP Tool"));
+  // The tool list can arrive after this screen mounts — seed the name once the target shows up.
+  const [seededId, setSeededId] = useState(target?.id);
+  if (target && target.id !== seededId) { setSeededId(target.id); setName(target.name); }
   const [saving, setSaving] = useState(false);
   const savedRef = useRef(false);
 
@@ -211,8 +219,13 @@ export default function TeachTcpScreen() {
       ],
     );
   };
+  // Return to whatever opened the wizard — the tool's editor reloads the re-taught offset; a new
+  // tool's editor was replaced by the wizard, so that lands back on the tool list.
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(tabs)/space/tools"));
   const exit = () => leave(goBack);
+  // The tool's editor sits right under the wizard — its crumb steps back to it rather than
+  // opening a second copy.
+  const editorHref = target?.id ? `/space/tool-edit?id=${encodeURIComponent(target.id)}` : null;
 
   const captureTouch = () => {
     const t: Touch = { x: status.x, y: status.y, rz: status.rz };
@@ -233,8 +246,11 @@ export default function TeachTcpScreen() {
     return max;
   }, [touches]);
 
+  // Renaming the tool being re-taught onto another tool's name would clobber that tool.
+  const nameClash = !!target && tools.some(t => t.name === name.trim() && t.id !== target.id);
+
   const save = async () => {
-    if (!solution) return;
+    if (!solution || nameClash) return;
     const nm = name.trim();
     if (!nm) return;
     setSaving(true);
@@ -242,7 +258,9 @@ export default function TeachTcpScreen() {
       // Only X/Y are taught — height (Z) and rotation are left untouched so editing an
       // existing tool preserves whatever Z/rotation offset it already had.
       const fields = { x: round(solution.tx), y: round(solution.ty) };
-      if (tools.some(t => t.name === nm)) {
+      if (target) {
+        await robotClient.editTool(target.name, { ...fields, newName: nm !== target.name ? nm : undefined });
+      } else if (tools.some(t => t.name === nm)) {
         await robotClient.editTool(nm, { ...fields });
       } else {
         await robotClient.createTool({ name: nm, ...fields });
@@ -423,9 +441,11 @@ export default function TeachTcpScreen() {
           <Text style={styles.sectionLabel}>TOOL NAME</Text>
           <Input value={name} onChangeText={setName} placeholder="e.g. Pointer" autoCapitalize="words" />
           <Text style={styles.hint}>
-            {tools.some(t => t.name === name.trim())
-              ? "Updates the existing tool and makes it active."
-              : "Creates a new tool and makes it active."}
+            {nameClash
+              ? "Another tool already uses this name."
+              : target || tools.some(t => t.name === name.trim())
+                ? "Updates the existing tool and makes it active."
+                : "Creates a new tool and makes it active."}
           </Text>
         </Card>
 
@@ -437,7 +457,7 @@ export default function TeachTcpScreen() {
             icon={<Check size={16} color={buttonTextColor("primary")} />}
             onPress={save}
             loading={saving}
-            disabled={saving || !ok || !name.trim()}
+            disabled={saving || !ok || !name.trim() || nameClash}
             style={styles.navBtn}
           />
         </View>
@@ -451,15 +471,16 @@ export default function TeachTcpScreen() {
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <NotConnectedOverlay />
         <PageHeader
-          title="Teach TCP"
+          title={target ? `Teach ${target.name}` : "Teach TCP"}
           subtitle="Touch one point from several angles to solve the tool offset"
           crumbs={[
             { label: "Space", href: "/(tabs)/space" },
             { label: "Tools", href: "/(tabs)/space/tools" },
+            ...(editorHref ? [{ label: target!.name, href: editorHref }] : []),
             { label: "Teach TCP" },
           ]}
           onBack={exit}
-          onNavigate={href => leave(() => router.navigate(href as never))}
+          onNavigate={href => leave(() => (href === editorHref ? goBack() : router.navigate(href as never)))}
         />
         <Screen>
           <WizardStepper steps={STEPS} current={step} reachable={reachable} onStep={goto} />

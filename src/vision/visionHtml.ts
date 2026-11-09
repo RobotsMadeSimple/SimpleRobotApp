@@ -1,27 +1,41 @@
-import { VisionZone, VisionZoneGeometry, VisionZoneGrid, VisionZoneShape } from "@/src/models/robotModels";
+import type { DrawGeometry, DrawGrid, DrawShape } from "./regionMath";
+import { HOMOGRAPHY_JS } from "./homography";
+import { FEED_NOTE_JS, LIVE_FEED_JS } from "./liveFeedSocket";
+import { ZOOM_PAN_JS } from "./zoomPan";
+
+/** Another region drawn faintly behind the one being edited, for context. */
+export type DrawContextRegion = { id: string; name: string; geometry: DrawGeometry; grid: DrawGrid | null };
 
 /**
- * Zone draw/edit canvas.
+ * Region draw/edit canvas (a tool's search area).
  *
  * There is always at most one *working geometry*. Until it exists you are drawing:
  * drag out a rectangle or circle, or tap out polygon points. Once it exists you are
  * editing: drag a handle to reshape, drag the interior to move. Nothing is committed
  * back to the program until the host taps Save, so Cancel is always a clean exit.
  *
- * `initialGeometry` seeds the working geometry, which is what makes "edit the zone I
+ * `initialGeometry` seeds the working geometry, which is what makes "edit the region I
  * already have" work rather than forcing a redraw from scratch. `initialGrid` is drawn
  * over it but not owned here — the host keeps that and pushes updates in via setGrid.
  *
  * Pointer events rather than touch events: the app also runs on web and Electron,
  * where touch events never fire and the editor would otherwise be dead to a mouse.
+ *
+ * A `Quad` (skewed grid) has no draw phase: choosing it seeds four corners — from the
+ * rectangle being edited if there is one, else an inset box — and the user drags each
+ * corner onto the board's. Its grid is drawn perspective-correct (src/vision/homography.ts).
+ *
+ * While a corner or point is dragged, a magnifier shows the image around it (with the shape's
+ * edges) in the top corner away from the finger, so it can be placed exactly on a phone, where
+ * the finger hides the very spot being placed.
  */
-export function makeZoneDrawHtml(
+export function makeRegionDrawHtml(
   imageUri: string,
-  zones: VisionZone[],
-  editingZoneId: string | null,
-  activeShape: VisionZoneShape,
-  initialGeometry?: VisionZoneGeometry | null,
-  initialGrid?: VisionZoneGrid | null
+  context: DrawContextRegion[],
+  editingId: string | null,
+  activeShape: DrawShape,
+  initialGeometry?: DrawGeometry | null,
+  initialGrid?: DrawGrid | null
 ): string {
   return `<!DOCTYPE html><html>
 <head>
@@ -35,9 +49,11 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;touch
 <body>
 <canvas id="c"></canvas>
 <script>
+${HOMOGRAPHY_JS}
+${ZOOM_PAN_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
-var zones=${JSON.stringify(zones)};
-var editingId=${JSON.stringify(editingZoneId)};
+var zones=${JSON.stringify(context)};
+var editingId=${JSON.stringify(editingId)};
 var drawShape=${JSON.stringify(activeShape)};
 var grid=${JSON.stringify(initialGrid ?? null)};
 var geom=${JSON.stringify(initialGeometry ?? null)};
@@ -47,6 +63,8 @@ var drag=null;
 var HIT=26;       // finger-sized handle hit radius
 var ROT_ARM=34;   // how far the rotation grip stands off the top edge
 var ORANGE='#f97316';
+var LOUPE_R=70;   // magnifier radius (px)
+var LOUPE_ZOOM=3; // magnifier zoom over the image as shown
 
 var img=new Image();
 img.onload=function(){resize();render();};
@@ -67,7 +85,23 @@ function post(){
 
 function reset(){polyPts=[];drag=null;geom=null;editing=false;}
 
-window.setShape=function(s){drawShape=s;reset();render();post();};
+window.setShape=function(s){
+  var prev=geom;drawShape=s;reset();
+  if(s==='Quad'){geom=quadFrom(prev);editing=true;}
+  render();post();
+};
+
+// Four corners TL, TR, BR, BL to start a skewed grid from: the rectangle (or quad) that was
+// on the canvas, so switching shape keeps the user's placement, else an inset box.
+function quadFrom(prev){
+  var pts=[[0.2,0.2],[0.8,0.2],[0.8,0.8],[0.2,0.8]];
+  if(prev&&prev.shape==='Quad'&&prev.points&&prev.points.length===4) pts=prev.points.map(function(p){return[p[0],p[1]];});
+  else if(prev&&prev.shape==='Rectangle') pts=rectCorners(prev).map(function(p){var n=toNorm(p.x,p.y);return[clamp01(n.x),clamp01(n.y)];});
+  return{shape:'Quad',x:0,y:0,width:1,height:1,rotation:0,cx:0.5,cy:0.5,radius:0.25,points:pts};
+}
+function isQuad(g){return g&&g.shape==='Quad'&&g.points&&g.points.length===4;}
+// A quad's corners in screen space, as [x,y] pairs for the homography helpers.
+function quadScr(g){var r=imgRect();return g.points.map(function(p){return[r.x+p[0]*r.w,r.y+p[1]*r.h];});}
 window.clearShape=function(){reset();render();post();};
 window.undoPoint=function(){if(polyPts.length){polyPts.pop();render();post();}};
 
@@ -88,12 +122,16 @@ window.closePolygon=function(){
   polyPts=[];editing=true;drag=null;render();post();
 };
 
+// The image as shown: fitted to the canvas, then through the zoom view (VS, VX, VY — see the
+// interaction section). Every shape, handle and hit test goes through this, so zooming needs no
+// other maths and the handles keep their finger size while zoomed.
+var VS=1,VX=0,VY=0;
 function imgRect(){
   var iw=img.naturalWidth||1,ih=img.naturalHeight||1;
   var cw=c.width,ch=c.height;
   var scale=Math.min(cw/iw,ch/ih);
   var w=iw*scale,h=ih*scale;
-  return{x:(cw-w)/2,y:(ch-h)/2,w:w,h:h};
+  return{x:VX+VS*(cw-w)/2,y:VY+VS*(ch-h)/2,w:VS*w,h:VS*h};
 }
 function toNorm(px,py){var r=imgRect();return{x:(px-r.x)/r.w,y:(py-r.y)/r.h};}
 function toScr(nx,ny){var r=imgRect();return{x:r.x+nx*r.w,y:r.y+ny*r.h};}
@@ -183,7 +221,7 @@ function handles(){
     var p=toScr(geom.cx,geom.cy),rad=geom.radius*Math.min(r.w,r.h);
     return[{id:'center',x:p.x,y:p.y},{id:'radius',x:p.x+rad,y:p.y}];
   }
-  if(geom.shape==='Polygon'){
+  if(geom.shape==='Polygon'||geom.shape==='Quad'){
     return geom.points.map(function(p,i){return{id:i,x:r.x+p[0]*r.w,y:r.y+p[1]*r.h};});
   }
   return[];
@@ -226,7 +264,7 @@ function inside(x,y){
     var p=toScr(geom.cx,geom.cy),rad=geom.radius*Math.min(r.w,r.h);
     return (x-p.x)*(x-p.x)+(y-p.y)*(y-p.y)<=rad*rad;
   }
-  if(geom.shape==='Polygon'&&geom.points.length>=3){
+  if((geom.shape==='Polygon'||geom.shape==='Quad')&&geom.points.length>=3){
     var pts=geom.points.map(function(q){return[r.x+q[0]*r.w,r.y+q[1]*r.h];});
     var hit=false;
     for(var i=0,j=pts.length-1;i<pts.length;j=i++){
@@ -279,6 +317,64 @@ function render(){
   }
 
   if(!editing&&drawShape==='Polygon'&&polyPts.length>0) drawPolyDraft();
+  var lp=loupePoint();
+  if(lp) drawLoupe(lp);
+}
+
+// The point being placed right now: a dragged corner / point, else none.
+function loupePoint(){
+  if(!drag||!geom) return null;
+  if(drag.kind==='vertex'&&geom.points&&geom.points[drag.idx]){
+    var v=geom.points[drag.idx];return toScr(v[0],v[1]);
+  }
+  if(drag.kind==='rectcorner'&&drag.hx!=null) return{x:drag.hx,y:drag.hy};
+  return null;
+}
+
+// A round magnifier on the side away from the point, showing the image and the working shape
+// around it, with a crosshair. It sits in the empty band above or below the image when there is
+// room (a phone held upright), clear of the hint strip; else in a top corner.
+function drawLoupe(p){
+  if(!(img.complete&&img.naturalWidth>0)) return;
+  var R=LOUPE_R,Z=LOUPE_ZOOM,m=12;
+  var r=imgRect();
+  var cx=p.x<c.width/2?c.width-R-m:R+m;
+  var cy;
+  if(r.y>=2*R+2*m) cy=r.y-R-m;
+  else if(c.height-(r.y+r.h)>=2*R+2*m) cy=r.y+r.h+R+m;
+  else{
+    cy=R+m;
+    if(p.y<R*2+m*2&&Math.abs(p.x-cx)<R*2+m) cy=c.height-R-m;
+  }
+  ctx.save();
+  ctx.beginPath();ctx.arc(cx,cy,R,0,2*Math.PI);ctx.closePath();
+  ctx.fillStyle='#000';ctx.fill();
+  ctx.clip();
+  ctx.translate(cx,cy);ctx.scale(Z,Z);ctx.translate(-p.x,-p.y);
+  ctx.drawImage(img,r.x,r.y,r.w,r.h);
+  ctx.strokeStyle=ORANGE;ctx.lineWidth=1.5/Z;ctx.fillStyle='rgba(0,0,0,0)';
+  if(isQuad(geom)||geom.shape==='Polygon'){
+    var q=geom.points.map(function(v){return toScr(v[0],v[1]);});
+    traceQuad(q);ctx.stroke();
+    if(isQuad(geom)&&grid&&grid.rows*grid.cols>1){
+      ctx.globalAlpha=0.6;ctx.setLineDash([4/Z,3/Z]);ctx.lineWidth=1/Z;
+      var qs=quadScr(geom);
+      for(var a=0;a<grid.rows;a++)for(var b=0;b<grid.cols;b++){
+        traceQuad(quadCellQuad(qs,grid.rows,grid.cols,a,b).map(function(t){return{x:t[0],y:t[1]};}));ctx.stroke();
+      }
+      ctx.setLineDash([]);ctx.globalAlpha=1;
+    }
+  }else if(geom.shape==='Rectangle'){
+    traceQuad(rectCorners(geom));ctx.stroke();
+  }
+  ctx.restore();
+  // Crosshair on the point, and the rim.
+  ctx.save();
+  ctx.strokeStyle='#fff';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(cx-10,cy);ctx.lineTo(cx-3,cy);ctx.moveTo(cx+3,cy);ctx.lineTo(cx+10,cy);
+  ctx.moveTo(cx,cy-10);ctx.lineTo(cx,cy-3);ctx.moveTo(cx,cy+3);ctx.lineTo(cx,cy+10);ctx.stroke();
+  ctx.beginPath();ctx.arc(cx,cy,R,0,2*Math.PI);ctx.lineWidth=2.5;ctx.strokeStyle=ORANGE;ctx.stroke();
+  ctx.restore();
 }
 
 function drawPolyDraft(){
@@ -339,13 +435,23 @@ function drawZone(g,label,color,grid){
     ctx.beginPath();ctx.arc(px,py,rad,0,2*Math.PI);ctx.fill();ctx.stroke();
     ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
     ctx.fillText(label,px+4,py-rad-4);
-  }else if(g.shape==='Polygon'&&g.points.length>=2){
+  }else if((g.shape==='Polygon'||g.shape==='Quad')&&g.points.length>=2){
     ctx.beginPath();
     ctx.moveTo(r.x+g.points[0][0]*r.w,r.y+g.points[0][1]*r.h);
     for(var i=1;i<g.points.length;i++) ctx.lineTo(r.x+g.points[i][0]*r.w,r.y+g.points[i][1]*r.h);
     ctx.closePath();ctx.fill();ctx.stroke();
     ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
     ctx.fillText(label,r.x+g.points[0][0]*r.w+4,r.y+g.points[0][1]*r.h-4);
+    // Mark which corner is row 1 / column 1 and which way the rows run, since a skewed grid
+    // can be dragged into any orientation.
+    if(isQuad(g)){
+      var tl=toScr(g.points[0][0],g.points[0][1]),tr=toScr(g.points[1][0],g.points[1][1]);
+      ctx.font='bold 11px sans-serif';ctx.fillStyle=color;
+      ctx.fillText('1,1',tl.x+6,tl.y+14);
+      ctx.beginPath();ctx.setLineDash([]);ctx.lineWidth=3;
+      var mx=tl.x+(tr.x-tl.x)*0.25,my=tl.y+(tr.y-tl.y)*0.25;
+      ctx.moveTo(tl.x,tl.y);ctx.lineTo(mx,my);ctx.strokeStyle=color;ctx.stroke();
+    }
   }
   if(grid&&grid.rows*grid.cols>1) drawGrid(g,grid,color);
   ctx.restore();
@@ -360,7 +466,7 @@ function zoneBounds(g){
     var rad=g.radius*Math.min(r.w,r.h);
     return{x:r.x+g.cx*r.w-rad,y:r.y+g.cy*r.h-rad,w:rad*2,h:rad*2};
   }
-  if(g.shape==='Polygon'&&g.points.length>=3){
+  if((g.shape==='Polygon'||g.shape==='Quad')&&g.points.length>=3){
     var xs=g.points.map(function(p){return p[0];}),ys=g.points.map(function(p){return p[1];});
     var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs);
     var y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
@@ -372,6 +478,19 @@ function zoneBounds(g){
 function drawGrid(g,grid,color){
   ctx.save();
   ctx.strokeStyle=color;ctx.globalAlpha=0.6;ctx.lineWidth=1;ctx.setLineDash([4,3]);
+
+  if(isQuad(g)){
+    // Perspective-correct: the unit-square lattice pushed through the quad's homography,
+    // so far rows come out shorter than near ones, as the board's squares do.
+    var qs=quadScr(g);
+    for(var qr=0;qr<grid.rows;qr++)
+      for(var qc=0;qc<grid.cols;qc++){
+        var cq=quadCellQuad(qs,grid.rows,grid.cols,qr,qc);
+        traceQuad(cq.map(function(p){return{x:p[0],y:p[1]};}));
+        ctx.stroke();
+      }
+    ctx.restore();return;
+  }
 
   if(g.shape==='Rectangle'&&rot(g)){
     // Cell by cell, because the lattice turns with the rectangle. The straight-line
@@ -407,7 +526,7 @@ function hoverCursor(x,y){
   if(editing&&geom){
     if(hitHandle(x,y)) return 'grab';
     if(inside(x,y)) return 'grab';
-    return 'default';
+    return VS>1?'move':'default';
   }
   return 'crosshair';
 }
@@ -417,7 +536,7 @@ function onDown(p){
   // that is what Clear is for. Only handles and the interior respond.
   if(editing&&geom){
     var h=hitHandle(p.x,p.y);
-    if(h){startHandleDrag(h);return;}
+    if(h){startHandleDrag(h);render();return;}
     if(inside(p.x,p.y)){
       drag={kind:'body',px:p.x,py:p.y,orig:JSON.parse(JSON.stringify(geom))};
       return;
@@ -462,6 +581,7 @@ function onMove(p){
     // axes are the screen's and this reduces to the plain min/max corner rebuild.
     // Only the dragged corner is clamped; the anchor is already inside the frame.
     var px=Math.max(r.x,Math.min(r.x+r.w,p.x)),py=Math.max(r.y,Math.min(r.y+r.h,p.y));
+    drag.hx=px;drag.hy=py;
     var ax=axes(geom),dx=px-drag.fx,dy=py-drag.fy;
     var lw=dx*ax.ux+dy*ax.uy, lh=dx*ax.vx+dy*ax.vy;
     var mid=toNorm(drag.fx+(ax.ux*lw+ax.vx*lh)/2, drag.fy+(ax.uy*lw+ax.vy*lh)/2);
@@ -545,22 +665,37 @@ function onUp(){
   drag=null;render();post();
 }
 
-c.addEventListener('pointerdown',function(e){
-  e.preventDefault();
-  try{c.setPointerCapture(e.pointerId);}catch(err){}
-  onDown({x:e.clientX,y:e.clientY});
-  // A drag that grabbed a handle or the body reads as grabbing; a fresh draw stays crosshair.
-  if(drag&&drag.kind!=='new'&&drag.kind!=='polyhover') c.style.cursor='grabbing';
-},{passive:false});
-
-c.addEventListener('pointermove',function(e){
-  if(drag){e.preventDefault();onMove({x:e.clientX,y:e.clientY});return;}
-  // Not dragging: just update the hover cursor so the mouse tells you what a point does.
-  c.style.cursor=hoverCursor(e.clientX,e.clientY);
-},{passive:false});
-
-c.addEventListener('pointerup',function(e){e.preventDefault();onUp();c.style.cursor=hoverCursor(e.clientX,e.clientY);},{passive:false});
-c.addEventListener('pointercancel',function(){onUp();c.style.cursor='default';},{passive:false});
+// Pointers go through ZoomPan (src/vision/zoomPan.ts): one finger edits exactly as before; two
+// fingers pinch-zoom and pan, and the wheel zooms about the cursor, so a corner can be placed on the
+// exact pixel. A one-finger drag on empty canvas around a finished shape pans the zoomed view. A
+// second finger landing mid-edit undoes what the first had started, so a pinch never nudges the shape.
+var snap=null;
+var zp=ZoomPan({el:c,dbl:false,max:10,
+  content:function(){var iw=img.naturalWidth||1,ih=img.naturalHeight||1,k=Math.min(c.width/iw,c.height/ih);
+    return{x:(c.width-iw*k)/2,y:(c.height-ih*k)/2,w:iw*k,h:ih*k};},
+  apply:function(s,ox,oy){
+    // The polygon being tapped out is held in screen points: carry it through the view change.
+    var keep=polyPts.map(function(p){return toNorm(p[0],p[1]);});
+    VS=s;VX=ox;VY=oy;
+    polyPts=keep.map(function(n){var q=toScr(n.x,n.y);return[q.x,q.y];});
+    render();
+  },
+  down:function(p){
+    snap={g:JSON.stringify(geom),pl:polyPts.length,ed:editing};
+    onDown(p);
+    // A drag that grabbed a handle or the body reads as grabbing; a fresh draw stays crosshair.
+    if(drag&&drag.kind!=='new'&&drag.kind!=='polyhover') c.style.cursor='grabbing';
+    return !!drag;
+  },
+  cancel:function(){
+    if(snap){geom=JSON.parse(snap.g);polyPts.length=snap.pl;editing=snap.ed;}
+    drag=null;render();post();
+  },
+  move:function(p){onMove(p);},
+  up:function(p,e,cancelled){onUp();c.style.cursor=cancelled?'default':hoverCursor(p.x,p.y);},
+  hover:function(e){c.style.cursor=hoverCursor(e.clientX,e.clientY);}
+});
+window.resetZoom=function(){zp.reset();};
 
 post();
 <\/script>
@@ -580,46 +715,76 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
 <body>
 <canvas id="c"></canvas>
 <script>
+${HOMOGRAPHY_JS}
+${ZOOM_PAN_JS}
 var c=document.getElementById('c'),ctx=c.getContext('2d');
-var _ws=null,_timer=null,_lastUrl=null,_gen=0;
+${LIVE_FEED_JS}
+${FEED_NOTE_JS}
+var _ws=null,_timer=null,_lastUrl=null,_gen=0,_feed=null;
 
-// Zone outlines drawn over every frame, so every declared zone is visible whether or
-// not an inspection uses it. The host pushes the zones in and toggles them; the canvas
-// is the image at natural size, so normalized zone coords map straight to it.
-var _zones=[],_zonesVisible=true;
-window.setZones=function(z){_zones=z||[];};
-window.setZonesVisible=function(v){_zonesVisible=!!v;};
-function drawZones(){
-  if(!_zonesVisible||!_zones.length||!c.width||!c.height)return;
-  var W=c.width,H=c.height,m=Math.min(W,H);
-  ctx.save();
-  ctx.lineWidth=Math.max(2,Math.round(m*0.005));
-  ctx.strokeStyle='#22d3ee';
-  for(var i=0;i<_zones.length;i++){
-    var g=_zones[i].geometry;if(!g)continue;
-    if(g.shape==='Circle'){
-      ctx.beginPath();ctx.arc(g.cx*W,g.cy*H,g.radius*m,0,2*Math.PI);ctx.stroke();
-    }else if(g.shape==='Polygon'&&g.points&&g.points.length>=2){
-      ctx.beginPath();ctx.moveTo(g.points[0][0]*W,g.points[0][1]*H);
-      for(var j=1;j<g.points.length;j++)ctx.lineTo(g.points[j][0]*W,g.points[j][1]*H);
-      ctx.closePath();ctx.stroke();
-    }else{
-      var x=g.x*W,y=g.y*H,w=g.width*W,h=g.height*H,rot=(g.rotation||0)*Math.PI/180;
-      if(rot){ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate(rot);ctx.strokeRect(-w/2,-h/2,w,h);ctx.restore();}
-      else{ctx.strokeRect(x,y,w,h);}
-    }
+// Tool overlay drawn over every frame: each tool's region (as used this frame when there is a
+// result, else as configured), its found points / lines / pose (a small axis cross), matched
+// pattern outlines with their scores, grid cells coloured pass / fail, and tools that did not run dimmed. The host pushes it in with setOverlay.
+// An outline (and its cells) in "norm" space is scaled by the frame size, a "px" one is drawn as-is;
+// points, lines and poses are always pixels of the frame vision ran on (each item's frame [w, h]).
+// The canvas is whatever frame the feed sent, which can be a downscaled preview of that one (a phone
+// stream's live preview is), so each item is drawn in frame units scaled onto the canvas.
+var _ov=[];
+window.setOverlay=function(o){_ov=o||[];};
+function drawOverlay(){
+  if(!_ov.length||!c.width||!c.height)return;
+  var cw=c.width,ch=c.height,lw0=Math.max(2,Math.round(Math.min(cw,ch)*0.004)),W,H,m,lw;
+  ctx.save();ctx.lineJoin='round';
+  for(var i=0;i<_ov.length;i++){
+    var o=_ov[i];
+    W=o.frame&&o.frame[0]>0?o.frame[0]:cw;H=o.frame&&o.frame[1]>0?o.frame[1]:ch;
+    ctx.setTransform(cw/W,0,0,ch/H,0,0);m=Math.min(W,H);lw=lw0*Math.min(W/cw,H/ch);
+    var sx=o.space==='norm'?W:1,sy=o.space==='norm'?H:1;
+    function X(p){return p[0]*sx;} function Y(p){return p[1]*sy;}
+    ctx.globalAlpha=o.dim?0.35:1;
+    function poly(pts,fill){if(!pts||pts.length<2)return;ctx.beginPath();ctx.moveTo(X(pts[0]),Y(pts[0]));
+      for(var k=1;k<pts.length;k++)ctx.lineTo(X(pts[k]),Y(pts[k]));ctx.closePath();if(fill)ctx.fill();ctx.stroke();}
+    // Cells first so the region outline sits on top of them.
+    if(o.cells){for(var ci=0;ci<o.cells.length;ci++){var ce=o.cells[ci];
+      ctx.lineWidth=Math.max(1,lw/2);ctx.setLineDash([]);
+      ctx.strokeStyle=ce.passed===true?'#22c55e':ce.passed===false?'#ef4444':o.color;
+      ctx.fillStyle=ce.passed===true?'rgba(34,197,94,0.22)':ce.passed===false?'rgba(239,68,68,0.22)':'rgba(0,0,0,0)';
+      poly(ce.pts,ce.passed!==null&&ce.passed!==undefined);}}
+    if(o.outline){ctx.lineWidth=o.selected?lw*1.6:lw;ctx.strokeStyle=o.color;ctx.setLineDash(o.dashed?[lw*3,lw*2]:[]);
+      ctx.fillStyle='rgba(0,0,0,0)';poly(o.outline,false);ctx.setLineDash([]);
+      if(o.label){var top=o.outline[0];for(var t=1;t<o.outline.length;t++)if(Y(o.outline[t])<Y(top))top=o.outline[t];
+        ctx.font='bold '+Math.max(11,Math.round(m*0.028))+'px sans-serif';
+        var tx=X(top)+4,ty=Y(top)>m*0.05?Y(top)-lw*2:Y(top)+m*0.04;
+        ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.6)';ctx.strokeText(o.label,tx,ty);ctx.fillStyle=o.color;ctx.fillText(o.label,tx,ty);}}
+    // A matching tool's pattern outlines where each match was found, then each match's score.
+    if(o.contours){ctx.lineWidth=lw;ctx.strokeStyle='#4ade80';ctx.fillStyle='rgba(0,0,0,0)';
+      for(var oi=0;oi<o.contours.length;oi++){var C=o.contours[oi];if(!C||C.length<2)continue;
+        ctx.beginPath();ctx.moveTo(C[0][0],C[0][1]);for(var cj=1;cj<C.length;cj++)ctx.lineTo(C[cj][0],C[cj][1]);ctx.closePath();ctx.stroke();}}
+    if(o.labels){ctx.font='bold '+Math.max(11,Math.round(m*0.026))+'px sans-serif';
+      for(var la=0;la<o.labels.length;la++){var Lb=o.labels[la],lx=Lb[0]+lw*3,ly=Lb[1]-lw*3;
+        ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.65)';ctx.strokeText(Lb[2],lx,ly);ctx.fillStyle='#4ade80';ctx.fillText(Lb[2],lx,ly);}}
+    if(o.lines){ctx.lineWidth=lw;ctx.strokeStyle='#facc15';for(var li=0;li<o.lines.length;li++){var L=o.lines[li];
+      ctx.beginPath();ctx.moveTo(L[0],L[1]);ctx.lineTo(L[2],L[3]);ctx.stroke();}}
+    if(o.points){ctx.fillStyle='#facc15';var pr=Math.max(2,lw);for(var pi=0;pi<o.points.length;pi++){var P=o.points[pi];
+      ctx.beginPath();ctx.arc(P[0],P[1],pr,0,2*Math.PI);ctx.fill();}}
+    if(o.pose){var px=o.pose.x,py=o.pose.y,a=o.pose.angle*Math.PI/180,len=m*0.06;
+      var ux=Math.cos(a),uy=Math.sin(a);ctx.lineWidth=lw;
+      ctx.strokeStyle='#ef4444';ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px+ux*len,py+uy*len);ctx.stroke();
+      ctx.strokeStyle='#22c55e';ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px-uy*len,py+ux*len);ctx.stroke();
+      ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(px,py,lw*1.2,0,2*Math.PI);ctx.fill();}
   }
   ctx.restore();
 }
 
 // Tap-to-select: report a tap's position in normalized (0-1) image coordinates, so the
-// host can hit-test it against zone geometry (that logic stays out of this shared feed
-// document — see VisionFeedViewer's onTapImagePoint and InspectionConfigModal.tsx).
+// host can hit-test it against tool regions (that logic stays out of this shared feed document —
+// see VisionFeedViewer's onTapImagePoint).
 // canvas{object-fit:contain} lets the browser scale the buffer (c.width/c.height, i.e. the
 // image's natural pixels) into the element's box, letterboxing to preserve aspect ratio —
-// the same "contain" math ZoneDrawModal's imgRect() computes by hand against its own,
-// differently-sized buffer (see makeZoneDrawHtml above). A tap landing in the letterbox
+// the same "contain" math RegionDrawModal's imgRect() computes by hand against its own,
+// differently-sized buffer (see makeRegionDrawHtml above). A tap landing in the letterbox
 // bars (outside the scaled image) is reported as no tap at all.
+// The bounding rect is the zoomed one while zoomed (a uniform CSS scale), so the same maths holds.
 function feedTapPoint(clientX,clientY){
   var rect=c.getBoundingClientRect();
   if(!c.width||!c.height||!rect.width||!rect.height) return null;
@@ -630,15 +795,31 @@ function feedTapPoint(clientX,clientY){
   if(px<0||py<0||px>dispW||py>dispH) return null;
   return{x:px/dispW,y:py/dispH};
 }
-c.addEventListener('pointerup',function(e){
-  var p=feedTapPoint(e.clientX,e.clientY);
-  if(p){try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedTap',x:p.x,y:p.y}));}catch(err){}}
-},{passive:true});
+
+// Zoom and pan (src/vision/zoomPan.ts) as a CSS transform on the canvas: the frame and the overlay
+// drawn into it scale together, and every new frame lands already zoomed. Off until the host calls
+// setZoomable(true) (the full-screen viewer); a clean tap is reported either way — a tap in the
+// letterbox bars as feedTap with null coordinates, so the host can still open the viewer.
+var zp=ZoomPan({el:document.body,enabled:false,content:function(){
+  var vw=window.innerWidth||1,vh=window.innerHeight||1;
+  if(!c.width||!c.height)return null;
+  var k=Math.min(vw/c.width,vh/c.height);
+  return{x:(vw-c.width*k)/2,y:(vh-c.height*k)/2,w:c.width*k,h:c.height*k};
+},apply:function(s,ox,oy){
+  c.style.transformOrigin='0 0';
+  c.style.transform=s===1?'':'translate('+ox+'px,'+oy+'px) scale('+s+')';
+},tap:function(x,y){
+  var p=feedTapPoint(x,y);
+  try{window.ReactNativeWebView.postMessage(JSON.stringify({type:'feedTap',x:p?p.x:null,y:p?p.y:null}));}catch(err){}
+}});
+window.setZoomable=function(b){zp.setEnabled(b);document.body.style.touchAction=b?'none':'';};
+window.resetZoom=function(){zp.reset();};
+window.zoomBy=function(f){zp.zoomBy(f);};
 
 // Each setFeed bumps the generation; only the current generation is allowed to
 // draw, so a just-closed feed (e.g. the raw camera socket while switching to the
 // annotated vision socket) can't paint stale frames and cause flicker.
-function closeWs(){if(_ws){try{_ws.onmessage=null;_ws.close();}catch(e){}_ws=null;}}
+function closeWs(){if(_feed){_feed.close();_feed=null;}}
 function stopTimer(){if(_timer){clearInterval(_timer);_timer=null;}}
 
 function drawSrc(src,cb,g){
@@ -649,7 +830,7 @@ function drawSrc(src,cb,g){
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
-      ctx.drawImage(img,0,0);drawZones();
+      ctx.drawImage(img,0,0);drawOverlay();
     }
     if(cb)cb();
   };
@@ -657,14 +838,16 @@ function drawSrc(src,cb,g){
   img.src=src;
 }
 
+// The socket reconnects and watches itself (src/vision/liveFeedSocket.ts): a feed that closes or
+// goes quiet comes back on its own, with "No new frames for N s, …" over the picture meanwhile.
 function startWs(url,g){
-  var dec=false,pend=null;
-  function step(src){dec=true;drawSrc(src,function(){dec=false;if(pend!==null){var n=pend;pend=null;step(n);}},g);}
-  _ws=new WebSocket(url);
-  _ws.onmessage=function(e){if(g!==_gen)return;if(dec){pend=e.data;}else{step(e.data);}};
-  _ws.onerror=function(){_ws=null;};
-  _ws.onclose=function(){_ws=null;};
+  _feed=liveFeed(url,{
+    frame:function(src,done){if(g!==_gen){done();return;}drawSrc(src,done,g);},
+    note:showNote,
+    log:function(m){try{console.log('[feed] '+m);}catch(e){}}
+  });
 }
+window.kickFeed=function(why){if(_feed)_feed.kick(why);};
 
 function startPoll(url,ms,g){
   var busy=false;
@@ -677,23 +860,29 @@ function startPoll(url,ms,g){
       if(c.width!==img.naturalWidth||c.height!==img.naturalHeight){
         c.width=img.naturalWidth||1;c.height=img.naturalHeight||1;
       }
-      ctx.drawImage(img,0,0);drawZones();busy=false;
+      ctx.drawImage(img,0,0);drawOverlay();busy=false;
     };
     img.onerror=function(){busy=false;};
-    img.src=url+'?_='+Date.now();
+    img.src=url+(url.indexOf('?')>=0?'&':'?')+'_='+Date.now();
   }
   load();_timer=setInterval(load,ms||150);
 }
 
-window.setFeed=function(url){
+// ms: the poll interval for an http(s) URL (default 150). A data: URL is one still frame, drawn once.
+var _lastMs;
+window.setFeed=function(url,ms){
+  // The host re-sends the feed on every load and prop change: the same source that is still
+  // running is left alone, so it is never closed and reopened for nothing (one socket per feed).
+  if(url&&url===_lastUrl&&ms===_lastMs&&(_feed||_timer))return;
   _gen++;var g=_gen;
-  _lastUrl=url;closeWs();stopTimer();
+  _lastUrl=url;_lastMs=ms;closeWs();stopTimer();
   if(!url)return;
   if(url.startsWith('ws://')||url.startsWith('wss://'))startWs(url,g);
-  else startPoll(url,150,g);
+  else if(url.startsWith('data:'))drawSrc(url,null,g);
+  else startPoll(url,ms||150,g);
 };
 window.pauseFeed=function(){_gen++;closeWs();stopTimer();};
-window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl);};
+window.resumeFeed=function(){if(_lastUrl)window.setFeed(_lastUrl,_lastMs);};
 <\/script>
 </body></html>`;
 

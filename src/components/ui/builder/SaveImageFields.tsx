@@ -7,7 +7,7 @@ import { Camera, Check } from "lucide-react-native";
 import { CameraState, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { TemplateInput } from "./NumericInputs";
 import { ms } from "./builderStyles";
-import { colors, accents } from "@/src/components/ui/kit";
+import { colors, accents, CautionNote } from "@/src/components/ui/kit";
 
 // ── SaveImageFields ───────────────────────────────────────────────────────────
 
@@ -16,11 +16,13 @@ export function SaveImageFields({
   variables,
   cameras,
   set,
+  onSaveVariable,
 }: {
   draft: ProgramStep;
   variables: ProgramVariable[] | undefined;
   cameras: CameraState[];
   set: (p: Partial<ProgramStep>) => void;
+  onSaveVariable?: (v: ProgramVariable) => void;
 }) {
   const accent = accents.cyan;
 
@@ -36,7 +38,11 @@ export function SaveImageFields({
       {cameras.length === 0 ? (
         <Text style={ms.emptyHint}>No cameras configured. Add cameras in the Camera settings.</Text>
       ) : (
-        cameras.map((cam, i) => {
+        <>
+        {!cameras.some(c => c.id === draft.saveImageCameraId) && (
+          <CautionNote style={{ marginBottom: 6 }}>No camera selected. Pick one below.</CautionNote>
+        )}
+        {cameras.map((cam, i) => {
           const active = draft.saveImageCameraId === cam.id;
           return (
             <TouchableOpacity
@@ -50,7 +56,8 @@ export function SaveImageFields({
               {active && <Check size={14} color={accent} />}
             </TouchableOpacity>
           );
-        })
+        })}
+        </>
       )}
 
       <Text style={[ms.fieldLabel, { marginTop: 14 }]}>SAVE PATH</Text>
@@ -62,6 +69,7 @@ export function SaveImageFields({
         accent={accent}
         variables={variables}
         quickTokens={["$time_ms"]}
+        create={{ type: "string" }} onCreateVariable={onSaveVariable} allVariables={variables}
       />
       <Text style={[ms.hintText, { marginTop: 8 }]}>
         Relative paths are from the app directory. Folders are created automatically.

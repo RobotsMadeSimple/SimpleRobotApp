@@ -1,11 +1,11 @@
-import { IORow } from "@/src/components/ui/io/ioShared";
+import { DeviceStatusBar, IORow } from "@/src/components/ui/io/ioShared";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Settings2 } from "lucide-react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback } from "react";
 import React from "react";
-import { StyleSheet, View } from "react-native";
+import { View } from "react-native";
 
 import {
   Button,
@@ -16,7 +16,6 @@ import {
   PageHeader,
   Screen,
   SectionHeader,
-  spacing,
   StatusPill,
 } from "@/src/components/ui/kit";
 
@@ -43,9 +42,11 @@ export default function RelayPage() {
       <PageHeader
         title="USB Relay Board"
         subtitle={`DCTTECH 4CH · HID${serial ? ` · ${serial}` : ""}`}
-        right={
-          <View style={styles.headerActions}>
-            <StatusPill label={connected ? "Connected" : "Offline"} tone={connected ? "success" : "danger"} dot />
+      />
+      <Screen>
+        <DeviceStatusBar
+          connected={connected}
+          actions={
             <Button
               variant="secondary"
               size="sm"
@@ -53,10 +54,8 @@ export default function RelayPage() {
               icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
               onPress={() => router.push("/(tabs)/io/configure-relay")}
             />
-          </View>
-        }
-      />
-      <Screen>
+          }
+        />
         <SectionHeader title="Relays" right={<StatusPill label={`${activeRelays}/4 on`} tone="neutral" />} />
         <Card padded={false}>
           {[0, 1, 2, 3].map((i) => (
@@ -77,6 +76,3 @@ export default function RelayPage() {
   );
 }
 
-const styles = StyleSheet.create({
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-});

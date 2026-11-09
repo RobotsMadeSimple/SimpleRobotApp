@@ -519,7 +519,7 @@ export default function AboutRobot() {
                   <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
                 )}
                 {hasUpdate && <StatusPill label={`v${latestVersion} available`} tone="warning" />}
-                <Text style={styles.rowValue} numberOfLines={1}>{controllerVersion}</Text>
+                <Text style={styles.versionValue} numberOfLines={1}>{controllerVersion}</Text>
               </View>
             }
           />
@@ -573,7 +573,7 @@ export default function AboutRobot() {
                 <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
               )}
               {appHasUpdate && <StatusPill label={`v${appLatestVersion} available`} tone="warning" />}
-              <Text style={styles.rowValue} numberOfLines={1}>v{appVersion}</Text>
+              <Text style={styles.versionValue} numberOfLines={1}>v{appVersion}</Text>
             </View>
           }
         />
@@ -610,7 +610,7 @@ export default function AboutRobot() {
                 <StatusPill label="Up to date" tone="success" icon={<CheckCircle2 size={11} color={colors.success} />} />
               )}
               {electronHasUpdate && <StatusPill label={`v${electronLatestVersion} available`} tone="warning" />}
-              <Text style={styles.rowValue} numberOfLines={1}>
+              <Text style={styles.versionValue} numberOfLines={1}>
                 {electronVersion ? `v${electronVersion}` : "—"}
               </Text>
             </View>
@@ -815,9 +815,9 @@ const styles = StyleSheet.create({
   heroRowWide:   { flexDirection: "row", alignItems: "center", gap: spacing.lg },
   heroColNarrow: { alignItems: "center", gap: spacing.md },
 
-  heroImageWrapperWide:   { width: 168, height: 168, borderRadius: radii.xl, backgroundColor: colors.surfaceMuted, justifyContent: "center", alignItems: "center" },
+  heroImageWrapperWide:   { width: 168, height: 168, justifyContent: "center", alignItems: "center" },
   heroImageWide:          { width: 148, height: 148 },
-  heroImageWrapperNarrow: { width: 128, height: 128, borderRadius: radii.xl, backgroundColor: colors.surfaceMuted, justifyContent: "center", alignItems: "center" },
+  heroImageWrapperNarrow: { width: 128, height: 128, justifyContent: "center", alignItems: "center" },
   heroImageNarrow:        { width: 112, height: 112 },
 
   identityFieldsColWide:   { flex: 1 },
@@ -848,7 +848,10 @@ const styles = StyleSheet.create({
   rowValue: { ...type.body, color: colors.textMuted, maxWidth: "45%", textAlign: "right" },
 
   multiDot:     { flexDirection: "row", gap: spacing.sm },
-  versionRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  versionRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexShrink: 1, minWidth: 0 },
+  // No percentage maxWidth here: inside versionRight (sized by its content) Android resolved
+  // "45%" against a zero first-pass width and cut the version to "v…" until a re-render.
+  versionValue: { ...type.body, color: colors.textMuted, flexShrink: 0 },
 
   cardActionBtn:          { paddingVertical: spacing.sm + 5, borderRadius: 0 },
   cardActionTextDisabled: { color: colors.textFaint },

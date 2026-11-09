@@ -2,25 +2,32 @@ import { ActionButton } from "@/src/components/ui/ActionButton";
 import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
-import { useBuiltPrograms, useConnected, usePoints } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, usePoints, useProgramSummaries } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
-import { robotClient } from "@/src/services/RobotConnectService";
-import { BuiltProgram, ListElementType, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, variableList } from "@/src/models/robotModels";
+import { isNotImplementedCommand, robotClient } from "@/src/services/RobotConnectService";
+import { BuiltProgram, EditorMode, ListElementType, PluginStepContribution, Point, ProgramStep, ProgramVariable, StepType, ValidationProblem, imageDataUri, isStepEnabled, variableList } from "@/src/models/robotModels";
+import { findStep, mapStepTree, walkSteps } from "@/src/models/stepTree";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
   Camera,
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
+  CircleDot,
+  GitBranch,
+  Play,
+  Search,
+  ShieldCheck,
   ChevronsRight,
   ClipboardPaste,
   Copy,
   Cpu,
   History as HistoryIcon,
-  Eye,
-  EyeOff,
   ImagePlus,
   Plus,
+  Power,
   Repeat,
   Repeat2,
   Scissors,
@@ -29,11 +36,14 @@ import {
   Upload,
   Wrench,
   X,
+  BookOpen,
 } from "lucide-react-native";
+import { openManual, openStepReference } from "@/src/docs/navigation";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import React, { SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   BackHandler,
   Dimensions,
   Image,
@@ -50,20 +60,34 @@ import {
 
 import { StepConfigModal } from "@/src/components/ui/builder/StepConfigModal";
 import { StepTypePicker } from "@/src/components/ui/builder/StepTypePicker";
+import { usePluginContributions } from "@/src/components/ui/builder/usePluginContributions";
+import { useStepCatalog } from "@/src/components/ui/builder/useStepCatalog";
+import { useBreakpoints } from "@/src/components/ui/builder/useBreakpoints";
+import * as TextView from "@/src/components/ui/builder/TextProgramView";
+import { pluginStepFields } from "@/src/components/ui/builder/pluginSteps";
 import { StepRow, InsertDivider } from "@/src/components/ui/builder/StepRow";
+import { useDragReorder } from "@/src/components/ui/useDragReorder";
+import { BottomSheet } from "@/src/components/ui/BottomSheet";
+import { insertAt, locateStep, mapStepsById, moveRefusal, moveStep, removeStepsById, replaceStepById, sameScope, topSelected } from "@/src/components/ui/builder/stepEdits";
+import { conditionSummary } from "@/src/components/ui/builder/ConditionEditor";
 import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
-import { newId, getStepsAtScope, setStepsAtScope, backfillPointIds, ScopeFrame, InsertTarget, DragInfo } from "@/src/components/ui/builder/stepUtils";
-import { useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
+import { renameVariableInSteps, renameVariableInVariables } from "@/src/components/ui/builder/renameVariable";
+import {
+  STEP_THEME, ScopeFrame, backfillPointIds, bodyFrames, bodyOf, caseValuesText, categoryForStep, getStepsAtScope,
+  isBlockStep, newId, newStep, setStepsAtScope, stepDetail, stepLabel,
+} from "@/src/components/ui/builder/stepUtils";
+import { cloneForPaste, detachedCopy, useStepClipboard } from "@/src/components/ui/builder/stepClipboard";
 import { ms } from "@/src/components/ui/builder/builderStyles";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { useDocumentHistory } from "@/src/components/ui/builder/useDocumentHistory";
+import { loadTextDraft } from "@/src/components/ui/builder/textDraft";
 import { EMPTY_DOC, EditorDoc, docFromProgram, docSnapshot, programFromDoc, validScopeDepth } from "@/src/components/ui/builder/editorDocument";
-import { EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
+import { EditorModeToggle, EditorToolbar, ToolbarButton, useUndoShortcuts } from "@/src/components/ui/builder/EditorToolbar";
 import { RevisionsSheet } from "@/src/components/ui/builder/RevisionsSheet";
-import { isStepEnabled, withStepEnabled } from "@/src/components/ui/builder/StepMetaFields";
 import { findStepLocation, indexProblems, useProgramValidation } from "@/src/components/ui/builder/useProgramValidation";
 import { ProblemsPill, ValidationPanel } from "@/src/components/ui/builder/ValidationPanel";
 import { ExpressionEnvProvider } from "@/src/components/ui/builder/expressions/ExpressionEnv";
+import { ActiveFieldProvider } from "@/src/components/ui/builder/expressions/ActiveField";
 import { PropertiesSection } from "@/src/components/ui/builder/expressions/PropertiesSection";
 import { accents, colors, InfoTip, PageHeader, radii, shadows, spacing, type } from "@/src/components/ui/kit";
 
@@ -124,10 +148,159 @@ function ComputedFormula({ v }: { v: ProgramVariable }) {
   );
 }
 
+/** Where a new or pasted step goes: the list (by scope from the program root) and the index. */
+type InsertAt = { scope: ScopeFrame[]; index: number };
+
+// ── Visible rows ──────────────────────────────────────────────────────────────
+// The step list on screen is flattened into rows: the steps of the current scope, and — for a
+// block whose chevron is open — a header row per body, that body's steps (indented), and an end
+// row. Drag bars reorder over these rows, so a step can be dropped into, out of or across bodies;
+// where it lands is read off the row it ends up below (see dropRow).
+
+/** Bodies show inline up to two levels deep; deeper blocks keep their Enter pills. */
+const MAX_INLINE_DEPTH = 2;
+const INDENT = 14;
+
+type StepFlatRow = {
+  kind: "step"; id: string; step: ProgramStep; depth: number;
+  /** The list it sits in, from the program root. */
+  scope: ScopeFrame[]; index: number; listLen: number;
+  expandable: boolean; expanded: boolean;
+  /** An expanded block's first body (a drop right below the block lands at its top). */
+  firstBody?: ScopeFrame[];
+  /** Section notes: folded, and how many steps that hides. */
+  folded?: boolean; hiddenCount?: number;
+};
+type BodyFlatRow = { kind: "body"; id: string; depth: number; parent: ProgramStep; frame: ScopeFrame; scope: ScopeFrame[]; count: number };
+type EndFlatRow = { kind: "end"; id: string; depth: number; parent: ProgramStep; scope: ScopeFrame[]; index: number; listLen: number };
+type FlatRow = StepFlatRow | BodyFlatRow | EndFlatRow;
+
+function buildRows(
+  list: ProgramStep[],
+  scope: ScopeFrame[],
+  expanded: ReadonlySet<string>,
+  folded: ReadonlySet<string>,
+  points: Point[] | undefined,
+): FlatRow[] {
+  const rows: FlatRow[] = [];
+  const walk = (items: ProgramStep[], at: ScopeFrame[], depth: number) => {
+    let section: StepFlatRow | null = null;
+    items.forEach((s, index) => {
+      const isSection = s.type === "Note" && s.noteStyle === "section";
+      if (isSection) {
+        section = { kind: "step", id: s.id, step: s, depth, scope: at, index, listLen: items.length,
+          expandable: false, expanded: false, folded: folded.has(s.id), hiddenCount: 0 };
+        rows.push(section);
+        return;
+      }
+      if (section?.folded) { section.hiddenCount = (section.hiddenCount ?? 0) + 1; return; }
+      const expandable = isBlockStep(s) && depth < MAX_INLINE_DEPTH;
+      const isOpen = expandable && expanded.has(s.id);
+      const frames = isOpen ? bodyFrames(s, points).map(f => ({ ...f, stepId: s.id })) : [];
+      rows.push({ kind: "step", id: s.id, step: s, depth, scope: at, index, listLen: items.length,
+        expandable, expanded: isOpen, firstBody: frames[0] ? [...at, frames[0]] : undefined });
+      if (!isOpen) return;
+      for (const frame of frames) {
+        const bodyScope = [...at, frame];
+        const body = bodyOf(s, frame) ?? [];
+        rows.push({ kind: "body", id: `${s.id}|${frame.kind}|${frame.branchId ?? ""}`, depth: depth + 1,
+          parent: s, frame, scope: bodyScope, count: body.length });
+        walk(body, bodyScope, depth + 1);
+      }
+      rows.push({ kind: "end", id: `${s.id}|end`, depth: depth + 1, parent: s, scope: at, index, listLen: items.length });
+    });
+  };
+  walk(list, scope, 0);
+  return rows;
+}
+
+// Step search: what a step can be found by — its block name, row label and summary, its own
+// name and comment, and every value it stores (so `$count` finds the steps that use it, and a
+// point's name the moves to it). Field names are not searched, only values.
+const BODY_KEYS = new Set<string>(["loopSteps", "ifSteps", "elseSteps", "switchDefault", "trySteps", "catchSteps", "cncProgramSteps", "steps"]);
+function stepValues(node: unknown, out: string[]) {
+  if (typeof node === "string" || typeof node === "number") { out.push(String(node)); return; }
+  if (Array.isArray(node)) { node.forEach(x => stepValues(x, out)); return; }
+  if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) if (!BODY_KEYS.has(k) && k !== "id" && k !== "type") stepValues(v, out);
+  }
+}
+function searchText(step: ProgramStep, points: Point[] | undefined): string {
+  const values: string[] = [];
+  stepValues(step, values);
+  return [
+    STEP_THEME[step.type]?.label, stepLabel(step, points), stepDetail(step, undefined, undefined, points),
+    ...values,
+  ].filter(Boolean).join(" • ").toLowerCase();
+}
+
+/** The tint of a body header badge. */
+function bodyTint(kind: ScopeFrame["kind"]): string {
+  switch (kind) {
+    case "ifTrue": case "switchCase": case "try": return accents.cyan;
+    case "elseIf": return accents.purple;
+    case "catch": return colors.danger;
+    case "loop": return categoryForStep("Loop").color;
+    default: return colors.textMuted;
+  }
+}
+
+/** The header of a body shown inline: its badge, its condition / values, and add + enter. */
+function BodyHeaderRow({ row, condition, onEdit, onAdd, onPaste, onEnter, disabled }: {
+  row: BodyFlatRow;
+  condition?: string;
+  onEdit?: () => void;
+  onAdd: () => void;
+  onPaste?: () => void;
+  onEnter: () => void;
+  disabled?: boolean;
+}) {
+  const tint = bodyTint(row.frame.kind);
+  const badge = row.frame.kind === "loop" ? "REPEAT"
+    : row.frame.kind === "switchCase" ? "CASE"
+    : row.frame.label;
+  const text = row.frame.kind === "switchCase" ? caseValuesText(row.parent.switchCases?.find(c => c.id === row.frame.branchId)?.values)
+    : row.frame.kind === "loop" ? ""
+    : condition ?? "";
+  return (
+    <View style={styles.bodyHeader}>
+      <View style={[styles.bodyBadge, { backgroundColor: tint }]}>
+        <Text style={styles.bodyBadgeText}>{badge}</Text>
+      </View>
+      <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={onEdit ?? onEnter} activeOpacity={0.7} disabled={disabled}
+        accessibilityRole="button" accessibilityLabel={onEdit ? `Edit ${badge}` : `Enter ${badge}`}>
+        <Text style={styles.bodyText} numberOfLines={1}>
+          {text || (row.count === 0 ? "" : `${row.count} step${row.count === 1 ? "" : "s"}`)}
+          {row.count === 0 ? <Text style={styles.bodyEmpty}>{text ? "  ·  empty" : "empty — add a step"}</Text> : null}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={onAdd} hitSlop={6} disabled={disabled} activeOpacity={0.7}
+        accessibilityRole="button" accessibilityLabel={`Add a step to ${badge}`}>
+        <View style={styles.bodyAddBtn}><Plus size={11} color={colors.accent} /></View>
+      </TouchableOpacity>
+      {onPaste && (
+        <TouchableOpacity onPress={onPaste} hitSlop={6} disabled={disabled} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel={`Paste into ${badge}`}>
+          <View style={styles.bodyPasteBtn}><ClipboardPaste size={11} color={accents.purple} /></View>
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity onPress={onEnter} hitSlop={6} disabled={disabled} activeOpacity={0.7}
+        accessibilityRole="button" accessibilityLabel={`Open ${badge} on its own`}>
+        <ChevronRight size={15} color={tint} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function BuilderScreen() {
-  const { name: editName, isRoutine: isRoutineParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; source?: string; callerName?: string }>();
+  const { name: editName, isRoutine: isRoutineParam, isBackground: isBackgroundParam, source: sourceParam, callerName: callerNameParam } = useLocalSearchParams<{ name?: string; isRoutine?: string; isBackground?: string; source?: string; callerName?: string }>();
   const builtPrograms = useBuiltPrograms();
   const connected     = useConnected();
+  // Plugin steps/functions for the picker, config form and step labels; refetched on reconnect.
+  usePluginContributions(connected);
+  // The controller's step catalog (labels, typed fields, text syntax); refetched on reconnect.
+  // An older controller has none — the built-in tables in stepUtils stand in.
+  useStepCatalog(connected);
   const points        = usePoints();
   const paneLayout    = usePaneLayout();
   const isWide        = paneLayout !== "single";
@@ -144,7 +317,9 @@ export default function BuilderScreen() {
   // way to change it, and every one routes through history.commit.
   const history = useDocumentHistory<EditorDoc>(() => {
     const isRoutine = isRoutineParam === "1" || existing?.isRoutine === true;
-    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine };
+    // `isBackground=1` starts a new background program (the Background page's New button).
+    const isBackground = !isRoutine && isBackgroundParam === "1";
+    return existing ? docFromProgram(existing, { isRoutine }) : { ...EMPTY_DOC, isRoutine, isBackground };
   }, { limit: 100 });
   const { doc, commit } = history;
   const {
@@ -168,6 +343,10 @@ export default function BuilderScreen() {
   const [contextPickerOpen,  setContextPickerOpen]  = useState(false);
 
   const [programId, setProgramId]     = useState<string | undefined>(existing?.id);
+  // Blocks | Text — the program's preferred view (BuiltProgram.editorMode). A view switch is
+  // not an edit: it is kept out of the undo document and saved with the program.
+  const [editorMode, setEditorMode]   = useState<EditorMode>(existing?.editorMode ?? "blocks");
+  const breakpoints = useBreakpoints(programId);
   const [coverImage, setCoverImage]   = useState<string | null>(null);
   const [localLoading, setLocalLoading] = useState(isLocalMode && !!editName);
 
@@ -195,11 +374,21 @@ export default function BuilderScreen() {
         history.reset(loaded);
         markSaved(loaded);
         if (prog.id) setProgramId(prog.id);
+        if (prog.editorMode) setEditorMode(prog.editorMode);
       }
       if (img) setCoverImage(img);
       setLocalLoading(false);
     });
   }, []);
+
+  // Text the OS cut off last time (the app was killed in the background with the text view
+  // open and the text not saved): open in Text, where the view brings it back.
+  const draftChecked = useRef(false);
+  useEffect(() => {
+    if (!programId || draftChecked.current) return;
+    draftChecked.current = true;
+    loadTextDraft(programId).then(t => { if (t !== null) setEditorMode("text"); }).catch(() => {});
+  }, [programId]);
 
   // Load existing cover image when editing a robot program
   useEffect(() => {
@@ -216,6 +405,8 @@ export default function BuilderScreen() {
       const loaded = docFromProgram(existing, { isRoutine: isRoutineMode || existing.isRoutine === true });
       history.reset(loaded);
       markSaved(loaded);
+      if (existing.id) setProgramId(existing.id);
+      if (existing.editorMode) setEditorMode(existing.editorMode);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing?.name]);
@@ -285,44 +476,12 @@ export default function BuilderScreen() {
   // survives backing out to the parent program (and pastes across programs).
   const [clipboard, setClipboard] = useStepClipboard();
 
-  // A fully independent copy of a step (steps are always JSON-serialisable — they
-  // round-trip through the robot as JSON). Used so the clipboard never holds live
-  // references into the current `steps` state; sharing references let a later
-  // re-render/edit blank out the copy until the screen was remounted.
-  function deepCloneStep(step: ProgramStep): ProgramStep {
-    return JSON.parse(JSON.stringify(step));
-  }
-
-  // Recursively assign fresh ids to a step and everything nested inside it.
-  function reassignIds(step: ProgramStep): ProgramStep {
-    step.id = newId();
-    step.loopSteps?.forEach(reassignIds);
-    step.ifSteps?.forEach(reassignIds);
-    step.elseSteps?.forEach(reassignIds);
-    step.elseIfBranches?.forEach(b => { b.id = newId(); b.steps.forEach(reassignIds); });
-    return step;
-  }
-
-  function cloneStepWithNewIds(step: ProgramStep): ProgramStep {
-    // Deep clone first (full independence), then re-key in place on the throwaway.
-    return reassignIds(deepCloneStep(step));
-  }
-
-  function pasteStep(target: InsertTarget) {
+  // The clipboard only ever holds detached copies (stepClipboard.detachedCopy), so a later edit
+  // can never reach into it; a paste clones again with fresh ids for every nested step.
+  function pasteStep(at: InsertAt) {
     if (clipboard.length === 0) return;
-    const clones = clipboard.map(cloneStepWithNewIds);
-    setSteps(prev => {
-      const scoped = getStepsAtScope(prev, scopeStackRef.current);
-      let newScoped: ProgramStep[];
-      if (target.mode === "append") {
-        newScoped = [...scoped, ...clones];
-      } else {
-        const arr = [...scoped];
-        arr.splice(target.afterIndex + 1, 0, ...clones);
-        newScoped = arr;
-      }
-      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
-    });
+    const clones = clipboard.map(cloneForPaste);
+    setSteps(prev => insertAt(prev, at.scope, at.index, clones));
   }
 
   // ── Multi-select mode ─────────────────────────────────────────────────────
@@ -343,17 +502,17 @@ export default function BuilderScreen() {
     setSelectedIds([]);
   }
 
-  // Selected steps from the currently visible scope, in their display order.
+  // The selected steps that are not inside another selected one, in program order. Rows of an
+  // inline body can be selected with the list they sit in.
   function selectedInOrder(): ProgramStep[] {
-    const scoped = getStepsAtScope(steps, scopeStackRef.current);
-    return scoped.filter(s => selectedIds.includes(s.id));
+    return topSelected(getStepsAtScope(steps, scopeStackRef.current), new Set(selectedIds));
   }
 
   function copySelected() {
     const sel = selectedInOrder();
     if (sel.length === 0) return;
     // Store detached copies so the clipboard is immune to later edits/re-renders.
-    setClipboard(sel.map(deepCloneStep));
+    setClipboard(sel.map(detachedCopy));
     exitSelect();
   }
 
@@ -362,49 +521,61 @@ export default function BuilderScreen() {
   function cutSelected() {
     const sel = selectedInOrder();
     if (sel.length === 0) return;
-    setClipboard(sel.map(deepCloneStep));
-    setSteps(prev => {
-      const scoped = getStepsAtScope(prev, scopeStackRef.current).filter(s => !selectedIds.includes(s.id));
-      return setStepsAtScope(prev, scopeStackRef.current, scoped);
-    });
+    setClipboard(sel.map(detachedCopy));
+    const ids = new Set(sel.map(s => s.id));
+    setSteps(prev => removeStepsById(prev, ids));
     exitSelect();
   }
 
-  // Wrap the selected steps into a new Loop, in place. The selected steps are
-  // moved (ids preserved) into the loop's body; the loop takes the position of
-  // the first selected step.
-  function wrapSelectedInLoop() {
-    if (selectedIds.length === 0) return;
-    setSteps(prev => {
-      const scoped  = getStepsAtScope(prev, scopeStackRef.current);
-      const inner   = scoped.filter(s => selectedIds.includes(s.id));
-      const loop: ProgramStep = { ...defaultStep("Loop"), loopSteps: inner };
-      const firstIdx = scoped.findIndex(s => selectedIds.includes(s.id));
-      const rebuilt: ProgramStep[] = [];
-      scoped.forEach((s, i) => {
-        if (i === firstIdx) rebuilt.push(loop);
-        if (!selectedIds.includes(s.id)) rebuilt.push(s);
-      });
-      if (firstIdx < 0) rebuilt.push(loop);
-      return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
-    });
-    exitSelect();
-  }
-
-  // Every selected step is already off → the action switches them back on;
-  // otherwise it switches them all off.
-  function selectionAllDisabled(): boolean {
+  /**
+   * The list the selection sits in and the selected steps in it, when they all share one list
+   * (wrapping and Make Routine need that); otherwise explains why not and returns null.
+   */
+  function selectionInOneList(): { scope: ScopeFrame[]; picked: ProgramStep[]; firstIdx: number } | null {
     const sel = selectedInOrder();
-    return sel.length > 0 && sel.every(s => !isStepEnabled(s));
+    if (sel.length === 0) return null;
+    const locs = sel.map(s => locateStep(steps, s.id)).filter((l): l is NonNullable<typeof l> => !!l);
+    const scope = locs[0]?.scope;
+    if (!scope || locs.some(l => !sameScope(l.scope, scope))) {
+      appAlert("Pick steps from one list", "Wrapping and Make Routine work on steps that sit in the same list. Select steps from one block or one level.");
+      return null;
+    }
+    return { scope, picked: sel, firstIdx: Math.min(...locs.map(l => l.index)) };
   }
 
-  function setSelectedEnabled(enabled: boolean) {
-    if (selectedIds.length === 0) return;
+  // Wrap the selected steps into a new block, in place: they move (ids kept) into its first
+  // body — a Loop's steps, an If's IF branch or a Try's TRY — and the block takes the place of
+  // the first one.
+  function wrapSelected(type: "Loop" | "IfCondition" | "Try") {
+    const one = selectionInOneList();
+    if (!one) return;
+    const ids = new Set(one.picked.map(s => s.id));
+    const base = newStep(type);
+    const block: ProgramStep = type === "Loop" ? { ...base, loopSteps: one.picked }
+      : type === "IfCondition" ? { ...base, ifSteps: one.picked }
+      : { ...base, trySteps: one.picked };
     setSteps(prev => {
-      const scoped = getStepsAtScope(prev, scopeStackRef.current)
-        .map(s => selectedIds.includes(s.id) ? withStepEnabled(s, enabled) : s);
-      return setStepsAtScope(prev, scopeStackRef.current, scoped);
+      const list = getStepsAtScope(prev, one.scope);
+      const rebuilt: ProgramStep[] = [];
+      list.forEach((s, i) => {
+        if (i === one.firstIdx) rebuilt.push(block);
+        if (!ids.has(s.id)) rebuilt.push(s);
+      });
+      return setStepsAtScope(prev, one.scope, rebuilt);
     });
+    // The new block shows its body inline so the moved steps stay in view.
+    setExpanded(prev => new Set(prev).add(block.id));
+    exitSelect();
+    if (type === "IfCondition") setIfEdit(r => ({ stepId: block.id, key: "if", tick: (r?.tick ?? 0) + 1 }));
+  }
+
+  // Disable (or, when every selected step is already disabled, enable) the selection. A
+  // disabled step is skipped at run time with its whole body.
+  function toggleSelectedEnabled() {
+    if (selectedIds.length === 0) return;
+    const sel = selectedInOrder();
+    const enable = sel.length > 0 && sel.every(s => !isStepEnabled(s));
+    setSteps(prev => mapStepsById(prev, new Set(selectedIds), s => ({ ...s, enabled: enable ? undefined : false })));
     exitSelect();
   }
 
@@ -414,10 +585,7 @@ export default function BuilderScreen() {
     appAlert("Delete Steps", `Remove ${n} step${n !== 1 ? "s" : ""}?`, [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: () => {
-        setSteps(prev => {
-          const scoped = getStepsAtScope(prev, scopeStackRef.current).filter(s => !selectedIds.includes(s.id));
-          return setStepsAtScope(prev, scopeStackRef.current, scoped);
-        });
+        setSteps(prev => removeStepsById(prev, new Set(selectedIds)));
         exitSelect();
       } },
     ]);
@@ -425,17 +593,18 @@ export default function BuilderScreen() {
 
   // Replace the selected steps in place with a single CallRoutine step.
   function replaceSelectedWithRoutineCall(routineId: string, routineName: string) {
+    const one = selectionInOneList();
+    if (!one) return;
+    const ids = new Set(one.picked.map(s => s.id));
     setSteps(prev => {
-      const scoped = getStepsAtScope(prev, scopeStackRef.current);
-      const firstIdx = scoped.findIndex(s => selectedIds.includes(s.id));
-      const call: ProgramStep = { ...defaultStep("CallRoutine"), routineId, routineName };
+      const list = getStepsAtScope(prev, one.scope);
+      const call: ProgramStep = { ...newStep("CallRoutine"), routineId, routineName };
       const rebuilt: ProgramStep[] = [];
-      scoped.forEach((s, i) => {
-        if (i === firstIdx) rebuilt.push(call);
-        if (!selectedIds.includes(s.id)) rebuilt.push(s);
+      list.forEach((s, i) => {
+        if (i === one.firstIdx) rebuilt.push(call);
+        if (!ids.has(s.id)) rebuilt.push(s);
       });
-      if (firstIdx < 0) rebuilt.push(call);
-      return setStepsAtScope(prev, scopeStackRef.current, rebuilt);
+      return setStepsAtScope(prev, one.scope, rebuilt);
     });
   }
 
@@ -448,6 +617,7 @@ export default function BuilderScreen() {
 
   function openMakeRoutine() {
     if (selectedIds.length === 0) return;
+    if (!selectionInOneList()) return;
     if (!connected) {
       appAlert("Not Connected", "Connect to the robot to save a routine.");
       return;
@@ -462,7 +632,7 @@ export default function BuilderScreen() {
     setMakingRoutine(true);
     try {
       const routineId = newId();
-      const routineSteps = selectedInOrder().map(cloneStepWithNewIds);
+      const routineSteps = selectedInOrder().map(cloneForPaste);
       const prog: BuiltProgram = {
         id: routineId,
         name,
@@ -494,10 +664,24 @@ export default function BuilderScreen() {
   function openEditVar(v: ProgramVariable) { setEditingVar(v); setVarModalOpen(true); }
 
   function saveVar(v: ProgramVariable) {
-    setVariables(prev => {
-      const idx = prev.findIndex(x => x.id === v.id);
-      if (idx >= 0) { const next = [...prev]; next[idx] = v; return next; }
-      return [...prev, v];
+    // A rename must rewrite every `$name` reference across the program (and bare-name target fields),
+    // or the links orphan — the name is the symbol in the expression language. Done atomically with
+    // the variable-list update so steps + variables stay consistent in one commit.
+    //
+    // Whether this is a rename is read off the stored variable with the same id, not off the
+    // editor's state: the step modal's pickers create variables through this same function, and
+    // a stale `editingVar` would otherwise turn a brand-new variable into a rename of the last one
+    // edited — rewriting every reference to it.
+    commit(d => {
+      const prev = d.variables.find(x => x.id === v.id);
+      const isRename = !!prev && prev.name !== v.name;
+      let variables = prev ? d.variables.map(x => (x.id === v.id ? v : x)) : [...d.variables, v];
+      let steps = d.steps;
+      if (isRename) {
+        variables = renameVariableInVariables(variables, prev.name, v.name);
+        steps = renameVariableInSteps(d.steps, prev.name, v.name);
+      }
+      return { ...d, variables, steps };
     });
   }
 
@@ -519,8 +703,7 @@ export default function BuilderScreen() {
     if (!pendingRoutine) return;
     const added = builtPrograms.find(p => p.isRoutine && p.id && !pendingRoutine.beforeIds.includes(p.id));
     if (!added) return;
-    const scoped = getStepsAtScope(steps, scopeStackRef.current);
-    const target = scoped.find(s => s.id === pendingRoutine.stepId);
+    const target = findStep(steps, pendingRoutine.stepId);
     if (target) {
       const updated = { ...target, routineId: added.id, routineName: added.name };
       updateStep(updated);
@@ -542,35 +725,21 @@ export default function BuilderScreen() {
   const currentStepsRef = useRef(currentSteps);
   useEffect(() => { currentStepsRef.current = currentSteps; }, [currentSteps]);
 
-  function pushScope(frame: ScopeFrame) {
-    scrollYRef.current = 0;
-    exitSelect();
-    setScopeStack(prev => [...prev, frame]);
-  }
-
   function popScope() {
     scrollYRef.current = 0;
     exitSelect();
     setScopeStack(prev => prev.slice(0, -1));
   }
 
-  // For Label/GoToLabel pickers — the editing step is always in currentSteps
-  const editingScope = currentSteps;
-  const editingStepIndex = useMemo(() => {
-    if (!editingStep) return -1;
-    return currentSteps.findIndex(s => s.id === editingStep.id);
-  }, [editingStep, currentSteps]);
+  // For the Label / Go To Label pickers: the list the edited step sits in (it may be in a body
+  // shown inline, not the list on screen).
+  const editingLoc = useMemo(() => (editingStep ? locateStep(steps, editingStep.id) : null), [editingStep, steps]);
+  const editingScope = editingLoc ? getStepsAtScope(steps, editingLoc.scope) : currentSteps;
+  const editingStepIndex = editingLoc?.index ?? -1;
 
-  const [insertTarget, setInsertTarget]   = useState<InsertTarget>({ mode: "append" });
-  const insertTargetRef = useRef<InsertTarget>({ mode: "append" });
+  const insertTargetRef = useRef<InsertAt>({ scope: [], index: 0 });
 
-  // ── Drag state ────────────────────────────────────────────────────────────
-
-  const [drag, setDrag] = useState<DragInfo | null>(null);
-  const dragRef = useRef<DragInfo | null>(null);
-
-  // Auto-scroll while dragging
-  // Both refs point at the single steps ScrollView in the wide layout.
+  // Auto-scroll while dragging. Both refs point at the single steps ScrollView in the wide layout.
   const scrollViewRef      = useRef<ScrollView | null>(null);
   const scopeScrollViewRef = useRef<ScrollView | null>(null);
   const scrollYRef         = useRef(0);
@@ -589,177 +758,201 @@ export default function BuilderScreen() {
     if (autoScrollTimer.current) { clearInterval(autoScrollTimer.current); autoScrollTimer.current = null; }
   }
 
-  // Heights of every row (step.id → px) — measured via onLayout
-  const itemHeightsRef = useRef<Map<string, number>>(new Map());
+  // ── Inline bodies, sections, search (view state — not part of the document) ─
 
-  const handleItemLayout = useCallback((id: string, height: number) => {
-    itemHeightsRef.current.set(id, height);
-  }, []);
-
-  function calcDropIndex(fromIndex: number, dy: number, arr: ProgramStep[]): number {
-    if (fromIndex < 0 || arr.length < 2) return Math.max(0, Math.min(arr.length - 1, fromIndex));
-    const DEFAULT_H = 52;
-    let target = fromIndex;
-    let accumulated = 0;
-
-    if (dy > 0) {
-      for (let i = fromIndex + 1; i < arr.length; i++) {
-        const h = itemHeightsRef.current.get(arr[i].id) ?? DEFAULT_H;
-        if (dy > accumulated + h / 2) { target = i; accumulated += h; }
-        else break;
-      }
-    } else {
-      for (let i = fromIndex - 1; i >= 0; i--) {
-        const h = itemHeightsRef.current.get(arr[i].id) ?? DEFAULT_H;
-        if (-dy > accumulated + h / 2) { target = i; accumulated += h; }
-        else break;
-      }
-    }
-    return target;
-  }
-
-  function handleDragStart(stepId: string) {
-    const idx  = currentStepsRef.current.findIndex(s => s.id === stepId);
-    const info: DragInfo = { id: stepId, fromIndex: idx, toIndex: idx };
-    dragRef.current = info;
-    setDrag(info);
-  }
-
-  function handleDragMove(stepId: string, dy: number, absY: number) {
-    const d = dragRef.current;
-    if (!d || d.id !== stepId) return;
-
-    const newTo = calcDropIndex(d.fromIndex, dy, currentStepsRef.current);
-    if (newTo !== d.toIndex) {
-      const updated = { ...d, toIndex: newTo };
-      dragRef.current = updated;
-      setDrag(updated);
-    }
-
-    const screenH = Dimensions.get('window').height;
-    const ZONE = 110;
-    if (absY < ZONE) startAutoScroll(-1);
-    else if (absY > screenH - ZONE) startAutoScroll(1);
-    else stopAutoScroll();
-  }
-
-  function handleDragEnd(stepId: string) {
-    stopAutoScroll();
-    const d = dragRef.current;
-    if (d && d.id === stepId && d.toIndex !== d.fromIndex) {
-      moveScopedStepTo(d.fromIndex, d.toIndex);
-    }
-    dragRef.current = null;
-    setDrag(null);
-  }
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [foldedSections, setFoldedSections] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleIn = (set: (u: (p: ReadonlySet<string>) => ReadonlySet<string>) => void, id: string) =>
+    set(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const [ifEdit, setIfEdit] = useState<{ stepId: string; key: string; tick: number } | null>(null);
+  const [caseEdit, setCaseEdit] = useState<{ stepId: string; caseId: string; tick: number } | null>(null);
+  const [rowMenu, setRowMenu] = useState<ProgramStep | null>(null);
 
   // ── Step helpers ──────────────────────────────────────────────────────────
 
-  function defaultStep(type: StepType): ProgramStep {
-    return {
-      id: newId(), type,
-      name: undefined,
-      pointName: undefined,
-      speed: undefined, accel: undefined, decel: undefined,
-      blend: undefined, blendRadius: type === "SetBlendRadius" ? 10 : undefined,
-      offsetX: undefined, offsetY: undefined, offsetZ: undefined,
-      offsetRX: undefined, offsetRY: undefined, offsetRZ: undefined,
-      toolOffsetX: undefined, toolOffsetY: undefined, toolOffsetZ: undefined,
-      toolOffsetRX: undefined, toolOffsetRY: undefined, toolOffsetRZ: undefined,
-      outputNumber: 1, outputValue: true,
-      waitMs: 500,
-      loopCount: 1, loopSteps: type === "Loop" ? [] : undefined,
-      statusMessage: undefined, statusWarning: undefined, statusError: undefined, statusSeverity: undefined,
-      routineName: undefined, routineId: undefined,
-      visionProgramId: undefined, visionProgramName: undefined, visionZoneId: undefined, visionZoneVar: undefined, visionOutputs: undefined,
-      varPointName: undefined, varPointIndex: undefined, pointNameExpr: undefined,
-      variableName: undefined, variableExpr: undefined,
-      expressions: undefined,
-      labelId: type === "Label" ? newId() : undefined,
-      labelName: undefined,
-      condition: type === "IfCondition" ? { combinator: 'ALL' as const, items: [] } : undefined,
-      ifSteps:   type === "IfCondition" ? [] : undefined,
-      toolName:  undefined,
-      localName: undefined,
-      saveImagePath: undefined,
-      saveImageCameraId: undefined,
-      backgroundProgramName: undefined,
-      backgroundProgramId: undefined,
-      threadDistance: undefined,
-      threadPitch: undefined,
-      threadPeck: undefined,
-      threadPeckDepth: undefined,
-      threadReverseOut: undefined,
-      cncDxfFile: undefined,
-      cncSafeZ: undefined,
-      cncProgramSteps: type === "CncProgram" ? [] : undefined,
-      auxAxisIndex: (type === "GripperAction" || type === "ConveyorAction" || type === "RotaryIndex") ? 0 : undefined,
-      gripperAction:  type === "GripperAction"  ? "Open" : undefined,
-      conveyorAction: type === "ConveyorAction" ? "RunForward" : undefined,
-      rotaryDirection: type === "RotaryIndex" ? 1 : undefined,
-      rotaryCount:     type === "RotaryIndex" ? 1 : undefined,
-    };
-  }
-
-  function openTypePicker(target: InsertTarget) {
-    insertTargetRef.current = target;
-    setInsertTarget(target);
+  function openTypePicker(at: InsertAt) {
+    insertTargetRef.current = at;
     setTypePickerOpen(true);
   }
 
   function addStep(type: StepType) {
-    const target = insertTargetRef.current;
-    const step = defaultStep(type);
+    insertNewStep(newStep(type));
+  }
 
-    setSteps(prev => {
-      const scoped = getStepsAtScope(prev, scopeStackRef.current);
-      let newScoped: ProgramStep[];
-      if (target.mode === "append") {
-        newScoped = [...scoped, step];
-      } else {
-        const arr = [...scoped];
-        arr.splice(target.afterIndex + 1, 0, step);
-        newScoped = arr;
-      }
-      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
-    });
+  function addPluginStep(c: PluginStepContribution) {
+    insertNewStep({ ...newStep("Plugin"), ...pluginStepFields(c) });
+  }
 
+  function insertNewStep(step: ProgramStep) {
+    const at = insertTargetRef.current;
+    setSteps(prev => insertAt(prev, at.scope, at.index, [step]));
+
+    if (step.type === "IfCondition") {
+      // Nothing to configure on the step itself — go straight to its IF condition.
+      setIfEdit(r => ({ stepId: step.id, key: "if", tick: (r?.tick ?? 0) + 1 }));
+      return;
+    }
+    // Bodies, notes and the flow words with no settings open nothing; the rest open the editor.
+    if (step.type === "Return" || step.type === "PauseProgram" || step.type === "ClearLocal" || step.type === "RunHoming") return;
     setEditingStep(step);
     setConfigOpen(true);
   }
 
-  function updateStep(updated: ProgramStep) {
-    setSteps(prev => {
-      const scoped    = getStepsAtScope(prev, scopeStackRef.current);
-      const newScoped = scoped.map(s => s.id === updated.id ? updated : s);
-      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
-    });
+  // Edits find the step by id anywhere in the tree (it may sit in a body shown inline). A live
+  // edit from the phone step page coalesces per step, so one undo reverts a burst of changes.
+  function updateStep(updated: ProgramStep, opts?: { live?: boolean }) {
+    commit(d => ({ ...d, steps: replaceStepById(d.steps, updated) }),
+      opts?.live ? { coalesceKey: `step:${updated.id}` } : undefined);
   }
 
   function deleteStep(id: string) {
-    setSteps(prev => {
-      const scoped    = getStepsAtScope(prev, scopeStackRef.current);
-      const newScoped = scoped.filter(s => s.id !== id);
-      return setStepsAtScope(prev, scopeStackRef.current, newScoped);
-    });
+    setSteps(prev => removeStepsById(prev, new Set([id])));
   }
 
-  function moveScopedStepTo(from: number, to: number) {
-    setSteps(prev => {
-      const scoped = [...getStepsAtScope(prev, scopeStackRef.current)];
-      const [removed] = scoped.splice(from, 1);
-      scoped.splice(to, 0, removed);
-      return setStepsAtScope(prev, scopeStackRef.current, scoped);
-    });
+  function toggleStepEnabled(step: ProgramStep) {
+    updateStep({ ...step, enabled: isStepEnabled(step) ? false : undefined });
+  }
+
+  // ── Visible rows + drag bars ──────────────────────────────────────────────
+
+  const rows = useMemo(
+    () => buildRows(currentSteps, scopeStack, expanded, foldedSections, points),
+    [currentSteps, scopeStack, expanded, foldedSections, points]);
+  const draggedRef = useRef<string | null>(null);
+  const rowDrag = useDragReorder(rows, next => dropRow(next));
+  const rowRefs = useRef<Map<string, View>>(new Map());
+  const rowRef = (id: string) => (v: View | null) => { if (v) rowRefs.current.set(id, v); else rowRefs.current.delete(id); };
+  const rowLayout = (id: string) => rowDrag.onRowLayout(id);
+  const dragHandlers = {
+    onStart: (id: string) => { draggedRef.current = id; rowDrag.handle.onStart(id); },
+    onMove: (id: string, dy: number, absY: number) => {
+      rowDrag.handle.onMove(id, dy);
+      const ZONE = 110;
+      if (absY < ZONE) startAutoScroll(-1);
+      else if (absY > Dimensions.get("window").height - ZONE) startAutoScroll(1);
+      else stopAutoScroll();
+    },
+    onEnd: (id: string) => { stopAutoScroll(); rowDrag.handle.onEnd(id); draggedRef.current = null; },
+  };
+
+  // A dropped step lands below the row it ends up under: at the top of a body (under its
+  // header), after a block (under its end row), at the top of an open block's first body (right
+  // under the block), or after any other step in that step's list.
+  function dropRow(next: FlatRow[]) {
+    const id = draggedRef.current;
+    const k = next.findIndex(r => r.id === id);
+    const moved = next[k];
+    if (!moved || moved.kind !== "step") return;
+    const prev = k > 0 ? next[k - 1] : undefined;
+    const dest: InsertAt =
+      !prev                                            ? { scope: scopeStackRef.current, index: 0 }
+      : prev.kind === "body"                           ? { scope: prev.scope, index: 0 }
+      : prev.kind === "end"                            ? { scope: prev.scope, index: prev.index + 1 }
+      : prev.expanded && prev.firstBody                ? { scope: prev.firstBody, index: 0 }
+      :                                                  { scope: prev.scope, index: prev.index + 1 };
+    const why = moveRefusal(moved.step, dest.scope);
+    if (why === "intoItself") {
+      appAlert("Can't move a block into itself", "Drop it outside its own steps, or close the block first.");
+      return;
+    }
+    if (why === "loopControlOutsideLoop") {
+      appAlert("Break / Next needs a loop", "It only works inside a Loop's steps — keep it in a loop body.");
+      return;
+    }
+    if (sameScope(moved.scope, dest.scope) && (dest.index === moved.index || dest.index === moved.index + 1)) return;
+    setSteps(p => moveStep(p, moved.scope, moved.index, dest.scope, dest.index));
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [hitIdx, setHitIdx] = useState(0);
+  const hits = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [] as string[];
+    return [...walkSteps(steps)].filter(({ step }) => searchText(step, points).includes(q)).map(x => x.step.id);
+  }, [query, steps, points]);
+  const hitSet = useMemo(() => new Set(hits), [hits]);
+
+  // Show a hit: when it is not on screen, open the list it sits in; then scroll to it.
+  function gotoHit(i: number) {
+    if (hits.length === 0) return;
+    const n = ((i % hits.length) + hits.length) % hits.length;
+    setHitIdx(n);
+    const id = hits[n];
+    if (!rows.some(r => r.id === id)) {
+      const loc = locateStep(steps, id);
+      if (loc) { exitSelect(); setScopeStack(loc.scope); }
+    }
+    // Measured on screen (layout offsets are parent-relative), then scrolled by the difference.
+    setTimeout(() => {
+      const node = rowRefs.current.get(id);
+      const ref = scopeStackRef.current.length > 0 ? scopeScrollViewRef : scrollViewRef;
+      node?.measureInWindow((_x, y) => {
+        ref.current?.scrollTo({ y: Math.max(0, scrollYRef.current + y - 220), animated: true });
+      });
+    }, 220);
+  }
+
+  // ── Run from here, breakpoints, the running step ─────────────────────────
+
+  const programSummaries = useProgramSummaries();
+  const runSummary = programSummaries.find(p => p.name === (editName ?? programName.trim()));
+  const isActive = !!runSummary && ["Starting", "Running", "Stopping", "Stopped"].includes(runSummary.status);
+  const runningStepId = isActive ? (runSummary?.pausedAtStepId ?? runSummary?.currentStepId ?? undefined) : undefined;
+
+  function toggleBreakpoint(step: ProgramStep) {
+    if (!programId) {
+      appAlert("Save first", "Breakpoints are kept per saved program. Save this program once, then set them.");
+      return;
+    }
+    const on = !breakpoints.has(step.id);
+    breakpoints.toggle(step.id);
+    // A running program picks the change up straight away (an older controller ignores it).
+    if (isActive) {
+      const next = on ? [...breakpoints.list, step.id] : breakpoints.list.filter(x => x !== step.id);
+      robotClient.setBreakpoints(next).catch(() => {});
+    }
+  }
+
+  async function runFromHere(step: ProgramStep) {
+    if (isLocalMode) {
+      appAlert("Robot program required", "Save this program to the robot to run it.");
+      return;
+    }
+    if (validation.errorCount > 0) { setProblemsOpen(true); return; }
+    if (!(await save())) return;
+    const name = programName.trim();
+    try {
+      await robotClient.executeBuiltProgramDebug(name, { startAtStepId: step.id, breakpoints: breakpoints.list });
+      router.push(`/(tabs)/program/monitor-program?name=${encodeURIComponent(name)}`);
+    } catch (e) {
+      if (isNotImplementedCommand(e)) {
+        appAlert("Not available on this controller yet",
+          "This controller can't start a program from a chosen step yet. Update the controller software, or run the program from the top.");
+      } else {
+        appAlert("Could not start", e instanceof Error ? e.message : "The controller did not start the program.");
+      }
+    }
   }
 
   // ── Save / Run ────────────────────────────────────────────────────────────
 
   function buildProg(): BuiltProgram {
     const prog = programFromDoc(doc, programId, Date.now());
+    // The builder doesn't edit the display page, but SaveBuiltProgram replaces the whole
+    // program — so carry the robot's current page through, or saving from here wipes it.
+    // Prefer the id match: builtPrograms refreshes after the page editor saves.
+    const onRobot = (programId ? builtPrograms.find(p => p.id === programId) : undefined) ?? existing;
+    const page = onRobot ? {
+      displayPageHtml:   onRobot.displayPageHtml,
+      displayPageMode:   onRobot.displayPageMode,
+      displayPageLayout: onRobot.displayPageLayout,
+    } : {};
     // Self-migration: stamp a stable pointId onto any move step that still
     // references a point only by name, so renaming that point won't break it.
-    return { ...prog, steps: backfillPointIds(prog.steps, points) };
+    return { ...prog, ...page, editorMode, steps: backfillPointIds(prog.steps, points) };
   }
 
   async function save(): Promise<boolean> {
@@ -856,13 +1049,16 @@ export default function BuilderScreen() {
   // scope is handled by the scope header above the steps pane instead.
   function exitBuilder() {
     if (selectMode) { exitSelect(); return; }
-    if (!isDirty) { router.back(); return; }
+    // Always back to the program list this program belongs to, not one step back in history.
+    const listHref = headerCrumbs[headerCrumbs.length - 2].href as string;
+    const leaveBuilder = () => router.dismissTo(listHref as never);
+    if (!isDirty) { leaveBuilder(); return; }
     appAlert(
       "Unsaved Changes",
       "You have unsaved changes. Exit without saving?",
       [
-        { text: "Save & Exit", onPress: async () => { if (await save()) router.back(); } },
-        { text: "Discard",     style: "destructive", onPress: () => router.back() },
+        { text: "Save & Exit", onPress: async () => { if (await save()) leaveBuilder(); } },
+        { text: "Discard",     style: "destructive", onPress: leaveBuilder },
         { text: "Cancel",      style: "cancel" },
       ]
     );
@@ -1026,7 +1222,29 @@ export default function BuilderScreen() {
     setTimeout(() => { setEditingStep(loc.step); setConfigOpen(true); }, 350);
   }
 
-  const editorTools = (variant: "header" | "bar") => (
+  // Blocks ↔ Text. Text shows the whole program, so leave any block scope and selection.
+  // Leaving Text asks the text view first: it applies the text, or asks what to do with text
+  // that has errors, and answers false to stay. (Read off the module so a build whose text view
+  // has no guard yet still switches.)
+  async function changeEditorMode(mode: EditorMode, opts?: { checked?: boolean }) {
+    if (mode === editorMode) return;
+    if (editorMode === "text" && !opts?.checked) {
+      const leave = (TextView as unknown as { requestLeaveTextView?: () => Promise<boolean> }).requestLeaveTextView;
+      if (leave && !(await leave())) return;
+    }
+    exitSelect();
+    if (mode === "text") setScopeStack([]);
+    setEditorMode(mode);
+  }
+
+  // A parsed text program becomes the document in ONE undoable edit.
+  function applyTextProgram(p: BuiltProgram) {
+    commit(d => ({ ...d, steps: p.steps ?? [], variables: p.variables ?? [] }));
+  }
+
+  // Undo / redo, problems, find and history: in the wide header next to Save, or at the
+  // start of the narrow Save bar. The Blocks | Text switch sits on the STEPS row instead.
+  const editorTools = (variant: "header" | "footer") => (
     <EditorToolbar
       variant={variant}
       canUndo={history.canUndo}
@@ -1039,14 +1257,29 @@ export default function BuilderScreen() {
           errorCount={validation.errorCount}
           warningCount={validation.warningCount}
           onPress={() => setProblemsOpen(true)}
+          compact={variant === "footer"}
         />
+      )}
+      {editorMode === "blocks" && (
+        <ToolbarButton label="Find" onPress={() => { setSearchOpen(o => !o); if (searchOpen) setQuery(""); }}>
+          <Search size={16} color={searchOpen ? colors.accent : colors.textSecondary} />
+        </ToolbarButton>
       )}
       {canShowHistory && (
         <ToolbarButton label="History" onPress={() => { exitSelect(); setHistoryOpen(true); }}>
           <HistoryIcon size={16} color={colors.textSecondary} />
         </ToolbarButton>
       )}
+      <ToolbarButton label="Manual" onPress={() => { exitSelect(); openManual(); }}>
+        <BookOpen size={16} color={colors.textSecondary} />
+      </ToolbarButton>
     </EditorToolbar>
+  );
+
+  // Blocks | Text lives on the STEPS row (it switches how the steps show), so it scrolls
+  // with the program rather than taking a fixed bar.
+  const modeToggle = (
+    <EditorModeToggle value={editorMode} onChange={m => { void changeEditorMode(m); }} />
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1266,6 +1499,14 @@ export default function BuilderScreen() {
                         <Text style={{ fontSize: 9, fontWeight: "700", fontStyle: "italic", color: accents.purple, letterSpacing: 0.3 }}>fx</Text>
                       </View>
                     )}
+                    {/* A routine parameter: how it passes values with the caller. */}
+                    {!!v.paramMode && (
+                      <View style={{ backgroundColor: colors.successSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.successBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: colors.success, letterSpacing: 0.3 }}>
+                          {v.paramMode === "inOut" ? "IN-OUT" : v.paramMode.toUpperCase()} PARAM
+                        </Text>
+                      </View>
+                    )}
                     {v.isGlobal && (
                       <View style={{ backgroundColor: colors.warningSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.warningBorder }}>
                         <Text style={{ fontSize: 9, fontWeight: "700", color: colors.warning, letterSpacing: 0.3 }}>GLOBAL</Text>
@@ -1332,7 +1573,58 @@ export default function BuilderScreen() {
     </>
   );
 
-  const stepsSection = (
+  const textView = (
+    <TextView.TextProgramView
+      program={validationProgram}
+      onApply={applyTextProgram}
+      // The text view's own "back to Blocks" has already run its guard.
+      onSwitchToBlocks={() => { void changeEditorMode("blocks", { checked: true }); }}
+      connected={connected}
+      problems={validationProblems}
+      breakpoints={breakpoints}
+      runningStepId={runningStepId}
+      draftId={programId}
+    />
+  );
+
+  const dragging = rowDrag.dragging;
+  const atScope = (scope: ScopeFrame[], index: number): InsertAt => ({ scope, index });
+  const canPaste = clipboard.length > 0;
+
+  const searchBar = searchOpen && (
+    <View style={styles.searchBar}>
+      <Search size={15} color={colors.textMuted} />
+      <TextInput
+        style={styles.searchInput}
+        value={query}
+        onChangeText={t => { setQuery(t); setHitIdx(0); }}
+        placeholder="Find steps — name, block, $variable or point"
+        placeholderTextColor={colors.textFaint}
+        autoFocus
+        autoCapitalize="none"
+        returnKeyType="search"
+        onSubmitEditing={() => gotoHit(hitIdx)}
+        aria-label="Find steps"
+      />
+      {query.trim() !== "" && (
+        <Text style={styles.searchCount}>{hits.length ? `${hitIdx + 1} of ${hits.length}` : "none"}</Text>
+      )}
+      <TouchableOpacity onPress={() => gotoHit(hitIdx - 1)} disabled={!hits.length} hitSlop={6}
+        accessibilityRole="button" accessibilityLabel="Previous match">
+        <ChevronUp size={17} color={hits.length ? colors.textSecondary : colors.borderStrong} />
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => gotoHit(hitIdx + 1)} disabled={!hits.length} hitSlop={6}
+        accessibilityRole="button" accessibilityLabel="Next match">
+        <ChevronDown size={17} color={hits.length ? colors.textSecondary : colors.borderStrong} />
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => { setSearchOpen(false); setQuery(""); }} hitSlop={6}
+        accessibilityRole="button" accessibilityLabel="Close search">
+        <X size={16} color={colors.textFaint} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const stepsSection = editorMode === "text" && !inScope ? textView : (
     <>
       {currentSteps.length === 0 ? (
         <View style={styles.emptySteps}>
@@ -1347,63 +1639,116 @@ export default function BuilderScreen() {
       ) : (
         <View style={styles.stepsList}>
           <InsertDivider
-            onPress={() => openTypePicker({ mode: "insert", afterIndex: -1 })}
-            onPaste={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: -1 }) : undefined}
-            disabled={!!drag}
+            onPress={() => openTypePicker(atScope(scopeStack, 0))}
+            onPaste={canPaste ? () => pasteStep(atScope(scopeStack, 0)) : undefined}
+            disabled={dragging}
           />
-          {currentSteps.map((step, i) => (
-            <StepRow
-              key={step.id}
-              step={step}
-              index={i}
-              isLast={i === currentSteps.length - 1}
-              selectMode={selectMode}
-              selected={selectedIds.includes(step.id)}
-              onLongPress={() => enterSelect(step.id)}
-              onToggleSelect={() => toggleSelect(step.id)}
-              isBeingDragged={drag?.id === step.id}
-              isDropAbove={!!(drag && drag.id !== step.id && drag.toIndex < drag.fromIndex && drag.toIndex === i)}
-              isDropBelow={!!(drag && drag.id !== step.id && drag.toIndex > drag.fromIndex && drag.toIndex === i)}
-              isDragging={!!drag}
-              onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
-              onCopy={() => setClipboard([deepCloneStep(step)])}
-              onDelete={() => appAlert("Delete Step", "Remove this step?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive", onPress: () => deleteStep(step.id) },
-              ])}
-              onDragStart={handleDragStart}
-              onDragMove={handleDragMove}
-              onDragEnd={handleDragEnd}
-              onInsertAfter={() => openTypePicker({ mode: "insert", afterIndex: i })}
-              onPasteAfter={clipboard.length > 0 ? () => pasteStep({ mode: "insert", afterIndex: i }) : undefined}
-              onEnterScope={pushScope}
-              onUpdateIfCondition={updateStep}
-              onItemLayout={handleItemLayout}
-              variables={variables}
-              contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
-              onEnterRoutine={!isRoutineMode ? (routineName) => {
-                router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
-              } : undefined}
-              onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
-              problems={problemIndex.get(step.id)}
-              points={points}
-            />
-          ))}
+          {rows.map((r, i) => {
+            const drop = rowDrag.dropAt(r.id, i);
+            const nested = r.depth > 0;
+            const indent = nested ? { marginLeft: (r.depth - 1) * INDENT + 6, paddingLeft: INDENT - 6, borderLeftWidth: 2, borderLeftColor: colors.border } : undefined;
+            const dropStyle = [drop === "above" && styles.dropAbove, drop === "below" && styles.dropBelow];
+
+            if (r.kind === "body") {
+              const ifCond = r.frame.kind === "ifTrue" ? r.parent.condition
+                : r.frame.kind === "elseIf" ? r.parent.elseIfBranches?.find(b => b.id === r.frame.branchId)?.condition : undefined;
+              const editable = r.frame.kind === "ifTrue" || r.frame.kind === "elseIf" || r.frame.kind === "switchCase";
+              return (
+                <View key={r.id} onLayout={rowLayout(r.id)} style={[indent, dropStyle]}>
+                  <BodyHeaderRow
+                    row={r}
+                    condition={ifCond ? (ifCond.items?.length ? conditionSummary(ifCond) : "Set condition…") : undefined}
+                    disabled={dragging}
+                    onEdit={!editable ? undefined : () => {
+                      if (r.frame.kind === "switchCase") setCaseEdit(c => ({ stepId: r.parent.id, caseId: r.frame.branchId!, tick: (c?.tick ?? 0) + 1 }));
+                      else setIfEdit(c => ({ stepId: r.parent.id, key: r.frame.kind === "ifTrue" ? "if" : r.frame.branchId!, tick: (c?.tick ?? 0) + 1 }));
+                    }}
+                    onAdd={() => openTypePicker(atScope(r.scope, 0))}
+                    onPaste={canPaste ? () => pasteStep(atScope(r.scope, 0)) : undefined}
+                    onEnter={() => { exitSelect(); scrollYRef.current = 0; setScopeStack(r.scope); }}
+                  />
+                </View>
+              );
+            }
+
+            if (r.kind === "end") {
+              const lastAtRoot = r.depth === 1 && r.index === r.listLen - 1;
+              return (
+                <View key={r.id} onLayout={rowLayout(r.id)} style={dropStyle}>
+                  <View style={[styles.blockEnd, { marginLeft: (r.depth - 1) * INDENT, borderColor: categoryForStep(r.parent.type).color }]} />
+                  {!lastAtRoot && (
+                    <View style={r.depth > 1 ? { marginLeft: (r.depth - 2) * INDENT + 6, paddingLeft: INDENT - 6, borderLeftWidth: 2, borderLeftColor: colors.border } : undefined}>
+                      <InsertDivider
+                        onPress={() => openTypePicker(atScope(r.scope, r.index + 1))}
+                        onPaste={canPaste ? () => pasteStep(atScope(r.scope, r.index + 1)) : undefined}
+                        disabled={dragging}
+                      />
+                    </View>
+                  )}
+                </View>
+              );
+            }
+
+            const step = r.step;
+            return (
+              <View key={r.id} ref={rowRef(r.id)} onLayout={rowLayout(r.id)} style={indent}>
+                <StepRow
+                  step={step}
+                  index={r.index}
+                  isLast={r.depth === 0 && r.index === r.listLen - 1}
+                  selectMode={selectMode}
+                  selected={selectedIds.includes(step.id)}
+                  onLongPress={() => enterSelect(step.id)}
+                  onToggleSelect={() => toggleSelect(step.id)}
+                  isBeingDragged={rowDrag.isDragged(step.id)}
+                  dropAt={drop}
+                  isDragging={dragging}
+                  drag={dragHandlers}
+                  onEdit={() => { setEditingStep(step); setConfigOpen(true); }}
+                  onCopy={() => setClipboard([detachedCopy(step)])}
+                  onMore={() => setRowMenu(step)}
+                  onToggleEnabled={() => toggleStepEnabled(step)}
+                  onInsertAfter={() => openTypePicker(atScope(r.scope, r.index + 1))}
+                  onPasteAfter={canPaste ? () => pasteStep(atScope(r.scope, r.index + 1)) : undefined}
+                  onEnterScope={frame => { exitSelect(); scrollYRef.current = 0; setScopeStack([...r.scope, frame]); }}
+                  onUpdateStep={updateStep}
+                  ifEditRequest={ifEdit?.stepId === step.id ? { key: ifEdit.key, tick: ifEdit.tick } : undefined}
+                  caseEditRequest={caseEdit?.stepId === step.id ? { caseId: caseEdit.caseId, tick: caseEdit.tick } : undefined}
+                  variables={variables}
+                  contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
+                  onEnterRoutine={!isRoutineMode ? (routineName) => {
+                    router.push({ pathname: '/(tabs)/program/builder', params: { name: routineName, isRoutine: '1', callerName: programName } });
+                  } : undefined}
+                  onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
+                  problems={problemIndex.get(step.id)}
+                  points={points}
+                  breakpoint={breakpoints.has(step.id)}
+                  running={runningStepId === step.id && (runSummary?.pausedAtStepId === step.id ? "paused" : true)}
+                  searchHit={hitSet.has(step.id)}
+                  expanded={r.expanded}
+                  onToggleExpand={r.expandable ? () => toggleIn(setExpanded, step.id) : undefined}
+                  sectionCollapsed={r.folded}
+                  hiddenCount={r.hiddenCount}
+                  onToggleSection={step.type === "Note" && step.noteStyle === "section" ? () => toggleIn(setFoldedSections, step.id) : undefined}
+                />
+              </View>
+            );
+          })}
         </View>
       )}
 
       <View style={styles.addRow}>
         <AnimatedPressable
           style={styles.addCard}
-          onPress={() => openTypePicker({ mode: "append" })}
+          onPress={() => openTypePicker(atScope(scopeStack, currentSteps.length))}
         >
           <Plus size={16} color={colors.accent} />
           <Text style={styles.addCardText}>Add Step</Text>
         </AnimatedPressable>
-        {clipboard.length > 0 && (
+        {canPaste && (
           <AnimatedPressable
             style={styles.pasteCard}
-            onPress={() => pasteStep({ mode: "append" })}
+            onPress={() => pasteStep(atScope(scopeStack, currentSteps.length))}
           >
             <ClipboardPaste size={16} color={accents.purple} />
             <Text style={styles.pasteCardText}>{clipboard.length > 1 ? `Paste ${clipboard.length}` : "Paste"}</Text>
@@ -1450,6 +1795,46 @@ export default function BuilderScreen() {
     </View>
   ) : undefined;
 
+  // Narrow: one bottom bar holds the editing tools (compact icon buttons) and the save
+  // actions, Save filling what is left so it stays the main action. The tools scroll
+  // sideways only if a very narrow screen can't fit them all.
+  const narrowFooter = (
+    <View style={styles.bottomBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.footerTools}
+        contentContainerStyle={styles.footerToolsContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {editorTools("footer")}
+      </ScrollView>
+      {isLocalMode && connected && (
+        <TouchableOpacity
+          style={styles.footerUploadBtn}
+          onPress={saveToRobot}
+          disabled={savingToRobot}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Save to Robot"
+        >
+          {savingToRobot
+            ? <ActivityIndicator size="small" color={colors.success} />
+            : <Upload size={17} color={colors.success} />}
+        </TouchableOpacity>
+      )}
+      <ActionButton
+        label="Save"
+        icon={<Wrench size={16} color={colors.accent} />}
+        loading={saving}
+        style={styles.saveBtn}
+        textStyle={styles.saveBtnText}
+        spinnerColor={colors.accent}
+        onPress={handleSave}
+      />
+    </View>
+  );
+
   // ── Header ────────────────────────────────────────────────────────────────
   // PageHeader owns chrome both wide and narrow. Narrow's back press runs
   // `handleBack` (pop a scope, or prompt on unsaved changes) via onBack; wide's
@@ -1481,6 +1866,7 @@ export default function BuilderScreen() {
 
   return (
     <ExpressionEnvProvider programName={expressionProgramName} variables={expressionVariables} enabled={connected}>
+    <ActiveFieldProvider>
     <View style={styles.container}>
       {isWide ? (
         <PageHeader
@@ -1498,7 +1884,7 @@ export default function BuilderScreen() {
           onBack={handleBack}
         />
       )}
-      {!isWide && editorTools("bar")}
+      {!isWide && searchBar && <View style={styles.searchWrap}>{searchBar}</View>}
 
       {/* Multi-select toolbar */}
       {selectMode && (
@@ -1534,12 +1920,33 @@ export default function BuilderScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
-            onPress={wrapSelectedInLoop}
+            onPress={() => wrapSelected("Loop")}
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
+            accessibilityLabel="Wrap in a Loop"
           >
             <Repeat size={16} color={accents.cyan} />
             <Text style={[styles.selectActionText, { color: accents.cyan }]}>Loop</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={() => wrapSelected("IfCondition")}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+            accessibilityLabel="Wrap in an If"
+          >
+            <GitBranch size={16} color={accents.cyan} />
+            <Text style={[styles.selectActionText, { color: accents.cyan }]}>If</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
+            onPress={() => wrapSelected("Try")}
+            disabled={selectedIds.length === 0}
+            activeOpacity={0.7}
+            accessibilityLabel="Wrap in a Try"
+          >
+            <ShieldCheck size={16} color={accents.cyan} />
+            <Text style={[styles.selectActionText, { color: accents.cyan }]}>Try</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
@@ -1552,15 +1959,13 @@ export default function BuilderScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.selectAction, selectedIds.length === 0 && styles.selectActionDisabled]}
-            onPress={() => setSelectedEnabled(selectionAllDisabled())}
+            onPress={toggleSelectedEnabled}
             disabled={selectedIds.length === 0}
             activeOpacity={0.7}
           >
-            {selectionAllDisabled()
-              ? <Eye size={16} color={colors.textSecondary} />
-              : <EyeOff size={16} color={colors.textSecondary} />}
+            <Power size={16} color={colors.textSecondary} />
             <Text style={[styles.selectActionText, { color: colors.textSecondary }]}>
-              {selectionAllDisabled() ? "Enable" : "Disable"}
+              {selectedIds.length > 0 && selectedInOrder().every(s => !isStepEnabled(s)) ? "Enable" : "Disable"}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1589,6 +1994,7 @@ export default function BuilderScreen() {
               {variablesSection}
             </ScrollView>
             <View style={styles.widePaneRight}>
+              {searchBar && <View style={styles.searchWrap}>{searchBar}</View>}
               {/* Scope header — back arrow + breadcrumb, scoped to the steps pane */}
               {inScope && (
                 <View style={[styles.scopeBreadcrumb, styles.scopeHeaderWide]}>
@@ -1603,7 +2009,7 @@ export default function BuilderScreen() {
                 contentContainerStyle={[styles.content, styles.wideStepsContent]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
-                scrollEnabled={drag === null}
+                scrollEnabled={!rowDrag.dragging}
                 onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
                 scrollEventThrottle={16}
               >
@@ -1612,7 +2018,8 @@ export default function BuilderScreen() {
                     <Text style={styles.sectionLabel}>STEPS</Text>
                     <Text style={styles.sectionCount}>{currentSteps.length}</Text>
                     <View style={{ flex: 1 }} />
-                    <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, disable, wrap them in a loop, or save them as a routine." />
+                    {modeToggle}
+                    <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Drag a step by its bar to move it, also into and out of blocks opened with their chevron. ⋮ on a step runs from it or sets a breakpoint. Long-press to select several, then copy, cut, disable, wrap them in a Loop, If or Try, or save them as a routine." />
                   </View>
                 )}
                 {stepsSection}
@@ -1628,26 +2035,14 @@ export default function BuilderScreen() {
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            scrollEnabled={drag === null}
+            scrollEnabled={!rowDrag.dragging}
             onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
             scrollEventThrottle={16}
           >
             {stepsSection}
           </ScrollView>
 
-          {isLocalMode && connected && (
-            <View style={styles.bottomBar}>
-              <ActionButton
-                label="Save to Robot"
-                icon={<Upload size={15} color={colors.success} />}
-                loading={savingToRobot}
-                style={styles.uploadBtn}
-                textStyle={styles.uploadBtnText}
-                spinnerColor={colors.success}
-                onPress={saveToRobot}
-              />
-            </View>
-          )}
+          {narrowFooter}
         </>
       ) : (
         <>
@@ -1656,7 +2051,7 @@ export default function BuilderScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={drag === null}
+        scrollEnabled={!rowDrag.dragging}
         onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
       >
@@ -1668,40 +2063,60 @@ export default function BuilderScreen() {
           <Text style={styles.sectionLabel}>STEPS</Text>
           <Text style={styles.sectionCount}>{currentSteps.length}</Text>
           <View style={{ flex: 1 }} />
-          <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Long-press a step to select several, then copy, cut, disable, wrap them in a loop, or save them as a routine." />
+          {modeToggle}
+          <InfoTip text="Tap Add Step to open the block picker — blocks are grouped by category. Drag a step by its bar to move it, also into and out of blocks opened with their chevron. ⋮ on a step runs from it or sets a breakpoint. Long-press to select several, then copy, cut, disable, wrap them in a Loop, If or Try, or save them as a routine." />
         </View>
         {stepsSection}
       </ScrollView>
 
-      {/* Bottom bar */}
-      <View style={styles.bottomBar}>
-        {isLocalMode && connected && (
-          <ActionButton
-            label="Save to Robot"
-            icon={<Upload size={15} color={colors.success} />}
-            loading={savingToRobot}
-            style={styles.uploadBtn}
-            textStyle={styles.uploadBtnText}
-            spinnerColor={colors.success}
-            onPress={saveToRobot}
-          />
-        )}
-        <ActionButton
-          label="Save"
-          icon={<Wrench size={16} color={colors.accent} />}
-          loading={saving}
-          style={styles.saveBtn}
-          textStyle={styles.saveBtnText}
-          spinnerColor={colors.accent}
-          onPress={handleSave}
-        />
-      </View>
+      {narrowFooter}
         </>
       )}
 
+      <BottomSheet visible={rowMenu !== null} onClose={() => setRowMenu(null)}
+        title={rowMenu ? (rowMenu.name?.trim() || stepLabel(rowMenu, points)) : ""}>
+        {rowMenu && (() => {
+          const m = rowMenu;
+          const item = (label: string, sub: string, icon: React.ReactNode, onPress: () => void, danger?: boolean) => (
+            <TouchableOpacity key={label} style={styles.menuRow} activeOpacity={0.7}
+              onPress={() => { setRowMenu(null); setTimeout(onPress, 250); }}
+              accessibilityRole="button" accessibilityLabel={label}>
+              {icon}
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuLabel, danger && { color: colors.danger }]}>{label}</Text>
+                <Text style={styles.menuSub}>{sub}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+          return (
+            <View>
+              {!isBackgroundMode && !isRoutineMode && item("Run from here", "Save, then start the program at this step",
+                <Play size={17} color={colors.success} />, () => { void runFromHere(m); })}
+              {item(breakpoints.has(m.id) ? "Remove breakpoint" : "Add breakpoint",
+                "The program pauses before this step; Continue goes on",
+                <CircleDot size={17} color={colors.danger} />, () => toggleBreakpoint(m))}
+              {item(isStepEnabled(m) ? "Disable step" : "Enable step",
+                isStepEnabled(m) ? "Skip it (and its steps) when the program runs" : "Run it again",
+                <Power size={17} color={colors.textSecondary} />, () => toggleStepEnabled(m))}
+              {isBlockStep(m) && bodyFrames(m).length > 0 && !rows.some(r => r.kind === "step" && r.id === m.id && r.expandable) && item(
+                "Open block", "Show only this block's steps",
+                <ChevronRight size={17} color={colors.textSecondary} />,
+                () => { const loc = locateStep(steps, m.id); const f = bodyFrames(m)[0]; if (loc && f) setScopeStack([...loc.scope, { ...f, stepId: m.id }]); })}
+              {item("Step help", "Open this step's page in the programming manual",
+                <BookOpen size={17} color={colors.textSecondary} />, () => openStepReference(m.type))}
+              {item("Delete step", "Remove it and everything inside it",
+                <Trash2 size={17} color={colors.danger} />, () => appAlert("Delete Step", "Remove this step?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Delete", style: "destructive", onPress: () => deleteStep(m.id) },
+                ]), true)}
+            </View>
+          );
+        })()}
+      </BottomSheet>
       <StepTypePicker
         visible={typePickerOpen}
         onPick={addStep}
+        onPickPlugin={addPluginStep}
         onClose={() => setTypePickerOpen(false)}
         isBackgroundMode={isBackgroundMode}
       />
@@ -1713,6 +2128,7 @@ export default function BuilderScreen() {
         scopeSteps={editingScope}
         stepIndex={editingStepIndex}
         onSave={updateStep}
+        problems={editingStep ? problemIndex.get(editingStep.id)?.own : undefined}
         onClose={() => setConfigOpen(false)}
         onCreateVariable={openNewVar}
         onSaveVariable={saveVar}
@@ -1747,8 +2163,9 @@ export default function BuilderScreen() {
         variable={editingVar}
         defaultType={editingVar == null ? newVarDefault : undefined}
         variables={variables}
+        isRoutine={isRoutineMode}
         onSave={saveVar}
-        onClose={() => setVarModalOpen(false)}
+        onClose={() => { setVarModalOpen(false); setEditingVar(null); }}
       />
 
       {/* Make Routine from selected steps */}
@@ -1909,46 +2326,22 @@ export default function BuilderScreen() {
         </Pressable>
       </Modal>
     </View>
+    </ActiveFieldProvider>
     </ExpressionEnvProvider>
   );
 }
 
 // ── CNC handoff helpers ───────────────────────────────────────────────────────
 
-/** Find a step by id anywhere in the nested step tree. */
+/** Find a step by id anywhere in the nested step tree (every body kind, via stepTree). */
 function findStepById(steps: ProgramStep[], id: string): ProgramStep | null {
-  for (const s of steps) {
-    if (s.id === id) return s;
-    const nested = [
-      ...(s.loopSteps ?? []),
-      ...(s.ifSteps ?? []),
-      ...(s.elseSteps ?? []),
-      ...(s.cncProgramSteps ?? []),
-      ...((s.elseIfBranches ?? []).flatMap(b => b.steps ?? [])),
-    ];
-    const found = findStepById(nested, id);
-    if (found) return found;
-  }
-  return null;
+  return findStep(steps, id) ?? null;
 }
 
 /** Copy the CNC toolpath fields from `src` onto the step with `id`, anywhere in the tree. */
 function applyCncFieldsById(steps: ProgramStep[], id: string, src: ProgramStep): ProgramStep[] {
-  return steps.map(s => {
-    if (s.id === id)
-      return { ...s, cncDxfFile: src.cncDxfFile, cncSafeZ: src.cncSafeZ, cncSpec: src.cncSpec, cncProgramSteps: src.cncProgramSteps };
-    return {
-      ...s,
-      loopSteps:       s.loopSteps       ? applyCncFieldsById(s.loopSteps, id, src) : undefined,
-      ifSteps:         s.ifSteps         ? applyCncFieldsById(s.ifSteps, id, src) : undefined,
-      elseSteps:       s.elseSteps       ? applyCncFieldsById(s.elseSteps, id, src) : undefined,
-      cncProgramSteps: s.cncProgramSteps ? applyCncFieldsById(s.cncProgramSteps, id, src) : undefined,
-      elseIfBranches:  s.elseIfBranches  ? s.elseIfBranches.map(b => ({
-        ...b,
-        steps: applyCncFieldsById(b.steps ?? [], id, src),
-      })) : undefined,
-    };
-  });
+  return steps.map(root => mapStepTree(root, s => s.id !== id ? s
+    : { ...s, cncDxfFile: src.cncDxfFile, cncSafeZ: src.cncSafeZ, cncSpec: src.cncSpec, cncProgramSteps: src.cncProgramSteps }));
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -2114,6 +2507,42 @@ const styles = StyleSheet.create({
   stepsList: {
     // each StepRow is its own card; InsertDivider provides spacing
   },
+  dropAbove: { borderTopWidth: 2.5, borderTopColor: colors.accent },
+  dropBelow: { borderBottomWidth: 2.5, borderBottomColor: colors.accent },
+  // A body shown inline: its header row, and the cap that closes the block.
+  bodyHeader: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 6, paddingRight: 4,
+  },
+  bodyBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 },
+  bodyBadgeText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5, color: colors.onAccent },
+  bodyText: { fontSize: 12, color: colors.textSecondary },
+  bodyEmpty: { fontSize: 12, color: colors.textFaint, fontStyle: "italic" },
+  bodyAddBtn: {
+    width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder,
+  },
+  bodyPasteBtn: {
+    width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: accents.purpleSoft, borderWidth: 1, borderColor: accents.purpleBorder,
+  },
+  blockEnd: {
+    height: 8, marginTop: 2, borderLeftWidth: 2, borderBottomWidth: 2, borderBottomLeftRadius: 8,
+    width: 28, opacity: 0.6,
+  },
+  // Step search
+  searchBar: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.surface, borderRadius: radii.md, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 10, paddingVertical: 4,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: colors.text, paddingVertical: 6 },
+  searchWrap: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, width: "100%", maxWidth: 720, alignSelf: "center" },
+  searchCount: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
+  // Row actions sheet
+  menuRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+  menuLabel: { fontSize: 15, fontWeight: "600", color: colors.text },
+  menuSub: { fontSize: 12, color: colors.textFaint, marginTop: 1 },
 
   stepCard: {
     backgroundColor: colors.surface,
@@ -2254,27 +2683,27 @@ const styles = StyleSheet.create({
   },
 
   bottomBar: {
-    flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: spacing.lg,
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md,
     paddingTop: 10, paddingBottom: 14,
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
+  },
+  footerTools: { flexGrow: 0, flexShrink: 1 },
+  footerToolsContent: { alignItems: "center" },
+  footerUploadBtn: {
+    width: 44, height: 44, borderRadius: radii.md, alignItems: "center", justifyContent: "center",
+    borderWidth: 1.5, borderColor: colors.success, backgroundColor: colors.successSoft,
   },
   stopBtn: {
     width: 48, height: 48, borderRadius: radii.md, backgroundColor: colors.dangerSoft,
     justifyContent: "center", alignItems: "center",
   },
   saveBtn: {
-    width: "33%", flexDirection: "row", alignItems: "center", justifyContent: "center",
+    flexGrow: 1, flexShrink: 0, minWidth: 104, flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: spacing.sm, borderWidth: 1.5, borderColor: colors.accent, borderRadius: radii.md,
     paddingVertical: spacing.md, backgroundColor: colors.accentSoft,
   },
   saveBtnText: { fontSize: 15, fontWeight: "600", color: colors.accent },
-  uploadBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: spacing.sm, borderWidth: 1.5, borderColor: colors.success, borderRadius: radii.md,
-    paddingVertical: spacing.md, backgroundColor: colors.successSoft,
-  },
-  uploadBtnText: { fontSize: 15, fontWeight: "600", color: colors.success },
   runBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: spacing.sm, backgroundColor: colors.accent, borderRadius: radii.md, paddingVertical: spacing.md,
