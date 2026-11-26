@@ -2,7 +2,7 @@
 import { pickReachableEndpoint } from "./addressPick";
 import { enrichByAddress, knownEndpoints } from "./connectionStore";
 import { robotDiscovery } from "./RobotDiscoveryService";
-import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, SimplePlcDeviceConfigInput, SimplePlcDeviceState, SimplePlcDiscovered, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 import { normalizeVisionProgram, type Pose, type Region } from "../models/visionTools";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
@@ -11,6 +11,7 @@ type ToolsListener            = (tools: Tool[])                          => void
 type LocalsListener           = (locals: Local[])                        => void;
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
 type IoDevicesListener           = (ioDevices: IoDeviceState[])                     => void;
+type SimplePlcsListener          = (simplePlcs: SimplePlcDeviceState[])            => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type AuxAxisListener          = (aux: AuxDeviceState[])                  => void;
 type CamerasListener          = (cameras: CameraState[])                 => void;
@@ -57,6 +58,7 @@ export class RobotConnectService {
   private readonly localsTopic        = createTopic<Local[]>();
   private readonly builtProgramsTopic = createTopic<BuiltProgram[]>();
   private readonly ioDevicesTopic        = createTopic<IoDeviceState[]>();
+  private readonly simplePlcsTopic       = createTopic<SimplePlcDeviceState[]>();
   private readonly relayIOTopic       = createTopic<UsbRelayState | null>();
   private readonly auxAxisTopic       = createTopic<AuxDeviceState[]>();
   private readonly camerasTopic       = createTopic<CameraState[]>();
@@ -73,6 +75,8 @@ export class RobotConnectService {
   private relayIO:        UsbRelayState | null          = null;
   private lastRelayJson:  string                        = "";
   private lastIoDevicesJson:  string                        = "";
+  private simplePlcs:     SimplePlcDeviceState[]        = [];
+  private lastSimplePlcsJson: string                    = "";
   private auxAxis:        AuxDeviceState[]              = [];
   private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
@@ -321,6 +325,9 @@ export class RobotConnectService {
         // Nano state likewise rides along so live values (load-cell readings in
         // particular) update every poll, not only on GetIO at page entry.
         this.updateIoDevicesFromStatus(data.ioDevices);
+        // SimplePLC heads ride along too, so connection / fault / slot values update live every
+        // poll (same change-detect as the nano path), not only on GetSimplePlcDevices at entry.
+        this.updateSimplePlcsFromStatus(data.simplePlcDevices);
         this.emitStatus(data);
         break;
       
@@ -419,6 +426,21 @@ export class RobotConnectService {
       this.ioDevices = [];
     }
     this.emitIoDevices();
+  }
+
+  // Apply SimplePLC head state carried in the status broadcast. `data.simplePlcDevices` is a JSON
+  // string (same shape GetSimplePlcDevices returns). Only reparse + emit when the string changed.
+  private updateSimplePlcsFromStatus(simplePlcDevices: any) {
+    if (typeof simplePlcDevices !== "string") return;
+    if (simplePlcDevices === this.lastSimplePlcsJson) return;
+    this.lastSimplePlcsJson = simplePlcDevices;
+    try {
+      const parsed = JSON.parse(simplePlcDevices);
+      this.simplePlcs = Array.isArray(parsed) ? (parsed as SimplePlcDeviceState[]) : [];
+    } catch {
+      this.simplePlcs = [];
+    }
+    this.emitSimplePlcs();
   }
 
   private decodeIO(data: any) {
@@ -616,6 +638,16 @@ export class RobotConnectService {
 
   private emitIoDevices() {
     this.ioDevicesTopic.emit(this.ioDevices);
+  }
+
+  onSimplePlcs(cb: SimplePlcsListener) {
+    const unsub = this.simplePlcsTopic.on(cb);
+    cb(this.simplePlcs);
+    return unsub;
+  }
+
+  private emitSimplePlcs() {
+    this.simplePlcsTopic.emit(this.simplePlcs);
   }
 
   onRelayIO(cb: RelayIOListener) {
@@ -1486,7 +1518,7 @@ export class RobotConnectService {
   }
 
   public setIoOutput(deviceId: string, pin: number, value: boolean) {
-    return this.sendCommand("SetNanoOutput", { deviceId, pin, value });
+    return this.sendCommand("SetIoOutput", { deviceId, pin, value });
   }
 
   public setNeoPixel(deviceId: string, pin: number, colors: NeoPixelColor[]) {
@@ -1494,12 +1526,12 @@ export class RobotConnectService {
   }
 
   public renameIoPin(deviceId: string, pin: number, name: string) {
-    return this.sendCommand("RenameNanoPin", { deviceId, pin, name })
+    return this.sendCommand("RenameIoPin", { deviceId, pin, name })
       .then(() => this.getIO().catch(() => {}));
   }
 
   public configureIoPin(deviceId: string, pin: number, type: string, pixelCount = 8) {
-    return this.sendCommand("ConfigureNanoPin", { deviceId, pin, type, pixelCount })
+    return this.sendCommand("ConfigureIoPin", { deviceId, pin, type, pixelCount })
       .then(() => this.getIO().catch(() => {}));
   }
 
@@ -1526,6 +1558,91 @@ export class RobotConnectService {
   public setLoadCellUnit(deviceId: string, pin: number, unit: string) {
     return this.sendCommand("SetLoadCellUnit", { deviceId, pin, unit })
       .then(() => this.getIO().catch(() => {}));
+  }
+
+  // ── SimplePLC network IO devices ─────────────────────────────────────────────
+  // Networked PLC heads. Config CRUD mirrors the generic serial-device methods; the per-bit IO
+  // (live pins + output writes) rides the existing ioDevices path under device id "PLC_xxx", so
+  // there is no separate pin read/write here — screens reuse getIO()/setIoOutput().
+
+  /** Parse a `simplePlcDevices` payload (JSON string, as broadcast, or an array). */
+  private parseSimplePlcList(raw: any): SimplePlcDeviceState[] {
+    if (typeof raw === "string") {
+      try { const p = JSON.parse(raw); if (Array.isArray(p)) return p as SimplePlcDeviceState[]; } catch { /* keep [] */ }
+    } else if (Array.isArray(raw)) {
+      return raw as SimplePlcDeviceState[];
+    }
+    return [];
+  }
+
+  /** Apply the `simplePlcDevices` echo a mutating command returns; refetch if it didn't include one. */
+  private applySimplePlcReply(d: any) {
+    if (d?.simplePlcDevices !== undefined) {
+      const list = this.parseSimplePlcList(d.simplePlcDevices);
+      this.simplePlcs = list;
+      this.lastSimplePlcsJson = JSON.stringify(list);
+      this.emitSimplePlcs();
+    } else {
+      this.getSimplePlcs().catch(() => {});
+    }
+  }
+
+  /** Fetch the configured SimplePLC heads; also refreshes the local store + emits. */
+  public async getSimplePlcs(): Promise<SimplePlcDeviceState[]> {
+    const d: any = await this.sendCommand("GetSimplePlcDevices");
+    const list = this.parseSimplePlcList(d?.simplePlcDevices);
+    this.simplePlcs = list;
+    this.lastSimplePlcsJson = JSON.stringify(list);
+    this.emitSimplePlcs();
+    return list;
+  }
+
+  /** Scan the network for SimplePLC heads. Does not change the configured devices. */
+  public async discoverSimplePlc(timeoutMs?: number): Promise<SimplePlcDiscovered[]> {
+    const d: any = await this.sendCommand("DiscoverSimplePlc", timeoutMs != null ? { timeoutMs } : {});
+    if (typeof d?.heads === "string") {
+      try { const p = JSON.parse(d.heads); if (Array.isArray(p)) return p as SimplePlcDiscovered[]; } catch { /* keep [] */ }
+    } else if (Array.isArray(d?.heads)) {
+      return d.heads as SimplePlcDiscovered[];
+    }
+    return [];
+  }
+
+  /** Create a SimplePLC device (from a discovered head or a manual host). Returns the new id. */
+  public async addSimplePlc(cfg: SimplePlcDeviceConfigInput & { autoConnect?: boolean }): Promise<string> {
+    const d: any = await this.sendCommand("AddSimplePlcDevice", cfg as any);
+    this.applySimplePlcReply(d);
+    // The new id comes back as "deviceId" (not "id"): the WS ack envelope keys on the message id and
+    // merges the payload over it, so an "id" key would clobber the ack's id. Same gotcha as serial.
+    return typeof d?.deviceId === "string" ? d.deviceId : "";
+  }
+
+  public removeSimplePlc(id: string) {
+    return this.sendCommand("RemoveSimplePlcDevice", { id }).then(d => this.applySimplePlcReply(d));
+  }
+
+  public setSimplePlcConfig(cfg: SimplePlcDeviceConfigInput & { id: string }) {
+    return this.sendCommand("SetSimplePlcDeviceConfig", cfg as any).then(d => this.applySimplePlcReply(d));
+  }
+
+  /** Open / close the controller's link to the head. */
+  public setSimplePlcConnected(id: string, connected: boolean) {
+    return this.sendCommand("SetSimplePlcDeviceConnected", { id, connected }).then(d => this.applySimplePlcReply(d));
+  }
+
+  /** Blink a module's identify LED. `slot` 0 = the head's own LED. */
+  public identifySimplePlc(id: string, slot: number, seconds: number) {
+    return this.sendCommand("IdentifySimplePlc", { id, slot, seconds });
+  }
+
+  /** Re-enumerate the head's IO modules, then refresh the local store. */
+  public rescanSimplePlc(id: string) {
+    return this.sendCommand("RescanSimplePlc", { id }).then(() => this.getSimplePlcs().catch(() => {}));
+  }
+
+  /** Rename the head itself (stored on the device, distinct from the local display name). */
+  public setSimplePlcHeadName(id: string, name: string) {
+    return this.sendCommand("SetSimplePlcHeadName", { id, name }).then(d => this.applySimplePlcReply(d));
   }
 
   // ── IO value history + recordings ────────────────────────────────────────────

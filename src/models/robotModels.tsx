@@ -88,6 +88,103 @@ export function ioPinSymbol(nanoName: string, pinName: string): string {
 
 export type NeoPixelColor = { r: number; g: number; b: number };
 
+// ── SimplePLC network IO ────────────────────────────────────────────────────────
+// A networked PLC "head" (Ethernet) carrying hot-plug IO modules in slots. The user discovers
+// heads on the network (or enters a host manually), adds one, and configures a watchdog / input
+// filter / fail-safe behaviour. Each module slot carries packed input/output bits; those bits are
+// ALSO surfaced per-bit through the generic ioDevices path, under an IoDeviceState whose id is the
+// PLC device id (e.g. "PLC_001"), so live pins + output writes reuse the Nano IO path.
+
+/** What a PLC output holds when the controller link is lost. */
+export type SimplePlcOnTimeout = 'hold' | 'off';
+
+/** One IO module occupying a slot on a SimplePLC head. Values are packed bit fields. */
+export type SimplePlcSlotState = {
+  slot: number;
+  /** Module type code, e.g. "DI8" / "DO8" / "DO8N" (sinking output). */
+  type: string;
+  typeId: number;
+  inBits: number;
+  outBits: number;
+  state: 'ok' | 'lost';
+  /** Packed input bits. */
+  inValue: number;
+  /** Packed output bits. */
+  outValue: number;
+  /** For output modules that report it: whether the module's 24 V field supply is present.
+   * null/undefined for modules without a field-power rail (e.g. inputs). */
+  fieldPower?: boolean | null;
+};
+
+/** One active fault on a SimplePLC head. */
+export type SimplePlcFault = {
+  /** Fault code, e.g. "watchdog", "supply_low", "field_power". */
+  code: string;
+  /** Module slot the fault is about (field_power); null for head-wide faults. */
+  slot?: number | null;
+  /** Measured supply millivolts, when the fault carries it (supply_low). */
+  mv?: number | null;
+};
+
+/**
+ * Serialized SimplePLC head state (camelCase) — carried in GetStatus `simplePlcDevices` and
+ * returned by GetSimplePlcDevices. The config fields (host/port/mac/autoConnect/watchdogMs/
+ * filterMs/onTimeout) are included so the detail screen's Edit area pre-fills without a separate
+ * config fetch, mirroring the serial-device state.
+ */
+export type SimplePlcDeviceState = {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  mac: string;
+  autoConnect: boolean;
+  connected: boolean;
+  /** True when this controller owns (is the active master of) the head. */
+  owned: boolean;
+  headName: string;
+  firmware: string;
+  /** Where the head's MAC comes from: "eeprom" (unique) or "default" (shared across default-MAC
+   * heads — a collision risk worth warning about). "" when the head didn't report it. */
+  macSource?: string;
+  /** Head 24 V supply in millivolts (0 if not reported). */
+  supplyMv?: number;
+  watchdogMs: number;
+  filterMs: number;
+  onTimeout: SimplePlcOnTimeout;
+  /** Primary fault code for simple UIs; "" when none. See `faults` for the full set. */
+  fault: string;
+  /** All active faults on the head (it can fault on several things at once). */
+  faults?: SimplePlcFault[];
+  lastError: string;
+  slots: SimplePlcSlotState[];
+};
+
+/** Fields accepted by AddSimplePlcDevice / SetSimplePlcDeviceConfig (all optional on the wire). */
+export type SimplePlcDeviceConfigInput = {
+  name?: string;
+  host?: string;
+  port?: number;
+  mac?: string;
+  autoConnect?: boolean;
+  watchdogMs?: number;
+  filterMs?: number;
+  onTimeout?: SimplePlcOnTimeout;
+};
+
+/** One entry from DiscoverSimplePlc — a head found on the network. */
+export type SimplePlcDiscovered = {
+  name: string;
+  mac: string;
+  host: string;
+  port: number;
+  firmware: string;
+  /** Number of IO modules the head reports. */
+  modules: number;
+  /** True when this head is already configured on the controller. */
+  added: boolean;
+};
+
 // ── IO value history / recordings ──────────────────────────────────────────────
 // Mirrors the controller History models. A channel is addressed by a stable key
 // (`io/<deviceId>/<pin>` for load cells). Short sample keys keep high-rate batches small.

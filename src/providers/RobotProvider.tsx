@@ -1,5 +1,5 @@
 import { subscribeRobot } from "@/src/connections/robotState";
-import { BuiltProgram, CameraState, Grid, Local, IoDeviceState, Point, ProgramSummary, RobotStack, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
+import { BuiltProgram, CameraState, Grid, Local, IoDeviceState, Point, ProgramSummary, RobotStack, SimplePlcDeviceState, Tool, RobotInfo, RobotStatus, UsbRelayState, createDefaultStatus } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { robotDiscovery } from "@/src/services/RobotDiscoveryService";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -33,6 +33,7 @@ type DataContextType = {
   builtPrograms:       BuiltProgram[];
   builtProgramsLoaded: boolean;
   ioDevices:              IoDeviceState[];
+  simplePlcs:          SimplePlcDeviceState[];
   relayIO:             UsbRelayState | null;
   grids:               Grid[];
   stacks:              RobotStack[];
@@ -46,6 +47,7 @@ const DataContext = createContext<DataContextType>({
   builtPrograms:       [],
   builtProgramsLoaded: false,
   ioDevices:              [],
+  simplePlcs:          [],
   relayIO:             null,
   grids:               [],
   stacks:              [],
@@ -63,6 +65,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
   const [builtPrograms,       setBuiltPrograms]       = useState<BuiltProgram[]>([]);
   const [builtProgramsLoaded, setBuiltProgramsLoaded] = useState(false);
   const [ioDevices,              setIoDevices]              = useState<IoDeviceState[]>([]);
+  const [simplePlcs,          setSimplePlcs]          = useState<SimplePlcDeviceState[]>([]);
   const [relayIO,             setRelayIO]             = useState<UsbRelayState | null>(null);
   const [grids,               setGrids]               = useState<Grid[]>([]);
   const [stacks,              setStacks]              = useState<RobotStack[]>([]);
@@ -80,6 +83,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       setBuiltProgramsLoaded(true);
     });
     const unsubIoDevices   = robotClient.onIoDevices(setIoDevices);
+    const unsubSimplePlcs = robotClient.onSimplePlcs(setSimplePlcs);
     const unsubRelayIO  = robotClient.onRelayIO(setRelayIO);
     const unsubGrids    = robotClient.onGrids(setGrids);
     const unsubStacks   = robotClient.onStacks(setStacks);
@@ -98,6 +102,7 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
       unsubLocals();
       unsubBuiltPrograms();
       unsubIoDevices();
+      unsubSimplePlcs();
       unsubRelayIO();
       unsubGrids();
       unsubStacks();
@@ -140,11 +145,12 @@ export function RobotProvider({ children }: { children: React.ReactNode }) {
     builtPrograms,
     builtProgramsLoaded,
     ioDevices,
+    simplePlcs,
     relayIO,
     grids,
     stacks,
     cameras,
-  }), [points, tools, locals, builtPrograms, builtProgramsLoaded, ioDevices, relayIO, grids, stacks, cameras]);
+  }), [points, tools, locals, builtPrograms, builtProgramsLoaded, ioDevices, simplePlcs, relayIO, grids, stacks, cameras]);
 
   return (
     <StatusContext.Provider value={statusContextValue}>
@@ -171,6 +177,12 @@ export function useLocals()              { return useContext(DataContext).locals
 export function useBuiltPrograms()       { return useContext(DataContext).builtPrograms; }
 export function useBuiltProgramsLoaded() { return useContext(DataContext).builtProgramsLoaded; }
 export function useIoDevices()              { return useContext(DataContext).ioDevices; }
+export function useSimplePlcs()           { return useContext(DataContext).simplePlcs; }
+/** One SimplePLC head by id (re-renders only when the list changes). */
+export function useSimplePlc(id: string | null | undefined) {
+  const simplePlcs = useContext(DataContext).simplePlcs;
+  return id ? simplePlcs.find(d => d.id === id) ?? null : null;
+}
 export function useRelayIO()             { return useContext(DataContext).relayIO; }
 export function useGrids()               { return useContext(DataContext).grids; }
 export function useStacks()              { return useContext(DataContext).stacks; }
