@@ -3,7 +3,9 @@ import { Check, Crosshair, Minus, Plus, RotateCcw, RotateCw } from "lucide-react
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, AppStateStatus, StyleSheet, Text, View } from "react-native";
 
+import { SpacePreview3D } from "@/src/components/space/space3d";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import type { Cell3DPreview } from "@/src/components/ui/cell3d/bridge";
 import { JogButton } from "@/src/components/ui/JogButton";
 import { Notice } from "@/src/components/ui/calibration/Notice";
 import { WizardStepper } from "@/src/components/ui/calibration/WizardStepper";
@@ -237,6 +239,12 @@ export default function TeachTcpScreen() {
     if (got.length < TOUCHES) return null;
     return solveTcp(got);
   }, [touches]);
+
+  // 3D preview on the review step: the solved tool tip on the bare flange (Z is left at 0).
+  const tcpPreview = useMemo<Cell3DPreview | null>(
+    () => (solution ? { kind: "tool", id: target?.id, name: name.trim() || "Tool", x: solution.tx, y: solution.ty, z: 0 } : null),
+    [solution, target?.id, name],
+  );
 
   const angleSpread = useMemo(() => {
     const got = touches.filter((t): t is Touch => !!t);
@@ -485,6 +493,12 @@ export default function TeachTcpScreen() {
         <Screen>
           <WizardStepper steps={STEPS} current={step} reachable={reachable} onStep={goto} />
           <View style={styles.bodyGap}>{body}</View>
+          {step > 0 && (
+            <SpacePreview3D
+              preview={step === SAVE ? tcpPreview : null}
+              hint={step === SAVE ? (tcpPreview ? "Solved tool tip at the flange" : undefined) : "The solved tool tip shows on Save"}
+            />
+          )}
         </Screen>
       </View>
     </>

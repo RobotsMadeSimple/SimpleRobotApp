@@ -1,5 +1,8 @@
 import {
   Activity,
+  Box,
+  Camera as CameraIcon,
+  CircleDot,
   Gauge as GaugeIcon,
   Hash,
   Image as ImageIcon,
@@ -27,9 +30,12 @@ const ICONS: Record<DisplayWidgetType, React.ComponentType<{ size?: number; colo
   boolean: ToggleRight,
   graph: Activity,
   image: ImageIcon,
+  camera: CameraIcon,
   button: Play,
   text: TypeIcon,
   plugin: Puzzle,
+  status: CircleDot,
+  cell3d: Box,
 };
 
 /** A short caption of a widget's binding, so the canvas is readable before compiling. */
@@ -42,6 +48,8 @@ export function widgetSummary(w: DisplayWidget): string {
       return c.variable || "(expression)";
     case "image":
       return c.variable ? `$${c.variable}` : "(pick a variable)";
+    case "camera":
+      return c.cameraId ? `Camera ${c.cameraId}` : "(pick a camera)";
     case "graph":
       return c.source === "variable" ? (c.variable || "(expression)") : c.deviceId ? `${c.deviceId}/${c.pin}` : "(set nano + pin)";
     case "button":
@@ -50,6 +58,10 @@ export function widgetSummary(w: DisplayWidget): string {
       return c.text || "(text)";
     case "plugin":
       return c.pluginName || c.pluginId || "(pick a plugin)";
+    case "status":
+      return "Program status";
+    case "cell3d":
+      return "Live 3D view";
     default:
       return "";
   }

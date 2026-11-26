@@ -2,7 +2,7 @@ import { colors, radii, spacing } from "@/src/components/ui/kit";
 import { Input } from "@/src/components/ui/kit/Field";
 import type { ProgramPrompt } from "@/src/models/robotModels";
 import { addKeyboardListener, getKeyboard } from "@/src/platform/keyboard";
-import { useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useProgramSummaries, useRobotStatusValue } from "@/src/providers/RobotProvider";
 import { CommandFailedError, isNotImplementedCommand, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
 import { ChevronUp, Clock, MessageSquare, Minus } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
@@ -48,7 +48,7 @@ function clearMockPrompt() {
 /** Every prompt currently in the status, oldest first, plus the web dev mock (if any). */
 function usePendingPrompts(): { prompts: ProgramPrompt[]; mockId: string | null; clearMock: () => void } {
   const summaries = useProgramSummaries();
-  const status = useRobotStatus();
+  const backgroundPrograms = useRobotStatusValue(s => s.backgroundPrograms);
   const [mock, setMock] = useState<ProgramPrompt | null>(readMockPrompt);
 
   const prompts = useMemo(() => {
@@ -61,10 +61,10 @@ function usePendingPrompts(): { prompts: ProgramPrompt[]; mockId: string | null;
     };
     for (const s of summaries) add(s.prompt);
     // A background program's prompt, if the controller reports it on that block.
-    for (const b of (status.backgroundPrograms ?? []) as any[]) add(b?.prompt);
+    for (const b of (backgroundPrograms ?? []) as any[]) add(b?.prompt);
     add(mock);
     return out.sort((a, b) => (a.shownUnixMs ?? 0) - (b.shownUnixMs ?? 0));
-  }, [summaries, status.backgroundPrograms, mock]);
+  }, [summaries, backgroundPrograms, mock]);
 
   return { prompts, mockId: mock?.id ?? null, clearMock: () => { clearMockPrompt(); setMock(null); } };
 }

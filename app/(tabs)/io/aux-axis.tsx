@@ -88,6 +88,38 @@ const CONVEYOR_PRESETS: ConveyorPreset[] = [
   },
 ];
 
+type SiloPreset = {
+  label: string;
+  axisType: "Linear";
+  mmPerRev: number;       // platform lift per motor rev
+  gearRatio: number;
+  stepsPerRev: number;
+  pitchMm: number;        // height of one part
+  capacity: number;
+  clearanceMm: number;
+  homeOverTravelMm: number;
+  homeSpeed: number;      // mm/s
+  liftSpeed: number;      // mm/s (actionVelocity)
+  note: string;
+};
+
+const SILO_PRESETS: SiloPreset[] = [
+  {
+    label: "Disc silo · 3.9 mm parts",
+    axisType: "Linear",
+    mmPerRev: 40,        // GT2 20T lift: 40 mm per motor rev
+    gearRatio: 1,
+    stepsPerRev: 3200,   // 1/16 microstepping — change to match your driver
+    pitchMm: 3.9,
+    capacity: 12,
+    clearanceMm: 0.5,
+    homeOverTravelMm: 5,
+    homeSpeed: 5,
+    liftSpeed: 20,
+    note: "Twelve 21 mm discs, 3.9 mm thick, on a 40 mm/rev belt lift. Steps per rev assumes 1/16 microstepping — change it to match your driver. Set the driver current low: homing drives into the bottom stop and lets the motor skip. Flip 'Invert direction' until positive moves the platform up.",
+  },
+];
+
 // ── Preset wizard ─────────────────────────────────────────────────────────────
 // Sparkle trigger on each role card opens this chooser; picking a preset fills the
 // motion + role fields. Everything stays editable afterwards.
@@ -145,6 +177,11 @@ export default function AuxAxisConfigPage() {
   const [closeTime,   setCloseTime]   = useState("0");
   const [gripAccel,   setGripAccel]   = useState("0");
   const [overTravel,  setOverTravel]  = useState("0");
+  const [siloPitch,      setSiloPitch]      = useState("0");
+  const [siloCapacity,   setSiloCapacity]   = useState("0");
+  const [siloClearance,  setSiloClearance]  = useState("0");
+  const [siloOverTravel, setSiloOverTravel] = useState("0");
+  const [siloHomeSpeed,  setSiloHomeSpeed]  = useState("0");
 
   useEffect(() => {
     robotClient.getAuxState().catch(() => {});
@@ -175,6 +212,11 @@ export default function AuxAxisConfigPage() {
     setCloseTime(String(axisState.gripperCloseTimeSec ?? 0));
     setGripAccel(String(axisState.gripperAccel ?? 0));
     setOverTravel(String(axisState.gripperOverTravelMm ?? 0));
+    setSiloPitch(String(axisState.siloPitchMm ?? 0));
+    setSiloCapacity(String(axisState.siloCapacity ?? 0));
+    setSiloClearance(String(axisState.siloClearanceMm ?? 0));
+    setSiloOverTravel(String(axisState.siloHomeOverTravelMm ?? 0));
+    setSiloHomeSpeed(String(axisState.siloHomeSpeed ?? 0));
     setLoaded(true);
   }, [axisState, loaded]);
 
@@ -199,6 +241,19 @@ export default function AuxAxisConfigPage() {
     setActionVel(String(p.actionVelocity));
   };
 
+  const applySiloPreset = (p: SiloPreset) => {
+    setAxisType(p.axisType);
+    setMmPerRev(String(p.mmPerRev));
+    setGearRatio(String(p.gearRatio));
+    setStepsPerRev(String(p.stepsPerRev));
+    setSiloPitch(String(p.pitchMm));
+    setSiloCapacity(String(p.capacity));
+    setSiloClearance(String(p.clearanceMm));
+    setSiloOverTravel(String(p.homeOverTravelMm));
+    setSiloHomeSpeed(String(p.homeSpeed));
+    setActionVel(String(p.liftSpeed));
+  };
+
   const save = async () => {
     if (!deviceId) return;
     setSaving(true);
@@ -220,6 +275,11 @@ export default function AuxAxisConfigPage() {
       gripperCloseTimeSec: parseFloat(closeTime) || 0,
       gripperAccel:        parseFloat(gripAccel) || 0,
       gripperOverTravelMm: parseFloat(overTravel) || 0,
+      siloPitchMm:          parseFloat(siloPitch)      || 0,
+      siloCapacity:         parseInt(siloCapacity)     || 0,
+      siloClearanceMm:      parseFloat(siloClearance)  || 0,
+      siloHomeOverTravelMm: parseFloat(siloOverTravel) || 0,
+      siloHomeSpeed:        parseFloat(siloHomeSpeed)  || 0,
     });
     await robotClient.getAuxState().catch(() => {});
     setSaving(false);
@@ -238,6 +298,15 @@ export default function AuxAxisConfigPage() {
   const gStroke   = Math.abs((parseFloat(openMm) || 0) - (parseFloat(closedMm) || 0));
   const gOpenVel  = parseFloat(openTime)  > 0 ? gStroke / parseFloat(openTime)  : null;
   const gCloseVel = parseFloat(closeTime) > 0 ? gStroke / parseFloat(closeTime) : null;
+
+  // Silo derived travel (docs/aux-silo.md: capacity × pitch + clearance) — the full lift from home.
+  const sTravel = (parseInt(siloCapacity) || 0) * (parseFloat(siloPitch) || 0) + (parseFloat(siloClearance) || 0);
+
+  // Which preset list the sheet shows for the current role.
+  const presetSet =
+    role === "Conveyor" ? { title: "Conveyor presets", presets: CONVEYOR_PRESETS, pick: (i: number) => applyConveyorPreset(CONVEYOR_PRESETS[i]) }
+    : role === "Silo"   ? { title: "Silo presets",     presets: SILO_PRESETS,     pick: (i: number) => applySiloPreset(SILO_PRESETS[i]) }
+    :                     { title: "Gripper presets",  presets: GRIPPER_PRESETS,  pick: (i: number) => applyGripperPreset(GRIPPER_PRESETS[i]) };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -363,6 +432,47 @@ export default function AuxAxisConfigPage() {
           </>
         )}
 
+        {/* ── Silo characteristics ───────────────────────────────────────── */}
+        {role === "Silo" && (
+          <>
+            <SectionHeader
+              title="Silo"
+              style={styles.sectionGap}
+              right={<InfoTip text="A tube of stacked parts on a platform this axis lifts. Home drives the platform down past full travel into the bottom stop, then zeros. Present next lifts the top part level with the rim. Refill sets the count to capacity and homes so you can load from the top." />}
+            />
+            <Card>
+              {SILO_PRESETS.length > 0 && (
+                <AnimatedPressable style={styles.presetTrigger} onPress={() => setPresetOpen(true)}>
+                  <Sparkles size={16} color={AUX_TINT} />
+                  <Text style={styles.presetTriggerText}>Presets</Text>
+                </AnimatedPressable>
+              )}
+              <FormRow label="Part height / pitch (mm)">
+                <Input value={siloPitch} onChangeText={setSiloPitch} placeholder="3.9" keyboardType="decimal-pad" returnKeyType="done" />
+              </FormRow>
+              <FormRow label="Capacity (parts when full)" style={styles.fieldGap}>
+                <Input value={siloCapacity} onChangeText={setSiloCapacity} placeholder="12" keyboardType="numeric" returnKeyType="done" />
+              </FormRow>
+              <FormRow label="Clearance below the rim (mm)" hint="Gap between a full stack's top and the rim." style={styles.fieldGap}>
+                <Input value={siloClearance} onChangeText={setSiloClearance} placeholder="0.5" keyboardType="decimal-pad" returnKeyType="done" />
+              </FormRow>
+              <FormRow label="Home over-travel (mm)" hint="Extra distance driven down past full travel when homing, so the platform always reaches the bottom stop." style={styles.fieldGap}>
+                <Input value={siloOverTravel} onChangeText={setSiloOverTravel} placeholder="5" keyboardType="decimal-pad" returnKeyType="done" />
+              </FormRow>
+              <FormRow label="Home speed (mm/s)" hint="Keep it slow and the driver current modest: the motor skips against the stop." style={styles.fieldGap}>
+                <Input value={siloHomeSpeed} onChangeText={setSiloHomeSpeed} placeholder="5" keyboardType="decimal-pad" returnKeyType="done" />
+              </FormRow>
+              <FormRow label="Lift speed (mm/s)" style={styles.fieldGap}>
+                <Input value={actionVel} onChangeText={setActionVel} placeholder="20" keyboardType="decimal-pad" returnKeyType="done" />
+              </FormRow>
+              <Text style={styles.presetNote}>
+                {sTravel > 0 ? `Full travel ${sTravel.toFixed(1)} mm. ` : ""}
+                Positive = platform up — flip Invert direction under Motion if Home lifts the platform instead of lowering it.
+              </Text>
+            </Card>
+          </>
+        )}
+
         {/* ── Rotary table characteristics ───────────────────────────────── */}
         {role === "RotaryTable" && (
           <>
@@ -421,7 +531,12 @@ export default function AuxAxisConfigPage() {
             </FormRow>
           )}
 
-          <FormRow label="Invert direction" inline style={styles.fieldGap}>
+          <FormRow
+            label="Invert direction"
+            inline
+            hint={role === "Silo" ? "Silo: set so positive = platform up." : undefined}
+            style={styles.fieldGap}
+          >
             <Switch value={invertDir} onValueChange={setInvertDir} trackColor={{ false: colors.border, true: AUX_TINT }} />
           </FormRow>
         </Card>
@@ -441,12 +556,9 @@ export default function AuxAxisConfigPage() {
         <PresetSheet
           visible={presetOpen}
           onClose={() => setPresetOpen(false)}
-          title={role === "Conveyor" ? "Conveyor presets" : "Gripper presets"}
-          presets={role === "Conveyor" ? CONVEYOR_PRESETS : GRIPPER_PRESETS}
-          onPick={(i) => {
-            if (role === "Conveyor") applyConveyorPreset(CONVEYOR_PRESETS[i]);
-            else applyGripperPreset(GRIPPER_PRESETS[i]);
-          }}
+          title={presetSet.title}
+          presets={presetSet.presets}
+          onPick={presetSet.pick}
         />
       </Screen>
     </View>
@@ -459,7 +571,7 @@ const styles = StyleSheet.create({
 
   roleGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   roleTile: {
-    flexGrow: 1, flexBasis: "22%", minWidth: 80,
+    flexGrow: 1, flexBasis: "18%", minWidth: 64,
     alignItems: "center", justifyContent: "center", gap: 6,
     paddingVertical: spacing.md,
     borderRadius: radii.md,

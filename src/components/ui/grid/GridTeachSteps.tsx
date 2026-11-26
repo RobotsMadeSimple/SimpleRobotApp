@@ -53,7 +53,7 @@ export function GridSetupStep({
   return (
     <View style={cs.step}>
       <Card style={cs.cardGap}>
-        <FormRow label="Grid name" hint={`Its base point is saved as "${name.trim() || "<name>"} origin".`}>
+        <FormRow label="Grid name" hint="Each taught corner is saved as a named point you can edit and re-teach later.">
           <Input value={name} onChangeText={onName} placeholder="e.g. Parts Tray" autoCapitalize="words" returnKeyType="next" />
         </FormRow>
         <View style={cs.row}>
@@ -110,12 +110,16 @@ const SPEEDS = ["0.1mm", "1mm", "10mm", "Slow", "Normal"];
 
 export function GridTeachCornerStep({
   corner, index, total, rows, cols, method, taught, onTeach, onBack, onNext, nextLabel,
+  name, onName, nameError, description, onDescription,
 }: {
   corner: CornerKey; index: number; total: number;
   rows: number; cols: number; method: GridMethod;
   taught: Partial<Record<CornerKey, Pose>>;
   onTeach: (corner: CornerKey, pose: Pose) => void;
   onBack: () => void; onNext: () => void; nextLabel: string;
+  /** This corner is saved as a named, re-teachable point — its name + optional description. */
+  name: string; onName: (v: string) => void; nameError?: string;
+  description: string; onDescription: (v: string) => void;
 }) {
   const isWide = usePaneLayout() === "desktop";
   const status = useRobotStatus();
@@ -129,6 +133,8 @@ export function GridTeachCornerStep({
   const requirements: Requirement[] = [
     { key: "taught", label: `Teach corner ${corner}`, met: !!mine,
       hint: "Jog the tool tip to the centre of the highlighted cell, then press Teach." },
+    { key: "name", label: "Name this point", met: name.trim().length > 0 && !nameError,
+      hint: nameError ?? "Each corner is saved as a named point you can move to, edit and re-teach later." },
   ];
 
   const targetPane = (
@@ -152,6 +158,12 @@ export function GridTeachCornerStep({
             Taught  X {fmt(mine.x)}  Y {fmt(mine.y)}  Z {fmt(mine.z)}
           </Text>
         )}
+        <FormRow label="Point name" hint={nameError}>
+          <Input value={name} onChangeText={onName} placeholder={`e.g. ${cornerLabel(corner, rows, cols)}`} autoCapitalize="words" returnKeyType="next" />
+        </FormRow>
+        <FormRow label="Description (optional)">
+          <Input value={description} onChangeText={onDescription} placeholder="What is this point for?" multiline />
+        </FormRow>
       </Card>
     </View>
   );
@@ -226,7 +238,9 @@ export function GridReviewStep({
     return (
       <View style={cs.step}>
         <Notice tone="info" title={`Saved "${name}"`}>
-          {rows} × {cols} grid, base point “{name} origin”. Pick it in a Move step’s Grid target, by row and column.
+          {rows} × {cols} grid. Its taught corners are saved as named points you can move to, edit and
+          re-teach from the grid’s page — re-teaching one re-fits the grid. Pick the grid in a Move
+          step’s Grid target, by row and column.
         </Notice>
         <Button label="Done" onPress={onDone} />
       </View>
@@ -272,15 +286,15 @@ export function GridReviewStep({
             <Stat key={k} label={`Corner ${k} off the fit`} value={`${fmt(fit.residuals![k] ?? NaN)} mm`} />
           ))}
           <Text style={cs.caption}>
-            Saved as base point “{name} origin” (cell 1,1) plus a row step and a column step in robot X/Y/Z,
-            so a Move to row r, column c lands at origin + r·row step + c·column step.
+            Each taught corner is saved as a named point (corner A is the base, cell 1,1), plus a row step
+            and a column step in robot X/Y/Z, so a Move to row r, column c lands at A + r·row step + c·column step.
           </Text>
         </Card>
       )}
 
       {overwritesPoint && (
-        <Notice tone="warning" title={`Replaces the point "${name} origin"`}>
-          A point with that name already exists; saving moves it to this grid’s first cell.
+        <Notice tone="warning" title="Reuses existing point names">
+          One or more corner names already exist as points; saving moves those points to this grid’s corners.
         </Notice>
       )}
       {saveError && <Notice tone="danger" title="Couldn’t save">{saveError}</Notice>}

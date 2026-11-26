@@ -1,4 +1,6 @@
 import * as Battery from "expo-battery";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import * as ScreenOrientation from "expo-screen-orientation";
 import * as Location from "expo-location";
 import { Accelerometer, Gyroscope, LightSensor, Magnetometer } from "expo-sensors";
 import { AppState, Platform } from "react-native";
@@ -13,6 +15,7 @@ import {
   ensurePhoneIdentity, getAssignedDeviceId, setAssignedDeviceId,
 } from "@/src/services/phoneIdentity";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { setNfcGuard } from "@/src/services/stationNfc";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Provider engine
@@ -46,6 +49,7 @@ const RESTART_BASE_MS = 1000;      // first restart delay; doubles per failed at
 const RESTART_MAX_MS = 15000;      // …up to this
 const CAMERA_OPEN_MS = 8000;       // give up on a camera open that hasn't finished by then
 const HEALTH_MS = 5 * 60_000;      // how often a streaming phone logs one health line (leak watch)
+const KEEP_AWAKE_TAG = "provider-stream";
 // A settings change (resolution, fps, aspect, lens, orientation) rebuilds the whole camera pipeline:
 // new capturer, new peer connection, new hardware encoder. Tapping through the options used to do that
 // once per tap (13 rebuilds in 4 min on the S22+), so changes are coalesced: the rebuild waits until
@@ -127,6 +131,20 @@ export const ORIENT_OPTIONS: { label: string; value: "portrait" | "landscape" }[
   { label: "Portrait", value: "portrait" },
   { label: "Landscape", value: "landscape" },
 ];
+// Screen orientation → Android display rotation in quarter turns (portrait-natural phones; matches
+// expo-screen-orientation's Surface.ROTATION_* mapping).
+const SCREEN_TURNS: Partial<Record<ScreenOrientation.Orientation, number>> = {
+  [ScreenOrientation.Orientation.PORTRAIT_UP]: 0,
+  [ScreenOrientation.Orientation.LANDSCAPE_RIGHT]: 1,
+  [ScreenOrientation.Orientation.PORTRAIT_DOWN]: 2,
+  [ScreenOrientation.Orientation.LANDSCAPE_LEFT]: 3,
+};
+
+async function currentScreenTurns(): Promise<number> {
+  if (Platform.OS !== "android") return 0;
+  try { return SCREEN_TURNS[await ScreenOrientation.getOrientationAsync()] ?? 0; } catch { return 0; }
+}
+
 /** The orientation a quarter turn clockwise from `o`. */
 export function nextOrientation(o: StreamOrientation): StreamOrientation {
   return ORIENT_TURNS[(ORIENT_TURNS.indexOf(o) + 1) % ORIENT_TURNS.length];
@@ -329,16 +347,36 @@ export function describeRxStats(rx: RxStats, userBps?: number): { text: string; 
 
 const isFront = (l: Lens) => { const f = (l.facing || "").toLowerCase(); return f === "front" || f === "user"; };
 
-/** Short label for a lens in the picker: the front camera, else a numbered lens (labels vary by OEM).
- *  Pass the whole list so phones with several front cameras get "Front 1", "Front 2"… */
+/** The lens kind its system label names, when it names one (iOS and some browsers do, e.g. "Back
+ *  Ultra Wide Camera"; Android only gives a numeric camera id, so this is null there). */
+function lensKind(label: string): string | null {
+  const s = label.toLowerCase();
+  if (/ultra[\s-]?wide/.test(s)) return "Ultra-wide";
+  if (/tele(photo)?\b/.test(s)) return "Telephoto";
+  if (/\btriple\b/.test(s)) return "Triple";
+  if (/\bdual[\s-]?wide\b/.test(s)) return "Dual wide";
+  if (/\bdual\b/.test(s)) return "Dual";
+  if (/\bwide\b/.test(s)) return "Wide";
+  return null;
+}
+
+/** Short label for a lens in the picker. Uses the lens kind when the system label names it
+ *  ("Ultra-wide", "Telephoto"…), else which side it faces: the first back camera (Android's
+ *  main one) is "Back", the rest "Back 2", "Back 3"…; likewise "Front", "Front 2"…
+ *  Pass the whole list so the numbering is per side. */
 export function lensLabel(l: Lens, i: number, all?: Lens[]): string {
-  if (isFront(l)) {
-    const fronts = (all ?? []).filter(isFront);
-    if (fronts.length > 1) return `Front ${fronts.findIndex(x => x.id === l.id) + 1}`;
-    return "Front";
-  }
-  const k = all ? all.filter(x => !isFront(x)).findIndex(x => x.id === l.id) : -1;
-  return `Lens ${(k >= 0 ? k : i) + 1}`;
+  const front = isFront(l);
+  const side = front ? "Front" : "Back";
+  const kind = lensKind(l.label || "");
+  if (kind) return front ? `Front ${kind.toLowerCase()}` : kind;
+  const k = all ? all.filter(x => isFront(x) === front).findIndex(x => x.id === l.id) : -1;
+  const n = (k >= 0 ? k : i) + 1;
+  return n === 1 ? side : `${side} ${n}`;
+}
+
+/** Lenses in picker order: back cameras first, then front, each in the phone's own order. */
+export function sortLenses(all: Lens[]): Lens[] {
+  return [...all.filter(l => !isFront(l)), ...all.filter(isFront)];
 }
 
 /** The engine's observable state — what the provider screen renders. */
@@ -861,6 +899,7 @@ class ProviderEngine {
   // ── Foreground service ──────────────────────────────────────────────────────
   private syncForeground() {
     this.syncHealth();
+    this.syncStayAwake();
     if (!this.active) {
       if (this.fgsKey !== "") { this.fgsKey = ""; stopForegroundStreaming(); }
       return;
@@ -875,6 +914,17 @@ class ProviderEngine {
     if (key === this.fgsKey) return;
     this.fgsKey = key;
     startForegroundStreaming(this.deviceName || "Phone", text, types);
+  }
+
+  // ── Stay awake while streaming ─────────────────────────────────────────────
+  // Held by the engine, not the provider screen, so the screen stays on whichever page of the app is
+  // showing. Both only act while the app is in the foreground, so they're re-applied when it returns
+  // (syncForeground runs then). The NFC guard stops a tag the phone sits on from opening another app
+  // over this one — that's what let a mounted phone time out mid-stream.
+  private syncStayAwake() {
+    setNfcGuard(this.active);
+    if (this.active) activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    else { try { deactivateKeepAwake(KEEP_AWAKE_TAG); } catch { /* not held */ } }
   }
 
   // ── Health line (leak watch for a phone left streaming for hours) ──────────
@@ -915,6 +965,20 @@ class ProviderEngine {
    * changing for REBUILD_SETTLE_MS, and keep REBUILD_MIN_GAP_MS since the last build began. The
    * running stream keeps going meanwhile, so a burst of taps costs one encoder re-init, not one each.
    */
+  private screenTurns = 0;
+  private screenSub: ScreenOrientation.Subscription | null = null;
+
+  /** Rebuild the camera when the screen turns, so the stream keeps facing the same way. */
+  private watchScreenRotation() {
+    if (this.screenSub || Platform.OS !== "android") return;
+    this.screenSub = ScreenOrientation.addOrientationChangeListener(e => {
+      const turns = SCREEN_TURNS[e.orientationInfo.orientation];
+      if (turns === undefined || turns === this.screenTurns) return;
+      this.screenTurns = turns;
+      if (this.camOn && this.assignedHere) this.requestCamRebuild();
+    });
+  }
+
   private requestCamRebuild() {
     if (this.settingsRebuildTimer) clearTimeout(this.settingsRebuildTimer);
     const wait = Math.max(REBUILD_SETTLE_MS, this.camStartedAt + REBUILD_MIN_GAP_MS - Date.now());
@@ -1020,7 +1084,15 @@ class ProviderEngine {
 
     // react-native-webrtc's normalizer reads {ideal} width/height/frameRate, so these apply.
     // `rotation` (our react-native-webrtc patch) turns every frame on the phone before encoding.
-    const rotation = ORIENT_TURNS.indexOf(this.config.orientation) * 90;
+    // WebRTC already turns each frame to follow the screen (back lens: −screen turn, front: +), but
+    // the orientation setting is relative to how the phone is mounted — cancel the screen turn out
+    // so rotating the app doesn't rotate the stream.
+    this.watchScreenRotation();
+    this.screenTurns = await currentScreenTurns();
+    if (gen !== this.camGen) return;
+    const lens = lensId ? this.lenses.find(l => l.id === lensId) : undefined;
+    const screenComp = lens && isFront(lens) ? -this.screenTurns : this.screenTurns;
+    const rotation = (((ORIENT_TURNS.indexOf(this.config.orientation) + screenComp) % 4) + 4) % 4 * 90;
     const baseVideo = { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: targetFps }, rotation };
     const videoFor = (lens: string | null) =>
       lens ? { ...baseVideo, deviceId: lens } : { ...baseVideo, facingMode: "environment" as const };
@@ -1305,6 +1377,8 @@ class ProviderEngine {
     this.fgsKey = "";
     stopForegroundStreaming();
     this.syncHealth();
+    setNfcGuard(false);
+    try { deactivateKeepAwake(KEEP_AWAKE_TAG); } catch { /* not held */ }
   }
 }
 

@@ -11,10 +11,15 @@ import { BuiltProgram,
 import { useBuiltPrograms,
   useBuiltProgramsLoaded,
   useConnected,
+  useGrids,
   usePoints,
   useProgramSummaries,
   useRobotStatus,
-  useSelectedRobot } from "@/src/providers/RobotProvider";
+  useSelectedRobot,
+  useStacks } from "@/src/providers/RobotProvider";
+import { movingToPointId, programPointIds } from "@/src/components/ui/cell3d/programPoints";
+import { PointActionSheet, usePointPick } from "@/src/components/space/PointActionSheet";
+import type { Cell3DTarget } from "@/src/components/ui/cell3d/bridge";
 import { useActionPending } from "@/src/hooks/useActionPending";
 import { isNotImplementedCommand, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
 import { useBreakpoints } from "@/src/components/ui/builder/useBreakpoints";
@@ -66,7 +71,9 @@ import { ExpandBadge, LiveViewerModal } from "@/src/components/vision/LiveViewer
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { usePaneLayout, wide } from "@/src/components/ui/responsive";
 import { RobotPathMap } from "@/src/components/ui/RobotPathMap";
-import { colors, spacing, radii, InfoTip, PageHeader, PositionReadout, StatusPill } from "@/src/components/ui/kit";
+import { Cell3DView } from "@/src/components/ui/cell3d/Cell3DView";
+import { colors, spacing, radii, InfoTip, PageHeader, PositionReadout, SegmentedControl, StatusPill } from "@/src/components/ui/kit";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // ── Status theming ────────────────────────────────────────────────────────────
 
@@ -224,6 +231,15 @@ export default function MonitorProgramScreen() {
   const allAxes = (isAstro ? ["X", "Y", "Z", "RZ"] : ["X", "Y", "Z", "RX", "RY", "RZ"]) as string[];
   const fmt    = (v?: number) => (v ?? 0).toFixed(1);
 
+  // Position section: the 2D path map or the live 3D view (remembered). A running CNC block's
+  // planned toolpath only draws on the 2D map, so 2D is the default for non-ASTRO robots.
+  const [posView, setPosView] = useState<"2d" | "3d" | null>(null);
+  useEffect(() => {
+    AsyncStorage.getItem("monitor.posView").then(v => { if (v === "2d" || v === "3d") setPosView(v); }).catch(() => {});
+  }, []);
+  const positionView = posView ?? (isAstro ? "3d" : "2d");
+  const choosePosView = (v: "2d" | "3d") => { setPosView(v); AsyncStorage.setItem("monitor.posView", v).catch(() => {}); };
+
   const builtProgram  = builtPrograms.find((p) => p.name === programName) ?? null;
   const isBuilt       = builtProgram !== null;
   const isBackground  = builtProgram?.isBackground ?? false;
@@ -301,6 +317,24 @@ export default function MonitorProgramScreen() {
   // ── Debugging: breakpoints, step mode, live push ───────────────────────────
   const connected   = useConnected();
   const points      = usePoints();
+  const grids       = useGrids();
+  const stacks      = useStacks();
+  // The 3D view draws only the points this program (and the routines it calls) refers to, and
+  // highlights the one the robot is moving to.
+  const programPoints = useMemo(
+    () => programPointIds(builtProgram, builtPrograms, points, grids, stacks),
+    [builtProgram, builtPrograms, points, grids, stacks],
+  );
+  const runningStep = builtProgram && program?.currentStepId ? findStep(builtProgram.steps, program.currentStepId) : undefined;
+  const movingToId = movingToPointId(runningStep, s, points);
+  const pos3dOptions = useMemo(() => ({ trail: true, points: true, pointIds: programPoints, controls: "views" as const }), [programPoints]);
+  // Tapping a point marker opens the shared point action sheet; it offers no moves while a
+  // program runs (the sheet checks), so mid-run it only names the point.
+  const pick3d = usePointPick();
+  const pos3dHighlight = useMemo<Cell3DTarget | null>(
+    () => pick3d.highlight ?? (movingToId ? { kind: "point", id: movingToId } : null),
+    [pick3d.highlight, movingToId],
+  );
   const catalog     = useStepCatalog(connected);
   const breakpoints = useBreakpoints(builtProgram?.id);
   // "no" once the controller has refused a debug command (an older build, or before the
@@ -919,6 +953,12 @@ export default function MonitorProgramScreen() {
                     : "This error always ends the program; a Try block cannot catch it."}
                 </Text>
               )}
+              {!!errorCode && (
+                <TouchableOpacity onPress={() => router.navigate({ pathname: "/robot/alarms", params: { code: errorCode } })}
+                  accessibilityRole="link" hitSlop={8}>
+                  <Text style={styles.errorHelpLink}>What causes this and how to fix it →</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -1143,9 +1183,24 @@ export default function MonitorProgramScreen() {
           <>
             <View style={styles.gapBand} />
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>POSITION</Text>
+              <View style={styles.posHeaderRow}>
+                <Text style={styles.sectionLabel}>POSITION</Text>
+                <SegmentedControl
+                  size="sm"
+                  style={styles.posViewToggle}
+                  options={[{ label: "2D map", value: "2d" }, { label: "3D view", value: "3d" }]}
+                  value={positionView}
+                  onChange={(v) => choosePosView(v as "2d" | "3d")}
+                />
+              </View>
 
-              {s && (
+              {s && positionView === "3d" && (
+                <View style={{ marginBottom: 10 }}>
+                  <Cell3DView style={styles.pos3d} persistKey="monitor" options={pos3dOptions} highlight={pos3dHighlight} onPick={pick3d.onPick} />
+                </View>
+              )}
+
+              {s && positionView === "2d" && (
                 <View style={{ marginBottom: 10 }}>
                   <RobotPathMap
                     x={s.x ?? 0}
@@ -1376,6 +1431,7 @@ export default function MonitorProgramScreen() {
         overridePercent={s?.speedOverridePercent ?? 100}
         onClose={() => setSpeedModalOpen(false)}
       />
+      <PointActionSheet point={pick3d.point} onClose={pick3d.close} />
     </View>
   );
 }
@@ -1473,6 +1529,9 @@ const styles = StyleSheet.create({
     fontSize: 10, fontWeight: "700", color: colors.textFaint,
     letterSpacing: 1, textTransform: "uppercase",
   },
+  posHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  posViewToggle: { width: 180 },
+  pos3d: { height: 300, borderRadius: radii.md },
 
   // ── Gap band (gray strip between major sections) ───────────────────────────
   gapBand: { height: 10, backgroundColor: colors.background },
@@ -1530,6 +1589,7 @@ const styles = StyleSheet.create({
   errorCodeText: { fontSize: 11, fontWeight: "700", color: colors.danger, fontFamily: "monospace" },
   errorMsg: { fontSize: 13, color: colors.text, lineHeight: 19 },
   errorMeta: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
+  errorHelpLink: { fontSize: 12, fontWeight: "600", color: colors.accent, marginTop: 2 },
   debugNote: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
   speedFactorRow: {
     flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.xs, paddingTop: spacing.sm,

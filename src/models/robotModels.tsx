@@ -1,7 +1,8 @@
 ﻿import type { VisionToolOutput } from "./visionTools";
 // ── Nano IO ───────────────────────────────────────────────────────────────────
 
-export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured' | 'LoadCell';
+/** 'Latch' = an aux-card (Uno) input scanned every loop pass that latches the step counts on each edge (conveyor part sensors). */
+export type PinType = 'Input' | 'Output' | 'Neopixel' | 'Unconfigured' | 'LoadCell' | 'Latch';
 
 /** Display units for a load cell; grams is the master behind the scenes. */
 export type LoadCellUnit = 'g' | 'kg' | 'oz' | 'lb' | 'N';
@@ -10,6 +11,8 @@ export type IoPinState = {
   pin: number;
   type: PinType;
   value: boolean;
+  /** A latch input (aux card): reads as an input, and its edges latch the step counts. */
+  latch?: boolean;
   name: string;
   deviceId: string;
   nanoName: string;
@@ -30,7 +33,7 @@ export type IoPinState = {
 // null/"" and `capabilities` is null, and the UI then allows everything.
 
 /** Feature a board's firmware may advertise. */
-export type DeviceCapability = 'io' | 'neopixel' | 'loadcell' | 'stepper';
+export type DeviceCapability = 'io' | 'neopixel' | 'loadcell' | 'stepper' | 'pos' | 'latch';
 
 /** The firmware fields shared by IoDeviceState and AuxDeviceState. */
 export type DeviceFirmwareInfo = {
@@ -87,6 +90,77 @@ export function ioPinSymbol(nanoName: string, pinName: string): string {
 }
 
 export type NeoPixelColor = { r: number; g: number; b: number };
+
+// ── Generic serial device ───────────────────────────────────────────────────────
+// A user-defined device on one fixed serial port (no ID? auto-discovery). The user picks an
+// unused port, sets baud/framing, defines named commands, and can send commands (named or raw)
+// from a console and from a program step. Wire shapes mirror the controller's SerialDeviceState.
+
+/** System.IO.Ports.Parity names (JSON string enum). */
+export type SerialParity = 'None' | 'Odd' | 'Even' | 'Mark' | 'Space';
+/** System.IO.Ports.StopBits names (JSON string enum). */
+export type SerialStopBits = 'One' | 'Two' | 'OnePointFive';
+/** Terminator appended to each sent payload. `none` sends the payload raw. */
+export type SerialLineEnding = 'lf' | 'crlf' | 'cr' | 'none';
+
+/** One line in the device console buffer. `tx` = sent, `rx` = received. */
+export type SerialLineEntry = { dir: 'tx' | 'rx'; text: string };
+
+/** A named command a serial device can send. `payload` supports `{{expr}}` at send time. */
+export type SerialCommandDef = {
+  id: string;
+  name: string;
+  payload: string;
+  expectReply?: boolean;
+  replyTimeoutMs?: number;
+};
+
+/**
+ * Serialized serial-device state (camelCase) — carried in GetStatus `serialDevices` and returned
+ * by GetSerialDevices. The config fields (dataBits/parity/stopBits/writeLineEnding/autoConnect)
+ * are included so the detail screen's Edit area can pre-fill without a separate config fetch.
+ */
+export type SerialDeviceState = {
+  id: string;
+  name: string;
+  portName: string;
+  baudRate: number;
+  connected: boolean;
+  /** Rolling console buffer, newest LAST, cap 100. */
+  recentLines: SerialLineEntry[];
+  commands: SerialCommandDef[];
+  dataBits?: number;
+  parity?: SerialParity;
+  stopBits?: SerialStopBits;
+  writeLineEnding?: SerialLineEnding;
+  autoConnect?: boolean;
+};
+
+/** Fields accepted by AddSerialDevice / SetSerialDeviceConfig (all optional on the wire). */
+export type SerialDeviceConfigInput = {
+  name?: string;
+  portName?: string;
+  baudRate?: number;
+  dataBits?: number;
+  parity?: SerialParity;
+  stopBits?: SerialStopBits;
+  writeLineEnding?: SerialLineEnding;
+  autoConnect?: boolean;
+  commands?: SerialCommandDef[];
+};
+
+/** One entry from ListSerialPorts — a physical port with descriptive info and current use. */
+export type SerialPortInfo = {
+  portName: string;
+  description?: string;
+  manufacturer?: string;
+  vid?: string;
+  pid?: string;
+  serialNumber?: string;
+  inUse: boolean;
+  /** Name/role of the device currently claiming the port, when known. */
+  usedBy?: string;
+};
 
 // ── IO value history / recordings ──────────────────────────────────────────────
 // Mirrors the controller History models. A channel is addressed by a stable key
@@ -149,6 +223,18 @@ export type AuxAxisChannelState = {
   /** Extra travel (mm) driven past a hard stop on a full Open/Close so the jaws seat firmly
    *  and the tracked position re-references at the clamped limit. 0 = don't over-travel. */
   gripperOverTravelMm: number;
+  /** Silo (Role === "Silo", controller docs/aux-silo.md). Optional: older controllers omit them.
+   *  Travel = capacity × pitch + clearance; Present lifts the top part level with the rim. */
+  siloPitchMm?: number;
+  siloCapacity?: number;
+  siloClearanceMm?: number;
+  siloHomeOverTravelMm?: number;
+  /** Homing speed, mm/s. */
+  siloHomeSpeed?: number;
+  /** Parts currently in the silo (persisted on the controller). */
+  siloCount?: number;
+  /** Runtime: homed since the last restart / foreign move. */
+  siloHomed?: boolean;
 };
 
 export type AuxDeviceState = DeviceFirmwareInfo & {
@@ -173,6 +259,96 @@ export function auxUnitLabel(axis: AuxAxisChannelState): string {
   if (axis.axisType === 'Rotary') return '°'; // degree sign (escaped so it can't re-mojibake)
   return 'steps';
 }
+
+// ── Conveyor tracking (controller docs/conveyor-tracking.md) ──────────────────
+
+/** Where a conveyor's belt travel comes from. */
+export type ConveyorSourceKind = "aux" | "timed" | "manual";
+/** Part sensor: none, an aux-card latch pin (exact), any IO-device input, or an STB input. */
+export type ConveyorSensorKind = "none" | "auxPin" | "io" | "stb";
+
+/** An output reference in the SetOutput step's shape (the belt's run output for a timed source). */
+export type ConveyorOutputRef = {
+  outputCard: string;          // "stb" | "relay" | "io"
+  outputDeviceId?: string | null;
+  outputNumber: number;
+};
+
+export type ConveyorSource = {
+  kind: ConveyorSourceKind;
+  /** aux: the aux device and axis driving the belt. */
+  deviceId: string | null;
+  axis: number | null;
+  /** aux: overrides the axis's own steps-per-mm (null = use the axis's Linear settings). */
+  mmPerStep: number | null;
+  /** timed: the output that runs the belt, and the belt speed while it is on. */
+  runOutput: ConveyorOutputRef | null;
+  speedMmS: number;
+};
+
+export type ConveyorFrame = { x: number; y: number; z: number; rz: number };
+
+export type ConveyorSensor = {
+  kind: ConveyorSensorKind;
+  /** auxPin / io: the device and its pin. */
+  deviceId: string | null;
+  pin: number | null;
+  /** stb: the STB input number. */
+  input: number | null;
+  activeHigh: boolean;
+  /** X of a part (in the conveyor frame) at the moment the sensor latches it. */
+  offsetMm: number;
+  /** Re-triggers closer than this along the belt are ignored. */
+  minSpacingMm: number;
+};
+
+/** A configured conveyor, linked everywhere by its stable `id` (empty = not saved yet). */
+export type Conveyor = {
+  id: string;
+  name: string;
+  source: ConveyorSource;
+  /** Multiplies counted travel to correct slip / pulley error (set by calibration). */
+  scale: number;
+  /** In robot base coordinates; +X is the direction of belt travel. */
+  frame: ConveyorFrame;
+  sensor: ConveyorSensor;
+  /** Where along conveyor X the robot may track. Past endMm a part is dropped as missed. */
+  window: { startMm: number; endMm: number };
+  maxQueue: number;
+};
+
+/** One queued part in the status broadcast: its current X in the conveyor frame. */
+export type ConveyorPartStatus = { id: string; x: number; travelAtLatch?: number };
+
+/** A conveyor's live state, from the status broadcast's `conveyors` field (≤ 10 Hz). */
+export type ConveyorStatus = {
+  id: string;
+  travelMm: number;
+  speedMmS: number;
+  running: boolean;
+  tracking: boolean;
+  trackedPartId: string | null;
+  /** Capped at 16 by the controller. */
+  parts: ConveyorPartStatus[];
+  picked: number;
+  missed: number;
+  /** Parts latched so far, the belt travel at the last latch, and whether the travel source is
+   *  answering (an aux board streaming positions / the run output readable). Newer fields. */
+  latched?: number;
+  lastLatchTravelMm?: number | null;
+  sourceOk?: boolean;
+};
+
+/** `ConveyorSample`: the current TCP and belt travel, for calibration. */
+export type ConveyorSample = { x: number; y: number; z: number; rz: number; travelMm: number };
+
+/** `ConveyorCalibrate`'s proposal (not saved until the conveyor is saved with it). */
+export type ConveyorCalibration = {
+  frame: ConveyorFrame;
+  scale: number;
+  sensorOffsetMm: number | null;
+  residualMm: number;
+};
 
 // ── USB Cameras ───────────────────────────────────────────────────────────────
 
@@ -410,7 +586,14 @@ export function defaultColorEntry(): ColorEntry {
 export type StepType = 'MoveL' | 'MoveJ' | 'JumpL' | 'JumpJ' | 'SetOutput' | 'Wait' | 'Loop' | 'StatusUpdate' | 'CallRoutine' | 'SetSpeedL' | 'SetSpeedJ' | 'SetVariable' | 'PauseProgram' | 'Label' | 'GoToLabel' | 'IfCondition' | 'SetTool' | 'RunHoming' | 'SetJointPosition' | 'AuxMove' | 'AuxContinuous' | 'AuxStop' | 'AuxEnable' | 'GripperAction' | 'ConveyorAction' | 'RotaryIndex' | 'RunVision' | 'SetLocal' | 'ClearLocal' | 'StartBackground' | 'StopBackground' | 'WaitForBackground' | 'StopwatchControl' | 'SaveImage' | 'ThreadMove' | 'CncProgram' | 'SetBlendRadius' | 'HttpRequest' | 'CaptureImage' | 'HttpReceive' | 'Plugin' | 'Tare' | 'ReadLoadCell' | 'StartRecording' | 'StopRecording' | 'ExportData' | 'Unknown'
   // Program editor v2 (controller docs/program-language.md §4). Order mirrors the controller enum.
   | 'Note' | 'LoopControl' | 'Return' | 'EndProgram' | 'RaiseError' | 'Switch' | 'Try' | 'SavePosition'
-  | 'SetSpeedFactor' | 'ListOp' | 'Prompt' | 'MoveC';
+  | 'SetSpeedFactor' | 'ListOp' | 'Prompt' | 'MoveC'
+  | 'MoveJoints'
+  // Conveyor tracking (controller docs/conveyor-tracking.md), appended in the controller's enum order.
+  | 'ConveyorTrack' | 'ConveyorEndTracking' | 'ConveyorAddPart' | 'ConveyorClearQueue'
+  // Silo role (controller docs/aux-silo.md), appended in the controller's enum order.
+  | 'SiloAction'
+  // Generic serial device — send a named/raw command to a user-configured serial port.
+  | 'SerialCommand';
 
 /**
  * One outbound JSON field. A row is exactly one of three things: a list variable sent as a
@@ -507,7 +690,11 @@ export type WaitTimeoutAction = 'continue' | 'error';
 export type OutputAction = 'set' | 'toggle';
 export type SavePositionTo = 'variable' | 'point';
 export type SavePositionMode = 'replace' | 'append' | 'insert' | 'set';
-export type SavePositionSource = 'actual' | 'target';
+/** 'joints' stores the joint values {j1, j2, j3, j4} into an Objects (Record) list. */
+export type SavePositionSource = 'actual' | 'target' | 'joints';
+
+/** A move's speed profile; the robot config's `motionProfile` when a step leaves it unset. */
+export type MotionProfile = 'trapezoid' | 'scurve';
 export type ListAction =
   | 'append' | 'insert' | 'removeAt' | 'clear' | 'set' | 'setField' | 'sort' | 'reverse' | 'copyFrom';
 export type PromptInput = 'none' | 'number' | 'text';
@@ -799,6 +986,14 @@ export type ProgramStep = {
   loadCellDeviceId?: string;
   loadCellPin?: number;
   loadCellUnit?: string;   // ReadLoadCell: unit to store (default grams)
+  // Serial command (SerialCommand) — send a named or raw command to a generic serial device.
+  serialDeviceId?: string;       // DeviceRef (stable id)
+  serialDeviceName?: string;     // display cache
+  serialCommandId?: string;      // named command id (when using a saved command)
+  serialText?: string;           // raw payload (when not using a named command); supports {{expr}}
+  serialExpectReply?: boolean;   // wait for a reply line
+  serialResultVariable?: string; // variable to store the reply line into (when expectReply)
+  serialTimeoutMs?: number;      // reply wait timeout (default 1000)
   // Stop / record on condition — optional on move steps (MoveL, MoveJ, JumpL, JumpJ, AuxMove,
   // GripperAction). The condition is evaluated every executor tick while the move is in flight;
   // null/empty = feature off. A force limit is just `$io.<nano>.<loadcell> >= <grams>` (load cells
@@ -924,6 +1119,14 @@ export type ProgramStep = {
   conveyorAction?: string;  // ConveyorAction: "RunForward" | "RunReverse" | "Stop"
   rotaryDirection?: number; // RotaryIndex: 1 | -1
   rotaryCount?: number;     // RotaryIndex: number of indexes
+  siloAction?: string;      // SiloAction: "Home" | "Present" | "Refill" | "SetCount"
+  siloCount?: number;       // SiloAction "SetCount": parts now in the silo (expression-capable)
+  // Conveyor tracking (controller docs/conveyor-tracking.md) — linked by the conveyor's stable id.
+  conveyorId?: string;      // ConveyorTrack/AddPart/ClearQueue; ConveyorEndTracking: optional (default = the tracked one)
+  trackWait?: boolean;      // ConveyorTrack: wait for a part to enter the window (default true)
+  trackTimeoutMs?: number;  // ConveyorTrack: give up waiting after this long (→ conveyorTimeout); unset = forever
+  partOffsetMm?: number;    // ConveyorAddPart: X of the part in the conveyor frame now (expressions.partOffsetMm overrides)
+  conveyorRelease?: boolean; // ConveyorEndTracking: count the part as released instead of picked
   // ThreadMove
   threadDistance?: number;
   threadPitch?: number;
@@ -1018,6 +1221,16 @@ export type ProgramStep = {
   viaPointName?: string;
   viaPointNameExpr?: string;
   arcTolerance?: number;
+  // MoveJoints (MoveAbsJ) — a joint target: `jointsExpr` gives a joints value ($home[0] — an Objects
+  // list element with j1…j4 — or jointsOf(…)); j1…j4 (or expressions.j1…j4) set joints on top of it.
+  // An empty joint keeps its current value. ASTRO: J1 °, J2 radial mm, J3 vertical mm, J4 °; CNC: X Y Z RZ.
+  jointsExpr?: string;
+  j1?: number;
+  j2?: number;
+  j3?: number;
+  j4?: number;
+  // MoveL / MoveJ / MoveJoints / JumpL / JumpJ — this move's speed profile (unset = the robot config's).
+  motionProfile?: MotionProfile;
   // ListOp — mutates the list in `variableName`. listIndex may be an expression (expressions.listIndex).
   listAction?: ListAction;
   listIndex?: number;
@@ -1120,9 +1333,12 @@ export type DisplayWidgetType =
   | "boolean"  // a true/false lamp
   | "graph"    // a live line chart (load cell, or a variable sampled over time)
   | "image"    // a display-image variable
+  | "camera"   // a live camera stream (the controller's /camera/{id}/ws feed), like the IO page
   | "button"   // run / stop / seed-inputs action
   | "text"     // static heading / caption
-  | "plugin";  // an embedded live plugin UI
+  | "plugin"   // an embedded live plugin UI
+  | "status"   // the program's run state (status + current step)
+  | "cell3d";  // the live 3D view of the robot and its cell
 
 /**
  * One widget on a display page. `x`/`y`/`w`/`h` are in grid cells (columns × auto rows); the
@@ -1146,6 +1362,8 @@ export type DisplayPageLayout = {
   /** Pixel height of one grid row. */
   rowHeight: number;
   widgets: DisplayWidget[];
+  /** Page colours: "light" (the default, like the app), "dark", or "auto" (follows the device). */
+  theme?: "dark" | "light" | "auto";
 };
 
 /** Which editor authored the page — widgets compile to HTML; html is raw/uploaded. */
@@ -1157,6 +1375,12 @@ export type BuiltProgram = {
   description: string;
   steps: ProgramStep[];
   variables?: ProgramVariable[];
+  /**
+   * Points that belong to THIS program, taught from the Program page and bundled with it (they
+   * travel with the program). They coexist with the global point library; a move step's
+   * pointId/pointName resolves against these first, then the global library. Absent/empty = none.
+   */
+  points?: Point[];
   /**
    * Custom display page — a dashboard that shows this program's variables/state/images/graphs
    * and offers inputs + a run button, rendered in a sandboxed WebView via the host bridge.
@@ -1481,6 +1705,8 @@ export type Point = {
    */
   id: string
   name: string
+  /** Optional free-text note: what the point is for. Edited any time; preserved across re-teach. */
+  description: string
   lastUpdatedUnixMs: number
   x: number
   y: number
@@ -1488,6 +1714,12 @@ export type Point = {
   rx: number
   ry: number
   rz: number
+  /**
+   * Program points only: true until the point has been taught a position (added in the builder
+   * with a name but not yet jogged to). Global library points are always taught. Not sent to the
+   * controller for global points.
+   */
+  untaught?: boolean
 }
 
 export type Tool = {
@@ -1518,15 +1750,36 @@ export type Local = {
   rz: number
 }
 
+/** How a grid was set up — drives whether editing a corner re-fits it. */
+export type GridMethod = "2pt" | "3pt" | "4pt" | "manual";
+
+/** A grid's taught corner: a reference to a global point plus which corner it is. */
+export type GridCorner = {
+  /** "A" (the base/origin) | "B" | "C" | "D". */
+  role: "A" | "B" | "C" | "D";
+  pointId: string;
+  pointName: string;
+};
+
 export type Grid = {
   id: string;
   name: string;
+  /** Optional free-text note: what the grid is, where/how to teach it. */
+  description?: string;
   basePointName: string;
+  /** Stable id of the base point — resolved id-first so a renamed base still works. */
+  basePointId?: string;
   rowOffsetX: number; rowOffsetY: number; rowOffsetZ: number;
   colOffsetX: number; colOffsetY: number; colOffsetZ: number;
   rowCount?: number;
   colCount?: number;
   rotation: number;
+  /** "2pt" | "3pt" | "4pt" | "manual" — absent on old grids (treated as manual). */
+  method?: GridMethod;
+  /** 2-point only: which side of the first row the next row lies on. */
+  rowSide?: "left" | "right";
+  /** The taught corner points this grid was fitted from; empty/absent for a manual grid. */
+  corners?: GridCorner[];
   lastUpdatedUnixMs: number;
 };
 
@@ -1647,6 +1900,18 @@ export type RobotStatus = {
   limitBypass: boolean,
   jointLimitsEnabled: boolean,
   robotType: string,        // "ASTRO" | "CNC4Axis" — drives joint labelling
+
+  // Hardwired e-stop + alarm history (controller docs/estop.md). Optional: older controllers omit them.
+  estopEnabled?: boolean,
+  estopActive?: boolean,
+  estopLatched?: boolean,
+  estopInput?: boolean | null,
+  estopInputHealthy?: boolean | null,
+  estopSourceOnline?: boolean,
+  estopSource?: string,
+  estopReason?: string | null,
+  activeAlarmCount?: number,
+  lastAlarmUpdate?: number,
 }
 
 export function createDefaultStatus(): RobotStatus {
@@ -1825,8 +2090,11 @@ export type PluginManifest = {
   steps?: PluginStepDef[];
   functions?: PluginFunctionDef[];
   properties?: PluginPropertyDef[];
-  /** A custom GUI the plugin ships; shown in a WebView on the plugin detail page. */
-  ui?: { entry: string; title?: string };
+  /**
+   * A custom GUI the plugin ships; shown in a WebView on the plugin detail page. `params` are
+   * settings a display-page Plugin block can set (passed to the page as its URL query string).
+   */
+  ui?: { entry: string; title?: string; params?: PluginParamDef[] };
 };
 
 export type PluginSummary = {

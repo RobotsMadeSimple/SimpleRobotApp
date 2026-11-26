@@ -6,7 +6,8 @@ import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { IoDeviceState } from "@/src/models/robotModels";
 import { Gauge, LogIn, LogOut, Settings2, Sparkles } from "lucide-react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
@@ -33,6 +34,7 @@ function NanoDetail({ nano, isWide }: { nano: IoDeviceState; isWide: boolean }) 
   const outputs   = nano.pins.filter(p => p.type === "Output");
   const neopixels = nano.pins.filter(p => p.type === "Neopixel");
   const loadcells = nano.pins.filter(p => p.type === "LoadCell");
+  const pushOnce  = usePushOnce();
 
   const groups = [
     { label: "Inputs",   pins: inputs    },
@@ -96,7 +98,7 @@ function NanoDetail({ nano, isWide }: { nano: IoDeviceState; isWide: boolean }) 
                 icon={<Gauge size={20} color={colors.accent} />}
                 iconColor={colors.accentSoft}
                 chevron
-                onPress={() => router.push({ pathname: "/(tabs)/io/loadcell-calibrate", params: { deviceId: nano.id, pin: String(pin.pin) } })}
+                onPress={() => pushOnce({ pathname: "/(tabs)/io/loadcell-calibrate", params: { deviceId: nano.id, pin: String(pin.pin) } })}
                 right={
                   <View style={styles.lcRight}>
                     <IoSparkline channelKey={`io/${nano.id}/${pin.pin}`} useRaw={!calibrated} />
@@ -124,6 +126,7 @@ export default function IoDevicesPage() {
   const { deviceId } = useLocalSearchParams<{ deviceId?: string }>();
   const ioDevices = useIoDevices();
   const isWide = useIsWide();
+  const pushOnce = usePushOnce();
 
   const nano = deviceId ? (ioDevices.find(n => n.id === deviceId) ?? null) : null;
 
@@ -150,7 +153,7 @@ export default function IoDevicesPage() {
                   label="Configure"
                   icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
                   onPress={() =>
-                    router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: nano.id } })
+                    pushOnce({ pathname: "/(tabs)/io/configure", params: { deviceId: nano.id } })
                   }
                 />
               }

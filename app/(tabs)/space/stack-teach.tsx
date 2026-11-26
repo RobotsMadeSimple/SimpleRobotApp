@@ -15,8 +15,10 @@ import { Notice } from "@/src/components/ui/calibration/Notice";
 import { Attention, Requirement, StepFooter } from "@/src/components/ui/calibration/StepRequirements";
 import { useJogSpeeds } from "@/src/components/ui/calibration/useJogSpeeds";
 import { WizardStepper } from "@/src/components/ui/calibration/WizardStepper";
+import { spaceSets, SpacePreview3D, UNLIMITED_STACK_PREVIEW } from "@/src/components/space/space3d";
+import type { Cell3DPreview, Cell3DSet } from "@/src/components/ui/cell3d/bridge";
 import { RobotStack } from "@/src/models/robotModels";
-import { usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
+import { useGrids, usePoints, useRobotStatus, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 
 type Pose = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
@@ -88,6 +90,24 @@ function StackTeachWizard({ existing, initialName }: { existing: RobotStack | nu
     const pitch = Math.hypot(off.x, off.y, off.z);
     return { off, pitch, span: pitch * stepsApart };
   }, [taught, stepsApart]);
+
+  // 3D preview: the taught items as marks, the stack's positions once both are in, and the saved
+  // grids / other stacks for context.
+  const grids = useGrids();
+  const teachSets = useMemo<Cell3DSet[]>(() => {
+    const marks: Cell3DSet = {
+      kind: "marks", id: "taught-items",
+      positions: (["first", "second"] as const).filter(k => taught[k]).map(k => ({ ...taught[k]!, name: k === "first" ? "First" : method === "next" ? "Next" : "Last" })),
+    };
+    return [marks, ...spaceSets(grids, stacks.filter(st => st.id !== existing?.id), points)];
+  }, [taught, method, grids, stacks, points, existing?.id]);
+  const preview = useMemo<Cell3DPreview | null>(() => {
+    const a = taught.first;
+    if (!fit || !a || fit.pitch < 0.1) return null;
+    const count = Math.min(n != null && Number.isInteger(n) && n > 0 ? n : UNLIMITED_STACK_PREVIEW, 500);
+    const positions = Array.from({ length: count }, (_, i) => ({ x: a.x + i * fit.off.x, y: a.y + i * fit.off.y, z: a.z + i * fit.off.z }));
+    return { kind: "set", set: { kind: "stack", id: existing?.id || "draft", name: trimmed || "New stack", positions } };
+  }, [fit, taught.first, n, existing?.id, trimmed]);
 
   const setupOk = trimmed.length > 0 && !nameTaken && !countProblem;
   let reachable = 0;
@@ -288,6 +308,13 @@ function StackTeachWizard({ existing, initialName }: { existing: RobotStack | nu
       <Screen>
         <WizardStepper steps={STEPS} current={step} reachable={reachable} onStep={goto} />
         {body}
+        {step > 0 && (
+          <SpacePreview3D
+            preview={preview}
+            sets={teachSets}
+            hint={preview ? (n == null ? `No item limit: first ${UNLIMITED_STACK_PREVIEW} shown` : undefined) : "Taught items appear here"}
+          />
+        )}
       </Screen>
     </View>
   );

@@ -4,7 +4,7 @@ import { ProgramListLayout, SortState, bySort, defaultSort, relativeTime } from 
 import { BuiltProgram } from "@/src/models/robotModels";
 import { useBuiltPrograms } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { Box, Clock, Layers, Repeat2 } from "lucide-react-native";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -16,6 +16,7 @@ import { Card, IconTile, InfoTip, SectionHeader, StatTile, accents, colors, spac
 const ROUTINE_TINT = accents.purple;
 
 export default function RoutinesScreen() {
+  const pushOnce = usePushOnce();
   const allPrograms = useBuiltPrograms();
   const [search, setSearch] = useState("");
   const [sort, setSort]     = useState<SortState>(defaultSort());
@@ -64,7 +65,7 @@ export default function RoutinesScreen() {
       crumbs={[{ label: "Program", href: "/program" }, { label: "Routines" }]}
       accentColor={ROUTINE_TINT}
       addLabel="New Routine"
-      onAdd={() => router.push("/program/builder?isRoutine=1")}
+      onAdd={() => pushOnce("/program/builder?isRoutine=1")}
       search={search}
       onSearchChange={setSearch}
       sort={sort}
@@ -89,13 +90,14 @@ export default function RoutinesScreen() {
 }
 
 function RoutineRow({ routine: r, onDelete }: { routine: BuiltProgram; onDelete: () => void }) {
+  const pushOnce = usePushOnce();
   const metaParts: string[] = [];
   metaParts.push(`${r.steps.length} step${r.steps.length !== 1 ? "s" : ""}`);
   if (r.lastUpdatedUnixMs) metaParts.push(`saved ${relativeTime(r.lastUpdatedUnixMs)}`);
 
   return (
     <Card
-      onPress={() => router.push(`/program/builder?name=${encodeURIComponent(r.name)}`)}
+      onPress={() => pushOnce(`/program/builder?name=${encodeURIComponent(r.name)}`)}
       padded={false}
       style={s.card}
     >

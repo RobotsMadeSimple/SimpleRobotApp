@@ -8,6 +8,7 @@ export default function ControlLayout() {
         options={{ headerShown: false }}
       />
       <Stack.Screen name="jog" options={{ headerShown: false }} />
+      <Stack.Screen name="view-3d" options={{ headerShown: false }} />
     </Stack>
   );
 }

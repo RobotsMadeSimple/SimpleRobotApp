@@ -1,6 +1,7 @@
 import { ManualJointHoming, MANUAL_HOMING_INFO } from "@/src/components/ui/jog/ManualJointHoming";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import {
+  accents,
   Button,
   buttonTextColor,
   Card,
@@ -24,6 +25,7 @@ import { router } from "expo-router";
 import {
   Activity,
   AlertTriangle,
+  Box,
   Cpu,
   Gamepad2,
   HomeIcon,
@@ -80,6 +82,13 @@ export default function Control() {
       icon: <Gamepad2 size={20} color={colors.accent} />,
       iconBg: colors.accentSoft,
       onPress: () => router.push("/control/jog"),
+    },
+    {
+      label: "3D View",
+      sub: "Watch the robot and its cell move, live",
+      icon: <Box size={20} color={accents.cyan} />,
+      iconBg: accents.cyanSoft,
+      onPress: () => router.push("/control/view-3d"),
     },
     {
       label: "Home Robot",

@@ -10,6 +10,7 @@ import {
   Clock,
   Cpu,
   Brackets,
+  Cylinder,
   Gauge,
   Scale,
   Globe,
@@ -52,6 +53,12 @@ import {
   List,
   MessageCircleQuestionMark,
   Spline,
+  Rotate3d,
+  PackagePlus,
+  PackageX,
+  Crosshair,
+  CircleStop,
+  Terminal,
 } from "lucide-react-native";
 import React from "react";
 import { ConditionGroup, FieldSpec, Grid, Point, ProgramStep, RobotStack, StepType, THREAD_PRESETS } from "@/src/models/robotModels";
@@ -59,6 +66,7 @@ import { accents, colors } from "@/src/components/ui/kit";
 import { findPluginStep, pluginDisplayName } from "./usePluginContributions";
 import { outputsSummary, paramsSummary } from "./pluginSteps";
 import { mapStepTree } from "@/src/models/stepTree";
+import { conveyorLabel } from "@/src/models/conveyors";
 import { blockBodyFrames, type ScopeFrame } from "./scopeFrames";
 import { stepSpecFor } from "./useStepCatalog";
 
@@ -263,6 +271,18 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       const dir = (step.rotaryDirection ?? 1) < 0 ? "−" : "+";
       return `Rotary Index  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${dir}${step.rotaryCount ?? 1}`;
     }
+    case "SiloAction":
+      return `Silo  ·  Axis ${step.auxAxisIndex ?? 0}  ·  ${siloActionLabel(step)}`;
+    case "ConveyorTrack":
+      return step.conveyorId ? `Track  ·  ${conveyorLabel(step.conveyorId)}` : "Track Conveyor Part";
+    case "ConveyorEndTracking":
+      return step.conveyorId ? `End Tracking  ·  ${conveyorLabel(step.conveyorId)}` : "End Tracking";
+    case "ConveyorAddPart": {
+      const at = step.expressions?.partOffsetMm ?? `${step.partOffsetMm ?? 0} mm`;
+      return step.conveyorId ? `Add Part  ·  ${conveyorLabel(step.conveyorId)}  @ ${at}` : "Add Conveyor Part";
+    }
+    case "ConveyorClearQueue":
+      return step.conveyorId ? `Clear Queue  ·  ${conveyorLabel(step.conveyorId)}` : "Clear Conveyor Queue";
     case "StartBackground":
       return step.backgroundProgramName ? `Start Background  →  ${step.backgroundProgramName}` : "Start Background";
     case "StopBackground":
@@ -288,6 +308,11 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
       return step.httpReceiveName
         ? `HTTP Receive  ←  ${step.httpReceiveName}`
         : "HTTP Receive";
+    case "SerialCommand": {
+      const target = serialStepTarget(step);
+      const dev = step.serialDeviceName ? `  ·  ${step.serialDeviceName}` : "";
+      return `Serial  →  ${target}${dev}`;
+    }
     case "Plugin":
       return pluginStepTitle(step);
     case "Unknown":
@@ -317,6 +342,8 @@ export function stepLabel(step: ProgramStep, points?: Point[]): string {
         : `Save Position  →  ${step.variableName ? `$${step.variableName}` : "?"}`;
     case "MoveC":
       return `MoveC  →  ${movePointName(step, points, "?")}`;
+    case "MoveJoints":
+      return `MoveJoints  →  ${jointsSummary(step)}`;
     case "Return":
       return "Return";
     default:              return step.type;
@@ -363,6 +390,11 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "GripperAction":      return <Brackets      size={size} color={color} />;
     case "ConveyorAction":     return <MoveHorizontal size={size} color={color} />;
     case "RotaryIndex":        return <RotateCw      size={size} color={color} />;
+    case "SiloAction":         return <Cylinder      size={size} color={color} />;
+    case "ConveyorTrack":      return <Crosshair     size={size} color={color} />;
+    case "ConveyorEndTracking": return <CircleStop   size={size} color={color} />;
+    case "ConveyorAddPart":    return <PackagePlus   size={size} color={color} />;
+    case "ConveyorClearQueue": return <PackageX      size={size} color={color} />;
     case "StartBackground":    return <Layers        size={size} color={color} />;
     case "StopBackground":     return <Square        size={size} color={color} />;
     case "WaitForBackground":  return <Hourglass     size={size} color={color} />;
@@ -372,6 +404,7 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "HttpRequest":       return <Globe         size={size} color={color} />;
     case "CaptureImage":       return <Camera        size={size} color={color} />;
     case "HttpReceive":        return <Inbox         size={size} color={color} />;
+    case "SerialCommand":      return <Terminal      size={size} color={color} />;
     case "Plugin":             return <Plug          size={size} color={color} />;
     case "Note":               return <StickyNote    size={size} color={color} />;
     case "LoopControl":        return <SkipForward   size={size} color={color} />;
@@ -385,6 +418,7 @@ export function StepIcon({ type, size = 16, color = colors.textMuted }: { type: 
     case "ListOp":             return <List          size={size} color={color} />;
     case "Prompt":             return <MessageCircleQuestionMark size={size} color={color} />;
     case "MoveC":              return <Spline        size={size} color={color} />;
+    case "MoveJoints":         return <Rotate3d      size={size} color={color} />;
     case "Unknown":            return <HelpCircle    size={size} color={color} />;
     default:               return <Cpu           size={size} color={color} />;
   }
@@ -427,6 +461,11 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   GripperAction:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Gripper"            },
   ConveyorAction: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor"           },
   RotaryIndex:    { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Rotary Index"       },
+  SiloAction:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Silo"               },
+  ConveyorTrack:       { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor Track"       },
+  ConveyorEndTracking: { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor End Tracking" },
+  ConveyorAddPart:     { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor Add Part"    },
+  ConveyorClearQueue:  { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "Conveyor Clear Queue" },
   RunVision:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Run Vision"          },
   SaveImage:        { accent: "#0891b2", iconBg: "#cffafe", iconColor: "#0891b2", label: "Save Image"          },
   StartBackground:  { accent: "#16a34a", iconBg: "#dcfce7", iconColor: "#16a34a", label: "Start Background"   },
@@ -438,6 +477,7 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   HttpRequest:     { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Request"        },
   CaptureImage:     { accent: "#0891b2", iconBg: "#e0f2fe", iconColor: "#0891b2", label: "Capture Image"       },
   HttpReceive:      { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "HTTP Receive"        },
+  SerialCommand:    { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Send Serial Command" },
   // Ink/slate: the one kit tone no built-in family uses, so plugin blocks read as "external".
   Plugin:           { accent: colors.surfaceDark, iconBg: colors.border, iconColor: colors.surfaceDark, label: "Plugin" },
   // Program editor v2
@@ -453,10 +493,28 @@ export const STEP_THEME: Record<string, { accent: string; iconBg: string; iconCo
   ListOp:           { accent: "#7c3aed", iconBg: "#ede9fe", iconColor: "#7c3aed", label: "List"                },
   Prompt:           { accent: "#0f766e", iconBg: "#ccfbf1", iconColor: "#0f766e", label: "Prompt"              },
   MoveC:            { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move Arc"            },
+  MoveJoints:       { accent: "#2563eb", iconBg: "#dbeafe", iconColor: "#2563eb", label: "Move to Joints"      },
   Unknown:          { accent: "#9ca3af", iconBg: "#f3f4f6", iconColor: "#6b7280", label: "Unknown Step"        },
 };
 
 // ── Move modifier formatting ──────────────────────────────────────────────────
+
+/** "$home[0] · J4 45", "J1 90 · J2 250" — what a Move to Joints step moves to (expressions as written). */
+export function jointsSummary(step: ProgramStep): string {
+  const parts: string[] = [];
+  if (step.jointsExpr?.trim()) parts.push(step.jointsExpr.trim());
+  (["j1", "j2", "j3", "j4"] as const).forEach(k => {
+    const expr = step.expressions?.[k];
+    if (expr?.trim()) parts.push(`${k.toUpperCase()} (${expr})`);
+    else if (step[k] != null) parts.push(`${k.toUpperCase()} ${step[k]}`);
+  });
+  return parts.length ? parts.join("  ·  ") : "current joints";
+}
+
+/** The label of a move's own motion profile. */
+export function profileLabel(p: string): string {
+  return p === "scurve" ? "S-curve profile" : p === "trapezoid" ? "trapezoid profile" : `${p} profile`;
+}
 
 export function fmtMoveModifiers(step: ProgramStep): string[] {
   const axes = ['X','Y','Z','RX','RY','RZ'] as const;
@@ -490,6 +548,13 @@ export function fmtMoveStop(step: ProgramStep): string | null {
   if (step.moveStopPositionVariableName) parts.push(`→ $${step.moveStopPositionVariableName}`);
   if (step.moveStopFlagVariableName)     parts.push(`fired → $${step.moveStopFlagVariableName}`);
   return parts.join("  ");
+}
+
+/** SiloAction's action as display text — "Present next", "Set count 12" (count may be an expression). */
+export function siloActionLabel(step: ProgramStep): string {
+  const a = step.siloAction ?? "Present";
+  if (a === "SetCount") return `Set count ${step.expressions?.siloCount ?? step.siloCount ?? 0}`;
+  return a === "Present" ? "Present next" : a;
 }
 
 /** Short label suffix for a move step with a stop condition — "stop on condition" / "record on condition". */
@@ -576,6 +641,7 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (acc) lines.push(`accel ${acc}`);
       if (dec) lines.push(`decel ${dec}`);
       if (step.localName) lines.push(`local: ${step.localName}`);
+      if (step.motionProfile) lines.push(profileLabel(step.motionProfile));
       if (step.type === "MoveL" && step.blend)
         lines.push(step.blendRadius != null ? `blend ${step.blendRadius} mm` : "blend on");
       lines.push(...fmtMoveModifiers(step));
@@ -748,6 +814,18 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       const dir = (step.rotaryDirection ?? 1) < 0 ? "−" : "+";
       return `Index ${dir}  ·  ×${step.rotaryCount ?? 1}`;
     }
+    case "SiloAction":
+      return `Silo · ${siloActionLabel(step)}`;
+    case "ConveyorTrack": {
+      if (step.trackWait === false) return "Track a part already in the window";
+      return step.trackTimeoutMs ? `Wait for a part · ${step.trackTimeoutMs} ms max` : "Wait for a part";
+    }
+    case "ConveyorEndTracking":
+      return step.conveyorRelease ? "Count the part as released" : "Count the part as picked";
+    case "ConveyorAddPart":
+      return `Part at X ${step.expressions?.partOffsetMm ?? `${step.partOffsetMm ?? 0} mm`}`;
+    case "ConveyorClearQueue":
+      return "Drop every queued part";
     case "StartBackground":
       return step.backgroundProgramName ? `→ ${step.backgroundProgramName}` : null;
     case "StopBackground":
@@ -882,6 +960,15 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       if (timeout != null) lines.push(`timeout: ${timeout / 1000}s`);
       return lines.length ? lines.join("\n") : null;
     }
+    case "SerialCommand": {
+      const lines: string[] = [];
+      if (step.serialDeviceName) lines.push(step.serialDeviceName);
+      lines.push(step.serialCommandId ? "saved command" : (step.serialText?.trim() ? `"${step.serialText.trim()}"` : "(no command)"));
+      if (step.serialExpectReply) {
+        lines.push(step.serialResultVariable ? `reply → $${step.serialResultVariable}` : "waits for reply");
+      }
+      return lines.join("\n");
+    }
     case "Plugin": {
       const c = findPluginStep(step.pluginId, step.pluginStepId);
       const lines = [pluginStepTitle(step)];
@@ -912,6 +999,15 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
       parts.push(step.catchCodes?.length ? `catches ${step.catchCodes.join(", ")}` : "catches any runtime error");
       if (step.errorVariableName) parts.push(`message → $${step.errorVariableName}`);
       return parts.join("  ·  ");
+    }
+    case "MoveJoints": {
+      const lines = [`→ ${jointsSummary(step)}`];
+      const spd = step.expressions?.speed ?? (step.speed != null ? `${step.speed} °/s · mm/s` : null);
+      if (spd) lines.push(spd);
+      if (step.motionProfile) lines.push(profileLabel(step.motionProfile));
+      const stopLine = fmtMoveStop(step);
+      if (stopLine) lines.push(stopLine);
+      return lines.join("\n");
     }
     case "MoveC": {
       const via = step.viaPointNameExpr || step.viaPointName || "?";
@@ -944,6 +1040,14 @@ export function stepDetail(step: ProgramStep, grids?: Grid[], stacks?: RobotStac
  * `<plugin name> · <step label>` from the cached contributions, falling back to the
  * raw ids while they load or when the plugin is no longer installed.
  */
+/** A SerialCommand step's target: a saved command, or a short preview of the raw text. */
+export function serialStepTarget(step: ProgramStep): string {
+  if (step.serialCommandId) return "saved command";
+  const t = (step.serialText ?? "").trim();
+  if (!t) return "(no command)";
+  return t.length > 24 ? `"${t.slice(0, 24)}…"` : `"${t}"`;
+}
+
 export function pluginStepTitle(step: ProgramStep): string {
   const c = findPluginStep(step.pluginId, step.pluginStepId);
   const plugin = c?.pluginName || pluginDisplayName(step.pluginId);
@@ -989,6 +1093,11 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "GripperAction", label: "Gripper",            desc: "Open, close, or grip to a set jaw gap — with optional per-step speed and accel overrides" },
   { type: "ConveyorAction",label: "Conveyor",           desc: "Run a conveyor axis forward or reverse, or stop it — speed comes from the axis settings" },
   { type: "RotaryIndex",   label: "Rotary Index",       desc: "Index a rotary table axis by a number of steps in a direction — distance and speed come from the axis settings" },
+  { type: "SiloAction",    label: "Silo",               desc: "Home a silo lift, present its next part at the rim, refill it, or set its part count" },
+  { type: "ConveyorTrack",       label: "Conveyor Track",        desc: "Start following the oldest part in a conveyor's pick window — later moves ride along with the part" },
+  { type: "ConveyorEndTracking", label: "Conveyor End Tracking", desc: "Stop following the tracked part and count it as picked (or released)" },
+  { type: "ConveyorAddPart",     label: "Conveyor Add Part",     desc: "Add a part to a conveyor's queue at a given position along the belt — e.g. from a vision result" },
+  { type: "ConveyorClearQueue",  label: "Conveyor Clear Queue",  desc: "Drop every part queued on a conveyor" },
   { type: "RunVision",        label: "Run Vision",            desc: "Trigger a vision program, wait for one inspection result, then continue" },
   { type: "StartBackground",  label: "Start Background",      desc: "Start a background program running in parallel with this one" },
   { type: "StopBackground",   label: "Stop Background",       desc: "Stop a named background program" },
@@ -999,9 +1108,11 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
   { type: "HttpRequest",   label: "HTTP Request",           desc: "POST a JSON payload to a server and optionally load values from the response back into program variables" },
   { type: "CaptureImage",   label: "Capture Image",          desc: "Grab the current camera frame and store it as a base64 image in a program variable — use with HTTP Request to send it to a server" },
   { type: "HttpReceive",    label: "HTTP Receive",           desc: "Wait for an incoming HTTP POST to a named webhook endpoint — other robots or servers can trigger this step by POSTing to /webhook/{name}" },
+  { type: "SerialCommand",  label: "Send Serial Command",    desc: "Send a saved or raw command to a serial device, optionally waiting for a reply line and storing it in a variable" },
   // Program editor v2 (labels/descriptions mirror the controller's step catalog)
   { type: "MoveC",          label: "Move Arc",               desc: "Move along a circular arc through a via point to the end target" },
-  { type: "SavePosition",   label: "Save Position",          desc: "Store the current position in a Points list or a saved point" },
+  { type: "MoveJoints",     label: "Move to Joints",         desc: "Move to explicit joint values by joint interpolation (no Cartesian target)" },
+  { type: "SavePosition",   label: "Save Position",          desc: "Store the current position (or joint values) in a list or a saved point" },
   { type: "SetSpeedFactor", label: "Set Speed Factor",       desc: "Scale this program's move speeds by a percentage" },
   { type: "Switch",         label: "Switch",                 desc: "Run the case whose value equals an expression" },
   { type: "LoopControl",    label: "Break / Next",           desc: "Leave the enclosing loop, or skip to its next iteration" },
@@ -1017,8 +1128,9 @@ export const STEP_TYPES: { type: StepType; label: string; desc: string }[] = [
 export const STEP_TYPE_MAP = Object.fromEntries(STEP_TYPES.map(s => [s.type, s])) as Record<string, typeof STEP_TYPES[0]>;
 
 export const BACKGROUND_RESTRICTED: Set<StepType> = new Set([
-  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram", "MoveC",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "ThreadMove", "CncProgram", "MoveC", "MoveJoints",
   "SetTool", "SetSpeedL", "SetSpeedJ", "SetSpeedFactor", "SetLocal", "ClearLocal", "RunHoming", "SetJointPosition",
+  "ConveyorTrack", "ConveyorEndTracking",
 ]);
 
 /**
@@ -1054,7 +1166,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "motion", label: "Motion", icon: Move3d,
     desc: "Send the robot somewhere — points, jumps, threads and homing.",
     color: colors.accent, soft: colors.accentSoft,
-    types: ["MoveL", "MoveJ", "JumpL", "JumpJ", "MoveC", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram", "SavePosition"],
+    types: ["MoveL", "MoveJ", "MoveJoints", "JumpL", "JumpJ", "MoveC", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram", "SavePosition"],
   },
   {
     key: "motionSettings", label: "Motion Settings", icon: SlidersHorizontal,
@@ -1078,7 +1190,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "io", label: "I/O & Aux Axes", icon: Zap,
     desc: "Drive digital outputs and auxiliary stepper axes.",
     color: accents.orange, soft: accents.orangeSoft,
-    types: ["SetOutput", "Tare", "ReadLoadCell", "StartRecording", "StopRecording", "ExportData", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex"],
+    types: ["SetOutput", "Tare", "ReadLoadCell", "StartRecording", "StopRecording", "ExportData", "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex", "SiloAction", "ConveyorTrack", "ConveyorEndTracking", "ConveyorAddPart", "ConveyorClearQueue"],
   },
   {
     key: "vision", label: "Vision", icon: ScanSearch,
@@ -1096,7 +1208,7 @@ export const STEP_CATEGORIES: StepCategory[] = [
     key: "comms", label: "Communication", icon: Radio,
     desc: "Talk to the operator and to other machines over HTTP.",
     color: "#0f766e", soft: "#f0fdfa",
-    types: ["Prompt", "HttpRequest", "HttpReceive", "StatusUpdate"],
+    types: ["Prompt", "HttpRequest", "HttpReceive", "SerialCommand", "StatusUpdate"],
   },
 ];
 
@@ -1182,6 +1294,9 @@ function builtInDefaults(type: StepType): Partial<ProgramStep> {
     case "GripperAction":  return { auxAxisIndex: 0, gripperAction: "Open" };
     case "ConveyorAction": return { auxAxisIndex: 0, conveyorAction: "RunForward" };
     case "RotaryIndex":    return { auxAxisIndex: 0, rotaryDirection: 1, rotaryCount: 1 };
+    case "SiloAction":     return { auxAxisIndex: 0, siloAction: "Present" };
+    case "ConveyorTrack":  return { trackWait: true };
+    case "ConveyorAddPart": return { partOffsetMm: 0 };
     case "Note":           return { comment: "", noteStyle: "note" };
     case "LoopControl":    return { loopControl: "break" };
     case "RaiseError":     return { errorMessage: "" };
@@ -1191,6 +1306,7 @@ function builtInDefaults(type: StepType): Partial<ProgramStep> {
     case "SetSpeedFactor": return { speedFactor: 100 };
     case "ListOp":         return { listAction: "append" };
     case "Prompt":         return { promptMessage: "", promptButtons: ["OK"], promptInput: "none" };
+    case "SerialCommand":  return { serialExpectReply: false, serialTimeoutMs: 1000 };
     default:               return {};
   }
 }

@@ -1,24 +1,24 @@
 import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { Point } from "@/src/models/robotModels";
-import { useConnected, usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { usePoints, useSelectedRobot } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { Cell3DView } from "@/src/components/ui/cell3d/Cell3DView";
+import type { Cell3DTarget } from "@/src/components/ui/cell3d/bridge";
+import { useScreenFocused } from "@/src/components/space/space3d";
+import { LAST_MOVE_SPEED_KEY, type MoveSpeedKey, PointActionSheet } from "@/src/components/space/PointActionSheet";
 
-// Matches control/jog.tsx — the last continuous jog speed, so moves default to the jog selection.
-const LAST_MOVE_SPEED_KEY = "lastMoveSpeed";
+// The map above the list: the 2D top-down map (default) or the live 3D view. Remembered per device.
+const MAP_VIEW_KEY = "points.mapView";
+type MapView = "2d" | "3d" | "off";
 import { Button, Card, colors, Divider, EmptyState, FormRow, InfoTip, Input, PageHeader, radii, SectionHeader, SegmentedControl, shadows, spacing, type } from "@/src/components/ui/kit";
 import { useFocusEffect } from "expo-router";
 import {
   ChevronRight,
   MapPin,
-  Navigation,
-  OctagonX,
   Pencil,
-  RotateCw,
   Search,
-  Trash2,
   X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -354,28 +354,12 @@ export default function PointsPage() {
   const wideContent = useWideContent();
   const [selectedPoint, setSelectedPoint] = useState<Point | null>(null);
   const [search, setSearch] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [movingFromPage, setMovingFromPage] = useState(false);
-  const [movingToName, setMovingToName] = useState<string | null>(null);
-  const [alreadyHere, setAlreadyHere] = useState(false);
-  const [editVisible, setEditVisible] = useState(false);
+  // The point being edited (the edit modal), separate from the action sheet's point.
+  const [editTarget, setEditTarget] = useState<Point | null>(null);
   const [editDraft, setEditDraft] = useState({ name: "", x: "", y: "", z: "", rz: "" });
 
-  // Move speed — reuses the jog Slow/Normal/Fast speeds from robot config.
-  const [moveSpeeds, setMoveSpeeds] = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
-  const [selectedSpeed, setSelectedSpeed] = useState<"Slow" | "Normal" | "Fast">("Normal");
-
-  // Re-run on (re)connect as well as on focus: if the controller starts while
-  // this page is open, the focus-time request has already failed.
-  const connected = useConnected();
-  const loadMoveSpeeds = useCallback(() => {
-    if (!connected) return;
-    robotClient.getRobotConfig()
-      .then(cfg => setMoveSpeeds({ Slow: cfg.jogSlowSpeed, Normal: cfg.jogNormalSpeed, Fast: cfg.jogFastSpeed }))
-      .catch(() => {});
-  }, [connected]);
-  useFocusEffect(loadMoveSpeeds);
-  useEffect(() => { loadMoveSpeeds(); }, [loadMoveSpeeds]);
+  // Move speed (Slow / Normal / Fast from the jog config) for moves from the action sheet.
+  const [selectedSpeed, setSelectedSpeed] = useState<MoveSpeedKey>("Normal");
 
   // Default the move speed to the user's current jog speed selection (persisted from Jog & Teach).
   useFocusEffect(
@@ -386,59 +370,35 @@ export default function PointsPage() {
     }, [])
   );
 
+  // "off" hides the map entirely so the list gets the whole page.
+  const [mapView, setMapView] = useState<MapView>("2d");
+  useEffect(() => {
+    AsyncStorage.getItem(MAP_VIEW_KEY).then(v => { if (v === "2d" || v === "3d" || v === "off") setMapView(v); }).catch(() => {});
+  }, []);
+  const chooseMapView = (v: MapView) => { setMapView(v); AsyncStorage.setItem(MAP_VIEW_KEY, v).catch(() => {}); };
+  // The viewer mounts only while this screen is focused (a page on top keeps an empty box).
+  const focused = useScreenFocused();
+  // A tapped 3D marker opens the same action sheet as a tapped 2D dot (matched by stable id); a tap
+  // on empty space closes it.
+  const onPick3d = useCallback((t: Cell3DTarget | null) => {
+    setSelectedPoint(t?.kind === "point" ? points.find(q => q.id === t.id) ?? null : null);
+  }, [points]);
+
   function isAtPoint(p: Point) {
     return !!robot && isSamePoint(p, robot.status);
   }
 
-  useEffect(() => {
-    if (movingFromPage && !robot?.status.moving) {
-      setMovingFromPage(false);
-      setMovingToName(null);
-    }
-  }, [robot?.status.moving]);
-
-  useEffect(() => { setConfirmDelete(false); }, [selectedPoint]);
-
-  function closeMenu() {
+  function openEdit(p: Point) {
+    setEditDraft({ name: p.name, x: p.x.toString(), y: p.y.toString(), z: p.z.toString(), rz: p.rz.toString() });
     setSelectedPoint(null);
-    setConfirmDelete(false);
-  }
-
-  function moveL() {
-    if (!selectedPoint) return;
-    if (isAtPoint(selectedPoint)) { setAlreadyHere(true); return; }
-    setMovingToName(selectedPoint.name);
-    robotClient.sendCommand("MoveL", { name: selectedPoint.name, speed: moveSpeeds?.[selectedSpeed] });
-    closeMenu();
-    setMovingFromPage(true);
-  }
-
-  function moveJ() {
-    if (!selectedPoint) return;
-    if (isAtPoint(selectedPoint)) { setAlreadyHere(true); return; }
-    setMovingToName(selectedPoint.name);
-    robotClient.sendCommand("MoveJ", { name: selectedPoint.name, speed: moveSpeeds?.[selectedSpeed] });
-    closeMenu();
-    setMovingFromPage(true);
-  }
-
-  function openEdit() {
-    if (!selectedPoint) return;
-    setEditDraft({
-      name: selectedPoint.name,
-      x: selectedPoint.x.toString(),
-      y: selectedPoint.y.toString(),
-      z: selectedPoint.z.toString(),
-      rz: selectedPoint.rz.toString(),
-    });
-    setEditVisible(true);
+    setEditTarget(p);
   }
 
   function saveEdit() {
-    if (!selectedPoint) return;
+    if (!editTarget) return;
     const fields: Record<string, any> = {};
     const newName = editDraft.name.trim();
-    if (newName && newName !== selectedPoint.name) fields.newName = newName;
+    if (newName && newName !== editTarget.name) fields.newName = newName;
     const px = parseFloat(editDraft.x);
     const py = parseFloat(editDraft.y);
     const pz = parseFloat(editDraft.z);
@@ -447,15 +407,8 @@ export default function PointsPage() {
     if (!isNaN(py))  fields.y  = py;
     if (!isNaN(pz))  fields.z  = pz;
     if (!isNaN(prz)) fields.rz = prz;
-    robotClient.editPoint(selectedPoint.name, fields);
-    setEditVisible(false);
-    closeMenu();
-  }
-
-  function deletePoint() {
-    if (!selectedPoint) return;
-    robotClient.deletePoint(selectedPoint.name);
-    closeMenu();
+    robotClient.editPoint(editTarget.name, fields);
+    setEditTarget(null);
   }
 
   // Speed selector + list — right pane in wide mode, stacked below the map on phones.
@@ -553,6 +506,18 @@ export default function PointsPage() {
     </ScrollView>
   );
 
+  // 2D | 3D | Hide: in the header on wide screens; on phones its own slim row (the header has no
+  // room for it beside the title).
+  const mapViewSwitch = (
+    <SegmentedControl
+      size="sm"
+      style={styles.mapViewToggle}
+      options={[{ label: "2D", value: "2d" }, { label: "3D", value: "3d" }, { label: "Hide", value: "off" }]}
+      value={mapView}
+      onChange={(v) => chooseMapView(v as MapView)}
+    />
+  );
+
   return (
     <View style={styles.page}>
       <NotConnectedOverlay />
@@ -560,17 +525,35 @@ export default function PointsPage() {
         title="Points"
         subtitle="Move to, edit, or delete saved robot positions"
         right={
-          <InfoTip
-            text={`Tap a point on the map or in the list to line/joint move the robot there, edit its coordinates, or delete it. ${Platform.OS === "web" ? "Scroll to zoom, drag to pan" : "Pinch to zoom, drag to pan"} the map.`}
-          />
+          <View style={styles.headerRight}>
+            {isWide && mapViewSwitch}
+            <InfoTip
+              text={`Tap a point on the map or in the list to line/joint move the robot there, edit its coordinates, or delete it. ${Platform.OS === "web" ? "Scroll to zoom, drag to pan" : "Pinch to zoom, drag to pan"} the map. Switch between the 2D map and the live 3D view at the top, or hide the map to give the list the whole page.`}
+            />
+          </View>
         }
       />
 
-      {isWide ? (
+      {!isWide && (
+        <View style={styles.mapViewRow}>
+          <Text style={styles.speedBarLabel}>MAP</Text>
+          {mapViewSwitch}
+        </View>
+      )}
+
+      {mapView === "off" ? (
+        <>
+          {speedBarEl}
+          {pointsList}
+        </>
+      ) : isWide ? (
         /* ── Wide layout: map fills the left half, speed + table on the right ── */
         <View style={styles.wideRow}>
           <View style={styles.mapPane}>
-            <PointsMap points={points} onPointPress={setSelectedPoint} fill />
+            {mapView === "3d"
+              ? !focused ? <View style={styles.view3dFill} /> : <Cell3DView style={styles.view3dFill} persistKey="points" options={{ points: true }}
+                  highlight={selectedPoint?.id ? { kind: "point", id: selectedPoint.id } : null} onPick={onPick3d} />
+              : <PointsMap points={points} onPointPress={setSelectedPoint} fill />}
           </View>
           <View style={styles.listPane}>
             {speedBarEl}
@@ -579,123 +562,44 @@ export default function PointsPage() {
         </View>
       ) : (
         <>
-          <PointsMap points={points} onPointPress={setSelectedPoint} />
+          {mapView === "3d"
+            ? !focused ? <View style={styles.view3d} /> : <Cell3DView style={styles.view3d} persistKey="points" options={{ points: true }}
+                highlight={selectedPoint?.id ? { kind: "point", id: selectedPoint.id } : null} onPick={onPick3d} />
+            : <PointsMap points={points} onPointPress={setSelectedPoint} />}
           {/* Move speed selector — applies to Line/Joint moves triggered from this page */}
           {speedBarEl}
           {pointsList}
         </>
       )}
 
-      {/* Point options modal */}
-      <Modal
-        visible={!!selectedPoint}
-        transparent
-        animationType="fade"
-        onRequestClose={closeMenu}
-      >
-        <Pressable style={styles.overlay} onPress={closeMenu}>
-          <Pressable style={styles.dialog} onPress={() => {}}>
-            <View style={styles.dialogHeader}>
-              <View style={styles.dialogTitleRow}>
-                <MapPin size={16} color={colors.textMuted} style={{ marginTop: 1 }} />
-                <Text style={styles.dialogTitle}>{selectedPoint?.name}</Text>
-              </View>
-              <Pressable onPress={closeMenu} hitSlop={10}>
-                <X size={18} color={colors.textFaint} />
-              </Pressable>
-            </View>
-
-            <Text style={styles.coordText}>
-              X {selectedPoint?.x.toFixed(1)}{"  "}
-              Y {selectedPoint?.y.toFixed(1)}{"  "}
-              Z {selectedPoint?.z.toFixed(1)}{"  "}
-              RZ {selectedPoint?.rz.toFixed(1)}
-            </Text>
-
-            <Divider style={styles.divider} />
-
-            {!confirmDelete ? (
-              <>
-                <Pressable style={styles.actionRow} onPress={moveL}>
-                  <Navigation size={18} color={colors.accent} />
-                  <Text style={styles.actionText}>Line Move</Text>
-                </Pressable>
-                <Pressable style={styles.actionRow} onPress={moveJ}>
-                  <RotateCw size={18} color={colors.accent} />
-                  <Text style={styles.actionText}>Joint Move</Text>
-                </Pressable>
-                <Pressable style={styles.actionRow} onPress={openEdit}>
-                  <Pencil size={18} color={colors.accent} />
-                  <Text style={styles.actionText}>Edit Point</Text>
-                </Pressable>
-                <AnimatedPressable style={styles.actionRow} onPress={() => setConfirmDelete(true)}>
-                  <Trash2 size={18} color={colors.danger} />
-                  <Text style={styles.deleteActionText}>Delete</Text>
-                </AnimatedPressable>
-              </>
-            ) : (
-              <>
-                <Text style={styles.confirmText}>
-                  Delete <Text style={{ fontWeight: "700" }}>{selectedPoint?.name}</Text>? This cannot be undone.
-                </Text>
-                <View style={styles.confirmButtons}>
-                  <Button label="Cancel" variant="secondary" style={styles.confirmBtn} onPress={() => setConfirmDelete(false)} />
-                  <Button
-                    label="Delete"
-                    variant="destructive"
-                    style={styles.confirmBtn}
-                    icon={<Trash2 size={15} color={colors.onAccent} />}
-                    onPress={deletePoint}
-                  />
-                </View>
-              </>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Move stop overlay */}
-      <Modal visible={movingFromPage} transparent animationType="fade">
-        <View style={styles.stopOverlay}>
-          <View style={styles.stopCard}>
-            <Navigation size={28} color={colors.accent} />
-            <Text style={styles.stopTitle}>Moving to point</Text>
-            {movingToName && <Text style={styles.stopPointName}>{movingToName}</Text>}
-            <Button
-              label="STOP"
-              variant="destructive"
-              icon={<OctagonX size={22} color={colors.onAccent} />}
-              onPress={() => {
-                robotClient.sendCommand("HardStop");
-                setMovingFromPage(false);
-                setMovingToName(null);
-              }}
-              style={styles.stopButton}
-              textStyle={styles.stopButtonText}
-            />
-          </View>
-        </View>
-      </Modal>
+      {/* Point actions: move (line / joint), edit, delete — the sheet the 3D views share. */}
+      <PointActionSheet
+        point={selectedPoint}
+        onClose={() => setSelectedPoint(null)}
+        speed={selectedSpeed}
+        onEdit={openEdit}
+        onDelete={p => robotClient.deletePoint(p.name)}
+      />
 
       {/* Edit Point modal */}
       <Modal
-        visible={editVisible}
+        visible={!!editTarget}
         transparent
         animationType="slide"
-        onRequestClose={() => setEditVisible(false)}
+        onRequestClose={() => setEditTarget(null)}
       >
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
-          <Pressable style={styles.overlay} onPress={() => setEditVisible(false)}>
+          <Pressable style={styles.overlay} onPress={() => setEditTarget(null)}>
             <Pressable style={styles.editCard} onPress={() => {}}>
               <View style={styles.editHeader}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                   <Pencil size={16} color={colors.textMuted} />
                   <Text style={styles.editTitle}>Edit Point</Text>
                 </View>
-                <Pressable onPress={() => setEditVisible(false)} hitSlop={10}>
+                <Pressable onPress={() => setEditTarget(null)} hitSlop={10}>
                   <X size={18} color={colors.textFaint} />
                 </Pressable>
               </View>
@@ -722,7 +626,7 @@ export default function PointsPage() {
               ))}
 
               <View style={styles.editActions}>
-                <Button label="Cancel" variant="secondary" style={styles.editBtn} onPress={() => setEditVisible(false)} />
+                <Button label="Cancel" variant="secondary" style={styles.editBtn} onPress={() => setEditTarget(null)} />
                 <Button label="Save" variant="primary" style={styles.editBtn} onPress={saveEdit} />
               </View>
             </Pressable>
@@ -730,20 +634,6 @@ export default function PointsPage() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Already at position popup */}
-      <Modal visible={alreadyHere} transparent animationType="fade" onRequestClose={() => setAlreadyHere(false)}>
-        <Pressable style={styles.overlay} onPress={() => setAlreadyHere(false)}>
-          <Pressable style={styles.alreadyHereCard} onPress={() => {}}>
-            <MapPin size={28} color={colors.accent} />
-            <Text style={styles.alreadyHereTitle}>Already Here</Text>
-            <Text style={styles.alreadyHereBody}>
-              The robot is already at{"\n"}
-              <Text style={{ fontWeight: "700" }}>{selectedPoint?.name}</Text>
-            </Text>
-            <Button label="OK" variant="primary" style={styles.alreadyHereButton} onPress={() => setAlreadyHere(false)} />
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
@@ -761,6 +651,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   mapContainerFill: { height: "auto", flex: 1 },
+  view3d: { height: MAP_HEIGHT },
+  view3dFill: { flex: 1 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  mapViewToggle: { width: 156 },
+  mapViewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
+  },
 
   // ── Wide (desktop / foldable) two-pane layout ───────────────────────────────
   wideRow:  { flex: 1, flexDirection: "row" },
@@ -955,147 +859,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.accent,
   },
-  // ── Point options dialog ─────────────────────────────────────────────────
+  // ── Modal overlay ───────────────────────────────────────────────────────
   overlay: {
     flex: 1,
     backgroundColor: colors.overlay,
     justifyContent: "center",
     alignItems: "center",
-  },
-  dialog: {
-    width: 280,
-    backgroundColor: colors.surface,
-    borderRadius: radii.xl,
-    paddingHorizontal: spacing.lg + 4,
-    paddingVertical: spacing.lg + 2,
-    ...shadows.raised,
-  },
-  dialogHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.xs,
-  },
-  dialogTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs + 2,
-  },
-  dialogTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  coordText: {
-    ...type.mono,
-    fontSize: 11,
-    color: colors.textFaint,
-    marginBottom: spacing.md + 2,
-  },
-  divider: {
-    marginBottom: spacing.xs,
-  },
-  actionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingVertical: spacing.md + 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.background,
-  },
-  actionText: {
-    fontSize: 15,
-    color: colors.accent,
-    fontWeight: "500",
-  },
-  deleteActionText: {
-    fontSize: 15,
-    color: colors.danger,
-    fontWeight: "500",
-  },
-  confirmText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginVertical: spacing.md,
-    lineHeight: 20,
-  },
-  confirmButtons: {
-    flexDirection: "row",
-    gap: spacing.sm + 2,
-    marginTop: spacing.xs,
-  },
-  confirmBtn: {
-    flex: 1,
-  },
-
-  // ── Move stop overlay ─────────────────────────────────────────────────────
-  stopOverlay: {
-    flex: 1,
-    backgroundColor: colors.overlay,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  stopCard: {
-    width: 240,
-    backgroundColor: colors.surface,
-    borderRadius: radii.xl,
-    paddingVertical: spacing.xl + 4,
-    paddingHorizontal: spacing.xl,
-    alignItems: "center",
-    gap: spacing.sm,
-    ...shadows.raised,
-  },
-  stopTitle: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    fontWeight: "600",
-    marginTop: spacing.xs,
-  },
-  stopPointName: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  stopButton: {
-    borderRadius: radii.md,
-    paddingVertical: spacing.md + 2,
-    paddingHorizontal: spacing.xl - 4,
-    marginTop: spacing.sm,
-  },
-  stopButtonText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    letterSpacing: 2,
-  },
-
-  // ── Already-here popup ───────────────────────────────────────────────────
-  alreadyHereCard: {
-    width: 220,
-    backgroundColor: colors.surface,
-    borderRadius: radii.xl,
-    paddingVertical: spacing.xl + 4,
-    paddingHorizontal: spacing.xl,
-    alignItems: "center",
-    gap: spacing.xs + 2,
-    ...shadows.raised,
-  },
-  alreadyHereTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.text,
-    marginTop: spacing.xs,
-  },
-  alreadyHereBody: {
-    fontSize: 13,
-    color: colors.textMuted,
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: spacing.sm,
-  },
-  alreadyHereButton: {
-    paddingHorizontal: spacing.xl - 4,
-    marginTop: spacing.xs,
   },
 
   // ── Edit point modal ──────────────────────────────────────────────────────

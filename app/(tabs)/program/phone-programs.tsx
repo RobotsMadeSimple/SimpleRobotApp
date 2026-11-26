@@ -2,7 +2,7 @@ import { BuiltProgram } from "@/src/models/robotModels";
 import { useConnected } from "@/src/providers/RobotProvider";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { Box,
   FileJson,
   Plus,
@@ -39,6 +39,7 @@ function LocalProgramCard({
   connected: boolean;
   onRefresh: () => void;
 }) {
+  const pushOnce = usePushOnce();
   // Three actions share one row; on a phone the full "Send to Robot" label
   // would truncate, so it shortens rather than clipping mid-word.
   const isWide = useIsWide();
@@ -79,7 +80,7 @@ function LocalProgramCard({
 
   return (
     <Card
-      onPress={() => router.push(`/program/builder?name=${encodeURIComponent(program.name)}&source=local`)}
+      onPress={() => pushOnce(`/program/builder?name=${encodeURIComponent(program.name)}&source=local`)}
       padded={false}
       style={styles.card}
     >
@@ -138,6 +139,7 @@ function LocalProgramCard({
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function PhoneProgramsScreen() {
+  const pushOnce = usePushOnce();
   const connected = useConnected();
   const [programs, setPrograms] = useState<BuiltProgram[]>([]);
   const [tick, setTick] = useState(0);
@@ -202,7 +204,7 @@ export default function PhoneProgramsScreen() {
       icon={<Plus size={16} color={LOCAL_TINT.color} />}
       style={[styles.addCard, { borderColor: LOCAL_TINT.color }]}
       textStyle={{ color: LOCAL_TINT.color }}
-      onPress={() => router.push("/program/builder?source=local")}
+      onPress={() => pushOnce("/program/builder?source=local")}
     />
   );
 

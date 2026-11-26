@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { Circle, Download, ListChecks, Save, Scale, Square } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -16,6 +16,7 @@ import type { IoRecordingMeta, LoadCellUnit } from "@/src/models/robotModels";
 import { useIoDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { exportSamplesCsv } from "@/src/services/ioExport";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 
 const RETENTION_PRESETS = [
   { label: "1m", value: "60000" },
@@ -34,6 +35,7 @@ export default function LoadCellCalibrateScreen() {
   const { deviceId, pin } = useLocalSearchParams<{ deviceId?: string; pin?: string }>();
   const pinNum = Number(pin);
   const ioDevices = useIoDevices();
+  const pushOnce = usePushOnce();
 
   const cell = useMemo(() => {
     const nano = ioDevices.find(n => n.id === deviceId);
@@ -172,7 +174,7 @@ export default function LoadCellCalibrateScreen() {
               label="Recordings"
               variant="secondary"
               icon={<ListChecks size={15} color={buttonTextColor("secondary")} />}
-              onPress={() => router.push({ pathname: "/(tabs)/io/recordings", params: channelKey ? { channelKey } : {} })}
+              onPress={() => pushOnce({ pathname: "/(tabs)/io/recordings", params: channelKey ? { channelKey } : {} })}
             />
           </View>
 

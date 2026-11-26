@@ -1,5 +1,6 @@
 import * as DocumentPicker from "expo-document-picker";
-import { router, useFocusEffect } from "expo-router";
+import { useFocusEffect } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { Download, Play, Plug, RefreshCw, RotateCw, Square } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
@@ -24,6 +25,7 @@ const POLL_MS = 2000;
 // ── Row ──────────────────────────────────────────────────────────────────────
 
 function PluginCard({ plugin, onChanged }: { plugin: PluginSummary; onChanged: (p: PluginSummary) => void }) {
+  const pushOnce = usePushOnce();
   // Spinner until the plugin's state moves (or the fallback timeout).
   const [pending, setPending] = useActionPending(undefined, `${plugin.state}|${plugin.enabled}`);
 
@@ -45,7 +47,7 @@ function PluginCard({ plugin, onChanged }: { plugin: PluginSummary; onChanged: (
   return (
     <Card
       padded={false}
-      onPress={() => router.push({ pathname: "/(tabs)/program/plugin-detail", params: { id: plugin.id } })}
+      onPress={() => pushOnce({ pathname: "/(tabs)/program/plugin-detail", params: { id: plugin.id } })}
       style={styles.card}
     >
       <View style={styles.head}>

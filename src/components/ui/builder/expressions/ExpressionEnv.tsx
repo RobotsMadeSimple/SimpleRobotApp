@@ -1,6 +1,8 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ExpressionEvaluation, ExpressionSymbols, ProgramVariable } from "@/src/models/robotModels";
 import { CommandFailedError, isUnsupportedCommand, robotClient } from "@/src/services/RobotConnectService";
+import { CONVEYOR_EXPRESSION_FIELDS } from "@/src/models/conveyors";
+import { useConveyors } from "@/src/providers/RobotProvider";
 
 /**
  * What expression fields inside the builder need from the controller: the symbols
@@ -78,12 +80,24 @@ export function ExpressionEnvProvider({ programName, variables, enabled, childre
     }
   }, [enabled, evalSupported, programName]);
 
+  // `$conveyor.<id>.…` for every configured conveyor (doc § Expressions), added to the IO names
+  // unless the controller already lists them.
+  const conveyors = useConveyors();
+  const withConveyors = useMemo<ExpressionSymbols | null>(() => {
+    if (!symbols || conveyors.length === 0) return symbols;
+    const have = new Set(symbols.io.map(i => i.name));
+    const extra = conveyors.flatMap(c => CONVEYOR_EXPRESSION_FIELDS
+      .map(f => ({ name: `conveyor.${c.id}.${f.key}`, description: `${c.name}: ${f.description}` }))
+      .filter(i => !have.has(i.name)));
+    return extra.length ? { ...symbols, io: [...symbols.io, ...extra] } : symbols;
+  }, [symbols, conveyors]);
+
   const value = useMemo<ExpressionEnv>(() => ({
-    symbols: enabled ? symbols : null,
+    symbols: enabled ? withConveyors : null,
     localVariables: variables,
     canEvaluate: enabled && evalSupported,
     evaluate,
-  }), [enabled, symbols, variables, evalSupported, evaluate]);
+  }), [enabled, withConveyors, variables, evalSupported, evaluate]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

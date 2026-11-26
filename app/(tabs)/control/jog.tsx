@@ -1,4 +1,9 @@
 import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { Cell3DView } from "@/src/components/ui/cell3d/Cell3DView";
+import type { Cell3DOptions } from "@/src/components/ui/cell3d/bridge";
+import { ArrayCellSheet } from "@/src/components/space/ArrayCellSheet";
+import { PointActionSheet, usePointPick } from "@/src/components/space/PointActionSheet";
+import { useSpaceSets } from "@/src/components/space/space3d";
 import JogPad from "@/src/components/ui/JogPad";
 import { SpeedSlider } from "@/src/components/ui/jog/SpeedSlider";
 import {
@@ -23,13 +28,17 @@ import {
   spacing,
   type,
 } from "@/src/components/ui/kit";
-import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { useIsShort, useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { COMPACT_RAIL_WIDTH } from "@/src/components/ui/NavRail";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Point } from "@/src/models/robotModels";
 import { useLocals, usePoints, useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router, Tabs, useFocusEffect } from "expo-router";
+import { teachHandoff } from "@/src/services/teachHandoff";
+import { router, Tabs, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
   ArrowRight,
+  Box,
   ChevronDown,
   ChevronRight,
   Gamepad2,
@@ -53,17 +62,25 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // Shared key: the last jog speed the user picked (continuous only), so Move-to-point / DRO moves
 // here and on the Points page default to it. Step modes (0.1/1/10 mm) aren't move speeds → Slow.
 export const LAST_MOVE_SPEED_KEY = "lastMoveSpeed";
+/** Which pane the desktop jog layout shows on the right ("3d" | "points"), and whether the phone
+ *  layout shows the 3D strip — remembered across visits. */
+const JOG_3D_KEY = "jog.view3d";
+/** The jog 3D views can show the saved grids / stacks (the Arrays chip, off by default); a tapped cell opens its move sheet. */
+const WIDE_3D_OPTIONS: Cell3DOptions = { sets: false, toggles: ["points", "locals", "sets", "trail"] };
+const NARROW_3D_OPTIONS: Cell3DOptions = { controls: "full", sets: false, toggles: ["sets"] };
 import {
   LayoutChangeEvent,
   Modal,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
+  ViewStyle,
 } from "react-native";
 
 // ── Layout breakpoints (measured on the content area, not the window) ─────────
@@ -76,6 +93,8 @@ const THREE_COL_MIN = 1140; // config | pad + STOP/Teach | points
 const TWO_COL_MIN    = 810; // config (+ points) | pad + STOP/Teach
 /** Rough NavRail width, used only to seed the layout before onLayout measures. */
 const RAIL_ESTIMATE = 216;
+/** Short layout: vertical padding of the row (top + bottom) and the gap above STOP/Teach. */
+const SHORT_PAD_CHROME = 8 + 8 + 8;
 
 // ── Picker modal ──────────────────────────────────────────────────────────────
 // Generalized beyond a flat string list so mode/speed pickers can carry a
@@ -445,6 +464,13 @@ export default function JogScreen() {
   const [teachOpen, setTeachOpen]       = useState(false);
   const [jogSpeeds, setJogSpeeds]       = useState<{ Slow: number; Normal: number; Fast: number } | undefined>(undefined);
 
+  // Program-point teach mode: opened from the builder with the point to teach. The header shows
+  // "Teaching [name]" and the Teach button captures the live base-frame pose, hands it back to the
+  // builder (teachHandoff) and returns, instead of saving to the global point library.
+  const { teachPointId, teachPointName, returnTo } =
+    useLocalSearchParams<{ teachPointId?: string; teachPointName?: string; returnTo?: string }>();
+  const teaching = !!teachPointName;
+
   const tools      = useTools();
   const locals     = useLocals();
   const points     = usePoints();
@@ -453,11 +479,14 @@ export default function JogScreen() {
   const wideContent = useWideContent();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isWide = useIsWide();
+  const isShort = useIsShort();
+  const insets = useSafeAreaInsets();
 
   // Lay out against the real content width (the NavRail eats ~216px of the
   // window on wide screens), seeded from the window so the first frame is right.
   const [measuredWidth, setMeasuredWidth] = useState(0);
-  const paneWidth = measuredWidth || (isWide ? windowWidth - RAIL_ESTIMATE : windowWidth);
+  const [measuredHeight, setMeasuredHeight] = useState(0);
+  const paneWidth = measuredWidth || (isWide ? windowWidth - (isShort ? COMPACT_RAIL_WIDTH : RAIL_ESTIMATE) : windowWidth);
   const threeColumn = paneWidth >= THREE_COL_MIN;
   const twoColumn   = !threeColumn && paneWidth >= TWO_COL_MIN;
   const wideLayout  = threeColumn || twoColumn;
@@ -474,9 +503,22 @@ export default function JogScreen() {
     ? Math.max(120, windowHeight - headerH - topH - footH - TAB_BAR_RESERVE)
     : undefined;
 
+  // Short (landscape phone): config scrolls on the left, the pad + STOP/Teach column sits on the
+  // right and never scrolls. The pad's height budget is the page minus the header, the STOP/Teach
+  // row and the column's padding; its width budget is the column (expressed as the equivalent
+  // 3-row height, since the pads size from maxHeight).
+  const shortPadColW = Math.round(Math.min(400, Math.max(280, paneWidth * 0.48)));
+  const shortPadMaxH = headerH && footH
+    ? Math.max(120, Math.min(
+        (measuredHeight || windowHeight) - headerH - footH - SHORT_PAD_CHROME - insets.bottom,
+        3 * ((shortPadColW - 3 * 8) / 4) + 2 * 8,
+      ))
+    : undefined;
+
   const onContentLayout = useCallback((e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
+    const { width: w, height: h } = e.nativeEvent.layout;
     setMeasuredWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+    setMeasuredHeight((prev) => (Math.abs(prev - h) > 1 ? h : prev));
   }, []);
 
   const [tool, setToolLocal] = useState(activeTool || "None");
@@ -544,6 +586,27 @@ export default function JogScreen() {
   // ── Move-to-point (mechanics mirrored from Space › Points) ──────────────────
   const [pointSearch, setPointSearch]     = useState("");
   const [pointsOpen, setPointsOpen]       = useState(false);
+
+  // ── Live 3D view (right pane on desktop, collapsible in two-column, toggle on narrow) ──
+  const [sidePane, setSidePane] = useState<"3d" | "points">("3d");
+  const [show3d, setShow3d]     = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(JOG_3D_KEY).then(raw => {
+      if (!raw) return;
+      const v = JSON.parse(raw);
+      if (v.sidePane === "3d" || v.sidePane === "points") setSidePane(v.sidePane);
+      if (typeof v.show3d === "boolean") setShow3d(v.show3d);
+    }).catch(() => {});
+  }, []);
+  const save3d = (patch: Partial<{ sidePane: "3d" | "points"; show3d: boolean }>) => {
+    const next = { sidePane, show3d, ...patch };
+    if (patch.sidePane) setSidePane(patch.sidePane);
+    if (patch.show3d !== undefined) setShow3d(patch.show3d);
+    AsyncStorage.setItem(JOG_3D_KEY, JSON.stringify(next)).catch(() => {});
+  };
+  // A point tapped in the 3D view opens the shared point action sheet (by stable id).
+  const pick3d = usePointPick();
+  const spaceSets3d = useSpaceSets();
   const [moveTarget, setMoveTarget]       = useState<Point | null>(null);
   const [moveSpeed, setMoveSpeed]         = useState<"Slow" | "Normal" | "Fast">("Normal");
 
@@ -604,7 +667,7 @@ export default function JogScreen() {
   // once (same sequencing the rest of the screen uses).
   const [actionTarget, setActionTarget] = useState<Point | null>(null);
   const [editTarget, setEditTarget]     = useState<Point | null>(null);
-  const [editDraft, setEditDraft]       = useState({ x: "", y: "", z: "", rz: "" });
+  const [editDraft, setEditDraft]       = useState({ x: "", y: "", z: "", rz: "", description: "" });
   const [teachTarget, setTeachTarget]   = useState<Point | null>(null);
 
   const editFields = ["x", "y", "z", "rz"] as const;
@@ -619,6 +682,7 @@ export default function JogScreen() {
       y:  p.y.toString(),
       z:  p.z.toString(),
       rz: p.rz.toString(),
+      description: p.description ?? "",
     });
     setActionTarget(null);
     setEditTarget(p);
@@ -634,6 +698,7 @@ export default function JogScreen() {
       y:  Number(editDraft.y),
       z:  Number(editDraft.z),
       rz: Number(editDraft.rz),
+      description: editDraft.description.trim(),
     });
     setEditTarget(null);
   }
@@ -903,24 +968,36 @@ export default function JogScreen() {
     </View>
   );
 
-  const stopTeach = (inline: boolean) => (
+  // Teach-mode: capture the live BASE-frame pose for the program point and hand it back to the
+  // builder (which owns the point in its in-memory doc), then return to it. router.back() keeps the
+  // builder instance — and its unsaved document — alive, so never replace/remount it.
+  const teachProgramPoint = () => {
+    if (!teachPointId) return;
+    teachHandoff.set(teachPointId, teachPointName ?? "", {
+      x: s.x ?? 0, y: s.y ?? 0, z: s.z ?? 0, rx: s.rx ?? 0, ry: s.ry ?? 0, rz: s.rz ?? 0,
+    });
+    if (router.canGoBack()) router.back();
+    else if (returnTo) router.replace(returnTo as Parameters<typeof router.replace>[0]);
+  };
+
+  const stopTeach = (inline: boolean, compact = false) => (
     <View style={[styles.bottomRow, inline && styles.bottomRowInline]}>
       <Button
         label="STOP"
         variant="destructive"
         icon={<OctagonX size={22} color={buttonTextColor("destructive")} />}
-        style={[styles.stopButton, inline && styles.stopButtonWide]}
+        style={[styles.stopButton, inline && !compact && styles.stopButtonWide]}
         textStyle={styles.stopText}
         onPress={() => robotClient.sendCommand("HardStop")}
       />
 
       <Button
-        label="Teach"
+        label={teaching ? "Teach Point" : "Teach"}
         variant="ghost"
         icon={<MousePointerClick size={18} color={colors.accent} />}
-        style={[styles.teachButton, inline && styles.teachButtonWide]}
+        style={[styles.teachButton, inline && !compact && styles.teachButtonWide]}
         textStyle={styles.teachButtonText}
-        onPress={() => setTeachOpen(true)}
+        onPress={teaching ? teachProgramPoint : () => setTeachOpen(true)}
       />
     </View>
   );
@@ -1061,18 +1138,103 @@ export default function JogScreen() {
     </Modal>
   );
 
+  /** Every jog 3D view: a tapped point / grid cell / stack slot opens its move sheet (highlighted while open). */
+  const jog3d = (style: StyleProp<ViewStyle>, persistKey: string, options: Cell3DOptions = WIDE_3D_OPTIONS) => (
+    <Cell3DView style={style} persistKey={persistKey} options={options} sets={spaceSets3d} highlight={pick3d.highlight} onPick={pick3d.onPick} />
+  );
+
+  /** Desktop right column: the live 3D view or the saved points, one at a time. */
+  const sidePanel = (
+    <View style={styles.sidePanel}>
+      <SegmentedControl
+        size="sm"
+        options={[
+          { label: "3D view", value: "3d", icon: (c: string, z: number) => <Box size={z} color={c} /> },
+          { label: `Points · ${points.length}`, value: "points", icon: (c: string, z: number) => <MapPin size={z} color={c} /> },
+        ]}
+        value={sidePane}
+        onChange={(v) => save3d({ sidePane: v as "3d" | "points" })}
+      />
+      {sidePane === "3d" ? (
+        <Card padded={false} style={styles.cell3dCard}>
+          {jog3d(styles.cell3dFill, "jog")}
+        </Card>
+      ) : pointsPanel}
+    </View>
+  );
+
+  /** Two-column: the 3D view fills the space above the pad in the pad column, always shown. It
+   *  takes whatever height the pad and STOP/Teach leave, down to a minimum; the pad never shrinks. */
+  const cell3dPadTop = (
+    <Card padded={false} style={[styles.cell3dCollapsible, styles.cell3dPadTop]}>
+      {jog3d(styles.cell3dFill, "jog")}
+    </Card>
+  );
+
+  /** Narrow: a compact 3D strip above the pad (opt-in from the header, the pad shrinks to fit). */
+  const cell3dNarrow = show3d ? (
+    <Card padded={false} style={styles.cell3dCollapsible}>
+      {jog3d({ height: Math.round(Math.max(170, Math.min(240, windowHeight * 0.24))) }, "jog-narrow", NARROW_3D_OPTIONS)}
+    </Card>
+  ) : null;
+
   return (
     <View style={styles.container} onLayout={onContentLayout}>
       <Tabs.Screen options={{ tabBarStyle: { display: "none" }, headerShown: false }} />
       <View onLayout={e => setHeaderH(e.nativeEvent.layout.height)}>
         <PageHeader
-          title="Jog & Teach"
-          subtitle="Manually move the robot, then save a point at its current position"
-          backTo="/control"
+          title={teaching ? `Teaching ${teachPointName}` : "Jog & Teach"}
+          subtitle={teaching
+            ? "Jog to the position, then tap Teach Point to capture it"
+            : "Manually move the robot, then save a point at its current position"}
+          // In teach mode return to the live builder (one pop) so its unsaved document survives;
+          // dismissTo a route could pop past it.
+          backTo={teaching ? undefined : "/control"}
+          onBack={teaching ? () => { teachHandoff.clear(); if (router.canGoBack()) router.back(); } : undefined}
+          right={!wideLayout || isShort ? (
+            <Button
+              size="sm"
+              variant={show3d ? "ghost" : "secondary"}
+              label={show3d ? "Hide 3D" : "3D"}
+              icon={<Box size={15} color={show3d ? colors.accent : colors.textSecondary} />}
+              onPress={() => save3d({ show3d: !show3d })}
+            />
+          ) : undefined}
         />
       </View>
 
-      {wideLayout ? (
+      {isShort ? (
+        // Short (a phone on its side): the DRO (first, so it stays in view while jogging), the
+        // optional 3D view, config and points scroll on the left; the pad with STOP/Teach beneath
+        // it is pinned on the right, always on screen.
+        <View style={[styles.shortRow, { paddingBottom: spacing.sm + insets.bottom }]}>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.sideColContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Card padded={false}>
+              <PositionReadout axes={coords} inline size="lg" card={false} onAxisPress={openAxisTarget} />
+            </Card>
+            {cell3dNarrow}
+            {configCard}
+            {pointsCollapsible}
+          </ScrollView>
+          <View style={[styles.shortPadCol, { width: shortPadColW }]}>
+            <View style={styles.shortPadArea}>
+              <JogPad
+                jogMode={mode}
+                selectedSpeed={selectedSpeed}
+                speedOverrides={jogSpeeds}
+                padStyle={padStyle}
+                maxHeight={shortPadMaxH}
+              />
+            </View>
+            <View onLayout={e => setFootH(e.nativeEvent.layout.height)}>{stopTeach(true, true)}</View>
+          </View>
+        </View>
+      ) : wideLayout ? (
         // Wide: jog config + DRO on the left, the pad with STOP/Teach directly
         // underneath in the middle, saved points on the right (desktop widths).
         <View style={styles.wideRow}>
@@ -1084,21 +1246,31 @@ export default function JogScreen() {
               keyboardShouldPersistTaps="handled"
             >
               {configCard}
+              {/* Two-column widths have no room for a third pane — the points list rides
+                  along in this column (the 3D view sits above the pad). */}
               {dro}
-              {/* Two-column widths have no room for a third pane — the points
-                  list rides along under the config column instead. */}
               {twoColumn && pointsCollapsible}
             </ScrollView>
           </View>
 
-          <View style={styles.padCol}>
-            {jogPad}
-            {stopTeach(true)}
-          </View>
+          {twoColumn ? (
+            <View style={[styles.padCol, styles.padColTwo]}>
+              {cell3dPadTop}
+              <View style={styles.padStack}>
+                {jogPad}
+                {stopTeach(true)}
+              </View>
+            </View>
+          ) : (
+            <View style={styles.padCol}>
+              {jogPad}
+              {stopTeach(true)}
+            </View>
+          )}
 
           {threeColumn && (
             <View style={[styles.sideCol, styles.sideColThree, styles.pointsCol]}>
-              {pointsPanel}
+              {sidePanel}
             </View>
           )}
         </View>
@@ -1115,6 +1287,7 @@ export default function JogScreen() {
           >
             {configMobile}
             {droSection}
+            {cell3dNarrow}
           </View>
           <View style={styles.narrowPadArea}>
             <JogPad
@@ -1129,6 +1302,9 @@ export default function JogScreen() {
           {pointsModal}
         </>
       )}
+
+      <PointActionSheet point={pick3d.point} onClose={pick3d.close} speed={moveSpeed} />
+      <ArrayCellSheet cell={pick3d.cell} onClose={pick3d.close} speed={moveSpeed} />
 
       {/* ── Teach modal ── */}
       <Modal
@@ -1244,6 +1420,16 @@ export default function JogScreen() {
                 />
               </FormRow>
             ))}
+
+            <FormRow label="DESCRIPTION" style={styles.editRow}>
+              <Input
+                value={editDraft.description}
+                onChangeText={(v) => setEditDraft((d) => ({ ...d, description: v }))}
+                placeholder="What is this point for? (optional)"
+                multiline
+                returnKeyType="done"
+              />
+            </FormRow>
 
             <Divider style={styles.cardSeparator} />
 
@@ -1854,6 +2040,54 @@ const styles = StyleSheet.create({
   pointsCard: {
     flex: 1,
     overflow: "hidden",
+  },
+
+  // ── Live 3D view ──
+  sidePanel: {
+    flex: 1,
+    gap: spacing.sm,
+  },
+  cell3dCard: {
+    flex: 1,
+    overflow: "hidden",
+  },
+  cell3dFill: {
+    flex: 1,
+  },
+  cell3dCollapsible: {
+    overflow: "hidden",
+  },
+  cell3dPadTop: {
+    alignSelf: "stretch",
+    flex: 1,
+    minHeight: 180,
+  },
+  // Two-column pad column: the 3D card on top, the pad + STOP/Teach anchored at the bottom.
+  padColTwo: {
+    justifyContent: "flex-start",
+    gap: spacing.lg,
+  },
+  // Short (landscape phone): scrolling config column + fixed pad column.
+  shortRow: {
+    flex: 1,
+    flexDirection: "row",
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    gap: spacing.md,
+  },
+  shortPadCol: {
+    gap: spacing.sm,
+  },
+  shortPadArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  padStack: {
+    alignItems: "center",
+    gap: spacing.xl,
   },
 
   pointsHeader: {

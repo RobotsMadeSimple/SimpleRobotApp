@@ -4,13 +4,16 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useConnected,
   useIoDevices,
   useRelayIO,
-  useRobotStatus } from "@/src/providers/RobotProvider";
+  useRobotStatusValue,
+  useSerialDevices } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AuxDeviceState,
   CameraState,
   DeviceState } from "@/src/models/robotModels";
 import {
+  Cable,
   Camera,
+  ChevronRight,
   CircuitBoard,
   Cpu,
   Gauge,
@@ -21,7 +24,8 @@ import {
   WifiOff,
   X,
   } from "lucide-react-native";
-import { router, useFocusEffect } from "expo-router";
+import { useFocusEffect } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import React,
   { useCallback,
   useEffect,
@@ -39,9 +43,13 @@ import {
   View,
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { AnimatedPressable } from "@/src/components/ui/AnimatedPressable";
+import { withHaptic } from "@/src/components/ui/haptics";
+import { useIsWide } from "@/src/components/ui/responsive";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { cameraSourceSummary, cameraSourceTag, isPhoneCamera } from "@/src/components/ui/camera/cameraSource";
 import { FirmwareChip } from "@/src/components/ui/io/ioShared";
+import { AddSerialDeviceModal } from "@/src/components/ui/io/AddSerialDeviceModal";
 import { DEFAULT_PHONE_DEVICE_NAME } from "@/src/components/provider/providerUtil";
 
 import {
@@ -49,6 +57,7 @@ import {
   Card,
   colors,
   Divider,
+  IconTile,
   InfoTip,
   Input,
   ListRow,
@@ -104,48 +113,78 @@ function DeviceNavCard({
   /** Extra quiet accessory before the status pill (the board's firmware chip). */
   leading?: React.ReactNode;
 }) {
-  const row = (
-    <ListRow
-      card={!footer}
-      style={footer ? styles.rowInCard : undefined}
-      title={name}
-      subtitle={subtitle}
-      icon={icon}
-      iconColor={iconBg}
-      onPress={onPress}
-      chevron
-      right={
-        <View style={styles.rowAccessories}>
-          {leading}
-          {!!tag && <StatusPill label={tag} tone="accent" />}
-          {statusPill ?? (
-            <StatusPill
-              label={connected ? "Connected" : "Offline"}
-              tone={connected ? "success" : "danger"}
-              dot
-            />
-          )}
-          {onDelete && <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />}
-        </View>
-      }
-    />
+  // On a phone (narrow), the trailing firmware chip + status pill + delete
+  // squeeze the flexible title until the device name truncates to a few
+  // characters ("Ardu…", "AU…"). So on narrow screens the name/subtitle take the
+  // full row width and the chips drop onto a wrapping meta line beneath them;
+  // wide screens (tablet/desktop) keep the chips inline on the right.
+  const isWide = useIsWide();
+
+  const meta = (
+    <View style={[styles.rowAccessories, !isWide && styles.metaStacked]}>
+      {leading}
+      {!!tag && <StatusPill label={tag} tone="accent" />}
+      {statusPill ?? (
+        <StatusPill
+          label={connected ? "Connected" : "Offline"}
+          tone={connected ? "success" : "danger"}
+          dot
+        />
+      )}
+    </View>
   );
-  if (!footer) return row;
-  return <Card padded={false}>{row}{footer}</Card>;
+
+  const content = (
+    <>
+      <IconTile color={iconBg} size={44}>{icon}</IconTile>
+      <View style={styles.rowBody}>
+        <Text style={type.title} numberOfLines={1}>{name}</Text>
+        {!!subtitle && (
+          <Text style={[type.subtitle, styles.rowSub]} numberOfLines={1}>{subtitle}</Text>
+        )}
+        {!isWide && meta}
+      </View>
+      {isWide && meta}
+      {onDelete && <DeleteIconButton onPress={onDelete} style={styles.deleteBtn} />}
+      <ChevronRight size={18} color={colors.textFaint} />
+    </>
+  );
+
+  // With a footer (camera calibration) the card holds a pressable row + the flat
+  // footer strip; otherwise the whole card is the press target.
+  if (footer) {
+    return (
+      <Card padded={false}>
+        <AnimatedPressable style={[styles.row, styles.rowInCard]} onPress={withHaptic("selection", onPress)}>
+          {content}
+        </AnimatedPressable>
+        {footer}
+      </Card>
+    );
+  }
+  return (
+    <Card onPress={onPress} padded={false}>
+      <View style={[styles.row, styles.rowPadded]}>{content}</View>
+    </Card>
+  );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function IoPage() {
   const ioDevices  = useIoDevices();
+  const serialDevices = useSerialDevices();
   const relay  = useRelayIO();
-  const status = useRobotStatus();
+  const driverConnected = useRobotStatusValue(s => s.driverConnected);
+  // Device cards open their page once, even when double-tapped before it loads.
+  const pushOnce = usePushOnce();
 
   const [ioConfig,    setIoConfig]    = useState<IOConfig | null>(null);
   const [auxDevices,  setAuxDevices]  = useState<AuxDeviceState[]>([]);
   const [cameras,     setCameras]     = useState<CameraState[]>([]);
   const [devices,     setDevices]     = useState<DeviceState[]>([]);
   const [addModal,    setAddModal]    = useState(false);
+  const [addSerialOpen, setAddSerialOpen] = useState(false);
   const [enabling,    setEnabling]    = useState<keyof IOConfig | null>(null);
   // Add-Device modal → "Phone" opens a name step (set up the device; a phone links to it later).
   const [phoneNameStep, setPhoneNameStep] = useState(false);
@@ -178,6 +217,8 @@ export default function IoPage() {
     // Refresh Nano + relay state so the IO summary cards reflect outputs a
     // running program changed, not the stale state from the last app action.
     robotClient.getIO().catch(() => {});
+    // Generic serial devices aren't gated by robot config — fetch their list directly.
+    robotClient.getSerialDevices().catch(() => {});
   }, [connected]);
 
   useFocusEffect(loadIoPage);
@@ -290,7 +331,7 @@ export default function IoPage() {
           robotClient.setRobotConfig({ enableCameras: true }).catch(() => {});
           setIoConfig(prev => prev ? { ...prev, enableCameras: true } : prev);
         }
-        router.push({ pathname: "/(tabs)/io/cameras", params: { addNew: "1" } });
+        pushOnce({ pathname: "/(tabs)/io/cameras", params: { addNew: "1" } });
       },
     },
   ];
@@ -329,7 +370,7 @@ export default function IoPage() {
 
   // Open the provider for a device so THIS phone starts feeding it (the "link" step).
   const linkThisPhoneTo = (dev: DeviceState) => {
-    router.push({ pathname: "/(tabs)/io/phone-provider", params: { deviceId: dev.id, name: dev.name } });
+    pushOnce({ pathname: "/(tabs)/io/phone-provider", params: { deviceId: dev.id, name: dev.name } });
   };
 
   const removePhoneDevice = (dev: DeviceState) => {
@@ -361,11 +402,12 @@ export default function IoPage() {
   // Devices online/offline summary — STB4100 is always present; the rest only
   // count once their device type is enabled, mirroring the cards rendered below.
   const connectionFlags = ioConfig ? [
-    status.driverConnected,
+    driverConnected,
     ...(ioConfig.enableIoDevices ? nanoDevices.map(n => n.connected) : []),
     ...(ioConfig.enableRelayCard ? [relay?.connected ?? false] : []),
     ...(ioConfig.enableAuxAxis ? auxDevices.map(d => d.connected) : []),
     ...(ioConfig.enableCameras ? visibleCameras.map(c => c.connected) : []),
+    ...serialDevices.map(s => s.connected),
     ...phoneDevices.map(phoneDeviceLive),
   ] : [];
   const totalDevices   = connectionFlags.length;
@@ -399,8 +441,8 @@ export default function IoPage() {
           iconBg={colors.successSoft}
           name="STB4100"
           subtitle="STB4100 · USB HID"
-          connected={status.driverConnected}
-          onPress={() => router.push("/(tabs)/io/stb")}
+          connected={driverConnected}
+          onPress={() => pushOnce("/(tabs)/io/stb")}
         />
 
         {/* One card per Nano device (aux-stepper spare-pin IO is shown under its Aux card) */}
@@ -413,7 +455,7 @@ export default function IoPage() {
             subtitle={nano.name}
             connected={nano.connected}
             leading={<FirmwareChip device={nano} />}
-            onPress={() => router.push({ pathname: "/(tabs)/io/nanos", params: { deviceId: nano.id } })}
+            onPress={() => pushOnce({ pathname: "/(tabs)/io/nanos", params: { deviceId: nano.id } })}
             onDelete={idx === 0 ? () => confirmRemove("Arduino Nano Devices", () => disableDeviceType("enableIoDevices")) : undefined}
           />
         ))}
@@ -426,7 +468,7 @@ export default function IoPage() {
             name="USB Relay Board"
             subtitle="DCTTECH 4CH · HID"
             connected={relay?.connected ?? false}
-            onPress={() => router.push("/(tabs)/io/relay")}
+            onPress={() => pushOnce("/(tabs)/io/relay")}
             onDelete={() => confirmRemove("USB Relay Board", () => disableDeviceType("enableRelayCard"))}
           />
         )}
@@ -441,7 +483,7 @@ export default function IoPage() {
             subtitle={`${dev.deviceId}${dev.portName ? ` · ${dev.portName}` : ""}`}
             connected={dev.connected}
             leading={<FirmwareChip device={dev} />}
-            onPress={() => router.push({ pathname: "/(tabs)/io/auxiliary", params: { deviceId: dev.deviceId } })}
+            onPress={() => pushOnce({ pathname: "/(tabs)/io/auxiliary", params: { deviceId: dev.deviceId } })}
             onDelete={idx === 0 ? () => confirmRemove("Aux Stepper Axes", () => disableDeviceType("enableAuxAxis")) : undefined}
           />
         ))}
@@ -478,9 +520,23 @@ export default function IoPage() {
             subtitle={`${cameraSourceSummary(cam)} · ${cam.targetFps}fps`}
             tag={cameraSourceTag(cam)}
             connected={cam.connected}
-            onPress={() => router.push({ pathname: "/(tabs)/io/cameras", params: { cameraId: cam.id } })}
+            onPress={() => pushOnce({ pathname: "/(tabs)/io/cameras", params: { cameraId: cam.id } })}
             onDelete={() => confirmRemove(cam.name, () => robotClient.removeCamera(cam.id).catch(() => {}))}
             footer={<CameraCalibrationControls camera={cam} layout="footer" />}
+          />
+        ))}
+
+        {/* One card per generic serial device */}
+        {serialDevices.map(dev => (
+          <DeviceNavCard
+            key={dev.id}
+            icon={<Cable size={20} color="#0f766e" />}
+            iconBg="#ccfbf1"
+            name={dev.name}
+            subtitle={`${dev.portName} · ${dev.baudRate} baud`}
+            connected={dev.connected}
+            onPress={() => pushOnce({ pathname: "/(tabs)/io/serial", params: { deviceId: dev.id } })}
+            onDelete={() => confirmRemove(dev.name, () => robotClient.removeSerialDevice(dev.id).catch(() => {}))}
           />
         ))}
 
@@ -568,6 +624,19 @@ export default function IoPage() {
                   onPress={() => { setPhoneName(DEFAULT_PHONE_DEVICE_NAME); setPhoneNameStep(true); }}
                   chevron
                 />
+                <Divider inset />
+
+                {/* A generic serial device — user picks a port and defines its own commands.
+                    Not gated by robot config; multiple are allowed. */}
+                <ListRow
+                  card={false}
+                  title="Generic Serial Device"
+                  subtitle="Any device on a serial port — define your own commands"
+                  icon={<Cable size={20} color="#0f766e" />}
+                  iconColor="#ccfbf1"
+                  onPress={() => { closeAddModal(); setAddSerialOpen(true); }}
+                  chevron
+                />
               </>
             )}
             </ScrollView>
@@ -575,6 +644,14 @@ export default function IoPage() {
         </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Generic serial device — a dedicated two-step add flow (pick port → name/baud/line ending) */}
+      <AddSerialDeviceModal
+        key={addSerialOpen ? "serial-add-open" : "serial-add-closed"}
+        visible={addSerialOpen}
+        onClose={() => setAddSerialOpen(false)}
+        onAdded={(id) => pushOnce({ pathname: "/(tabs)/io/serial", params: { deviceId: id } })}
+      />
     </View>
   );
 }
@@ -587,9 +664,17 @@ const styles = StyleSheet.create({
   statRow:  { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   statTile: { flex: 1, minWidth: 130 },
 
-  rowAccessories: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  // ListRow's own card padding, for the flat row inside a camera card with a footer.
+  // Device nav card: icon + name/subtitle body + trailing chips/delete/chevron.
+  row:       { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  rowPadded: { padding: spacing.lg - 2 },
+  // Card padding for the flat row inside a camera card with a footer.
   rowInCard: { paddingHorizontal: spacing.lg - 2, paddingTop: spacing.lg - 2, paddingBottom: spacing.md },
+  rowBody:   { flex: 1 },
+  rowSub:    { marginTop: 2 },
+  rowAccessories: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  // Narrow screens: chips wrap onto their own line under the name, so the name
+  // keeps the full width instead of being squeezed to a few characters.
+  metaStacked: { flexWrap: "wrap", marginTop: spacing.xs + 2 },
   deleteBtn: { padding: spacing.xs + 2, marginLeft: 0 },
 
   // ── Add Device modal ───────────────────────────────────────────────────────

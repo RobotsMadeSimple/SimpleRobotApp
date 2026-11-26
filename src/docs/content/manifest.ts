@@ -4,7 +4,7 @@ import type { ManualManifest } from "../types";
 export const MANUAL_MANIFEST: ManualManifest = {
   "title": "SimpleRobot Programming Manual",
   "subtitle": "Blocks and Simple Robot Script — concepts, instruction reference, functions and error codes",
-  "version": "Language v1 · 2026-11-07",
+  "version": "Language v1 · 2026-11-10",
   "parts": [
     {
       "id": "part-concepts",

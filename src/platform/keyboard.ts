@@ -84,6 +84,80 @@ export function useKeyboardHeight(): number {
 }
 
 /**
+ * Scroll `sv` (currently at `scrollY`) just far enough that the focused field ends `margin` px above
+ * the keyboard top `kbTop`. No-op when nothing is focused or the field is already clear.
+ */
+export function scrollFocusedClear(sv: ScrollView | null, scrollY: number, kbTop: number, margin = 72) {
+  // Native exposes currentlyFocusedInput() (a host component with measureInWindow); react-native-web
+  // only has the deprecated currentlyFocusedField(), which hands back the DOM node — measure that with
+  // its rect. Pick by which method EXISTS, not by return value: calling the fallback when a field just
+  // isn't focused would spam currentlyFocusedField's deprecation warning on native.
+  const state: any = (TextInput as any).State;
+  const focused: any = typeof state?.currentlyFocusedInput === "function"
+    ? state.currentlyFocusedInput()
+    : state?.currentlyFocusedField?.();
+  if (!focused || !sv) return;
+  const clear = (y: number, ht: number) => {
+    if (typeof y !== "number") return;
+    const overlap = (y + ht + margin) - kbTop;
+    if (overlap > 0) sv.scrollTo({ y: Math.max(0, scrollY + overlap), animated: true });
+  };
+  if (typeof focused.measureInWindow === "function") {
+    focused.measureInWindow((_x: number, y: number, _w: number, ht: number) => clear(y, ht));
+  } else if (typeof focused.getBoundingClientRect === "function") {
+    const r = focused.getBoundingClientRect();
+    clear(r.top, r.height);
+  }
+}
+
+/**
+ * A full-page ScrollView that keeps the focused field above the keyboard: the content gets bottom
+ * padding the size of the keyboard (so a low field can scroll up), and the focused field is scrolled
+ * clear when the keyboard opens or focus moves to another field. Wire it as:
+ *   <ScrollView ref={k.scrollRef} onScroll={k.onScroll} scrollEventThrottle={16}
+ *     contentContainerStyle={{ paddingBottom: base + k.kbHeight }}>
+ */
+export function useKeyboardScrollPage() {
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY   = useRef(0);
+  const kbTop     = useRef<number | null>(null);
+  const [kbHeight, setKbHeight] = useState(0);
+
+  useEffect(() => {
+    const settle = () => {
+      const top = kbTop.current;
+      if (top == null) return;
+      // Two frames to let the padding land, then again after the keyboard animation finishes.
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollFocusedClear(scrollRef.current, scrollY.current, top)));
+      setTimeout(() => scrollFocusedClear(scrollRef.current, scrollY.current, top), 240);
+    };
+    const offKb = addKeyboardListener(k => {
+      kbTop.current = k.visible ? k.screenY : null;
+      setKbHeight(k.visible ? k.height : 0);
+      settle();
+    });
+    // Tapping the next field while the keyboard stays up fires no keyboard event; re-check on focus.
+    const onFocus = () => settle();
+    const doc: any = Platform.OS === "web" ? (globalThis as any).document : null;
+    doc?.addEventListener?.("focusin", onFocus);
+    const state: any = (TextInput as any).State;
+    let last: any = null;
+    const poll = Platform.OS === "web" ? null : setInterval(() => {
+      if (kbTop.current == null) return;
+      const f = state?.currentlyFocusedInput?.();
+      if (f && f !== last) { last = f; settle(); }
+    }, 150);
+    return () => { offKb(); doc?.removeEventListener?.("focusin", onFocus); if (poll) clearInterval(poll); };
+  }, []);
+
+  return {
+    kbHeight,
+    scrollRef,
+    onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => { scrollY.current = e.nativeEvent.contentOffset.y; },
+  };
+}
+
+/**
  * A centred modal card that keeps its height when the keyboard opens: the card stays pinned to its
  * keyboard-closed height (its footer never moves; the keyboard simply draws over it), the body
  * gets bottom padding the size of the keyboard, and the focused field is scrolled clear of the

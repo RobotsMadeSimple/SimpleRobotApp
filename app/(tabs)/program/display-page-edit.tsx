@@ -45,7 +45,7 @@ export default function DisplayPageEditScreen() {
   const selectedWidget = layout.widgets.find((w) => w.id === selectedId) ?? null;
 
   const previewHtml = useMemo(
-    () => (mode === "widgets" ? compileLayout(layout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e) }) : html),
+    () => (mode === "widgets" ? compileLayout(layout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e), cameraWsUrl: (id) => robotClient.cameraWsUrl(id) }) : html),
     [mode, layout, html],
   );
 
@@ -54,7 +54,7 @@ export default function DisplayPageEditScreen() {
   const [designPreviewHtml, setDesignPreviewHtml] = useState("");
   useEffect(() => {
     const t = setTimeout(
-      () => setDesignPreviewHtml(compileLayout(layout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e) })),
+      () => setDesignPreviewHtml(compileLayout(layout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e), cameraWsUrl: (id) => robotClient.cameraWsUrl(id), reflow: false })),
       350,
     );
     return () => clearTimeout(t);
@@ -73,6 +73,7 @@ export default function DisplayPageEditScreen() {
   // Preview always shows the real page. Touching widgets makes it a widget page; typing HTML
   // (or uploading) makes it an HTML page.
   const setWidgets = (widgets: DisplayWidget[]) => { setLayout((l) => ({ ...l, widgets })); setMode("widgets"); };
+  const setTheme = (theme: NonNullable<DisplayPageLayout["theme"]>) => { setLayout((l) => ({ ...l, theme })); setMode("widgets"); };
   const updateSelectedConfig = (config: Record<string, any>) => {
     setLayout((l) => ({ ...l, widgets: l.widgets.map((w) => (w.id === selectedId ? { ...w, config } : w)) }));
     setMode("widgets");
@@ -82,7 +83,7 @@ export default function DisplayPageEditScreen() {
   const goTab = (t: Tab) => setTab(t); // navigation only — never changes the page's source
 
   const generateFromWidgets = () => {
-    setHtml(compileLayout(layout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e) }));
+    setHtml(compileLayout(layout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e), cameraWsUrl: (id) => robotClient.cameraWsUrl(id) }));
     setMode("html");
     appAlert("Generated", "Filled the HTML editor from your widget design, and switched the page to HTML mode.");
   };
@@ -170,6 +171,17 @@ export default function DisplayPageEditScreen() {
 
       {tab === "design" && (
         <View style={styles.fill}>
+          <View style={styles.themeRow}>
+            <Text style={styles.themeLabel}>Colours</Text>
+            {THEMES.map((t) => {
+              const active = (layout.theme ?? "light") === t.key;
+              return (
+                <TouchableOpacity key={t.key} style={[styles.tab, active && styles.tabActive]} onPress={() => setTheme(t.key)} activeOpacity={0.7}>
+                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <DisplayPageBuilder
             layout={layout}
             selectedId={selectedId}
@@ -227,6 +239,12 @@ export default function DisplayPageEditScreen() {
   );
 }
 
+const THEMES: { key: NonNullable<DisplayPageLayout["theme"]>; label: string }[] = [
+  { key: "light", label: "Light" },
+  { key: "dark", label: "Dark" },
+  { key: "auto", label: "Match device" },
+];
+
 const MONO = Platform.select({ web: "monospace", ios: "Menlo", default: "monospace" });
 
 const styles = StyleSheet.create({
@@ -241,6 +259,9 @@ const styles = StyleSheet.create({
   tabActive: { borderColor: colors.accentFaded, backgroundColor: colors.accentSoft },
   tabText: { fontSize: 13, fontWeight: "700", color: colors.textMuted },
   tabTextActive: { color: colors.accent },
+
+  themeRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  themeLabel: { fontSize: 12, fontWeight: "700", color: colors.textMuted, marginRight: 2 },
 
   htmlToolbar: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.sm },
   toolBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: colors.accentFaded, backgroundColor: colors.accentSoft },

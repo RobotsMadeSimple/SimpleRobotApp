@@ -1,21 +1,23 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCameraPermissions } from "expo-camera";
-import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { router, useFocusEffect } from "expo-router";
-import { Moon, RotateCw } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Moon, RotateCw } from "lucide-react-native";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { AppState, BackHandler, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
+import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
+import { usePaneLayout } from "@/src/components/ui/responsive";
 import { DeviceStatusBar } from "@/src/components/ui/io/ioShared";
 import {
-  Button, buttonTextColor, Card, colors, Divider, FormRow, PageHeader, radii, Screen, SectionHeader,
+  Button, buttonTextColor, Card, colors, Divider, FormRow, PageHeader, RadioRow, radii, Screen, SectionHeader,
   SegmentedControl, spacing, StatusPill, type,
 } from "@/src/components/ui/kit";
 import { CameraLiveFeed } from "@/src/components/vision/CameraLiveFeed";
 import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
 import {
-  ASPECT_OPTIONS, describeRxStats, lensLabel, ORIENT_OPTIONS, providerEngine, RES_OPTIONS, RTC_BITRATE_OPTIONS,
-  RTC_FPS_OPTIONS, type ProviderEngineState,
+  describeRxStats, type FrameAspect, lensLabel, providerEngine, type ProviderConfig, type ProviderEngineState,
+  RES_OPTIONS, RES_TIERS, type ResTier, RTC_BITRATE_OPTIONS, RTC_FPS_OPTIONS, sortLenses, type StreamOrientation,
 } from "@/src/services/providerEngine";
 import { DEFAULT_PHONE_DEVICE_NAME } from "./providerUtil";
 
@@ -34,7 +36,47 @@ import { DEFAULT_PHONE_DEVICE_NAME } from "./providerUtil";
 /** Compact display of a channel value: integers as-is, else 3 decimals. */
 const fmtVal = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(3));
 
-const KEEP_AWAKE_TAG = "provider-stream";
+// ── Camera settings ───────────────────────────────────────────────────────────
+
+/** One-tap quality presets: a resolution + frame rate + bitrate from the engine's own option lists
+ *  (RES_TIERS / RTC_FPS_OPTIONS / RTC_BITRATE_OPTIONS). Balanced is the engine's default config. */
+type QualityPreset = "low" | "balanced" | "high";
+const QUALITY_PRESETS: { label: string; value: QualityPreset; resTier: ResTier; rtcFps: string; bitrate: number }[] = [
+  { label: "Low",      value: "low",      resTier: "low",  rtcFps: "15", bitrate: 6_000_000 },
+  { label: "Balanced", value: "balanced", resTier: "med",  rtcFps: "30", bitrate: 12_000_000 },
+  { label: "High",     value: "high",     resTier: "high", rtcFps: "30", bitrate: 12_000_000 },
+];
+const presetOf = (c: ProviderConfig): QualityPreset | "custom" =>
+  QUALITY_PRESETS.find(p => p.resTier === c.resTier && p.rtcFps === c.rtcFps && p.bitrate === c.bitrate)?.value ?? "custom";
+const qualitySummary = (c: ProviderConfig) =>
+  `${RES_TIERS[c.resTier].height}p · ${c.rtcFps} fps · ${+(c.bitrate / 1e6).toFixed(1)} Mbps`;
+
+const RES_SHORT = RES_OPTIONS.map(o => ({ label: `${RES_TIERS[o.value].height}p`, value: o.value }));
+const ASPECT_SHORT: { label: string; value: FrameAspect }[] = [{ label: "4:3", value: "4:3" }, { label: "16:9", value: "16:9" }];
+const ORIENT_LABEL: Record<StreamOrientation, string> = {
+  "portrait": "Portrait", "landscape": "Landscape",
+  "portrait-flipped": "Portrait · flipped", "landscape-flipped": "Landscape · flipped",
+};
+
+/** Tallest the inline preview gets, so a portrait stream doesn't fill the whole screen. */
+const PREVIEW_MAX_H = 420;
+
+// The "More settings" disclosure remembers whether it was left open (per app install).
+const MORE_KEY = "phoneProvider.moreSettingsOpen";
+let moreOpenCache: boolean | null = null;
+
+/** Compact settings row: label left, control right, an optional one-line hint underneath. */
+function CompactRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <View style={styles.compactRow}>
+      <View style={styles.compactTop}>
+        <Text style={styles.compactLabel} numberOfLines={1}>{label}</Text>
+        <View style={styles.compactControl}>{children}</View>
+      </View>
+      {!!hint && <Text style={type.caption} numberOfLines={1}>{hint}</Text>}
+    </View>
+  );
+}
 
 /**
  * Streams THIS phone's camera + sensors to a specific controller device (set up on the I/O page).
@@ -55,16 +97,8 @@ export function PhoneProvider({
 
   // Mirror the engine's state into React. The engine owns the stream; this component only reflects it.
   const [st, setSt] = useState<ProviderEngineState>(() => providerEngine.getState());
+  // (While this phone streams, the engine keeps the screen on and guards against NFC tags.)
   useEffect(() => providerEngine.subscribe(setSt), []);
-
-  // Keep the screen on while this phone is actively streaming, so a mounted provider phone doesn't
-  // sleep mid-feed. Released when streaming stops or the screen unmounts (then it may sleep; the
-  // foreground service keeps the stream itself alive).
-  useEffect(() => {
-    if (!st.active) return;
-    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
-    return () => { try { deactivateKeepAwake(KEEP_AWAKE_TAG); } catch { /* noop */ } };
-  }, [st.active]);
 
   const cfg = st.config;
   const streaming = st.rtcState === "connected";
@@ -132,9 +166,39 @@ export function PhoneProvider({
   }, []);
   const previewLive = focused && appActive && !dimmed;
 
+  // "More settings" disclosure (remembered) and the lens picker sheet.
+  const [moreOpen, setMoreOpen] = useState(moreOpenCache ?? false);
+  useEffect(() => {
+    if (moreOpenCache !== null) return;
+    AsyncStorage.getItem(MORE_KEY).then(v => { moreOpenCache = v === "1"; setMoreOpen(moreOpenCache); }).catch(() => {});
+  }, []);
+  const toggleMore = useCallback(() => {
+    setMoreOpen(o => {
+      moreOpenCache = !o;
+      AsyncStorage.setItem(MORE_KEY, moreOpenCache ? "1" : "0").catch(() => {});
+      return !o;
+    });
+  }, []);
+  const [lensSheet, setLensSheet] = useState(false);
+  // Desktop: preview left, settings right. Narrower windows stack them.
+  const desktop = usePaneLayout() === "desktop";
+
   // ── Render ────────────────────────────────────────────────────────────────
   const crumbs = [{ label: "I/O", href: "/io" }, { label: name }];
   const lenses = st.lenses;
+  const lensOptions = [
+    { label: "Auto", hint: "The phone's main back camera", value: "" },
+    ...sortLenses(lenses).map((l, i) => ({ label: lensLabel(l, i, lenses), hint: undefined as string | undefined, value: l.id })),
+  ];
+  const lensCurrent = lensOptions.find(o => o.value === (cfg.lensId ?? "")) ?? lensOptions[0];
+  const preset = presetOf(cfg);
+  const qualityOptions: { label: string; value: QualityPreset | "custom" }[] = preset === "custom"
+    ? [...QUALITY_PRESETS, { label: "Custom", value: "custom" }]
+    : QUALITY_PRESETS;
+  const setPreset = (v: QualityPreset | "custom") => {
+    const p = QUALITY_PRESETS.find(q => q.value === v);
+    if (p) providerEngine.updateConfig({ resTier: p.resTier, rtcFps: p.rtcFps, bitrate: p.bitrate });
+  };
 
   const pill = !ready || (!st.assignedHere && !st.assignedPhoneId)
     ? <StatusPill label={st.assignedHere ? "Idle" : "Not linked"} tone="neutral" />
@@ -157,89 +221,116 @@ export function PhoneProvider({
         ) : (
           // Every phone sees and can change the settings; only the assigned phone streams them.
           <>
-            {!st.assignedHere && (
+            {/* With no phone linked yet, assigning is the first thing to do, so it leads the page. */}
+            {!st.assignedHere && !st.assignedPhoneId && (
             <Card style={styles.stack}>
-              <Text style={type.body}>
-                {st.assignedPhoneId
-                  ? `“${name}” is currently provided by ${st.assignedPhoneName || "another phone"}.`
-                  : `No phone is linked to “${name}” yet.`}
-              </Text>
+              <Text style={type.body}>No phone is linked to “{name}” yet.</Text>
               <Text style={type.caption}>
                 Assigning links <Text style={styles.bold}>this</Text> phone as the camera & sensor source for “{name}”.
                 It stays linked to this device until you change it — other phones won&apos;t take it over.
               </Text>
-              <Button
-                label={st.assignedPhoneId ? "Assign this phone instead" : "Assign this phone"}
-                onPress={onAssign}
-              />
+              <Button label="Assign this phone" onPress={onAssign} />
             </Card>
             )}
 
             <SectionHeader title="Camera" />
             <Card style={styles.stack}>
-              <FormRow label="Stream camera" hint="Feeds the linked phone's camera to the controller to preview, calibrate and run vision on. Hardware H.264 (WebRTC)." inline>
+              <FormRow label="Stream camera" hint="Sends the linked phone's camera to the controller." inline>
                 <Switch value={st.camOn} onValueChange={onCamToggle} trackColor={{ false: colors.border, true: colors.success }} />
               </FormRow>
               {st.camOn && (
-                <>
-                  <Divider />
-                  <FormRow label="Resolution" hint="Capture size requested from the camera.">
-                    <SegmentedControl options={RES_OPTIONS} value={cfg.resTier} onChange={v => providerEngine.updateConfig({ resTier: v })} />
-                  </FormRow>
-                  <Divider />
-                  <FormRow label="Frame shape" hint="4:3 streams the camera's whole view; 16:9 cuts off the top and bottom of it.">
-                    <SegmentedControl options={ASPECT_OPTIONS} value={cfg.aspect} onChange={v => providerEngine.updateConfig({ aspect: v })} />
-                  </FormRow>
-                  <Divider />
-                  <FormRow label="Frame rate" hint="Target capture/encode rate for the stream.">
-                    <SegmentedControl options={RTC_FPS_OPTIONS} value={cfg.rtcFps} onChange={v => providerEngine.updateConfig({ rtcFps: v })} />
-                  </FormRow>
-                  <Divider />
-                  <FormRow label="Bitrate" hint="Mbps the phone sends at — the quality knob; applies live. Higher = cleaner, but over Wi-Fi more gets lost and resent; 12 is plenty for 1080p.">
-                    <SegmentedControl options={RTC_BITRATE_OPTIONS} value={String(cfg.bitrate)} onChange={v => providerEngine.updateConfig({ bitrate: Number(v) })} />
-                  </FormRow>
-                  {lenses.length > 1 && (
-                    <>
-                      <Divider />
-                      <FormRow label="Lens" hint="Which of the linked phone's cameras to stream from.">
-                        <SegmentedControl
-                          options={[{ label: "Default", value: "" }, ...lenses.map((l, i) => ({ label: lensLabel(l, i, lenses), value: l.id }))]}
-                          value={cfg.lensId ?? ""}
-                          onChange={(v: string) => providerEngine.updateConfig({ lensId: v || null })}
-                        />
-                      </FormRow>
-                    </>
-                  )}
-                  <Divider />
-                  <FormRow label="Orientation" hint="Turns the stream itself, whatever way the phone or its screen is turned. Rotate turns it a quarter turn clockwise.">
-                    <View style={styles.orientRow}>
-                      <View style={styles.orientSeg}>
-                        <SegmentedControl
-                          options={ORIENT_OPTIONS}
-                          value={cfg.orientation.startsWith("portrait") ? "portrait" : "landscape"}
-                          onChange={v => providerEngine.updateConfig({ orientation: v })}
-                        />
-                      </View>
-                      <Button
-                        label="Rotate"
-                        variant="secondary"
-                        icon={<RotateCw size={16} color={buttonTextColor("secondary")} />}
-                        onPress={() => providerEngine.rotate()}
-                      />
-                    </View>
-                  </FormRow>
-                  {st.camId && previewLive
-                    ? <CameraLiveFeed cameraId={st.camId} aspectRatio={previewAspect} />
-                    : <View style={[styles.preview, styles.previewEmpty]}><Text style={type.caption}>{st.camId ? "Preview paused" : "Connecting…"}</Text></View>}
+                <View style={desktop ? styles.camSplit : styles.stack}>
+                  {/* Preview first (left on desktop), so every change shows up right here. */}
+                  <View style={desktop ? styles.camPreviewCol : styles.stack}>
+                  <View style={[styles.previewWrap, { aspectRatio: previewAspect, maxWidth: PREVIEW_MAX_H * previewAspect }]}>
+                    {st.camId && previewLive
+                      ? <CameraLiveFeed cameraId={st.camId} aspectRatio={previewAspect} />
+                      : <View style={[styles.preview, styles.previewEmpty]}><Text style={type.caption}>{st.camId ? "Preview paused" : "Connecting…"}</Text></View>}
+                    <Pressable
+                      style={styles.rotatePill}
+                      onPress={() => providerEngine.rotate()}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Rotate stream a quarter turn (now ${ORIENT_LABEL[cfg.orientation]})`}
+                      hitSlop={6}
+                    >
+                      <RotateCw size={14} color={colors.onSurfaceDark} />
+                      <Text style={styles.rotateText}>{ORIENT_LABEL[cfg.orientation]}</Text>
+                    </Pressable>
+                  </View>
                   <Text style={type.caption}>
                     {!st.assignedHere
-                      ? `Streamed by ${st.assignedPhoneName || "the linked phone"} · controller view of “${name}”.`
-                      : `WebRTC ${st.rtcState || "connecting…"}${st.rtcStats ? ` · sending ${st.rtcStats.fps} fps${st.rtcStats.limit ? ` (held back by ${st.rtcStats.limit})` : ""} ·${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s` : ""} · H.264 · controller round-trip of “${name}”.`}
+                      ? `Streamed by ${st.assignedPhoneName || "the linked phone"} · as the controller sees it.`
+                      : st.rtcStats
+                        ? `Sending ${st.rtcStats.fps} fps${st.rtcStats.limit ? ` (held back by ${st.rtcStats.limit})` : ""} · ${st.rtcStats.w}×${st.rtcStats.h} · ${st.rtcStats.kbps} kb/s · as the controller sees it.`
+                        : `WebRTC ${st.rtcState || "connecting…"}`}
                   </Text>
                   {rx && streaming && (
                     <Text style={[type.caption, rx.bad && styles.rxBad]}>{rx.text}</Text>
                   )}
-                </>
+                  </View>
+                  {!desktop && <Divider />}
+                  <View style={desktop ? styles.camSettingsCol : styles.stack}>
+                  <FormRow label="Quality" hint={preset === "custom" ? `Custom: ${qualitySummary(cfg)}` : qualitySummary(cfg)}>
+                    <SegmentedControl options={qualityOptions} value={preset} onChange={setPreset} style={styles.qualitySeg} />
+                  </FormRow>
+                  {lenses.length > 1 && (
+                    <>
+                      <Divider />
+                      <Pressable
+                        style={styles.pickerRow}
+                        onPress={() => setLensSheet(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Lens: ${lensCurrent.label}`}
+                      >
+                        <Text style={styles.compactLabel}>Lens</Text>
+                        <Text style={styles.pickerValue} numberOfLines={1}>{lensCurrent.label}</Text>
+                        <ChevronDown size={16} color={colors.textMuted} />
+                      </Pressable>
+                      <BottomSheet visible={lensSheet} onClose={() => setLensSheet(false)} title="Lens">
+                        {lensOptions.map((o, i) => (
+                          <View key={o.value || "auto"}>
+                            {i > 0 && <Divider />}
+                            <RadioRow
+                              title={o.label}
+                              subtitle={o.hint}
+                              selected={o.value === lensCurrent.value}
+                              onPress={() => { providerEngine.updateConfig({ lensId: o.value || null }); setLensSheet(false); }}
+                            />
+                          </View>
+                        ))}
+                      </BottomSheet>
+                    </>
+                  )}
+                  <Divider />
+                  <Pressable
+                    style={styles.pickerRow}
+                    onPress={toggleMore}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: moreOpen }}
+                  >
+                    <Text style={styles.compactLabel}>More settings</Text>
+                    {moreOpen
+                      ? <ChevronDown size={16} color={colors.textMuted} />
+                      : <ChevronRight size={16} color={colors.textMuted} />}
+                  </Pressable>
+                  {moreOpen && (
+                    <View style={styles.moreBody}>
+                      <CompactRow label="Frame shape" hint="4:3 is the full view; 16:9 crops top and bottom.">
+                        <SegmentedControl size="sm" options={ASPECT_SHORT} value={cfg.aspect} onChange={v => providerEngine.updateConfig({ aspect: v })} />
+                      </CompactRow>
+                      <CompactRow label="Resolution">
+                        <SegmentedControl size="sm" options={RES_SHORT} value={cfg.resTier} onChange={v => providerEngine.updateConfig({ resTier: v })} />
+                      </CompactRow>
+                      <CompactRow label="Frame rate">
+                        <SegmentedControl size="sm" options={RTC_FPS_OPTIONS} value={cfg.rtcFps} onChange={v => providerEngine.updateConfig({ rtcFps: v })} />
+                      </CompactRow>
+                      <CompactRow label="Bitrate (Mbps)" hint="Applies live. Higher is cleaner; 12 suits 1080p.">
+                        <SegmentedControl size="sm" options={RTC_BITRATE_OPTIONS} value={String(cfg.bitrate)} onChange={v => providerEngine.updateConfig({ bitrate: Number(v) })} />
+                      </CompactRow>
+                    </View>
+                  )}
+                  </View>
+                </View>
               )}
             </Card>
 
@@ -305,6 +396,18 @@ export function PhoneProvider({
             </Card>
             </>}
 
+            {/* Another phone already provides this device: taking it over is rare, so it sits at the end. */}
+            {!st.assignedHere && !!st.assignedPhoneId && <>
+            <SectionHeader title="Linked phone" />
+            <Card style={styles.stack}>
+              <Text style={type.body}>Provided by {st.assignedPhoneName || "another phone"}.</Text>
+              <Text style={type.caption}>
+                Assigning moves the camera & sensor source for “{name}” to <Text style={styles.bold}>this</Text> phone.
+              </Text>
+              <Button label="Assign this phone instead" variant="secondary" onPress={onAssign} />
+            </Card>
+            </>}
+
             <Text style={[type.caption, styles.note]}>
               {!st.assignedHere
                 ? `Changes here are saved on the controller and picked up by ${st.assignedPhoneName || "the linked phone"}, which does the streaming.`
@@ -342,16 +445,35 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   stack: { gap: spacing.md },
   bold: { fontWeight: "700", color: colors.text },
+  previewWrap: { width: "100%", alignSelf: "center" },
   preview: {
     width: "100%",
-    aspectRatio: 4 / 3,
-    borderRadius: radii.md,
+    height: "100%",
+    borderRadius: radii.lg,
     overflow: "hidden",
     backgroundColor: "#000",
   },
   previewEmpty: { alignItems: "center", justifyContent: "center" },
-  orientRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  orientSeg: { flex: 1 },
+  // Rotate + current orientation, floating on the preview's top-right corner.
+  rotatePill: {
+    position: "absolute", top: spacing.sm, right: spacing.sm,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    minHeight: 32, paddingHorizontal: spacing.md - 2, borderRadius: radii.pill,
+    backgroundColor: colors.overlayDark,
+  },
+  rotateText: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceDark },
+  // Label-left / value-right rows (lens picker, disclosure) and the compact advanced rows.
+  pickerRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 40 },
+  pickerValue: { flex: 1, textAlign: "right", fontSize: 14, fontWeight: "600", color: colors.text },
+  compactLabel: { flex: 1, fontSize: 13, fontWeight: "600", color: colors.textSecondary },
+  compactRow: { gap: 2 },
+  compactTop: { flexDirection: "row", alignItems: "center", gap: spacing.md, minHeight: 40 },
+  compactControl: { width: 208 },
+  moreBody: { gap: spacing.md },
+  qualitySeg: { maxWidth: 480 },
+  camSplit: { flexDirection: "row", alignItems: "flex-start", gap: spacing.xl },
+  camPreviewCol: { flex: 1, minWidth: 0, gap: spacing.md },
+  camSettingsCol: { width: 380, gap: spacing.md },
   valueRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 3 },
   valueKey: { ...type.body, color: colors.text },
   valueVal: { ...type.mono, color: colors.textSecondary },

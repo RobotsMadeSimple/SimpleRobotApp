@@ -2,7 +2,8 @@ import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors, radii, spacing } from "@/src/components/ui/kit";
-import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useIsShort } from "@/src/components/ui/responsive";
+import { useConnected, useSelectedRobotName } from "@/src/providers/RobotProvider";
 
 // Loose local typing for the react-navigation tabBar props — expo-router vendors
 // @react-navigation/bottom-tabs, so its prop types aren't importable directly.
@@ -27,19 +28,25 @@ type TabBarProps = {
 };
 
 const RAIL_WIDTH = 216;
+/** Short (landscape phone) rail: icons over small labels, so the content keeps the width. */
+export const COMPACT_RAIL_WIDTH = 76;
 
 /**
  * Wide-screen left navigation rail: brand header, pill nav items, and the
  * robot connection status pinned to the bottom. Rendered as a custom `tabBar`
  * with tabBarPosition "left"; narrow screens keep the stock bottom tab bar.
  */
-export function NavRail({ state, descriptors, navigation }: TabBarProps) {
+export function NavRail(props: TabBarProps) {
+  return useIsShort() ? <CompactNavRail {...props} /> : <FullNavRail {...props} />;
+}
+
+function FullNavRail({ state, descriptors, navigation }: TabBarProps) {
   const insets        = useSafeAreaInsets();
   const connected     = useConnected();
-  const selectedRobot = useSelectedRobot();
+  const robotName     = useSelectedRobotName();
 
   return (
-    <View style={[styles.rail, { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.lg }]}>
+    <View style={[styles.rail, { width: RAIL_WIDTH + insets.left, paddingLeft: insets.left + spacing.md, paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.lg }]}>
       {/* Brand */}
       <View style={styles.brand}>
         <Image source={require("@/assets/images/icon.png")} style={styles.brandIcon} />
@@ -96,10 +103,73 @@ export function NavRail({ state, descriptors, navigation }: TabBarProps) {
           <Text style={[styles.statusText, { color: connected ? colors.success : colors.danger }]} numberOfLines={1}>
             {connected ? "Connected" : "Disconnected"}
           </Text>
-          {!!selectedRobot?.robotName && (
-            <Text style={styles.statusRobot} numberOfLines={1}>{selectedRobot.robotName}</Text>
+          {!!robotName && (
+            <Text style={styles.statusRobot} numberOfLines={1}>{robotName}</Text>
           )}
         </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The short-screen rail (a phone on its side): brand mark, icon-over-label items and a status dot in
+ * a narrow strip. It pads past the left safe-area inset — in landscape the camera cutout or the
+ * navigation bar sits on the side, not at the top/bottom.
+ */
+function CompactNavRail({ state, descriptors, navigation }: TabBarProps) {
+  const insets    = useSafeAreaInsets();
+  const connected = useConnected();
+  const robotName = useSelectedRobotName();
+  const status    = connected ? "Connected" : "Disconnected";
+
+  return (
+    <View
+      style={[
+        styles.rail, styles.railCompact,
+        { width: COMPACT_RAIL_WIDTH + insets.left, paddingLeft: insets.left + spacing.xs, paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm },
+      ]}
+    >
+      <Image source={require("@/assets/images/icon.png")} style={styles.brandIconCompact} accessibilityLabel="Simple Robot" />
+
+      <View style={styles.itemsCompact}>
+        {state.routes.map((route, index) => {
+          const { options } = descriptors[route.key];
+          const focused = state.index === index;
+          const label = options.title ?? route.name;
+          const tint = focused ? colors.accent : colors.textMuted;
+          const onPress = () => {
+            const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+            if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
+          };
+          return (
+            <Pressable
+              key={route.key}
+              onPress={onPress}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              accessibilityState={{ selected: focused }}
+              android_ripple={{ color: colors.surfaceHover, borderless: false }}
+              style={
+                Platform.OS === "web"
+                  ? ({ hovered }: any) => [styles.itemCompact, focused && styles.itemActive, !focused && hovered && styles.itemHover]
+                  : [styles.itemCompact, focused && styles.itemActive]
+              }
+            >
+              {options.tabBarIcon?.({ focused, color: tint, size: 20 })}
+              <Text style={[styles.itemLabelCompact, { color: focused ? colors.accent : colors.textSecondary }, focused && styles.itemLabelActive]} numberOfLines={1}>
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.statusCompact} accessibilityLabel={robotName ? `${status} · ${robotName}` : status}>
+        <View style={[styles.statusDot, { backgroundColor: connected ? colors.success : colors.danger }]} />
+        <Text style={[styles.statusTextCompact, { color: connected ? colors.success : colors.danger }]} numberOfLines={1}>
+          {connected ? "Online" : "Offline"}
+        </Text>
       </View>
     </View>
   );
@@ -153,5 +223,19 @@ const styles = StyleSheet.create({
   statusBody: { flex: 1 },
   statusText: { fontSize: 13, fontWeight: "600" },
   statusRobot: { fontSize: 11, color: colors.textFaint, marginTop: 1 },
+
+  // Compact (short-screen) rail.
+  railCompact: { paddingHorizontal: spacing.xs, alignItems: "center" },
+  brandIconCompact: { width: 28, height: 28, borderRadius: 7, marginBottom: spacing.sm },
+  itemsCompact: { flex: 1, alignSelf: "stretch", gap: 2, justifyContent: "center" },
+  itemCompact: {
+    alignItems: "center",
+    gap: 2,
+    paddingVertical: spacing.xs + 1,
+    borderRadius: radii.md,
+  },
+  itemLabelCompact: { fontSize: 10.5, fontWeight: "500" },
+  statusCompact: { alignItems: "center", gap: 3, paddingTop: spacing.xs },
+  statusTextCompact: { fontSize: 10, fontWeight: "600" },
 });
 

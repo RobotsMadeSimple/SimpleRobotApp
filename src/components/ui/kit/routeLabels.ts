@@ -14,6 +14,8 @@ export const ROUTE_LABELS: Record<string, string> = {
   "connected-robot": "Connected Robot",
   about:             "About",
   config:            "Configure",
+  alarms:            "Alarms",
+  backup:            "Backup & Restore",
 
   // Program
   builder:           "Program Builder",
@@ -32,6 +34,7 @@ export const ROUTE_LABELS: Record<string, string> = {
 
   // Control
   jog: "Jog & Teach",
+  "view-3d": "3D View",
 
   // I/O
   auxiliary:         "Aux Axis",
@@ -49,6 +52,8 @@ export const ROUTE_LABELS: Record<string, string> = {
   stacks:       "Stacks",
   "stack-edit": "Edit Stack",
   "stack-teach": "Teach Stack",
+  conveyors:    "Conveyors",
+  "conveyor-edit": "Edit Conveyor",
   locals:       "Locals",
   "local-edit": "Edit Local",
   points:       "Points",

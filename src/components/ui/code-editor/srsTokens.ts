@@ -67,10 +67,11 @@ export type SrsKeywords = { steps: Set<string>; flow: Set<string>; decl: Set<str
 
 /** Lower-case. Step keywords when no catalog is loaded yet (the StepType names). */
 export const DEFAULT_STEP_KEYWORDS = [
-  "MoveL", "MoveJ", "JumpL", "JumpJ", "MoveC", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram",
+  "MoveL", "MoveJ", "JumpL", "JumpJ", "MoveC", "MoveJoints", "MoveAbsJ", "ThreadMove", "RunHoming", "SetJointPosition", "CncProgram",
   "SavePosition", "SetSpeedL", "SetSpeedJ", "SetBlendRadius", "SetSpeedFactor", "SetTool", "SetLocal",
   "ClearLocal", "Wait", "SetOutput", "Tare", "ReadLoadCell", "StartRecording", "StopRecording", "ExportData",
   "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable", "GripperAction", "ConveyorAction", "RotaryIndex",
+  "ConveyorTrack", "ConveyorEndTracking", "ConveyorAddPart", "ConveyorClearQueue", "SiloAction",
   "RunVision", "CaptureImage", "SaveImage", "StartBackground", "StopBackground", "WaitForBackground",
   "HttpRequest", "HttpReceive",
 ];

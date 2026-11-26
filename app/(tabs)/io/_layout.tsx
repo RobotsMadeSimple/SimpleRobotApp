@@ -6,6 +6,7 @@ export default function IOLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="stb" />
       <Stack.Screen name="ioDevices" />
+      <Stack.Screen name="serial" />
       <Stack.Screen name="relay" />
       <Stack.Screen name="auxiliary" />
       <Stack.Screen name="aux-axis" />

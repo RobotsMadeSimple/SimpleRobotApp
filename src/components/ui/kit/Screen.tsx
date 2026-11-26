@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { ScrollView, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 
 import { useWideContent } from "@/src/components/ui/responsive";
+import { useKeyboardScrollPage } from "@/src/platform/keyboard";
 import { colors, spacing } from "./theme";
 
 type Props = {
@@ -34,10 +35,24 @@ export function Screen({ children, scroll = true, contentStyle, padded = true }:
     );
   }
 
+  return <ScrollingScreen padded={padded} contentStyle={contentStyle}>{children}</ScrollingScreen>;
+}
+
+/** The scrolling page: keeps the focused field above the keyboard (Android doesn't resize for us). */
+function ScrollingScreen({ children, contentStyle, padded }: Omit<Props, "scroll">) {
+  const wideContent = useWideContent();
+  const kb = useKeyboardScrollPage();
   return (
     <ScrollView
+      ref={kb.scrollRef}
+      onScroll={kb.onScroll}
+      scrollEventThrottle={16}
+      keyboardShouldPersistTaps="handled"
       style={styles.container}
-      contentContainerStyle={[padded && styles.padded, styles.scrollContent, wideContent, contentStyle]}
+      contentContainerStyle={[
+        padded && styles.padded, styles.scrollContent, wideContent, contentStyle,
+        kb.kbHeight > 0 && { paddingBottom: spacing.xxl + kb.kbHeight },
+      ]}
     >
       {children}
     </ScrollView>

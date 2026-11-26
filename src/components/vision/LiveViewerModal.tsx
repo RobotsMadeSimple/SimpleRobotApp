@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from "react-native";
 import { Maximize2, Minus, Plus, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as ScreenOrientation from "expo-screen-orientation";
 import { colors } from "@/src/components/ui/kit";
 import type { FeedOverlayItem } from "@/src/vision/feedOverlay";
 import { FeedCanvas, type FeedCanvasHandle } from "./FeedCanvas";
@@ -45,13 +44,6 @@ function Viewer({ onClose, feedUrl, overlay, pollMs, title }: {
   const [scale, setScale] = useState(1);
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-
-  // Let a phone turn sideways for a bigger picture; back to the app's portrait on close.
-  useEffect(() => {
-    if (Platform.OS === "web") return;
-    ScreenOrientation.unlockAsync().catch(() => {});
-    return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {}); };
-  }, []);
 
   // Escape while focus is on the page (inside the feed it arrives as an "escape" message).
   useEffect(() => {

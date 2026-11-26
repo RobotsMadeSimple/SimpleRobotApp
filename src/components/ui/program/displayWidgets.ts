@@ -13,6 +13,7 @@ export type ConfigFieldKind =
   | "select"
   | "expression" // an expression (opens the program's expression editor), evaluated live
   | "variable"   // a program variable name (chips of the program's variables + free text)
+  | "camera"     // pick a connected camera (stores its id) for the live-stream widget
   | "plugin";    // pick an installed plugin that ships a UI (stores id/entry/title)
 
 export type ConfigField = {
@@ -41,10 +42,11 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
     label: "Value",
     hint: "A variable's live number or true/false.",
     defaultSize: { w: 3, h: 2 },
-    defaultConfig: { variable: "", label: "" },
+    defaultConfig: { variable: "", label: "", unit: "" },
     fields: [
       { key: "variable", label: "Value (expression)", kind: "expression", placeholder: "$force  or  $x * 2" },
       { key: "label", label: "Label (optional)", kind: "text" },
+      { key: "unit", label: "Unit (optional)", kind: "text", placeholder: "g, mm, °…" },
     ],
   },
   gauge: {
@@ -115,10 +117,39 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
     label: "Image",
     hint: "A display-image variable (camera / capture).",
     defaultSize: { w: 4, h: 4 },
-    defaultConfig: { variable: "", label: "" },
+    defaultConfig: { variable: "", label: "", fit: "cover" },
     fields: [
       { key: "variable", label: "Image variable", kind: "variable", placeholder: "image variable name" },
       { key: "label", label: "Label (optional)", kind: "text" },
+      {
+        key: "fit",
+        label: "Fit",
+        kind: "select",
+        options: [
+          { label: "Fill the card (crops edges)", value: "cover" },
+          { label: "Whole image", value: "contain" },
+        ],
+      },
+    ],
+  },
+  camera: {
+    type: "camera",
+    label: "Camera",
+    hint: "A live camera feed (smooth), like the I/O page.",
+    defaultSize: { w: 6, h: 6 },
+    defaultConfig: { cameraId: "", label: "", fit: "cover" },
+    fields: [
+      { key: "cameraId", label: "Camera", kind: "camera" },
+      { key: "label", label: "Label (optional)", kind: "text" },
+      {
+        key: "fit",
+        label: "Fit",
+        kind: "select",
+        options: [
+          { label: "Fill the card (crops edges)", value: "cover" },
+          { label: "Whole image", value: "contain" },
+        ],
+      },
     ],
   },
   button: {
@@ -170,10 +201,53 @@ export const DISPLAY_WIDGET_DEFS: Record<DisplayWidgetType, WidgetDef> = {
   plugin: {
     type: "plugin",
     label: "Plugin",
-    hint: "Embed a live plugin's UI panel.",
+    hint: "Embed a live plugin's UI panel, with optional settings.",
     defaultSize: { w: 6, h: 6 },
-    defaultConfig: { pluginId: "", entry: "", title: "", pluginName: "" },
+    // params: the plugin's declared UI settings; paramsText: any others as "name=value, …".
+    defaultConfig: { pluginId: "", entry: "", title: "", pluginName: "", params: {}, paramsText: "" },
     fields: [{ key: "pluginId", label: "Plugin", kind: "plugin" }],
+  },
+  status: {
+    type: "status",
+    label: "Status",
+    hint: "The program's run state and current step.",
+    defaultSize: { w: 4, h: 2 },
+    defaultConfig: {},
+    fields: [],
+  },
+  cell3d: {
+    type: "cell3d",
+    label: "3D view",
+    hint: "The robot and its cell in 3D, moving live.",
+    defaultSize: { w: 6, h: 8 },
+    defaultConfig: { label: "", view: "iso", trail: "on", points: "off", controls: "views" },
+    fields: [
+      { key: "label", label: "Label (optional)", kind: "text" },
+      {
+        key: "view",
+        label: "Default view",
+        kind: "select",
+        options: [
+          { label: "Iso", value: "iso" },
+          { label: "Front", value: "front" },
+          { label: "Side", value: "side" },
+          { label: "Top", value: "top" },
+          { label: "Follow the tool", value: "follow" },
+        ],
+      },
+      { key: "trail", label: "Tool path trail", kind: "select", options: [{ label: "Show", value: "on" }, { label: "Hide", value: "off" }] },
+      { key: "points", label: "Taught points", kind: "select", options: [{ label: "Show", value: "on" }, { label: "Hide", value: "off" }] },
+      {
+        key: "controls",
+        label: "On-screen controls",
+        kind: "select",
+        options: [
+          { label: "View buttons", value: "views" },
+          { label: "View buttons + toggles", value: "full" },
+          { label: "None", value: "none" },
+        ],
+      },
+    ],
   },
 };
 
@@ -184,8 +258,11 @@ export const WIDGET_PALETTE: DisplayWidgetType[] = [
   "boolean",
   "graph",
   "image",
+  "camera",
   "button",
   "text",
+  "status",
+  "cell3d",
   "plugin",
 ];
 
