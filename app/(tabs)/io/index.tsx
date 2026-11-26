@@ -4,7 +4,8 @@ import { DeleteIconButton } from "@/src/components/ui/DeleteIconButton";
 import { useConnected,
   useIoDevices,
   useRelayIO,
-  useRobotStatus } from "@/src/providers/RobotProvider";
+  useRobotStatus,
+  useSimplePlcs } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { AuxDeviceState,
   CameraState,
@@ -14,6 +15,7 @@ import {
   CircuitBoard,
   Cpu,
   Gauge,
+  Network,
   Plus,
   Radio,
   Smartphone,
@@ -42,6 +44,7 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 import { CameraCalibrationControls } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { cameraSourceSummary, cameraSourceTag, isPhoneCamera } from "@/src/components/ui/camera/cameraSource";
 import { FirmwareChip } from "@/src/components/ui/io/ioShared";
+import { AddSimplePlcModal } from "@/src/components/ui/io/AddSimplePlcModal";
 import { DEFAULT_PHONE_DEVICE_NAME } from "@/src/components/provider/providerUtil";
 
 import {
@@ -138,6 +141,7 @@ function DeviceNavCard({
 
 export default function IoPage() {
   const ioDevices  = useIoDevices();
+  const simplePlcs = useSimplePlcs();
   const relay  = useRelayIO();
   const status = useRobotStatus();
 
@@ -146,6 +150,7 @@ export default function IoPage() {
   const [cameras,     setCameras]     = useState<CameraState[]>([]);
   const [devices,     setDevices]     = useState<DeviceState[]>([]);
   const [addModal,    setAddModal]    = useState(false);
+  const [plcAddModal, setPlcAddModal] = useState(false);
   const [enabling,    setEnabling]    = useState<keyof IOConfig | null>(null);
   // Add-Device modal → "Phone" opens a name step (set up the device; a phone links to it later).
   const [phoneNameStep, setPhoneNameStep] = useState(false);
@@ -178,6 +183,8 @@ export default function IoPage() {
     // Refresh Nano + relay state so the IO summary cards reflect outputs a
     // running program changed, not the stale state from the last app action.
     robotClient.getIO().catch(() => {});
+    // SimplePLC heads are their own device list (also kept live by the status poll).
+    robotClient.getSimplePlcs().catch(() => {});
   }, [connected]);
 
   useFocusEffect(loadIoPage);
@@ -354,9 +361,11 @@ export default function IoPage() {
 
   // An aux-stepper device's spare-pin IO rides the same ioDevices stream, but it is shown
   // inside that device's Aux Stepper screen (not as its own card here), so exclude it from
-  // the generic IO-device cards and the count.
+  // the generic IO-device cards and the count. SimplePLC heads likewise surface their bits as
+  // ioDevices (id "PLC_xxx"), but get their own cards below sourced from simplePlcs — so exclude
+  // those too, or a PLC would appear twice.
   const auxIds = new Set(auxDevices.map(d => d.deviceId));
-  const nanoDevices = ioDevices.filter(n => !auxIds.has(n.id));
+  const nanoDevices = ioDevices.filter(n => !auxIds.has(n.id) && !n.id.startsWith("PLC_"));
 
   // Devices online/offline summary — STB4100 is always present; the rest only
   // count once their device type is enabled, mirroring the cards rendered below.
@@ -367,6 +376,7 @@ export default function IoPage() {
     ...(ioConfig.enableAuxAxis ? auxDevices.map(d => d.connected) : []),
     ...(ioConfig.enableCameras ? visibleCameras.map(c => c.connected) : []),
     ...phoneDevices.map(phoneDeviceLive),
+    ...simplePlcs.map(p => p.connected),
   ] : [];
   const totalDevices   = connectionFlags.length;
   const onlineDevices  = connectionFlags.filter(Boolean).length;
@@ -415,6 +425,21 @@ export default function IoPage() {
             leading={<FirmwareChip device={nano} />}
             onPress={() => router.push({ pathname: "/(tabs)/io/nanos", params: { deviceId: nano.id } })}
             onDelete={idx === 0 ? () => confirmRemove("Arduino Nano Devices", () => disableDeviceType("enableIoDevices")) : undefined}
+          />
+        ))}
+
+        {/* One card per SimplePLC head (its per-bit IO is excluded from the Nano cards above) */}
+        {simplePlcs.map(plc => (
+          <DeviceNavCard
+            key={plc.id}
+            icon={<Network size={20} color="#0ea5e9" />}
+            iconBg="#e0f2fe"
+            name={plc.name}
+            subtitle={plc.fault?.trim() ? `${plc.host || "—"} · ${plc.fault.trim()}` : (plc.host || "Network PLC head")}
+            connected={plc.connected}
+            tag={plc.owned ? "Owned" : null}
+            onPress={() => router.push({ pathname: "/(tabs)/io/simple-plc", params: { deviceId: plc.id } })}
+            onDelete={() => confirmRemove(plc.name, () => robotClient.removeSimplePlc(plc.id).catch(() => {}))}
           />
         ))}
 
@@ -557,6 +582,18 @@ export default function IoPage() {
                   );
                 })}
 
+                {/* A SimplePLC networked head. Multiple heads are allowed (discovered or by host). */}
+                <ListRow
+                  card={false}
+                  title="SimplePLC"
+                  subtitle="Networked PLC head with IO modules"
+                  icon={<Network size={20} color="#0ea5e9" />}
+                  iconColor="#e0f2fe"
+                  onPress={() => { setAddModal(false); setPlcAddModal(true); }}
+                  chevron
+                />
+                <Divider inset />
+
                 {/* A phone IO device (camera + sensors). Multiple are allowed, and the phone that
                     links as provider can be a different one than set it up here. */}
                 <ListRow
@@ -575,6 +612,15 @@ export default function IoPage() {
         </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* SimplePLC add flow — discover a head (or enter a host), then name + settings.
+          Keyed on visibility so its field state resets each time it opens. */}
+      <AddSimplePlcModal
+        key={plcAddModal ? "plc-open" : "plc-closed"}
+        visible={plcAddModal}
+        onClose={() => setPlcAddModal(false)}
+        onAdded={(id) => router.push({ pathname: "/(tabs)/io/simple-plc", params: { deviceId: id } })}
+      />
     </View>
   );
 }
