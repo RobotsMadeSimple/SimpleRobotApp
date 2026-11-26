@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ConnectionStatus } from "@/src/components/ui/ConnectedStatus";
-import { useIsWide, useWideContent } from "@/src/components/ui/responsive";
+import { useIsShort, useIsWide, useWideContent } from "@/src/components/ui/responsive";
 import { labelForSegment } from "./routeLabels";
 import { colors, spacing, type } from "./theme";
 
@@ -64,6 +64,7 @@ type Props = {
  */
 export function PageHeader({ title, subtitle, right, crumbs, backTo, connection = true, onBack, onNavigate }: Props) {
   const isWide = useIsWide();
+  const isShort = useIsShort();
   const insets = useSafeAreaInsets();
   const wideContent = useWideContent();
   const pathname = usePathname();
@@ -85,24 +86,26 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
   };
 
   if (isWide) {
+    // One slim bar spanning the content pane: the breadcrumb trail ends in the page title, the
+    // subtitle follows it as a quiet one-liner, and the page's actions sit on the right. (There is
+    // no separate big title block — the trail already names the page.) Always rendered, so a landing
+    // page shows its own name as the single crumb and the bar is a landmark on every wide screen.
     return (
-      <View>
-        {/* Breadcrumbs live in a real header bar spanning the content pane.
-            Always rendered — a landing page shows its own name as the single
-            crumb, so the bar is a consistent landmark on every wide screen. */}
-        {(
-          // Pad past the status bar: the app draws edge-to-edge, so without the top inset the crumb
-          // bar renders under the status bar and the system intercepts taps on the breadcrumbs.
-          <View style={[styles.crumbBar, { paddingTop: insets.top + spacing.md + 2 }]}>
-            <View style={[styles.crumbRow, wideContent]}>
+      // Pad past the status bar: the app draws edge-to-edge, so without the top inset the crumb
+      // bar renders under the status bar and the system intercepts taps on the breadcrumbs.
+      // Short (landscape phone) screens get a slimmer bar: height is the scarce axis there.
+      <View style={[styles.crumbBar, isShort && styles.crumbBarShort, { paddingTop: insets.top + (isShort ? spacing.sm : spacing.md + 2) }]}>
+        <View style={[styles.wideBarRow, wideContent]}>
+          <View style={styles.wideLead}>
+            <View style={styles.crumbRow}>
               {trail.map((crumb, i) => {
                 const last = i === trail.length - 1;
                 return (
-                  <View key={`${crumb.label}-${i}`} style={styles.crumbItem}>
+                  <View key={`${crumb.label}-${i}`} style={[styles.crumbItem, last && styles.crumbItemLast]}>
                     {i > 0 && <Text style={styles.crumbSep}>›</Text>}
                     {last || !crumb.href ? (
                       <Text style={[styles.crumb, last && styles.crumbCurrent]} numberOfLines={1}>
-                        {crumb.label}
+                        {last ? title : crumb.label}
                       </Text>
                     ) : (
                       <Pressable onPress={() => goCrumb(crumb.href!)} hitSlop={6}>
@@ -117,16 +120,9 @@ export function PageHeader({ title, subtitle, right, crumbs, backTo, connection 
                 );
               })}
             </View>
+            {!!subtitle && <Text style={[type.caption, styles.wideSubtitle]} numberOfLines={1}>{subtitle}</Text>}
           </View>
-        )}
-        <View style={[styles.wideWrap, wideContent]}>
-          <View style={styles.wideTitleRow}>
-            <View style={styles.titleBlock}>
-              <Text style={styles.wideTitle} numberOfLines={1}>{title}</Text>
-              {!!subtitle && <Text style={[type.body, styles.wideSubtitle]} numberOfLines={2}>{subtitle}</Text>}
-            </View>
-            {right != null && <View style={styles.right}>{right}</View>}
-          </View>
+          {right != null && <View style={styles.right}>{right}</View>}
         </View>
       </View>
     );
@@ -171,21 +167,17 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     paddingVertical: spacing.md + 2,
   },
-  wideWrap: {
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
-  },
-  crumbRow:  { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  crumbItem: { flexDirection: "row", alignItems: "center" },
+  crumbBarShort: { paddingVertical: spacing.sm },
+  wideBarRow: { flexDirection: "row", alignItems: "center", gap: spacing.lg, minHeight: 36 },
+  wideLead:   { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "baseline", gap: spacing.md },
+  crumbRow:  { flexDirection: "row", alignItems: "center", flexShrink: 0, maxWidth: "70%" },
+  crumbItem: { flexDirection: "row", alignItems: "center", flexShrink: 0 },
+  crumbItemLast: { flexShrink: 1, minWidth: 0 },
   crumbSep:  { color: colors.textFaint, fontSize: 16, marginHorizontal: spacing.sm },
   crumb:     { color: colors.textMuted, fontSize: 16, fontWeight: "600" },
   crumbHover:   { color: colors.accent },
-  crumbCurrent: { color: colors.text, fontWeight: "600" },
-  wideTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.lg },
-  titleBlock:   { flex: 1, minWidth: 0 },
-  wideTitle:    { fontSize: 24, fontWeight: "700", color: colors.text },
-  wideSubtitle: { marginTop: 2 },
+  crumbCurrent: { color: colors.text, fontSize: 18, fontWeight: "700" },
+  wideSubtitle: { flex: 1, minWidth: 0 },
   right: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
 
   // Narrow: a real mobile header bar with safe-area padding.

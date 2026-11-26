@@ -22,8 +22,10 @@ import {
 import { router } from "expo-router";
 import { useIsWide } from "@/src/components/ui/responsive";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { EstopConfigSection } from "@/src/components/ui/safety/EstopConfigSection";
 import { robotClient } from "@/src/services/RobotConnectService";
 import {
+  Activity,
   Gauge,
   Home,
   MoveHorizontal,
@@ -75,6 +77,9 @@ type RobotConfig = {
   astroJoint1GearRatio: number;
   astroJoint4GearRatio: number;
   astroCoreXyPulleyPcdMm: number;
+  // ASTRO axis lengths (draw-only: the 3D model's column / reach; older controllers omit them)
+  astroVerticalTravelMm?: number;
+  astroRadialTravelMm?: number;
   // CNC4Axis motor config
   cncStepsPerRevX:  number;
   cncStepsPerRevY:  number;
@@ -102,6 +107,10 @@ type RobotConfig = {
   joint3Max: number | null;
   joint4Min: number | null;
   joint4Max: number | null;
+  // Motion profile of program / point moves (older controllers omit these)
+  motionProfile?: "trapezoid" | "scurve";
+  scurveSmoothness?: number;
+  scurveJerk?: number | null;
 };
 
 type EditingField = {
@@ -224,6 +233,14 @@ export default function ConfigureRobot() {
 
   const isCNC = config?.robotType === "CNC4Axis";
 
+  async function setMotionProfile(next: "trapezoid" | "scurve") {
+    if (!config || config.motionProfile === next) return;
+    const prev = config.motionProfile;
+    setConfig({ ...config, motionProfile: next });
+    try { await robotClient.setRobotConfig({ motionProfile: next }); }
+    catch { setConfig(c => c ? { ...c, motionProfile: prev } : c); }
+  }
+
   async function toggleJointLimits() {
     if (!config) return;
     const next = !config.jointLimitsEnabled;
@@ -237,7 +254,10 @@ export default function ConfigureRobot() {
     try {
       const patch: any = {};
       if ((editing.type === "number" || editing.type === "homing") && editing.numKey)
-        patch[editing.numKey] = parseFloat(editing.numText);
+        // The S-curve jerk is optional: blank clears it (null = derived from the smoothness).
+        patch[editing.numKey] = editing.numKey === "scurveJerk" && !editing.numText.trim()
+          ? null
+          : parseFloat(editing.numText);
       if ((editing.type === "direction" || editing.type === "homing") && editing.dirKey)
         patch[editing.dirKey] = editing.dirValue;
       if (editing.type === "cncAxis") {
@@ -469,6 +489,37 @@ export default function ConfigureRobot() {
                 }) : undefined}
               />
             </Card>
+
+            {/* ── Axis Travel (ASTRO) — what the 3D view draws ── */}
+            <SectionHeader
+              title="Axis Travel"
+              icon={Ruler}
+              right={<InfoTip text="How long this robot's vertical column and radial reach are built, so the 3D view draws them to size. Only the drawing changes — motion and kinematics don't use these. Default 400 mm each." />}
+            />
+            <Card>
+              {([
+                { key: "astroVerticalTravelMm", label: "Vertical Travel", edit: "VERTICAL TRAVEL (mm)", Icon: MoveVertical, tint: colors.accent, bg: colors.accentSoft },
+                { key: "astroRadialTravelMm", label: "Radial Travel", edit: "RADIAL TRAVEL (mm)", Icon: MoveHorizontal, tint: accents.orange, bg: accents.orangeSoft },
+              ] as const).map((row, i) => {
+                const v = config?.[row.key];
+                const known = typeof v === "number";
+                return (
+                  <ConfigRow
+                    key={row.key}
+                    icon={<row.Icon size={16} color={row.tint} />}
+                    tileBg={row.bg}
+                    label={row.label}
+                    value={!config ? "—" : known ? `${v} mm` : "Needs a controller update"}
+                    last={i === 1}
+                    onPress={config && known ? () => setEditing({
+                      label: row.label, type: "number",
+                      numKey: row.key, numText: String(v),
+                      unit: "mm", editLabel: row.edit, placeholder: "400", dirValue: 1,
+                    }) : undefined}
+                  />
+                );
+              })}
+            </Card>
           </>
         )}
 
@@ -616,6 +667,55 @@ export default function ConfigureRobot() {
           ))}
         </Card>
 
+        {/* ── Motion Profile ── */}
+        <SectionHeader
+          title="Motion Profile"
+          icon={Activity}
+          right={<InfoTip text="How program and point moves speed up and slow down. Trapezoid uses constant acceleration (the default). S-curve ramps the acceleration itself, for a smoother start and stop with less jolt — the same move takes a little longer. A move step can pick its own profile. Homing and jogging always use the trapezoid." />}
+        />
+        <Card>
+          <View style={styles.profileBlock}>
+            <SegmentedControl
+              options={[{ label: "Trapezoid", value: "trapezoid" }, { label: "S-curve", value: "scurve" }]}
+              value={config?.motionProfile ?? "trapezoid"}
+              onChange={v => setMotionProfile(v as "trapezoid" | "scurve")}
+            />
+            <Text style={styles.profileHint}>
+              {config?.motionProfile === "scurve"
+                ? "Jerk-limited moves: the acceleration ramps instead of stepping."
+                : "Constant-acceleration ramps — the classic profile."}
+            </Text>
+          </View>
+          {config?.motionProfile === "scurve" && (
+            <>
+              <Divider inset />
+              <ConfigRow
+                icon={<Activity size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
+                label="Smoothness"
+                value={`${config.scurveSmoothness ?? 50} %`}
+                onPress={() => setEditing({
+                  label: "S-curve Smoothness", type: "number",
+                  numKey: "scurveSmoothness", numText: String(config.scurveSmoothness ?? 50),
+                  editLabel: "SMOOTHNESS (1–100 %)", placeholder: "50", dirValue: 1,
+                })}
+              />
+              <ConfigRow
+                icon={<Activity size={16} color={accents.purple} />}
+                tileBg={accents.purpleSoft}
+                label="Jerk Limit"
+                value={config.scurveJerk ? `${config.scurveJerk} u/s³` : "From smoothness"}
+                last
+                onPress={() => setEditing({
+                  label: "S-curve Jerk Limit", type: "number",
+                  numKey: "scurveJerk", numText: config.scurveJerk ? String(config.scurveJerk) : "",
+                  editLabel: "JERK LIMIT (u/s³)", placeholder: "From smoothness", dirValue: 1,
+                })}
+              />
+            </>
+          )}
+        </Card>
+
         {/* ── Joint Limits ── */}
         <SectionHeader
           title="Joint Limits"
@@ -679,6 +779,9 @@ export default function ConfigureRobot() {
           disabled={!config}
           style={styles.wizardBtn}
         />
+
+        {/* ── Emergency stop (hardwired e-stop sense input) ── */}
+        <EstopConfigSection />
     </>
   );
 
@@ -936,6 +1039,16 @@ const styles = StyleSheet.create({
   // ── Joint-limits wizard launch ────────────────────────────────────────────────
   wizardBtn: {
     marginTop: spacing.sm,
+  },
+
+  // ── Motion profile ───────────────────────────────────────────────────────────
+  profileBlock: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  profileHint: {
+    ...type.caption,
   },
 
   // ── Reset-all footer ─────────────────────────────────────────────────────────

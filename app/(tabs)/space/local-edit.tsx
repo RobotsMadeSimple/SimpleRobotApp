@@ -22,10 +22,12 @@ import {
   offsetToDraft,
   parseOffsetDraft,
 } from "@/src/components/space/OffsetFields";
+import { SpacePreview3D } from "@/src/components/space/space3d";
+import type { Cell3DPreview } from "@/src/components/ui/cell3d/bridge";
 import { useLocals, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 
 type Pose = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
@@ -108,6 +110,14 @@ export default function LocalEditPage() {
 
   const title = isNew ? "New Local" : "Edit Local";
 
+  const pose = parseOffsetDraft(draft);
+  const preview = useMemo<Cell3DPreview>(() => ({
+    kind: "local",
+    id: existing?.id || undefined,
+    name: pose.name || "New local",
+    pose: { x: pose.x, y: pose.y, z: pose.z, rx: pose.rx, ry: pose.ry, rz: pose.rz },
+  }), [existing?.id, pose.name, pose.x, pose.y, pose.z, pose.rx, pose.ry, pose.rz]);
+
   const identity = (
     <FieldGroup>
       <View>
@@ -174,6 +184,8 @@ export default function LocalEditPage() {
       <Screen>
         {/* The whole local setup in one card; split in two halves on desktop. */}
         <EditorCard left={[identity]} right={[offset]} />
+        {/* The frame being defined, live as the fields change, relative to the robot. */}
+        <SpacePreview3D preview={preview} />
       </Screen>
     </KeyboardAvoidingView>
   );

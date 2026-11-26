@@ -2,13 +2,12 @@
 // Import the token directly (not via the kit barrel): PageHeader — re-exported by
 // the barrel — imports this file, so going through the barrel forms a require cycle.
 import { colors } from "@/src/components/ui/kit/theme";
-import { useConnected, useSelectedRobot } from "@/src/providers/RobotProvider";
+import { useConnected, useSelectedRobotName } from "@/src/providers/RobotProvider";
 import { Text, View } from "react-native";
 
 export function ConnectionStatus() {
   const connected    = useConnected();
-  const selectedRobot = useSelectedRobot();
-  const robotName    = selectedRobot?.robotName;
+  const robotName    = useSelectedRobotName();
 
   return (
     <View style={{ alignItems: "flex-end", marginRight: 12 }}>

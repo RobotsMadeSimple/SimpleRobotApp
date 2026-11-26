@@ -1,9 +1,11 @@
-﻿import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
+import { getSelectedRobot, setSelectedRobot, subscribeRobot } from "../connections/robotState";
 import { pickReachableEndpoint } from "./addressPick";
 import { enrichByAddress, knownEndpoints } from "./connectionStore";
 import { robotDiscovery } from "./RobotDiscoveryService";
-import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
+import { AuxDeviceState, BuiltProgram, ExecuteOptions, FormatProgramTextResult, ParseProgramTextResult, ProgramTextMapEntry, StepCatalog, TextProblem, CalibrationDetectOptions, CalibrationRobotPoint, CalibrationSession, CalibrationSolveResult, CalibrationTaughtDot, CameraCalibration, CameraCodec, CameraDecoder, CameraSourceTestResult, CameraSourceType, CameraState, CameraStream, CameraTransport, DeviceState, Matrix3, PluginConfigValues, PluginContributions, PluginDetail, PluginLogPage, PluginSummary, ExpressionEvaluation, ExpressionSymbols, ProgramRevision, ValidationProblem, Grid, IoHistoryWindow, IoRecordingMeta, IoSample, Local, IoDeviceState, NeoPixelColor, Point, ProgramImageSnapshot, ProgramStatus, ProgramSummary, ProgramVariableSnapshot, RobotInfo, RobotStack, RobotStatus, SerialDeviceConfigInput, SerialDeviceState, SerialPortInfo, Tool, UsbRelayState, VisionProgram, VisionResult, createDefaultStatus } from "../models/robotModels";
 import { normalizeVisionProgram, type Pose, type Region } from "../models/visionTools";
+import { conveyorToWire, normalizeConveyor, setConveyorNames, normalizeConveyorCalibration, normalizeConveyorSample, normalizeConveyorStatus, wireList } from "../models/conveyors";
+import type { Conveyor, ConveyorCalibration, ConveyorSample, ConveyorStatus } from "../models/robotModels";
 type MessageHandler<T = any>  = (data: T) => void;
 type StatusListener           = (status: RobotStatus)                    => void;
 type PointsListener           = (points: Point[])                        => void;
@@ -11,12 +13,15 @@ type ToolsListener            = (tools: Tool[])                          => void
 type LocalsListener           = (locals: Local[])                        => void;
 type BuiltProgramsListener    = (programs: BuiltProgram[])               => void;
 type IoDevicesListener           = (ioDevices: IoDeviceState[])                     => void;
+type SerialDevicesListener       = (serialDevices: SerialDeviceState[])             => void;
 type RelayIOListener          = (relay: UsbRelayState | null)            => void;
 type AuxAxisListener          = (aux: AuxDeviceState[])                  => void;
 type CamerasListener          = (cameras: CameraState[])                 => void;
 type ProgramImagesListener    = (images: Record<string, string | null>)  => void;
 type GridsListener            = (grids: Grid[])                          => void;
 type StacksListener           = (stacks: RobotStack[])                   => void;
+/** The conveyor list, and whether the controller has conveyor tracking at all (null = not known yet). */
+export type ConveyorsSnapshot = { conveyors: Conveyor[]; supported: boolean | null };
 type PendingAck = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
@@ -57,12 +62,15 @@ export class RobotConnectService {
   private readonly localsTopic        = createTopic<Local[]>();
   private readonly builtProgramsTopic = createTopic<BuiltProgram[]>();
   private readonly ioDevicesTopic        = createTopic<IoDeviceState[]>();
+  private readonly serialDevicesTopic    = createTopic<SerialDeviceState[]>();
   private readonly relayIOTopic       = createTopic<UsbRelayState | null>();
   private readonly auxAxisTopic       = createTopic<AuxDeviceState[]>();
   private readonly camerasTopic       = createTopic<CameraState[]>();
   private readonly programImagesTopic = createTopic<Record<string, string | null>>();
   private readonly gridsTopic         = createTopic<Grid[]>();
   private readonly stacksTopic        = createTopic<RobotStack[]>();
+  private readonly conveyorsTopic     = createTopic<ConveyorsSnapshot>();
+  private readonly conveyorStatusTopic = createTopic<ConveyorStatus[]>();
   private status:       RobotStatus        = createDefaultStatus();
   private connecting:   boolean            = false;
   private points:       Point[]            = [];
@@ -73,11 +81,17 @@ export class RobotConnectService {
   private relayIO:        UsbRelayState | null          = null;
   private lastRelayJson:  string                        = "";
   private lastIoDevicesJson:  string                        = "";
+  private serialDevices:  SerialDeviceState[]           = [];
+  private lastSerialDevicesJson: string                 = "";
   private auxAxis:        AuxDeviceState[]              = [];
   private cameras:        CameraState[]                 = [];
   private programImages:  Record<string, string | null> = {};
   private grids:          Grid[]                        = [];
   private stacks:         RobotStack[]                  = [];
+  private conveyors:      ConveyorsSnapshot             = { conveyors: [], supported: null };
+  private conveyorStatus: ConveyorStatus[]              = [];
+  private lastConveyorStatusJson                        = "";
+  private conveyorRefetchAt                             = 0;
 
   private ws: WebSocket | null = null;
   private url?: string;
@@ -199,6 +213,7 @@ export class RobotConnectService {
       this.getPrograms().catch(() => {});
       this.getGrids().catch(() => {});
       this.getStacks().catch(() => {});
+      this.getConveyors().catch(() => {});
       this.getIO().catch(() => {});
       this.getAuxState().catch(() => {});
       this.getRobotInfo().then((info: any) => {
@@ -321,7 +336,19 @@ export class RobotConnectService {
         // Nano state likewise rides along so live values (load-cell readings in
         // particular) update every poll, not only on GetIO at page entry.
         this.updateIoDevicesFromStatus(data.ioDevices);
-        this.emitStatus(data);
+        // Generic serial devices ride along too, so the console (recentLines) and connected flag
+        // update live every poll, mirroring the nano path.
+        this.updateSerialDevicesFromStatus(data.serialDevices);
+        // Conveyor live state (≤ 10 Hz) goes to its own store, not the status object, so a moving
+        // belt re-renders only the conveyor views.
+        this.updateConveyorsFromStatus(data.conveyors);
+        delete data.conveyors;
+        {
+          // The ack envelope isn't status: its `id` is new on every poll, which made every poll
+          // look like a change (the whole app re-rendered 10× a second with the robot idle).
+          const { id: _id, type: _type, command: _command, ok: _ok, ...statusData } = data;
+          this.emitStatus(statusData);
+        }
         break;
       
       case "GetPoints":
@@ -421,6 +448,21 @@ export class RobotConnectService {
     this.emitIoDevices();
   }
 
+  // Apply serial-device state carried in the status broadcast. `data.serialDevices` is a JSON
+  // string (same shape GetSerialDevices returns). Only reparse + emit when the string changed.
+  private updateSerialDevicesFromStatus(serialDevices: any) {
+    if (typeof serialDevices !== "string") return;
+    if (serialDevices === this.lastSerialDevicesJson) return;
+    this.lastSerialDevicesJson = serialDevices;
+    try {
+      const parsed = JSON.parse(serialDevices);
+      this.serialDevices = Array.isArray(parsed) ? (parsed as SerialDeviceState[]) : [];
+    } catch {
+      this.serialDevices = [];
+    }
+    this.emitSerialDevices();
+  }
+
   private decodeIO(data: any) {
     // Nano devices
     if (!data.ioDevices) {
@@ -468,6 +510,7 @@ export class RobotConnectService {
     this.points = parsed.map((p: any): Point => ({
       id: p.id ?? p.Id ?? "",
       name: p.Name,
+      description: p.Description ?? p.description ?? "",
       lastUpdatedUnixMs: p.LastUpdatedUnixMs,
       x: p.X,
       y: p.Y,
@@ -530,8 +573,25 @@ export class RobotConnectService {
     if (update.lastProgramUpdate      !== undefined && update.lastProgramUpdate      !== prev.lastProgramUpdate)      this.getPrograms().catch(() => {});
     if (update.lastGridUpdate         !== undefined && update.lastGridUpdate         !== prev.lastGridUpdate)         this.getGrids().catch(() => {});
     if (update.lastStackUpdate        !== undefined && update.lastStackUpdate        !== prev.lastStackUpdate)        this.getStacks().catch(() => {});
+    {
+      const u = update as Record<string, unknown>, pr = prev as Record<string, unknown>;
+      if (u.lastConveyorUpdate !== undefined && u.lastConveyorUpdate !== pr.lastConveyorUpdate) this.getConveyors().catch(() => {});
+    }
 
     const next = { ...prev, ...update };
+
+    // Keep the previous value for any object/list field that is deep-equal to it: each poll parses
+    // fresh copies (programs, plugins, the relay board…). Without this an unchanged `relay` object
+    // counted as a change on every poll, so the whole app re-rendered 10× a second even with the
+    // robot idle; and a tick that only moves the arm handed every program-list consumer a "new" list.
+    const nextRec = next as Record<string, unknown>, prevRec = prev as Record<string, unknown>;
+    for (const key of Object.keys(update)) {
+      const nv = nextRec[key], pv = prevRec[key];
+      if (nv !== pv && nv !== null && pv !== null && typeof nv === "object" && typeof pv === "object"
+          && JSON.stringify(nv) === JSON.stringify(pv)) {
+        nextRec[key] = pv;
+      }
+    }
 
     // Skip listener calls when nothing meaningful changed — prevents unnecessary React re-renders
     // while the robot is idle between poll ticks.
@@ -542,13 +602,15 @@ export class RobotConnectService {
   }
 
   private statusEq(a: RobotStatus, b: RobotStatus): boolean {
-    // Non-primitive fields that require deep comparison
+    // Non-primitive fields that require deep comparison (emitStatus already keeps the old
+    // reference for any deep-equal object, so equal values short-circuit on `===` below)
     const NON_PRIMITIVE: ReadonlySet<keyof RobotStatus> = new Set(['programs', 'backgroundPrograms', 'plugins', 'jointReferenced']);
 
     // Compare over the union of all keys so newly added fields are never silently skipped
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof RobotStatus>;
     for (const key of keys) {
       const av = a[key], bv = b[key];
+      if (av === bv) continue;
       if (NON_PRIMITIVE.has(key)) {
         if (JSON.stringify(av) !== JSON.stringify(bv)) return false;
       } else {
@@ -616,6 +678,16 @@ export class RobotConnectService {
 
   private emitIoDevices() {
     this.ioDevicesTopic.emit(this.ioDevices);
+  }
+
+  onSerialDevices(cb: SerialDevicesListener) {
+    const unsub = this.serialDevicesTopic.on(cb);
+    cb(this.serialDevices);
+    return unsub;
+  }
+
+  private emitSerialDevices() {
+    this.serialDevicesTopic.emit(this.serialDevices);
   }
 
   onRelayIO(cb: RelayIOListener) {
@@ -686,6 +758,44 @@ export class RobotConnectService {
     if (!Array.isArray(parsed)) { this.stacks = []; this.emitStacks(); return; }
     this.stacks = parsed as RobotStack[];
     this.emitStacks();
+  }
+
+  // ── Conveyors ─────────────────────────────────────────────────────────────
+
+  onConveyors(cb: (s: ConveyorsSnapshot) => void) {
+    const unsub = this.conveyorsTopic.on(cb);
+    cb(this.conveyors);
+    return unsub;
+  }
+
+  onConveyorStatus(cb: (s: ConveyorStatus[]) => void) {
+    const unsub = this.conveyorStatusTopic.on(cb);
+    cb(this.conveyorStatus);
+    return unsub;
+  }
+
+  private setConveyors(next: ConveyorsSnapshot) {
+    if (next.supported === this.conveyors.supported
+        && JSON.stringify(next.conveyors) === JSON.stringify(this.conveyors.conveyors)) return;
+    this.conveyors = next;
+    setConveyorNames(next.conveyors);
+    this.conveyorsTopic.emit(next);
+  }
+
+  // `conveyors` in the status: an array (or a JSON string of one). Only reparse + emit on change.
+  private updateConveyorsFromStatus(raw: unknown) {
+    if (raw === undefined) return;
+    const json = typeof raw === "string" ? raw : JSON.stringify(raw ?? []);
+    if (json === this.lastConveyorStatusJson) return;
+    this.lastConveyorStatusJson = json;
+    this.conveyorStatus = wireList(raw).map(normalizeConveyorStatus).filter((c): c is ConveyorStatus => c !== null);
+    this.conveyorStatusTopic.emit(this.conveyorStatus);
+    // A conveyor the list doesn't know yet (made elsewhere): refetch, at most every 2 s.
+    const known = new Set(this.conveyors.conveyors.map(c => c.id));
+    if (this.conveyorStatus.some(c => !known.has(c.id)) && Date.now() > this.conveyorRefetchAt) {
+      this.conveyorRefetchAt = Date.now() + 2000;
+      this.getConveyors().catch(() => {});
+    }
   }
 
   private decodeTools(data: any) {
@@ -873,6 +983,7 @@ export class RobotConnectService {
 
   public editPoint(name: string, fields: {
     newName?: string;
+    description?: string;
     x?: number; y?: number; z?: number;
     rx?: number; ry?: number; rz?: number;
   }) {
@@ -1068,6 +1179,7 @@ export class RobotConnectService {
       description:         program.description,
       steps:               program.steps,
       variables:           program.variables,
+      points:              program.points,
       displayPageHtml:     program.displayPageHtml,
       displayPageMode:     program.displayPageMode,
       displayPageLayout:   program.displayPageLayout,
@@ -1364,7 +1476,9 @@ export class RobotConnectService {
     return this.sendCommand("SaveGrid", {
       id:            grid.id,
       name:          grid.name,
+      description:    grid.description ?? "",
       basePointName: grid.basePointName,
+      basePointId:   grid.basePointId ?? "",
       rowOffsetX:    grid.rowOffsetX,
       rowOffsetY:    grid.rowOffsetY,
       rowOffsetZ:    grid.rowOffsetZ,
@@ -1374,6 +1488,9 @@ export class RobotConnectService {
       rowCount:      grid.rowCount,
       colCount:      grid.colCount,
       rotation:      grid.rotation,
+      method:        grid.method ?? "",
+      rowSide:       grid.rowSide ?? "",
+      corners:       grid.corners ?? [],
     });
   }
 
@@ -1399,6 +1516,68 @@ export class RobotConnectService {
 
   public deleteStack(id: string) {
     return this.sendCommand("DeleteStack", { id });
+  }
+
+  // ── Conveyor tracking (controller docs/conveyor-tracking.md) ────────────────
+  // Newer controllers only: an older one answers UnsupportedCommandError, which getConveyors
+  // records as `supported: false` so the Conveyors pages can say so instead of failing.
+
+  public async getConveyors(): Promise<Conveyor[]> {
+    try {
+      const ack = await this.request("GetConveyors", {});
+      const list = wireList(ack.conveyors).map(normalizeConveyor).filter(c => c.id);
+      this.setConveyors({ conveyors: list, supported: true });
+      return list;
+    } catch (e) {
+      if (isUnsupportedCommand(e)) this.setConveyors({ conveyors: [], supported: false });
+      throw e;
+    }
+  }
+
+  /** Save (an empty id creates one). Resolves the saved conveyor, with its id. */
+  public async saveConveyor(conveyor: Conveyor): Promise<Conveyor> {
+    const ack = await this.request("SaveConveyor", { conveyor: conveyorToWire(conveyor) });
+    let raw: unknown = ack.conveyor;
+    if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { raw = null; } }
+    const saved = raw ? normalizeConveyor(raw) : { ...conveyor };
+    this.getConveyors().catch(() => {});
+    return saved;
+  }
+
+  public async deleteConveyor(id: string): Promise<void> {
+    await this.request("DeleteConveyor", { id });
+    this.getConveyors().catch(() => {});
+  }
+
+  /** Software trigger: add a part whose X in the conveyor frame is `offsetMm` right now. */
+  public async conveyorAddPart(id: string, offsetMm: number): Promise<string | null> {
+    const ack = await this.request("ConveyorAddPart", { id, offsetMm });
+    return ack.partId != null ? String(ack.partId) : null;
+  }
+
+  public async conveyorClearQueue(id: string): Promise<void> {
+    await this.request("ConveyorClearQueue", { id });
+  }
+
+  /** `manual` sources only. */
+  public async conveyorSetTravel(id: string, travelMm: number): Promise<void> {
+    await this.request("ConveyorSetTravel", { id, travelMm });
+  }
+
+  /** The current TCP + belt travel, for calibration. */
+  public async conveyorSample(id: string): Promise<ConveyorSample> {
+    return normalizeConveyorSample(await this.request("ConveyorSample", { id }));
+  }
+
+  /** A calibration proposal from ≥ 2 samples of one belt mark (not saved). */
+  public async conveyorCalibrate(
+    id: string,
+    samples: { x: number; y: number; z: number; travelMm: number }[],
+    sensorSample?: { x: number; y: number; z: number; travelMm: number; latchTravelMm: number },
+  ): Promise<ConveyorCalibration> {
+    const params: Record<string, unknown> = { id, samples };
+    if (sensorSample) params.sensorSample = sensorSample;
+    return normalizeConveyorCalibration(await this.request("ConveyorCalibrate", params));
   }
 
   public saveProgramImage(name: string, imageBase64: string) {
@@ -1486,7 +1665,7 @@ export class RobotConnectService {
   }
 
   public setIoOutput(deviceId: string, pin: number, value: boolean) {
-    return this.sendCommand("SetNanoOutput", { deviceId, pin, value });
+    return this.sendCommand("SetIoOutput", { deviceId, pin, value });
   }
 
   public setNeoPixel(deviceId: string, pin: number, colors: NeoPixelColor[]) {
@@ -1494,12 +1673,12 @@ export class RobotConnectService {
   }
 
   public renameIoPin(deviceId: string, pin: number, name: string) {
-    return this.sendCommand("RenameNanoPin", { deviceId, pin, name })
+    return this.sendCommand("RenameIoPin", { deviceId, pin, name })
       .then(() => this.getIO().catch(() => {}));
   }
 
   public configureIoPin(deviceId: string, pin: number, type: string, pixelCount = 8) {
-    return this.sendCommand("ConfigureNanoPin", { deviceId, pin, type, pixelCount })
+    return this.sendCommand("ConfigureIoPin", { deviceId, pin, type, pixelCount })
       .then(() => this.getIO().catch(() => {}));
   }
 
@@ -1526,6 +1705,71 @@ export class RobotConnectService {
   public setLoadCellUnit(deviceId: string, pin: number, unit: string) {
     return this.sendCommand("SetLoadCellUnit", { deviceId, pin, unit })
       .then(() => this.getIO().catch(() => {}));
+  }
+
+  // ── Generic serial devices ───────────────────────────────────────────────────
+
+  /** List physical serial ports with descriptive info + whether each is already in use. */
+  public async listSerialPorts(): Promise<SerialPortInfo[]> {
+    const d: any = await this.sendCommand("ListSerialPorts");
+    return Array.isArray(d?.ports) ? (d.ports as SerialPortInfo[]) : [];
+  }
+
+  /** Fetch the configured serial devices; also refreshes the local store + emits. */
+  public async getSerialDevices(): Promise<SerialDeviceState[]> {
+    const d: any = await this.sendCommand("GetSerialDevices");
+    let list: SerialDeviceState[] = [];
+    if (typeof d?.serialDevices === "string") {
+      try { const p = JSON.parse(d.serialDevices); if (Array.isArray(p)) list = p as SerialDeviceState[]; } catch { /* keep [] */ }
+    } else if (Array.isArray(d?.serialDevices)) {
+      list = d.serialDevices as SerialDeviceState[];
+    }
+    this.serialDevices = list;
+    this.lastSerialDevicesJson = JSON.stringify(list);
+    this.emitSerialDevices();
+    return list;
+  }
+
+  /** Create a serial device on a chosen port. Returns the new device id. */
+  public async addSerialDevice(cfg: SerialDeviceConfigInput): Promise<string> {
+    const d: any = await this.sendCommand("AddSerialDevice", cfg as any);
+    this.getSerialDevices().catch(() => {});
+    // The controller returns the new id as "deviceId" (not "id"): the WS ack envelope keys on the
+    // message id and merges the payload over it, so an "id" key would clobber the ack's message id.
+    return typeof d?.deviceId === "string" ? d.deviceId : "";
+  }
+
+  public removeSerialDevice(id: string) {
+    return this.sendCommand("RemoveSerialDevice", { id })
+      .then(() => this.getSerialDevices().catch(() => {}));
+  }
+
+  public setSerialDeviceConfig(cfg: SerialDeviceConfigInput & { id: string }) {
+    return this.sendCommand("SetSerialDeviceConfig", cfg as any)
+      .then(() => this.getSerialDevices().catch(() => {}));
+  }
+
+  /**
+   * Send a command to a serial device: a saved command (`commandId`) or raw `text`.
+   * When `expectReply`, the controller blocks up to `replyTimeoutMs` for reply lines.
+   */
+  public async sendSerialCommand(
+    id: string,
+    opts: { commandId?: string; text?: string; expectReply?: boolean; replyTimeoutMs?: number },
+  ): Promise<{ ok: boolean; reply: string; lines: string[]; error?: string }> {
+    const d: any = await this.sendCommand("SendSerialCommand", { id, ...opts });
+    return {
+      ok: !!d?.ok,
+      reply: typeof d?.reply === "string" ? d.reply : "",
+      lines: Array.isArray(d?.lines) ? (d.lines as string[]) : [],
+      error: typeof d?.error === "string" ? d.error : undefined,
+    };
+  }
+
+  /** Manually open/close the device's serial port. */
+  public setSerialDeviceConnected(id: string, connected: boolean) {
+    return this.sendCommand("SetSerialDeviceConnected", { id, connected })
+      .then(() => this.getSerialDevices().catch(() => {}));
   }
 
   // ── IO value history + recordings ────────────────────────────────────────────
@@ -1686,6 +1930,9 @@ export class RobotConnectService {
     astroJoint1GearRatio: number;
     astroJoint4GearRatio: number;
     astroCoreXyPulleyPcdMm: number;
+    /** ASTRO axis lengths the 3D model is drawn with (docs/cell-package.md §3.1); absent on older controllers. */
+    astroVerticalTravelMm?: number;
+    astroRadialTravelMm?: number;
     cncStepsPerRevX: number;
     cncStepsPerRevY: number;
     cncStepsPerRevZ: number;
@@ -1710,6 +1957,12 @@ export class RobotConnectService {
     joint3Max: number | null;
     joint4Min: number | null;
     joint4Max: number | null;
+    /** Speed profile of program / point moves (homing and jogging stay trapezoid); absent on older controllers. */
+    motionProfile?: "trapezoid" | "scurve";
+    /** S-curve smoothness 1–100 %, used when no jerk is set. */
+    scurveSmoothness?: number;
+    /** Absolute S-curve jerk limit (units/s³); null = derived from the smoothness. */
+    scurveJerk?: number | null;
   }> {
     return this.sendCommand("GetRobotConfig") as any;
   }
@@ -1743,6 +1996,8 @@ export class RobotConnectService {
     astroJoint1GearRatio?: number;
     astroJoint4GearRatio?: number;
     astroCoreXyPulleyPcdMm?: number;
+    astroVerticalTravelMm?: number;
+    astroRadialTravelMm?: number;
     cncStepsPerRevX?: number;
     cncStepsPerRevY?: number;
     cncStepsPerRevZ?: number;
@@ -1767,6 +2022,10 @@ export class RobotConnectService {
     joint3Max?: number | null;
     joint4Min?: number | null;
     joint4Max?: number | null;
+    motionProfile?: "trapezoid" | "scurve";
+    scurveSmoothness?: number;
+    /** null clears it (the jerk is then derived from the smoothness). */
+    scurveJerk?: number | null;
   }) {
     return this.sendCommand("SetRobotConfig", fields);
   }
@@ -1882,8 +2141,20 @@ export class RobotConnectService {
     gripperCloseTimeSec?: number;
     gripperAccel?: number;
     gripperOverTravelMm?: number;
+    siloPitchMm?: number;
+    siloCapacity?: number;
+    siloClearanceMm?: number;
+    siloHomeOverTravelMm?: number;
+    siloHomeSpeed?: number;
   }) {
     return this.sendCommand("SetAuxAxisConfig", params);
+  }
+
+  /** Silo role (controller docs/aux-silo.md). Acks after the motion finishes (Home / Present /
+   *  Refill) with `{ siloCount, siloHomed }`, so the timeout outlasts the controller's own
+   *  120 s move limit (it then answers `siloTimeout`). */
+  public siloAction(deviceId: string, axis: number, action: "Home" | "Present" | "Refill" | "SetCount", count?: number) {
+    return this.sendCommand("SiloAction", { deviceId, axis, action, ...(count != null ? { count } : {}) }, 130000);
   }
 
   public enableAux(deviceId: string, enable: boolean) {

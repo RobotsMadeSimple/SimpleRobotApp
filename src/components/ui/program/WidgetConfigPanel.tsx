@@ -4,7 +4,8 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 
 import { ExpressionField } from "@/src/components/ui/builder/expressions/ExpressionEditorModal";
 import { colors, radii, spacing } from "@/src/components/ui/kit";
-import type { DisplayWidget, PluginSummary, ProgramVariable } from "@/src/models/robotModels";
+import type { DisplayWidget, PluginParamDef, PluginSummary, ProgramVariable } from "@/src/models/robotModels";
+import { useCameras } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { ConfigField, DISPLAY_WIDGET_DEFS } from "./displayWidgets";
 
@@ -129,6 +130,10 @@ function FieldInput({
     );
   }
 
+  if (field.kind === "camera") {
+    return <CameraPicker value={value ?? ""} onChange={onChange} />;
+  }
+
   if (field.kind === "plugin") {
     return <PluginPicker config={config} onSetMany={onSetMany} />;
   }
@@ -147,10 +152,34 @@ function FieldInput({
   );
 }
 
-/** Lists installed plugins that ship a UI; selecting one stores id/entry/title/name. */
+/** Picks a connected camera for the live-camera widget; stores its id. */
+function CameraPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const cameras = useCameras();
+  if (cameras.length === 0) return <Text style={styles.muted}>No cameras — add one on the I/O page first.</Text>;
+  return (
+    <View style={styles.chipRow}>
+      {cameras.map((cam) => {
+        const active = value === cam.id;
+        return (
+          <TouchableOpacity key={cam.id} style={[styles.chip, active && styles.chipActive]} onPress={() => onChange(cam.id)} activeOpacity={0.7}>
+            <Text style={[styles.chipText, active && styles.chipTextActive]}>{cam.name}{cam.connected ? "" : " (offline)"}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+type PluginUiInfo = { entry: string; title: string; params: PluginParamDef[] };
+
+/**
+ * Lists installed plugins that ship a UI; selecting one stores id/entry/title/name. Below it, the
+ * plugin's declared UI settings (manifest ui.params) and a free "name=value, …" line for any
+ * others — both reach the embedded page as its URL query string.
+ */
 function PluginPicker({ config, onSetMany }: { config: Record<string, any>; onSetMany: (c: Record<string, any>) => void }) {
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
-  const [uiEntries, setUiEntries] = useState<Record<string, { entry: string; title: string } | null>>({});
+  const [uiEntries, setUiEntries] = useState<Record<string, PluginUiInfo | null>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -160,13 +189,13 @@ function PluginPicker({ config, onSetMany }: { config: Record<string, any>; onSe
         const list = await robotClient.getPlugins();
         if (cancelled) return;
         setPlugins(list);
-        const entries: Record<string, { entry: string; title: string } | null> = {};
+        const entries: Record<string, PluginUiInfo | null> = {};
         await Promise.all(
           list.map(async (p) => {
             try {
               const detail = await robotClient.getPlugin(p.id);
               const ui = detail.manifest?.ui;
-              entries[p.id] = ui?.entry ? { entry: ui.entry, title: ui.title || p.name } : null;
+              entries[p.id] = ui?.entry ? { entry: ui.entry, title: ui.title || p.name, params: ui.params ?? [] } : null;
             } catch {
               entries[p.id] = null;
             }
@@ -186,23 +215,87 @@ function PluginPicker({ config, onSetMany }: { config: Record<string, any>; onSe
   const withUi = plugins.filter((p) => uiEntries[p.id]);
   if (withUi.length === 0) return <Text style={styles.muted}>No installed plugin ships a UI to embed.</Text>;
 
+  const selected = config.pluginId ? uiEntries[config.pluginId] : null;
+  const params: Record<string, any> = config.params ?? {};
+  const setParam = (key: string, value: any) => onSetMany({ ...config, params: { ...params, [key]: value } });
+
   return (
-    <View style={styles.chipRow}>
-      {withUi.map((p) => {
-        const ui = uiEntries[p.id]!;
-        const active = config.pluginId === p.id;
-        return (
-          <TouchableOpacity
-            key={p.id}
-            style={[styles.chip, active && styles.chipActive]}
-            activeOpacity={0.7}
-            onPress={() => onSetMany({ ...config, pluginId: p.id, entry: ui.entry, title: ui.title, pluginName: p.name })}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>{p.name}</Text>
+    <>
+      <View style={styles.chipRow}>
+        {withUi.map((p) => {
+          const ui = uiEntries[p.id]!;
+          const active = config.pluginId === p.id;
+          return (
+            <TouchableOpacity
+              key={p.id}
+              style={[styles.chip, active && styles.chipActive]}
+              activeOpacity={0.7}
+              onPress={() =>
+                onSetMany({
+                  ...config, pluginId: p.id, entry: ui.entry, title: ui.title, pluginName: p.name,
+                  // Settings belong to one plugin's page: start fresh on a switch.
+                  ...(active ? {} : { params: {}, paramsText: "" }),
+                })
+              }
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{p.name}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {selected?.params.map((def) => (
+        <View key={def.key} style={styles.field}>
+          <Text style={styles.label}>{def.label || def.key}</Text>
+          <UiParamInput def={def} value={params[def.key]} onChange={(v) => setParam(def.key, v)} />
+          {def.help ? <Text style={styles.muted}>{def.help}</Text> : null}
+        </View>
+      ))}
+
+      {config.pluginId ? (
+        <View style={styles.field}>
+          <Text style={styles.label}>{selected?.params.length ? "Other settings (name=value, …)" : "Settings (name=value, …)"}</Text>
+          <TextInput
+            style={styles.input}
+            value={config.paramsText ?? ""}
+            onChangeText={(t) => onSetMany({ ...config, paramsText: t })}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="name=value, other=2"
+            placeholderTextColor={colors.textFaint}
+          />
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+/** One declared UI setting: enum and boolean as chips (the default marked), number/string as text. */
+function UiParamInput({ def, value, onChange }: { def: PluginParamDef; value: any; onChange: (v: any) => void }) {
+  if (def.type === "enum" || def.type === "boolean") {
+    const options = def.type === "boolean" ? ["true", "false"] : def.options ?? [];
+    const current = String(value ?? def.default ?? "");
+    return (
+      <View style={styles.chipRow}>
+        {options.map((o) => (
+          <TouchableOpacity key={o} style={[styles.chip, current === o && styles.chipActive]} onPress={() => onChange(o)} activeOpacity={0.7}>
+            <Text style={[styles.chipText, current === o && styles.chipTextActive]}>{o}</Text>
           </TouchableOpacity>
-        );
-      })}
-    </View>
+        ))}
+      </View>
+    );
+  }
+  return (
+    <TextInput
+      style={styles.input}
+      value={value == null ? "" : String(value)}
+      onChangeText={onChange}
+      keyboardType={def.type === "number" ? "numeric" : "default"}
+      autoCapitalize="none"
+      autoCorrect={false}
+      placeholder={def.default == null ? "" : String(def.default)}
+      placeholderTextColor={colors.textFaint}
+    />
   );
 }
 

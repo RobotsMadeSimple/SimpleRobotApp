@@ -18,20 +18,38 @@ import { Tool } from "@/src/models/robotModels";
 import { useRobotStatus, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Edit2, Plus, Wrench } from "lucide-react-native";
-import { router } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { Space3DToggle, SpaceList3DLayout, useRememberedFlag } from "@/src/components/space/space3d";
+import type { Cell3DOptions, Cell3DPreview } from "@/src/components/ui/cell3d/bridge";
+import { useMemo } from "react";
+
+// The optional 3D view: the active tool's TCP at the live flange. No saved points belong to a
+// tool, so they start hidden (the Points chip shows them all).
+const VIEW3D_OPTIONS: Cell3DOptions = { points: false, locals: false, sets: false, toggles: ["points", "locals", "sets"], fit: "robot" };
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ToolsPage() {
+  const pushOnce = usePushOnce();
   const tools      = useTools();
   const status     = useRobotStatus();
   const activeTool = status.activeTool;
 
+  // Optional live 3D (hidden by default, remembered on this device): the selected (active) tool's
+  // TCP drawn at the flange, by its stable id.
+  const [show3d, setShow3d] = useRememberedFlag("space.tools.view3d", false);
+  const activeToolId = (status as { activeToolId?: unknown }).activeToolId;
+  const selected = tools.find(t => (typeof activeToolId === "string" && activeToolId ? t.id === activeToolId : t.name === activeTool)) ?? null;
+  const toolPreview = useMemo<Cell3DPreview | null>(
+    () => (selected ? { kind: "tool", id: selected.id, name: selected.name, x: selected.x, y: selected.y, z: selected.z } : null),
+    [selected],
+  );
+
   // Each tool is edited on its own page, linked by the tool's stable id.
   function openEdit(tool: Tool) {
-    if (tool.id) router.push(`/space/tool-edit?id=${encodeURIComponent(tool.id)}`);
+    if (tool.id) pushOnce(`/space/tool-edit?id=${encodeURIComponent(tool.id)}`);
   }
 
   function confirmDelete(name: string) {
@@ -53,8 +71,9 @@ export default function ToolsPage() {
 
   return (
     <View style={styles.container}>
-      <PageHeader title="Tools" subtitle="Define TCP offsets and pick the active tool" />
+      <PageHeader title="Tools" subtitle="Define TCP offsets and pick the active tool" right={<Space3DToggle on={show3d} onChange={setShow3d} />} />
 
+      <SpaceList3DLayout show={show3d} persistKey="space-tools" options={VIEW3D_OPTIONS} preview={toolPreview}>
       <Screen>
         <SectionHeader
           title="Saved tools"
@@ -146,10 +165,11 @@ export default function ToolsPage() {
           variant="dashed"
           label="New Tool"
           icon={<Plus size={16} color={colors.accent} />}
-          onPress={() => router.push("/space/tool-edit")}
+          onPress={() => pushOnce("/space/tool-edit")}
         />
 
       </Screen>
+      </SpaceList3DLayout>
     </View>
   );
 }

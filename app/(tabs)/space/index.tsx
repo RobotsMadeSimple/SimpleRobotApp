@@ -2,7 +2,7 @@ import { NotConnectedOverlay } from "@/src/components/ui/NotConnectedOverlay";
 import { accents, Card, colors, Divider, ListRow, PageHeader, Screen, SectionHeader, spacing, StatTile } from "@/src/components/ui/kit";
 import { useGrids, usePoints, useStacks, useTools } from "@/src/providers/RobotProvider";
 import { router } from "expo-router";
-import { Grid3x3, Layers, LayoutGrid, MapPin, Wrench } from "lucide-react-native";
+import { Grid3x3, Layers, LayoutGrid, MapPin, MoveHorizontal, Wrench } from "lucide-react-native";
 import { StyleSheet, View } from "react-native";
 
 const MENU_ITEMS = [
@@ -45,6 +45,14 @@ const MENU_ITEMS = [
     tileColor: accents.purpleSoft,
     iconColor: accents.purple,
     onPress: () => router.navigate("/space/stacks"),
+  },
+  {
+    label: "Conveyors",
+    description: "Track and pick parts on moving belts",
+    icon: MoveHorizontal,
+    tileColor: accents.orangeSoft,
+    iconColor: accents.orange,
+    onPress: () => router.navigate("/space/conveyors"),
   },
 ];
 

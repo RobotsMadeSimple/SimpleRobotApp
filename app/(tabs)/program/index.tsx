@@ -2,7 +2,7 @@ import { usePaneLayout } from "@/src/components/ui/responsive";
 import { SpeedOverrideModal } from "@/src/components/ui/SpeedOverrideModal";
 import { ProgramStatus, ProgramSummary } from "@/src/models/robotModels";
 import { findBackgroundStatus } from "@/src/models/backgroundStatus";
-import { useBuiltPrograms, useConnected, useProgramSummaries, useRobotStatus } from "@/src/providers/RobotProvider";
+import { useBuiltPrograms, useConnected, useProgramSummaries, useRobotStatusValue } from "@/src/providers/RobotProvider";
 import { useActionPending } from "@/src/hooks/useActionPending";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { LocalProgramService } from "@/src/services/LocalProgramService";
@@ -233,7 +233,12 @@ function RunningCard({ p, isBuilt, anotherBuiltRunning, speedOverridePercent, on
 export default function ProgramScreen() {
   const programSummaries = useProgramSummaries();
   const builtPrograms    = useBuiltPrograms();
-  const robotStatus      = useRobotStatus();
+  // Only the status fields this page shows, so an arm move doesn't re-render the whole page.
+  const robotStatus      = {
+    backgroundPrograms:   useRobotStatusValue(s => s?.backgroundPrograms),
+    plugins:              useRobotStatusValue(s => s?.plugins),
+    speedOverridePercent: useRobotStatusValue(s => s?.speedOverridePercent),
+  };
   // Two columns only at desktop (≥1100); below that the NavRail sidebar is already
   // up, so the fixed 360px left column would squeeze the programs list into a
   // too-narrow right column and truncate its labels — keep single-column there.

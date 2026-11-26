@@ -21,12 +21,16 @@ import {
   SectionHeading,
   TeachButton,
 } from "@/src/components/space/EditorCard";
+import { pointIdsByName, spaceSets, SpacePreview3D, stackSet, UNLIMITED_STACK_PREVIEW } from "@/src/components/space/space3d";
+import type { Cell3DPreview } from "@/src/components/ui/cell3d/bridge";
 import { RobotStack } from "@/src/models/robotModels";
-import { usePoints, useStacks } from "@/src/providers/RobotProvider";
+import { useGrids, usePoints, useStacks } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { ArrayCellSheet } from "@/src/components/space/ArrayCellSheet";
+import { usePointPick } from "@/src/components/space/PointActionSheet";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronRight, X } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -103,6 +107,9 @@ function OptionalCountInput({
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
+/** The fields that place the cells (a rename alone keeps the saved cells movable). */
+const GEOMETRY: (keyof RobotStack)[] = ["basePointName", "offsetX", "offsetY", "offsetZ", "maxCount"];
+
 export default function StackEditPage() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const stacks = useStacks();
@@ -140,6 +147,30 @@ export default function StackEditPage() {
   }
 
   const canSave = draft.name.trim().length > 0;
+
+  // 3D preview: this stack from the unsaved fields, the grids / other stacks for context.
+  const grids = useGrids();
+  const draftSet = useMemo(() => stackSet({ ...draft, name: draft.name.trim() || "New stack" }, points), [draft, points]);
+  const preview = useMemo<Cell3DPreview | null>(() => (draftSet ? { kind: "set", set: draftSet } : null), [draftSet]);
+  // Tap a cell in the 3D preview to move to it: the other arrays' cells and this stack's saved cells
+  // move; while this stack is new or has unsaved changes its own cells show without moves.
+  const pick = usePointPick();
+  const changed = !existing || GEOMETRY.some(f => (draft[f] ?? null) !== (existing[f] ?? null));
+  const cellDraft = useMemo(() => (changed && draftSet ? {
+    kind: "stack" as const, id: draftSet.id, item: draft,
+    note: existing ? "Save your changes to move to this cell." : "Save the stack to move to its cells.",
+  } : null), [changed, draftSet, draft, existing]);
+  // Only the base point it steps from; the other saved points stay hidden.
+  const basePointIds = useMemo(() => pointIdsByName([draft.basePointName], points), [draft.basePointName, points]);
+  const otherSets = useMemo(
+    () => spaceSets(grids, stacks.filter(st => st.id !== draft.id), points),
+    [grids, stacks, points, draft.id],
+  );
+  const previewHint = !draft.basePointName
+    ? "Pick a base point to see the stack"
+    : !draftSet
+      ? "Base point not found"
+      : !draft.maxCount ? `No max count: first ${UNLIMITED_STACK_PREVIEW} shown` : undefined;
 
   // Teach opens the stack wizard. A saved stack is re-taught in place (same id); a new one is
   // created by the wizard, so it replaces this blank page and Done returns to the stack list.
@@ -263,6 +294,9 @@ export default function StackEditPage() {
             />
           );
         })()}
+        {/* The positions this stack steps through, live as the fields change. */}
+        <SpacePreview3D preview={preview} sets={otherSets} hint={previewHint} pointIds={basePointIds} highlight={pick.highlight} onPick={pick.onPick} />
+        <ArrayCellSheet cell={pick.cell} onClose={pick.close} draft={cellDraft} />
       </Screen>
 
       {/* ── Base point picker ── */}

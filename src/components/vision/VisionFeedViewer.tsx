@@ -28,6 +28,9 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   isWide: boolean;
   /** width/height for the wide-layout aspect box (defaults to 4:3). */
   aspect?: number;
+  /** Wide layout only: grow to fill the pane's height (letterboxing the frame) instead of
+   *  sitting in a fixed aspect box. Used by the editor's side pane so the feed is the hero. */
+  fill?: boolean;
   placeholder?: string;
   pointerEvents?: "none" | "auto" | "box-none" | "box-only";
   onMessage?: (event: { nativeEvent: { data: string } }) => void;
@@ -41,7 +44,7 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
   /** Title shown in the full-screen viewer. */
   title?: string;
 }>(function VisionFeedViewer(
-  { feedUrl, overlay, isWide, aspect = 4 / 3, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint, title },
+  { feedUrl, overlay, isWide, aspect = 4 / 3, fill = false, placeholder = "No camera feed", pointerEvents, onMessage, onTapImagePoint, title },
   ref,
 ) {
   const canvasRef = useRef<FeedCanvasHandle>(null);
@@ -67,7 +70,7 @@ export const VisionFeedViewer = forwardRef<VisionFeedHandle, {
 
   return (
     <View
-      style={[styles.feedCard, isWide ? { width: "100%", aspectRatio: aspect, maxHeight: 560 } : { height: 220 }]}
+      style={[styles.feedCard, isWide ? (fill ? styles.feedFill : { width: "100%", aspectRatio: aspect, maxHeight: 560 }) : { height: 220 }]}
       pointerEvents={pointerEvents}
     >
       <FeedCanvas
@@ -94,6 +97,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#111", borderRadius: radii.md, overflow: "hidden", // camera feed frame, intentionally near-black
     ...shadows.soft,
   },
+  // Wide "fill" mode: take all the height the side pane offers, so the live view is big; the
+  // frame letterboxes inside on whatever aspect the camera sends.
+  feedFill: { width: "100%", flex: 1, minHeight: 240 },
   placeholder: { ...StyleSheet.absoluteFill, justifyContent: "center", alignItems: "center" },
   placeholderText: { color: colors.textMuted, fontSize: 13 },
 });

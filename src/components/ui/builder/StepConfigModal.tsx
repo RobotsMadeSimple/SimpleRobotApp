@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Modal,
@@ -25,6 +25,7 @@ import {
   GridPoint,
   JsonInboundMapping,
   JsonKeyValue,
+  Point,
   ProgramStep,
   ProgramVariable,
   RobotStack,
@@ -52,6 +53,7 @@ import {
   usePoints,
   useRelayIO,
   useSelectedRobot,
+  useSerialDevices,
   useStacks,
   useTools,
 } from "@/src/providers/RobotProvider";
@@ -68,14 +70,16 @@ import { appAlert } from "@/src/components/ui/AppAlert";
 import { ExpressionInput, TemplateInput } from "./NumericInputs";
 import { SetVariableFields } from "./SetVariableFields";
 import { SaveImageFields } from "./SaveImageFields";
+import { ConveyorStepFields } from "./ConveyorStepFields";
 import { VarPickerModal, VarSelectorButton } from "./VarPicker";
 import { ConditionGroupEditor, conditionSummary } from "./ConditionEditor";
 import { VarType } from "./VariableEditModal";
 import { PluginStepFields, PluginStepHeader } from "./PluginStepFields";
 import { RunVisionStepFields } from "./RunVisionStepFields";
+import { MotionProfileField, MoveJointsFields } from "./MoveJointsFields";
 import type { VisionProgram } from "@/src/models/visionTools";
 import { ExpressionHelperPanel } from "./expressions/ExpressionHelperPanel";
-import { useIsWide } from "@/src/components/ui/responsive";
+import { SHORT_BREAKPOINT, useIsWide } from "@/src/components/ui/responsive";
 import { openCalibrationWizard } from "@/src/components/ui/calibration/CameraCalibrationControls";
 import { ManualPanel } from "@/src/components/docs/ManualPanel";
 import { openManual } from "@/src/docs/navigation";
@@ -95,7 +99,7 @@ const CATALOG_TYPES = new Set<string>([
 
 const AUX_STEP_TYPES = new Set<string>([
   "AuxMove", "AuxContinuous", "AuxStop", "AuxEnable",
-  "GripperAction", "ConveyorAction", "RotaryIndex",
+  "GripperAction", "ConveyorAction", "RotaryIndex", "SiloAction",
 ]);
 
 export function StepConfigModal({
@@ -103,6 +107,7 @@ export function StepConfigModal({
   step,
   variables,
   contextVariables,
+  programPoints = [],
   scopeSteps,
   stepIndex,
   onSave,
@@ -117,6 +122,8 @@ export function StepConfigModal({
   step: ProgramStep | null;
   variables?: ProgramVariable[];
   contextVariables?: ProgramVariable[];
+  /** Points that belong to the program being edited — offered under "This program" in the picker. */
+  programPoints?: Point[];
   scopeSteps?: ProgramStep[];
   stepIndex?: number;
   /**
@@ -134,6 +141,9 @@ export function StepConfigModal({
   problems?: ValidationProblem[];
 }) {
   const points        = usePoints();
+  // Program points first (same precedence as the controller), then the global library — for the
+  // move summary so a step targeting a program point shows its name, not "missing".
+  const allPoints     = useMemo(() => [...programPoints, ...points], [programPoints, points]);
   const catalog       = useStepCatalog();
   const insets        = useSafeAreaInsets();
   const grids         = useGrids();
@@ -143,6 +153,7 @@ export function StepConfigModal({
   const allPrograms   = useBuiltPrograms();
   const routines      = allPrograms.filter(p => p.isRoutine);
   const ioDevices         = useIoDevices();
+  const serialDevices     = useSerialDevices();
   const relay         = useRelayIO();
   const robot         = useSelectedRobot();
   // ASTRO and CNC 4-axis robots only have Z rotation — hide RX/RY offset fields.
@@ -183,6 +194,7 @@ export function StepConfigModal({
   const [loadCellVarPicker,  setLoadCellVarPicker]  = useState(false);
   const [recordVarPicker,    setRecordVarPicker]    = useState(false);
   const [captureVarPicker,   setCaptureVarPicker]   = useState(false);
+  const [serialResultVarPicker, setSerialResultVarPicker] = useState(false);
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const cardWidth = Math.min(windowWidth - 48, 520);
@@ -206,7 +218,8 @@ export function StepConfigModal({
           cardStyle: kbCardStyle, contentPaddingBottom: kbPadBottom } = useKeyboardStableCard(visible);
   const fullWindowHRef = useRef(windowHeight);
   if (kbHeight === 0) fullWindowHRef.current = windowHeight;
-  const cardMaxHeight = Math.round(fullWindowHRef.current * 0.88);
+  // A phone on its side (under ~500 tall) can't spare the 12% margin: the card takes nearly all of it.
+  const cardMaxHeight = Math.round(fullWindowHRef.current * (fullWindowHRef.current < SHORT_BREAKPOINT ? 0.96 : 0.88));
 
   // Only fetch the data a given step type actually uses. Opening a Move/Wait/Logic/etc. step now
   // makes zero network calls; IO/Vision/Aux steps fetch just their own data. (Previously every open
@@ -540,7 +553,7 @@ export function StepConfigModal({
     ? `$${draft.varPointName}[${draft.varPointIndex ?? "0"}]`
     : draft.pointNameExpr
     ? `→ ${draft.pointNameExpr}`
-    : movePointName(draft, points, "Current Position");
+    : movePointName(draft, allPoints, "Current Position");
 
   // Generic catalog fields for this draft (CatalogStepFields with the modal's wiring).
   const catalogFields = (extra?: { only?: string[]; skip?: string[]; grouped?: boolean; special?: Record<string, () => React.ReactNode> }) => (
@@ -635,26 +648,46 @@ export function StepConfigModal({
                     <Text style={ms.rowDesc}>Use the robot's live position — offsets become relative moves</Text>
                   </View>
                 </TouchableOpacity>
-                {points.length === 0 && <Text style={ms.emptyHint}>No points saved yet.</Text>}
-                {points.map((p, i) => {
-                  const active = draft!.pointId ? draft!.pointId === p.id : draft!.pointName === p.name;
-                  return (
-                    <TouchableOpacity
-                      key={p.id || p.name}
-                      style={[ms.row, i < points.length - 1 && ms.rowBorder, active && ms.rowActive]}
-                      onPress={() => { set({ pointName: p.name, pointId: p.id || undefined }); setSubPage(null); }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[ms.radioRing, active && ms.radioRingActive]}>
-                        {active && <View style={ms.radioDot} />}
-                      </View>
-                      <View style={ms.rowText}>
-                        <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
-                        <Text style={ms.rowDesc}>{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                {(() => {
+                  // Program points first (under "This program"), then the global library. Grouped
+                  // only when both exist; selection is by stable id so same-named points don't clash.
+                  const groups = [
+                    { key: 'prog',   label: 'THIS PROGRAM', list: programPoints },
+                    { key: 'global', label: 'GLOBAL',       list: points },
+                  ].filter(g => g.list.length > 0);
+                  if (groups.length === 0) return <Text style={ms.emptyHint}>No points saved yet.</Text>;
+                  const showHeaders = groups.length > 1;
+                  return groups.map(g => (
+                    <React.Fragment key={g.key}>
+                      {showHeaders && <Text style={ms.pointGroupLabel}>{g.label}</Text>}
+                      {g.list.map((p, i) => {
+                        const active = draft!.pointId ? draft!.pointId === p.id : draft!.pointName === p.name;
+                        return (
+                          <TouchableOpacity
+                            key={p.id || p.name}
+                            style={[ms.row, i < g.list.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                            onPress={() => { set({ pointName: p.name, pointId: p.id || undefined }); setSubPage(null); }}
+                            activeOpacity={0.7}
+                          >
+                            <View style={[ms.radioRing, active && ms.radioRingActive]}>
+                              {active && <View style={ms.radioDot} />}
+                            </View>
+                            <View style={ms.rowText}>
+                              <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{p.name}</Text>
+                              <Text style={ms.rowDesc}>
+                                {p.untaught
+                                  ? 'Not taught yet'
+                                  : p.description
+                                    ? p.description
+                                    : `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </React.Fragment>
+                  ));
+                })()}
                 <TeachHere
                   points={points}
                   selected={draft!.pointId ? points.find(p => p.id === draft!.pointId) : points.find(p => p.name === draft!.pointName)}
@@ -1012,6 +1045,7 @@ export function StepConfigModal({
             {/* Opening from the "Add" row turns the flag on; the sub-page edits the radius. */}
             {draft!.type === "MoveL" &&
               modifierRow("Blend Into Next Move", !!draft!.blend, blendSummary, "blend", blendKeys, { blend: true })}
+            <MotionProfileField value={draft!.motionProfile} onChange={v => set({ motionProfile: v })} />
             {moveStopRow()}
           </>
         );
@@ -1050,6 +1084,7 @@ export function StepConfigModal({
 
             {draft!.type === "JumpL" &&
               modifierRow("Blend Apex Corners", !!draft!.blend, blendSummary, "blend", blendKeys, { blend: true })}
+            <MotionProfileField value={draft!.motionProfile} onChange={v => set({ motionProfile: v })} />
             {moveStopRow()}
           </>
         );
@@ -1137,6 +1172,141 @@ export function StepConfigModal({
                 />
                 <Text style={[ms.hintText, { marginTop: 8 }]}>
                   {`Reads the load cell weight (in ${unit}) into $${draft!.variableName ?? "the variable"} each time this step runs.`}
+                </Text>
+              </>
+            )}
+          </>
+        );
+      }
+      case "SerialCommand": {
+        const devs = serialDevices ?? [];
+        const selDevId = draft!.serialDeviceId ?? devs[0]?.id;
+        const selDev = devs.find(d => d.id === selDevId);
+        const cmds = selDev?.commands ?? [];
+        const useSaved = !!draft!.serialCommandId;
+        // The reply is a text line: any assignable non-list variable can hold it.
+        const serialVars = (variables ?? []).filter(v => !isListVariable(v) && !v.isImage && !v.isStopwatch && !v.isBoolean);
+        return (
+          <>
+            <Text style={ms.fieldLabel}>SERIAL DEVICE</Text>
+            {devs.length === 0 ? (
+              <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 4 }}>No serial devices configured — add one on the I/O page.</Text>
+            ) : (
+              <View style={ms.segRow}>
+                {devs.map(d => {
+                  const active = selDevId === d.id;
+                  return (
+                    <TouchableOpacity key={d.id} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ serialDeviceId: d.id, serialDeviceName: d.name, serialCommandId: undefined })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{d.name || d.id}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            <Text style={[ms.fieldLabel, { marginTop: 12 }]}>COMMAND</Text>
+            <View style={ms.segRow}>
+              {([
+                { key: "saved", label: "Saved command" },
+                { key: "raw",   label: "Raw text" },
+              ] as const).map(o => {
+                const active = o.key === "saved" ? useSaved : !useSaved;
+                return (
+                  <TouchableOpacity key={o.key} style={[ms.seg, active && ms.segActive, { flex: 1 }]} activeOpacity={0.8}
+                    onPress={() => set(o.key === "saved"
+                      ? { serialCommandId: cmds[0]?.id, serialText: undefined }
+                      : { serialCommandId: undefined })}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {useSaved ? (
+              cmds.length === 0 ? (
+                <Text style={{ fontSize: 13, color: colors.textFaint, marginTop: 6 }}>
+                  This device has no saved commands — define them on its I/O page, or switch to Raw text.
+                </Text>
+              ) : (
+                <View style={[ms.segRow, { marginTop: 8, flexWrap: "wrap" }]}>
+                  {cmds.map(c => {
+                    const active = draft!.serialCommandId === c.id;
+                    return (
+                      <TouchableOpacity key={c.id} style={[ms.seg, active && ms.segActive]}
+                        onPress={() => set({ serialCommandId: c.id })} activeOpacity={0.8}>
+                        <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{c.name || c.id}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )
+            ) : (
+              <>
+                <TextInput
+                  style={[ms.input, { marginTop: 8 }]}
+                  value={draft!.serialText ?? ""}
+                  onChangeText={t => set({ serialText: t || undefined })}
+                  placeholder="e.g. G1 OPEN"
+                  placeholderTextColor="#c4c4c4"
+                  autoCapitalize="none"
+                  returnKeyType="done"
+                />
+                <Text style={[ms.hintText, { marginTop: 6 }]}>
+                  {"Sent as-is to the device. Use {{expr}} to interpolate a variable or expression at run time."}
+                </Text>
+              </>
+            )}
+
+            <Text style={[ms.fieldLabel, { marginTop: 14 }]}>WAIT FOR REPLY</Text>
+            <View style={ms.segRow}>
+              {([
+                { key: false, label: "No" },
+                { key: true,  label: "Yes" },
+              ] as const).map(o => {
+                const active = (draft!.serialExpectReply ?? false) === o.key;
+                return (
+                  <TouchableOpacity key={String(o.key)} style={[ms.seg, active && ms.segActive, { flex: 1 }]} activeOpacity={0.8}
+                    onPress={() => set(o.key
+                      ? { serialExpectReply: true, serialTimeoutMs: draft!.serialTimeoutMs ?? 1000 }
+                      : { serialExpectReply: undefined, serialResultVariable: undefined })}>
+                    <Text style={[ms.segText, active && ms.segTextActive]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {draft!.serialExpectReply && (
+              <>
+                <VarSelectorButton
+                  label="STORE REPLY IN VARIABLE"
+                  value={draft!.serialResultVariable}
+                  accent={accents.purple}
+                  placeholder="None — tap to select"
+                  onPress={() => setSerialResultVarPicker(true)}
+                />
+                <VarPickerModal
+                  filter={isAssignableVariable}
+                  visible={serialResultVarPicker}
+                  onClose={() => setSerialResultVarPicker(false)}
+                  variables={serialVars}
+                  selected={draft!.serialResultVariable}
+                  onSelect={v => { if (v) set({ serialResultVariable: v.name }); setSerialResultVarPicker(false); }}
+                  title="Store Reply In Variable"
+                  showNone
+                  create={{ type: "string" }}
+                  onCreateVariable={onSaveVariable} allVariables={variables}
+                />
+                <Text style={[ms.fieldLabel, { marginTop: 12 }]}>REPLY TIMEOUT  (ms)</Text>
+                <TextInput
+                  style={ms.input}
+                  value={draft!.serialTimeoutMs != null ? String(draft!.serialTimeoutMs) : ""}
+                  onChangeText={t => set({ serialTimeoutMs: t ? (parseInt(t) || undefined) : undefined })}
+                  keyboardType="numeric" placeholder="1000" placeholderTextColor="#c4c4c4"
+                  returnKeyType="done" selectTextOnFocus
+                />
+                <Text style={[ms.hintText, { marginTop: 6 }]}>
+                  {`Blocks up to this long for the device's reply, stored into $${draft!.serialResultVariable ?? "the variable"}.`}
                 </Text>
               </>
             )}
@@ -2639,22 +2809,31 @@ export function StepConfigModal({
 
       case "GripperAction":
       case "ConveyorAction":
-      case "RotaryIndex": {
-        const deviceId    = draft!.auxDeviceId ?? auxDevices[0]?.deviceId ?? "AUX_STEPPER_001";
+      case "RotaryIndex":
+      case "SiloAction": {
+        const isSilo      = draft!.type === "SiloAction";
+        // A silo step lists devices with a Silo-role axis first, and that device's silo axes first.
+        const hasSilo     = (d: AuxDeviceState) => d.axes.some(a => a.role === "Silo");
+        const pickDevices = isSilo ? [...auxDevices].sort((a, b) => Number(hasSilo(b)) - Number(hasSilo(a))) : auxDevices;
+        const deviceId    = draft!.auxDeviceId ?? pickDevices[0]?.deviceId ?? "AUX_STEPPER_001";
         const axisIndex   = draft!.auxAxisIndex ?? 0;
         const auxDevice   = auxDevices.find(d => d.deviceId === deviceId);
-        const displayAxes = auxDevice?.axes.length ? auxDevice.axes : [0,1,2,3].map(n => ({ axisIndex: n, name: "" }));
+        const baseAxes: { axisIndex: number; name: string; role?: string }[] =
+          auxDevice?.axes.length ? auxDevice.axes : [0,1,2,3].map(n => ({ axisIndex: n, name: "" }));
+        const displayAxes = isSilo
+          ? [...baseAxes].sort((a, b) => Number(b.role === "Silo") - Number(a.role === "Silo"))
+          : baseAxes;
 
         const deviceAndMotor = (
           <>
             <Text style={[ms.fieldLabel, { marginTop: 0 }]}>DEVICE</Text>
-            {auxDevices.length === 0 ? (
+            {pickDevices.length === 0 ? (
               <Text style={[ms.emptyHint, { marginTop: 4 }]}>No aux devices connected.</Text>
-            ) : auxDevices.map((d, i) => {
+            ) : pickDevices.map((d, i) => {
               const active = deviceId === d.deviceId;
               return (
                 <TouchableOpacity key={d.deviceId}
-                  style={[ms.row, i < auxDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
+                  style={[ms.row, i < pickDevices.length - 1 && ms.rowBorder, active && ms.rowActive]}
                   onPress={() => set({ auxDeviceId: d.deviceId })} activeOpacity={0.7}>
                   <View style={[ms.radioRing, active && ms.radioRingActive]}>
                     {active && <View style={ms.radioDot} />}
@@ -2683,6 +2862,9 @@ export function StepConfigModal({
                   </View>
                   <View style={ms.rowText}>
                     <Text style={[ms.rowLabel, active && ms.rowLabelActive]}>{label}</Text>
+                    {isSilo && a.role && a.role !== "Silo"
+                      ? <Text style={ms.rowDesc}>{`Not a silo (${a.role})`}</Text>
+                      : null}
                   </View>
                 </TouchableOpacity>
               );
@@ -2777,6 +2959,56 @@ export function StepConfigModal({
           );
         }
 
+        if (isSilo) {
+          const action = draft!.siloAction ?? "Present";
+          const siloAxis = auxDevice?.axes.find(a => a.axisIndex === axisIndex);
+          const cap = siloAxis?.siloCapacity ?? 0;
+          return (
+            <>
+              {deviceAndMotor}
+              <Text style={[ms.fieldLabel, { marginTop: 12 }]}>ACTION</Text>
+              <View style={ms.segRow}>
+                {([
+                  { label: "Home",      val: "Home" },
+                  { label: "Present",   val: "Present" },
+                  { label: "Refill",    val: "Refill" },
+                  { label: "Set count", val: "SetCount" },
+                ] as const).map(({ label, val }) => {
+                  const active = action === val;
+                  return (
+                    <TouchableOpacity key={val} style={[ms.seg, active && ms.segActive, { flex: 1 }]}
+                      onPress={() => set({ siloAction: val })} activeOpacity={0.8}>
+                      <Text style={[ms.segText, active && ms.segTextActive]} numberOfLines={1}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {action === "SetCount" && (
+                <>
+                  <Text style={[ms.fieldLabel, { marginTop: 12 }]}>PARTS IN THE SILO</Text>
+                  <ExpressionInput style={ms.input} fieldKey="siloCount"
+                    value={draft!.siloCount}
+                    expressions={draft!.expressions}
+                    onChangeValue={v => set({ siloCount: v !== undefined ? Math.round(v) : undefined })}
+                    onChangeExpr={setExpr}
+                    placeholder={cap > 0 ? `0–${cap}` : "12"}
+                    variables={variables} />
+                </>
+              )}
+              <Text style={ms.hintText}>
+                {action === "Home"
+                  ? "Drives the platform down into the bottom stop and zeros it. The count is unchanged."
+                  : action === "Present"
+                  ? "Lifts the top part level with the rim, then counts it as taken. Fails with siloNotHomed or siloEmpty — catch them with a Try."
+                  : action === "Refill"
+                  ? "Sets the count to the silo's capacity, then homes so parts can be loaded from the top."
+                  : "Sets the number of parts in the silo without moving."}
+                {" Pitch, capacity and speeds come from the axis's role settings."}
+              </Text>
+            </>
+          );
+        }
+
         // RotaryIndex
         const dir = draft!.rotaryDirection ?? 1;
         return (
@@ -2806,6 +3038,15 @@ export function StepConfigModal({
           </>
         );
       }
+
+      case "ConveyorTrack":
+      case "ConveyorEndTracking":
+      case "ConveyorAddPart":
+      case "ConveyorClearQueue":
+        return (
+          <ConveyorStepFields draft={draft!} set={set} setExpr={setExpr}
+            variables={variables} contextVariables={contextVariables} />
+        );
 
       case "IfCondition":
         return (
@@ -3373,6 +3614,25 @@ export function StepConfigModal({
           />
         );
 
+      case "MoveJoints":
+        return (
+          <>
+            <View style={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+              <MoveJointsFields
+                draft={draft!}
+                set={set}
+                setExpr={setExpr}
+                variables={variables}
+                contextVariables={contextVariables}
+                jointsValueField={catalogFields({ only: ["jointsExpr"] })}
+              />
+            </View>
+            {modifierRow("Override Speed", speedSet, speedSummary, "speed", speedKeys)}
+            <MotionProfileField value={draft!.motionProfile} onChange={v => set({ motionProfile: v })} />
+            {moveStopRow()}
+          </>
+        );
+
       case "MoveC":
         return (
           <>
@@ -3504,6 +3764,8 @@ export function StepConfigModal({
   const spec = catalog.spec(draft.type);
   const genericKeys = CATALOG_TYPES.has(draft.type)
     ? new Set((spec?.fields ?? []).filter(f => !f.hidden && isFieldShown(f, draft, spec)).flatMap(fieldClaims))
+    // Move to Joints shows its catalog "Joints value" field, which reports its own problems.
+    : draft.type === "MoveJoints" ? new Set<string>(["jointsExpr"])
     : new Set<string>();
   const ownProblems = problems ?? [];
   const looseProblems = ownProblems.filter(p => !p.field || !genericKeys.has(p.field));

@@ -27,7 +27,7 @@ export default function DisplayPageScreen() {
   const html = useMemo(() => {
     if (!program) return "";
     return useWidgets
-      ? compileLayout(program.displayPageLayout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e) })
+      ? compileLayout(program.displayPageLayout, { pluginUiUrl: (id, e) => robotClient.pluginUiUrl(id, e), cameraWsUrl: (id) => robotClient.cameraWsUrl(id) })
       : program.displayPageHtml ?? "";
   }, [program, useWidgets]);
   const hasPage = useWidgets ? (program?.displayPageLayout?.widgets?.length ?? 0) > 0 : !!program?.displayPageHtml;

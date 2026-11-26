@@ -22,10 +22,12 @@ import {
   offsetToDraft,
   parseOffsetDraft,
 } from "@/src/components/space/OffsetFields";
+import { SpacePreview3D } from "@/src/components/space/space3d";
+import type { Cell3DPreview } from "@/src/components/ui/cell3d/bridge";
 import { useSelectedRobot, useTools } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 
 /**
@@ -86,6 +88,11 @@ export default function ToolEditPage() {
 
   const title = isNew ? "New Tool" : "Edit Tool";
   const axes: OffsetAxis[] = isAstro ? ["x", "y", "z", "rz"] : ["x", "y", "z", "rx", "ry", "rz"];
+
+  const parsed = parseOffsetDraft(draft);
+  const preview = useMemo<Cell3DPreview>(() => ({
+    kind: "tool", id: existing?.id || undefined, name: parsed.name || "New tool", x: parsed.x, y: parsed.y, z: parsed.z,
+  }), [existing?.id, parsed.name, parsed.x, parsed.y, parsed.z]);
 
   const identity = (
     <FieldGroup>
@@ -152,6 +159,8 @@ export default function ToolEditPage() {
       <Screen>
         {/* The whole tool setup in one card; split in two halves on desktop. */}
         <EditorCard left={[identity]} right={[offset]} />
+        {/* The TCP this offset puts on the robot's flange, live as the fields change. */}
+        <SpacePreview3D preview={preview} hint="Drawn at the robot's flange" />
       </Screen>
     </KeyboardAvoidingView>
   );

@@ -115,12 +115,18 @@ const AUX_TYPE_OPTIONS: Array<PinType | "Unconfigured"> = [
   "Unconfigured", "Input", "Output",
 ];
 
+// Latch input: aux boards whose firmware reports the `latch` capability (Nano boards refuse it).
+const AUX_LATCH_TYPE_OPTIONS: Array<PinType | "Unconfigured"> = [
+  "Unconfigured", "Input", "Latch", "Output",
+];
+
 // Pin-type colors: Input/Neopixel map onto kit tokens; Output keeps the
 // purple device-type tint used for outputs across this section (ioShared).
 function typeColor(type: PinType | "Unconfigured") {
   if (type === "Input")    return { fg: colors.accent,  bg: colors.accentSoft };
   if (type === "Output")   return { fg: accents.purple, bg: accents.purpleSoft };
   if (type === "Neopixel") return { fg: colors.warning, bg: colors.warningSoft };
+  if (type === "Latch")    return { fg: accents.cyan,   bg: accents.cyanSoft };
   return { fg: colors.textFaint, bg: colors.background };
 }
 
@@ -128,6 +134,7 @@ function typeLabel(type: PinType | "Unconfigured") {
   if (type === "Input")    return "IN";
   if (type === "Output")   return "OUT";
   if (type === "Neopixel") return "NEO";
+  if (type === "Latch")    return "LAT";
   return "—";
 }
 
@@ -171,7 +178,7 @@ function TypeDropdown({
                     <Text style={[styles.typeMenuChipText, { color: ofg }]}>{typeLabel(opt)}</Text>
                   </View>
                   <Text style={[styles.typeMenuLabel, selected && { color: ofg, fontWeight: "700" }]}>
-                    {opt === "Unconfigured" ? "Unconfigured" : opt}
+                    {opt === "Latch" ? "Latch input" : opt}
                   </Text>
                   {selected && <View style={[styles.typeMenuDot, { backgroundColor: ofg }]} />}
                 </TouchableOpacity>
@@ -254,7 +261,7 @@ function ColumnHeaders({ style }: { style?: any }) {
       <Text style={[styles.colHeader, { flex: 1 }]}>LABEL</Text>
       <InfoTip
         size={12}
-        text="Input reads a sensor or switch. Output can be toggled on/off from the IO pages. Neopixel drives an addressable LED strip and needs a pixel count. Unconfigured pins are left alone."
+        text="Input reads a sensor or switch. Latch input (aux cards) is an input whose edges also capture the belt position exactly — wire a conveyor's part sensor to one. Output can be toggled on/off from the IO pages. Neopixel drives an addressable LED strip and needs a pixel count. Unconfigured pins are left alone."
       />
     </View>
   );
@@ -357,8 +364,10 @@ export default function ConfigurePage() {
   // that feature; legacy firmware (unknown capabilities) keeps everything visible.
   const canNeopixel = !isAux && deviceSupports(device, "neopixel");
   const canLoadCell = !isAux && deviceSupports(device, "loadcell");
+  // Strict here (not deviceSupports): only firmware that says it can latch gets the option.
+  const canLatch = isAux && !!device?.capabilities?.includes("latch");
   const typeOptions = isAux
-    ? AUX_TYPE_OPTIONS
+    ? (canLatch ? AUX_LATCH_TYPE_OPTIONS : AUX_TYPE_OPTIONS)
     : canNeopixel ? TYPE_OPTIONS : TYPE_OPTIONS.filter(t => t !== "Neopixel");
 
   // Build initial edit state from the current ioDevices snapshot
@@ -370,7 +379,7 @@ export default function ConfigurePage() {
       const existing = configuredMap.get(def.pin);
       return {
         pin:        def.pin,
-        type:       existing?.type ?? "Unconfigured",
+        type:       existing?.latch ? "Latch" : existing?.type ?? "Unconfigured",
         name:       existing?.name ?? "",
         pixelCount: String(existing?.pixelCount ?? 8),
         dirty:      false,

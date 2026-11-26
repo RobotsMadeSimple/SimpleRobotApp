@@ -19,11 +19,11 @@ const DEFAULT_SPEEDS = { Slow: 10, Normal: 100, Fast: 300 };
 // leave StopJog stuck behind a congested socket over WiFi (laggy start/stop).
 export const JOG_HEARTBEAT_MS = 150;
 
-// While a continuous jog is held we fire a rapid train of light impacts so the
-// robot "rumbles" under the finger (expo-haptics has no sustained vibration, so
-// this loop fakes one). ~60ms blurs the taps into a buzz without over-driving
-// the taptic engine. Native only — haptic() no-ops on web/Electron.
-const JOG_RUMBLE_MS = 60;
+// While a continuous jog is held we fire a train of the softest ticks so the
+// robot hums gently under the finger (expo-haptics has no sustained vibration, so
+// this loop fakes one). Kept deliberately subtle: selection ticks, spaced out.
+// Native only — haptic() no-ops on web/Electron.
+const JOG_RUMBLE_MS = 110;
 
 function buildSpeedMap(overrides?: { Slow: number; Normal: number; Fast: number }): Record<string, number> {
   const s = overrides ?? DEFAULT_SPEEDS;
@@ -99,8 +99,8 @@ export default function JogPad({ jogMode, selectedSpeed, speedOverrides, padStyl
   // ── Rumble: a light-impact train for as long as a continuous jog is held ──────
   const startRumble = useCallback(() => {
     if (rumbleRef.current) return;
-    haptic("medium");                                        // a firm "engaged" tap on press
-    rumbleRef.current = setInterval(() => haptic("light"), JOG_RUMBLE_MS);
+    haptic("light");                                         // a light "engaged" tap on press
+    rumbleRef.current = setInterval(() => haptic("selection"), JOG_RUMBLE_MS);
   }, []);
   const stopRumble = useCallback(() => {
     if (rumbleRef.current) { clearInterval(rumbleRef.current); rumbleRef.current = null; }

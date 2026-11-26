@@ -51,6 +51,8 @@ export const ms = StyleSheet.create({
     fontSize: 15, color: colors.text, marginTop: 6,
   },
   emptyHint: { fontSize: 13, color: colors.textFaint, paddingVertical: spacing.sm, textAlign: "center" },
+  // Group heading in the point picker ("THIS PROGRAM" / "GLOBAL").
+  pointGroupLabel: { fontSize: 10, fontWeight: "700", color: colors.textFaint, letterSpacing: 0.6, marginTop: spacing.md, marginBottom: spacing.xs, paddingHorizontal: 2 },
   hintText:   { fontSize: 12, color: colors.textFaint, marginTop: spacing.sm, lineHeight: 16 },
   fieldError: { fontSize: 12, color: colors.danger, marginTop: 6 },
 

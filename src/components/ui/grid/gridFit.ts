@@ -116,14 +116,15 @@ export function fitGrid(
 
   if (method === "4pt") {
     const A = taught.A!, B = taught.B!, C = taught.C!, D = taught.D!;
-    // Least squares of P(u, v) = a + u·b + v·c over the corners (u, v ∈ {0, 1}): closed form.
-    const b = mul(sub(add(C, D), add(A, B)), 0.5);   // across the rows (u: row 0 → row R-1)
-    const c = mul(sub(add(B, D), add(A, C)), 0.5);   // along the rows  (v: col 0 → col C-1)
-    const mean = mul(add(add(A, B), add(C, D)), 0.25);
-    const a = sub(mean, mul(add(b, c), 0.5));
-    if (len(b) < MIN_SPAN_MM || len(c) < MIN_SPAN_MM) return { ok: false, error: "Some corners were taught at the same spot" };
-    const rowStep = mul(b, 1 / n), colStep = mul(c, 1 / m);
-    const fit = describe(a, rowStep, colStep, rows, cols);
+    // Least-squares step vectors with the origin FIXED at corner A, so the base point is exactly A
+    // (no separate derived origin to store). Minimising |p−m·col|² + |q−n·row|² + |s−n·row−m·col|²
+    // over the corner offsets p=B−A (down the first row), q=C−A (down the first column), s=D−A gives
+    //   n·row = (2q + s − p)/3,   m·col = (2p − q + s)/3.
+    const p = sub(B, A), q = sub(C, A), s = sub(D, A);
+    if (len(p) < MIN_SPAN_MM || len(q) < MIN_SPAN_MM) return { ok: false, error: "Some corners were taught at the same spot" };
+    const rowStep = mul(sub(add(mul(q, 2), s), p), 1 / (3 * n));   // (2q + s − p) / 3n
+    const colStep = mul(add(sub(mul(p, 2), q), s), 1 / (3 * m));   // (2p − q + s) / 3m
+    const fit = describe(A, rowStep, colStep, rows, cols);
     const residuals: Partial<Record<CornerKey, number>> = {};
     for (const k of ["A", "B", "C", "D"] as CornerKey[]) {
       const { row, col } = cornerCell(k, rows, cols);
@@ -150,4 +151,37 @@ export function fitGrid(
   const colStep = { x: p * Math.cos(colAng), y: p * Math.sin(colAng), z: m > 0 ? (d.z * m) / k2 : 0 };
   const rowStep = { x: p * Math.cos(rowAng), y: p * Math.sin(rowAng), z: n > 0 ? (d.z * n) / k2 : 0 };
   return { ok: true, fit: describe(A, rowStep, colStep, rows, cols) };
+}
+
+/**
+ * Re-fit a saved grid from its taught corner points' CURRENT poses — the whole point of keeping the
+ * corners: re-teaching or editing one recomputes the grid. `resolve` looks a corner reference up in the
+ * live points (id-first). Returns null for a manual grid, a grid missing a corner, or one whose counts
+ * are gone. The origin is always corner A, so only the row/column steps change — the base point, being
+ * corner A itself, carries its own (possibly re-taught) pose.
+ */
+export type GridCornerRef = { role: CornerKey; pointId: string; pointName: string };
+
+export function refitGrid(
+  grid: {
+    method?: GridMethod | "manual";
+    corners?: GridCornerRef[];
+    rowCount?: number;
+    colCount?: number;
+    rowSide?: RowSide;
+  },
+  resolve: (ref: GridCornerRef) => Pose | null,
+): GridFit | null {
+  if (!grid.method || grid.method === "manual") return null;
+  const method = grid.method;
+  const rows = grid.rowCount ?? 0, cols = grid.colCount ?? 0;
+  const taught: Partial<Record<CornerKey, Pose>> = {};
+  for (const k of methodCorners(method)) {
+    const ref = grid.corners?.find(c => c.role === k);
+    const pose = ref ? resolve(ref) : null;
+    if (!pose) return null;
+    taught[k] = pose;
+  }
+  const res = fitGrid(method, rows, cols, taught, grid.rowSide ?? "left");
+  return res.ok ? res.fit : null;
 }

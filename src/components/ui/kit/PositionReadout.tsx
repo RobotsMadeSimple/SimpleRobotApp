@@ -77,6 +77,8 @@ export function PositionReadout({ axes, size = "md", inline = false, card = true
             <Text
               style={[styles.value, styles.valueInline, lg && styles.valueInlineLg, axis.active && styles.valueActive]}
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.5}
             >
               {fmtValue(axis.value)}
             </Text>
@@ -213,31 +215,30 @@ const styles = StyleSheet.create({
     color: colors.textFaint,
   },
   unitLg: { fontSize: 13, width: 30 },
-  // Inline strip: one line when it fits; wraps to a 2×2 grid when the numbers
-  // would otherwise clip (negative / 4-digit values need ~60px each). Values
-  // never shrink below their content width.
+  // Inline strip: always a single line. The four axes share the width as equal,
+  // shrinkable columns and the numbers auto-scale (adjustsFontSizeToFit) to the
+  // largest size that still fits, so X/Y/Z/RZ never wrap onto a second line even
+  // on a narrow phone (S22). Values stay as big as the width allows.
   inlineRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "center",
     paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    columnGap: spacing.sm,
-    rowGap: spacing.xs + 2,
+    paddingHorizontal: spacing.sm,
+    columnGap: spacing.xs,
   },
   inlineAxis: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: spacing.xs + 2,
-    flexGrow: 1,
-    flexBasis: 96,
-    minWidth: 96,
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
   },
   axisTileInline: { minWidth: 26, height: 22 },
   axisTileInlineLg: { minWidth: 30, height: 26 },
-  // Left-aligned, right beside its axis tile — a right-aligned flex:1 value
-  // drifted to the cell edge and read as belonging to the NEXT axis. Leftover
-  // cell width now falls after the value, i.e. between axis groups.
+  // Beside its axis tile; shrinks (and the text auto-scales) so the whole strip
+  // holds one line. Leftover cell width falls either side of the centered group.
   valueInline: {
     flexShrink: 1,
     fontSize: 14,

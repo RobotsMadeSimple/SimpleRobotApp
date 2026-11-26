@@ -18,21 +18,39 @@ import {
 import { Local } from "@/src/models/robotModels";
 import { useLocals, useRobotStatus } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
-import { router } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { Edit2, Grid3x3, Plus } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
+import { Space3DToggle, SpaceList3DLayout, useRememberedFlag } from "@/src/components/space/space3d";
+import type { Cell3DOptions, Cell3DTarget } from "@/src/components/ui/cell3d/bridge";
+import { useCallback, useMemo } from "react";
+
+// The optional 3D view: every local as a triad. No saved points belong to a local, so they start
+// hidden (the Points chip shows them all).
+const VIEW3D_OPTIONS: Cell3DOptions = { points: false, locals: true, sets: false, toggles: ["locals", "points"], fit: "items" };
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function LocalsPage() {
+  const pushOnce = usePushOnce();
   const locals      = useLocals();
   const status      = useRobotStatus();
   const activeLocal = status.activeLocal;
 
+  // Optional live 3D (hidden by default, remembered on this device). The selected (active) local
+  // is highlighted by its stable id; tapping a local's triad opens it.
+  const [show3d, setShow3d] = useRememberedFlag("space.locals.view3d", false);
+  const activeLocalId = (status as { activeLocalId?: unknown }).activeLocalId;
+  const selected = locals.find(l => (typeof activeLocalId === "string" && activeLocalId ? l.id === activeLocalId : l.name === activeLocal)) ?? null;
+  const highlight = useMemo<Cell3DTarget | null>(() => (selected?.id ? { kind: "local", id: selected.id } : null), [selected]);
+  const onPick = useCallback((t: Cell3DTarget | null) => {
+    if (t?.kind === "local") pushOnce(`/space/local-edit?id=${encodeURIComponent(t.id)}`);
+  }, [pushOnce]);
+
   // Each local is edited on its own page, linked by the local's stable id.
   function openEdit(local: Local) {
-    if (local.id) router.push(`/space/local-edit?id=${encodeURIComponent(local.id)}`);
+    if (local.id) pushOnce(`/space/local-edit?id=${encodeURIComponent(local.id)}`);
   }
 
   function confirmDelete(name: string) {
@@ -54,8 +72,9 @@ export default function LocalsPage() {
 
   return (
     <View style={styles.container}>
-      <PageHeader title="Locals" subtitle="Local coordinate frames offset where point coordinates are measured from" />
+      <PageHeader title="Locals" subtitle="Local coordinate frames offset where point coordinates are measured from" right={<Space3DToggle on={show3d} onChange={setShow3d} />} />
 
+      <SpaceList3DLayout show={show3d} persistKey="space-locals" options={VIEW3D_OPTIONS} highlight={highlight} onPick={onPick}>
       <Screen>
         <SectionHeader
           title="Saved locals"
@@ -155,10 +174,11 @@ export default function LocalsPage() {
           icon={<Plus size={16} color={accents.purple} />}
           style={styles.addCard}
           textStyle={styles.addCardText}
-          onPress={() => router.push("/space/local-edit")}
+          onPress={() => pushOnce("/space/local-edit")}
         />
 
       </Screen>
+      </SpaceList3DLayout>
     </View>
   );
 }

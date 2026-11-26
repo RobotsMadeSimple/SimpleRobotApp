@@ -13,6 +13,7 @@
 //   npm run keyboard-audit            # all scenarios
 //   npm run keyboard-audit -- aux     # scenarios whose name contains "aux"
 //   CTRL_PORT=9115 npm run keyboard-audit -- text   # against a private controller on another port
+//   AUDIT_VIEWPORT=landscape npm run keyboard-audit  # a phone on its side (844x390, 55% keyboard)
 // Add a scenario below whenever a screen gains a text field inside a modal or sheet.
 
 import { chromium } from "playwright";
@@ -23,8 +24,14 @@ import { Buffer } from "node:buffer";
 
 const BASE = process.env.APP_URL || "http://localhost:8081";
 const CONTROLLER = process.env.CTRL_HOST || "localhost";
-const KEYBOARD = process.env.MOCK_KEYBOARD || "42%";   // Fold-ish: the IME takes ~40-48% of the screen
-const VIEWPORT = { width: 412, height: 915 };
+// AUDIT_VIEWPORT=landscape (844x390, a phone on its side) or WxH; default is a portrait phone.
+// In landscape the IME covers most of the short screen (~55%), so the default keyboard grows with it.
+const VIEWPORT_SPEC = (process.env.AUDIT_VIEWPORT || "").toLowerCase();
+const LANDSCAPE_PHONE = VIEWPORT_SPEC === "landscape";
+const VIEWPORT = LANDSCAPE_PHONE ? { width: 844, height: 390 }
+  : /^\d+x\d+$/.test(VIEWPORT_SPEC) ? { width: +VIEWPORT_SPEC.split("x")[0], height: +VIEWPORT_SPEC.split("x")[1] }
+  : { width: 412, height: 915 };
+const KEYBOARD = process.env.MOCK_KEYBOARD || (VIEWPORT.width > VIEWPORT.height ? "55%" : "42%");   // portrait: Fold-ish, the IME takes ~40-48%
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "keyboard-audit-out");
 const filter = process.argv.slice(2).join(" ").trim().toLowerCase();
 
@@ -70,7 +77,7 @@ const SCENARIOS = [
   {
     name: "aux gripper — Move to Gap sheet",
     route: "/io/auxiliary?deviceId=AUX_STEPPER_001",
-    open: async p => { await p.getByLabel("Move to an exact gap").first().click({ force: true }); await sleep(500); },
+    open: async p => { await tap(p, "Exact gap"); await sleep(500); },
   },
   {
     name: "aux axis — Set Position sheet",
@@ -183,6 +190,18 @@ const SCENARIOS = [
     route: "/program/builder",
     open: async () => {},
   },
+  // Plain scrolling pages (kit <Screen>): Android doesn't resize for the keyboard, so the page
+  // itself must scroll a low field (e.g. the tool's RZ offset) clear of it.
+  { name: "space page — new tool", route: "/space/tool-edit", open: async () => {} },
+  { name: "space page — new local", route: "/space/local-edit", open: async () => {} },
+  { name: "space page — new grid", route: "/space/grid-edit", open: async () => {} },
+  { name: "space page — new conveyor", route: "/space/conveyor-edit", open: async () => {} },
+  // The conveyor calibration wizard (a modal), opened straight on its Window step (window start/end).
+  {
+    name: "space — conveyor calibration window step (modal)",
+    route: "/space/conveyor-edit?calibrate=window",
+    open: async () => { await sleep(700); },
+  },
   // Program editor v2 (package E): the step search field, the catalog-driven fields of the new
   // blocks (on phones the step editor is a full page — its fields must still clear the keyboard),
   // the Switch case-values editor and teach-here's new point name.
@@ -204,6 +223,10 @@ const SCENARIOS = [
       await p.getByLabel("Add field row").locator("visible=true").first().click({ force: true }); await sleep(400);
     }],
     ["Set Speed Factor step", "Motion Settings", "Set Speed Factor"],
+    ["Conveyor Track step (timeout)", "I/O & Aux Axes", "Conveyor Track"],
+    ["Silo step (set count)", "I/O & Aux Axes", "Silo", async p => {
+      await tap(p, "Set count", { last: true }); await sleep(400);
+    }],
     ["End Program step", "Logic & Flow", "End Program"],
     ["Move Arc via variable", "Motion", "Move Arc", async p => {
       await p.getByLabel("Via point: variable").locator("visible=true").first().click({ force: true }); await sleep(400);
@@ -336,9 +359,15 @@ const SCENARIOS = [
     name: "programs — Import .srs sheet",
     route: "/program/robot-programs",
     open: async p => {
-      const chooser = p.waitForEvent("filechooser");
-      await p.getByLabel("Import a program from a text file (.srs)").locator("visible=true").first().click({ force: true });
-      await (await chooser).setFiles({ name: "audit.srs", mimeType: "text/plain", buffer: Buffer.from('#!srs 1\n@program {"name": "zz keyboard audit import"}\nWait 100ms\n') });
+      // Await both together: if the click fails, a lone pending waitForEvent would reject unhandled
+      // and kill the whole audit instead of failing just this scenario.
+      // Import sits beside "New Program" (wide) or in its add menu (phone).
+      if (!(await text(p, "Import from file").locator("visible=true").count())) { await tap(p, "New Program", { last: true }); await sleep(500); }
+      const [chooser] = await Promise.all([
+        p.waitForEvent("filechooser"),
+        text(p, "Import from file").locator("visible=true").first().click({ force: true }),
+      ]);
+      await chooser.setFiles({ name: "audit.srs", mimeType: "text/plain", buffer: Buffer.from('#!srs 1\n@program {"name": "zz keyboard audit import"}\nWait 100ms\n') });
       await sleep(1500);
     },
   },
@@ -424,7 +453,8 @@ async function auditFields(p, scenario, report) {
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
-  const browser = await chromium.launch();
+  // PW_CHANNEL=msedge uses the installed Edge when Playwright's own Chromium isn't downloaded.
+  const browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {});
   const ctx = await browser.newContext({ viewport: VIEWPORT });
   await ctx.addInitScript(k => { try { localStorage.setItem("rms.mockKeyboard", k); } catch {} }, KEYBOARD);
   const p = await ctx.newPage();
@@ -458,6 +488,7 @@ async function main() {
   await browser.close();
 
   const failed = report.filter(r => !r.pass);
+  console.log(`viewport ${VIEWPORT.width}x${VIEWPORT.height}, keyboard ${KEYBOARD}`);
   for (const r of report) console.log(`${r.pass ? "PASS" : "FAIL"}  ${r.scenario}  ·  ${r.field}${r.why ? "  —  " + r.why : ""}${r.shot ? "\n        " + r.shot : ""}`);
   console.log(`\n${report.length - failed.length}/${report.length} fields visible with the keyboard up${errors.length ? `  ·  ${errors.length} page error(s): ${errors[0]}` : ""}`);
   process.exit(failed.length ? 1 : 0);

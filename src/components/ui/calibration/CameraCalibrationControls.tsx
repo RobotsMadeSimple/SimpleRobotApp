@@ -3,12 +3,13 @@ import { StyleSheet, View } from "react-native";
 import { Crosshair } from "lucide-react-native";
 
 import { Button, buttonTextColor, colors, spacing } from "@/src/components/ui/kit";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { CameraState } from "@/src/models/robotModels";
 import { CameraCalibrationPill } from "./CameraCalibrationPill";
 import { useCameraCalibration } from "./useCameraCalibration";
 
-export function openCalibrationWizard(cameraId: string) {
-  router.push({ pathname: "/(tabs)/io/camera-calibrate", params: { cameraId } });
+export function openCalibrationWizard(cameraId: string, push: typeof router.push = router.push) {
+  push({ pathname: "/(tabs)/io/camera-calibrate", params: { cameraId } });
 }
 
 /**
@@ -25,6 +26,7 @@ export function CameraCalibrationControls({
   layout: "footer" | "inline";
 }) {
   const status = useCameraCalibration(camera.id, camera.calibrated);
+  const pushOnce = usePushOnce();
   if (status.state !== "calibrated" && status.state !== "none") return null;
 
   const action = (
@@ -33,7 +35,7 @@ export function CameraCalibrationControls({
       variant={layout === "footer" ? "ghost" : "secondary"}
       size="sm"
       icon={<Crosshair size={14} color={buttonTextColor(layout === "footer" ? "ghost" : "secondary")} />}
-      onPress={() => openCalibrationWizard(camera.id)}
+      onPress={() => openCalibrationWizard(camera.id, pushOnce)}
     />
   );
 

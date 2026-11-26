@@ -5,7 +5,9 @@ import { robotClient } from "@/src/services/RobotConnectService";
 import { router } from "expo-router";
 import {
   ArrowLeftRight,
+  Bell,
   CheckCircle2,
+  FileArchive,
   CodeXml,
   Gamepad2,
   Info,
@@ -27,6 +29,7 @@ import {
   SectionHeader,
   spacing,
   StatTile,
+  StatusPill,
   type,
 } from "@/src/components/ui/kit";
 import {
@@ -89,6 +92,23 @@ const MENU_ITEMS = [
     tileColor: "#fdf4ff",
     iconColor: "#9333ea",
     onPress: () => router.navigate("/robot/config"),
+  },
+  {
+    label: "Alarms",
+    description: "Active alarms and history, with what to do",
+    icon: Bell,
+    tileColor: colors.dangerSoft,
+    iconColor: colors.danger,
+    onPress: () => router.navigate("/robot/alarms"),
+    badge: "alarms" as const,
+  },
+  {
+    label: "Backup & Restore",
+    description: "Save or restore everything on this controller",
+    icon: FileArchive,
+    tileColor: accents.cyanSoft,
+    iconColor: accents.cyan,
+    onPress: () => router.navigate("/robot/backup"),
   },
   {
     label: "Station Tag",
@@ -220,6 +240,9 @@ export default function ConnectedRobot() {
                 icon={<Icon size={20} color={item.iconColor} />}
                 iconColor={item.tileColor}
                 onPress={item.onPress}
+                right={"badge" in item && (status.activeAlarmCount ?? 0) > 0
+                  ? <StatusPill label={`${status.activeAlarmCount} active`} tone="danger" dot />
+                  : undefined}
               />
               {!isLast && <Divider inset />}
             </View>

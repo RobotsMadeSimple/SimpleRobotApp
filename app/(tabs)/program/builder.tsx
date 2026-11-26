@@ -26,6 +26,7 @@ import {
   Cpu,
   History as HistoryIcon,
   ImagePlus,
+  MousePointerClick,
   Plus,
   Power,
   Repeat,
@@ -71,7 +72,10 @@ import { BottomSheet } from "@/src/components/ui/BottomSheet";
 import { insertAt, locateStep, mapStepsById, moveRefusal, moveStep, removeStepsById, replaceStepById, sameScope, topSelected } from "@/src/components/ui/builder/stepEdits";
 import { conditionSummary } from "@/src/components/ui/builder/ConditionEditor";
 import { VarType, VariableEditModal } from "@/src/components/ui/builder/VariableEditModal";
+import { PointEditModal } from "@/src/components/ui/builder/PointEditModal";
 import { renameVariableInSteps, renameVariableInVariables } from "@/src/components/ui/builder/renameVariable";
+import { renameProgramPointInSteps } from "@/src/components/ui/builder/renamePoint";
+import { teachHandoff } from "@/src/services/teachHandoff";
 import {
   STEP_THEME, ScopeFrame, backfillPointIds, bodyFrames, bodyOf, caseValuesText, categoryForStep, getStepsAtScope,
   isBlockStep, newId, newStep, setStepsAtScope, stepDetail, stepLabel,
@@ -323,7 +327,7 @@ export default function BuilderScreen() {
   }, { limit: 100 });
   const { doc, commit } = history;
   const {
-    name: programName, description, steps, variables,
+    name: programName, description, steps, variables, points: programPoints,
     isRoutine: isRoutineMode, isBackground: isBackgroundMode, killBackgroundOnStop,
   } = doc;
 
@@ -331,6 +335,12 @@ export default function BuilderScreen() {
     commit(d => ({ ...d, steps: typeof u === "function" ? u(d.steps) : u })), [commit]);
   const setVariables = useCallback((u: SetStateAction<ProgramVariable[]>) =>
     commit(d => ({ ...d, variables: typeof u === "function" ? u(d.variables) : u })), [commit]);
+  const setProgramPoints = useCallback((u: SetStateAction<Point[]>) =>
+    commit(d => ({ ...d, points: typeof u === "function" ? u(d.points) : u })), [commit]);
+  // Points this program can resolve: its OWN points first (same precedence as the controller's
+  // composite), then the global library. Used for step summaries, search, and id-backfill so a step
+  // targeting a program point resolves instead of reading as "missing".
+  const allPoints = useMemo(() => [...programPoints, ...points], [programPoints, points]);
   // Typing coalesces, so one undo reverts a burst of keystrokes rather than one letter.
   const setProgramName = (name: string) => commit(d => ({ ...d, name }), { coalesceKey: "name" });
   const setDescription = (description: string) => commit(d => ({ ...d, description }), { coalesceKey: "description" });
@@ -689,6 +699,49 @@ export default function BuilderScreen() {
     setVariables(prev => prev.filter(v => v.id !== id));
   }
 
+  // ── Program point editor state ────────────────────────────────────────────
+
+  const [pointModalOpen, setPointModalOpen] = useState(false);
+  const [editingPoint,   setEditingPoint]   = useState<Point | null>(null);
+
+  function openNewPoint()           { setEditingPoint(null); setPointModalOpen(true); }
+  function openEditPoint(p: Point)  { setEditingPoint(p); setPointModalOpen(true); }
+
+  function saveProgramPoint(p: Point) {
+    // A rename refreshes the display name on every step linked to the point (links are id-first, so
+    // they survive regardless) — done in the same commit so steps + points stay consistent.
+    commit(d => {
+      const prev = d.points.find(x => x.id === p.id);
+      const isRename = !!prev && prev.name !== p.name;
+      const points = prev ? d.points.map(x => (x.id === p.id ? p : x)) : [...d.points, p];
+      const steps = isRename ? renameProgramPointInSteps(d.steps, p.id, p.name) : d.steps;
+      return { ...d, points, steps };
+    });
+  }
+
+  function deleteProgramPoint(id: string) {
+    setProgramPoints(prev => prev.filter(p => p.id !== id));
+  }
+
+  // Open the Jog page to teach this point's position. The Jog page captures the live pose and hands
+  // it back through teachHandoff; we consume it on focus below. router.push (not replace) keeps this
+  // builder — and its unsaved document — alive to return to.
+  function teachProgramPointOnJog(p: Point) {
+    router.push({ pathname: "/control/jog", params: { teachPointId: p.id, teachPointName: p.name, returnTo: "/program" } });
+  }
+
+  // Back from the Jog page: fold the captured pose into the matching point (undoable).
+  useFocusEffect(useCallback(() => {
+    const h = teachHandoff.take();
+    if (!h) return;
+    commit(d => ({
+      ...d,
+      points: d.points.map(p => p.id === h.pointId
+        ? { ...p, ...h.pose, untaught: false, lastUpdatedUnixMs: Date.now() }
+        : p),
+    }));
+  }, [commit]));
+
   // ── UI state ──────────────────────────────────────────────────────────────
 
   const [typePickerOpen, setTypePickerOpen] = useState(false);
@@ -816,8 +869,8 @@ export default function BuilderScreen() {
   // ── Visible rows + drag bars ──────────────────────────────────────────────
 
   const rows = useMemo(
-    () => buildRows(currentSteps, scopeStack, expanded, foldedSections, points),
-    [currentSteps, scopeStack, expanded, foldedSections, points]);
+    () => buildRows(currentSteps, scopeStack, expanded, foldedSections, allPoints),
+    [currentSteps, scopeStack, expanded, foldedSections, allPoints]);
   const draggedRef = useRef<string | null>(null);
   const rowDrag = useDragReorder(rows, next => dropRow(next));
   const rowRefs = useRef<Map<string, View>>(new Map());
@@ -871,8 +924,8 @@ export default function BuilderScreen() {
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [] as string[];
-    return [...walkSteps(steps)].filter(({ step }) => searchText(step, points).includes(q)).map(x => x.step.id);
-  }, [query, steps, points]);
+    return [...walkSteps(steps)].filter(({ step }) => searchText(step, allPoints).includes(q)).map(x => x.step.id);
+  }, [query, steps, allPoints]);
   const hitSet = useMemo(() => new Set(hits), [hits]);
 
   // Show a hit: when it is not on screen, open the list it sits in; then scroll to it.
@@ -952,7 +1005,7 @@ export default function BuilderScreen() {
     } : {};
     // Self-migration: stamp a stable pointId onto any move step that still
     // references a point only by name, so renaming that point won't break it.
-    return { ...prog, ...page, editorMode, steps: backfillPointIds(prog.steps, points) };
+    return { ...prog, ...page, editorMode, steps: backfillPointIds(prog.steps, allPoints) };
   }
 
   async function save(): Promise<boolean> {
@@ -1573,6 +1626,69 @@ export default function BuilderScreen() {
     </>
   );
 
+  // Program points — a sibling of the variables card. Each row teaches its position on the Jog page
+  // and can be targeted from a Move step (shown under "This program" in the point picker).
+  const pointsSection = (
+    <>
+      <View style={styles.sectionLabelRow}>
+        <Text style={styles.sectionLabel}>POINTS</Text>
+        {programPoints.length > 0 && <Text style={styles.sectionCount}>{programPoints.length}</Text>}
+        <View style={{ flex: 1 }} />
+        <InfoTip text="Points saved with this program. Add one, Teach it to a position on the robot, then target it from a Move step — program points appear under 'This program' in the point picker." />
+      </View>
+      <View style={styles.variablesCard}>
+        {programPoints.length === 0 ? (
+          <Text style={styles.varEmptyText}>
+            No program points yet. Tap + to add one, then Teach it to a position on the robot.
+          </Text>
+        ) : (
+          programPoints.map((p, i) => (
+            <React.Fragment key={p.id}>
+              {i > 0 && <View style={styles.varSep} />}
+              <TouchableOpacity style={styles.varRow} onPress={() => openEditPoint(p)} activeOpacity={0.7}>
+                <View style={styles.varInfo}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={[styles.varName, { color: accents.cyan }]}>{p.name}</Text>
+                    {p.untaught && (
+                      <View style={{ backgroundColor: colors.warningSoft, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: colors.warningBorder }}>
+                        <Text style={{ fontSize: 9, fontWeight: "700", color: colors.warning, letterSpacing: 0.3 }}>UNTAUGHT</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.varDesc} numberOfLines={1}>
+                    {p.description
+                      ? p.description
+                      : p.untaught
+                        ? "Not taught yet"
+                        : `X ${p.x.toFixed(1)}  Y ${p.y.toFixed(1)}  Z ${p.z.toFixed(1)}  RZ ${p.rz.toFixed(1)}`}
+                  </Text>
+                </View>
+                <TouchableOpacity style={styles.pointTeachBtn} onPress={() => teachProgramPointOnJog(p)} activeOpacity={0.7}>
+                  <MousePointerClick size={13} color={colors.accent} />
+                  <Text style={styles.pointTeachText}>{p.untaught ? "Teach" : "Re-teach"}</Text>
+                </TouchableOpacity>
+                <DeleteIconButton
+                  size={14}
+                  onPress={() => appAlert("Delete Point", `Remove "${p.name}"? Steps using it will need a new target.`, [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Delete", style: "destructive", onPress: () => deleteProgramPoint(p.id) },
+                  ])}
+                />
+              </TouchableOpacity>
+            </React.Fragment>
+          ))
+        )}
+        <TouchableOpacity
+          style={[styles.varAddBtn, programPoints.length > 0 && styles.varAddBtnBorder]}
+          onPress={openNewPoint} activeOpacity={0.7}
+        >
+          <Plus size={13} color={accents.cyan} />
+          <Text style={[styles.varAddText, { color: accents.cyan }]}>Add Point</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
   const textView = (
     <TextView.TextProgramView
       program={validationProgram}
@@ -1721,7 +1837,7 @@ export default function BuilderScreen() {
                   } : undefined}
                   onOpenCncBuilder={stepId => { void openCncBuilder(stepId); }}
                   problems={problemIndex.get(step.id)}
-                  points={points}
+                  points={allPoints}
                   breakpoint={breakpoints.has(step.id)}
                   running={runningStepId === step.id && (runSummary?.pausedAtStepId === step.id ? "paused" : true)}
                   searchHit={hitSet.has(step.id)}
@@ -1992,6 +2108,7 @@ export default function BuilderScreen() {
             >
               {metaSection}
               {variablesSection}
+              {pointsSection}
             </ScrollView>
             <View style={styles.widePaneRight}>
               {searchBar && <View style={styles.searchWrap}>{searchBar}</View>}
@@ -2057,6 +2174,7 @@ export default function BuilderScreen() {
       >
         {metaSection}
         {variablesSection}
+        {pointsSection}
 
         {/* Steps (root level) */}
         <View style={styles.sectionLabelRow}>
@@ -2074,7 +2192,7 @@ export default function BuilderScreen() {
       )}
 
       <BottomSheet visible={rowMenu !== null} onClose={() => setRowMenu(null)}
-        title={rowMenu ? (rowMenu.name?.trim() || stepLabel(rowMenu, points)) : ""}>
+        title={rowMenu ? (rowMenu.name?.trim() || stepLabel(rowMenu, allPoints)) : ""}>
         {rowMenu && (() => {
           const m = rowMenu;
           const item = (label: string, sub: string, icon: React.ReactNode, onPress: () => void, danger?: boolean) => (
@@ -2125,6 +2243,7 @@ export default function BuilderScreen() {
         step={editingStep}
         variables={variables}
         contextVariables={contextVariables.length > 0 ? contextVariables : undefined}
+        programPoints={programPoints}
         scopeSteps={editingScope}
         stepIndex={editingStepIndex}
         onSave={updateStep}
@@ -2166,6 +2285,14 @@ export default function BuilderScreen() {
         isRoutine={isRoutineMode}
         onSave={saveVar}
         onClose={() => { setVarModalOpen(false); setEditingVar(null); }}
+      />
+      <PointEditModal
+        key={pointModalOpen ? (editingPoint?.id ?? "new") : "closed"}
+        visible={pointModalOpen}
+        point={editingPoint}
+        existingNames={programPoints.filter(p => p.id !== editingPoint?.id).map(p => p.name)}
+        onSave={saveProgramPoint}
+        onClose={() => { setPointModalOpen(false); setEditingPoint(null); }}
       />
 
       {/* Make Routine from selected steps */}
@@ -2449,6 +2576,7 @@ const styles = StyleSheet.create({
   },
   sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   headerExitBtn: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs + 2,
     backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.border,
     borderRadius: radii.sm,
@@ -2501,6 +2629,14 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   varAddText: { fontSize: 13, fontWeight: "600", color: accents.purple },
+
+  // Program-point row's Teach / Re-teach affordance.
+  pointTeachBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 8, paddingVertical: 5,
+    borderRadius: radii.sm, backgroundColor: colors.accentSoft,
+  },
+  pointTeachText: { fontSize: 12, fontWeight: "700", color: colors.accent },
 
   // ── Step cards ──────────────────────────────────────────────────────────────
 

@@ -7,7 +7,8 @@ import {
   Router,
 } from "lucide-react-native";
 import { useEffect } from "react";
-import { BackHandler } from "react-native";
+import { BackHandler, Platform } from "react-native";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -16,6 +17,7 @@ import { colors } from "@/src/components/ui/kit";
 import { NavRail } from "@/src/components/ui/NavRail";
 import { AppAlertHost } from "@/src/components/ui/AppAlert";
 import { FaultRecoveryOverlay } from "@/src/components/ui/FaultRecoveryOverlay";
+import { EstopBannerFrame } from "@/src/components/ui/safety/EstopBanner";
 import { PromptDialog } from "@/src/components/ui/program/PromptDialog";
 import { MockKeyboard } from "@/src/components/dev/MockKeyboard";
 import { ProviderAutoStart } from "@/src/components/provider/ProviderAutoStart";
@@ -25,6 +27,13 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 export default function Layout() {
+  // The app follows the phone's rotation. app.json allows it for new builds; unlocking here also
+  // frees builds made while the manifest still pinned portrait.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    ScreenOrientation.unlockAsync().catch(() => {});
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ActionSheetProvider>
@@ -32,7 +41,10 @@ export default function Layout() {
           <RobotProvider>
             <StatusBar style="dark" />
             <ProviderAutoStart />
-            <TabLayout />
+            {/* Hardwired e-stop: a red banner above every screen while active or latched. */}
+            <EstopBannerFrame>
+              <TabLayout />
+            </EstopBannerFrame>
             <AppAlertHost />
             <FaultRecoveryOverlay />
             {/* A running program's operator prompt, answerable from any screen. */}
@@ -64,6 +76,9 @@ export function TabLayout() {
   const insets = useSafeAreaInsets();
   const isWide = useIsWide();
   usePreventBackExit();
+  // The rail owns the left inset; the right one (a landscape phone's cutout or navigation bar when
+  // turned the other way) pads the page itself so content never runs under it.
+  const sceneStyle = { paddingRight: insets.right, ...(isWide ? {} : { paddingLeft: insets.left }), backgroundColor: colors.background };
 
   return (
     <Tabs
@@ -75,6 +90,7 @@ export function TabLayout() {
         // wide, named back affordance + connection status on narrow) — the stock
         // navigator header is disabled app-wide.
         headerShown: false,
+        sceneStyle,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarPosition: isWide ? "left" : "bottom",

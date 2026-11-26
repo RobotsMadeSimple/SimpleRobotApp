@@ -2,7 +2,8 @@ import { DeviceStatusBar, IORow } from "@/src/components/ui/io/ioShared";
 import { useRelayIO } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
 import { Settings2 } from "lucide-react-native";
-import { router, useFocusEffect } from "expo-router";
+import { useFocusEffect } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import { useCallback } from "react";
 import React from "react";
 import { View } from "react-native";
@@ -25,6 +26,7 @@ export default function RelayPage() {
   const relays    = relay?.relays ?? [false, false, false, false];
   const names     = relay?.names  ?? ["Relay 1", "Relay 2", "Relay 3", "Relay 4"];
   const serial    = relay?.serial ?? "";
+  const pushOnce  = usePushOnce();
 
   // Refresh live IO on entry. relayIO is otherwise only updated on connect or
   // after the app's own toggle actions, so a relay changed by a running program
@@ -52,7 +54,7 @@ export default function RelayPage() {
               size="sm"
               label="Configure"
               icon={<Settings2 size={15} color={buttonTextColor("secondary")} />}
-              onPress={() => router.push("/(tabs)/io/configure-relay")}
+              onPress={() => pushOnce("/(tabs)/io/configure-relay")}
             />
           }
         />

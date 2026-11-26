@@ -1,4 +1,4 @@
-import { BuiltProgram, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
+import { BuiltProgram, Point, ProgramStep, ProgramVariable } from "@/src/models/robotModels";
 import { ScopeFrame, bodyOf, frameResolves, newId } from "./stepUtils";
 import { mapStepTree } from "@/src/models/stepTree";
 
@@ -11,6 +11,8 @@ export type EditorDoc = {
   description: string;
   steps: ProgramStep[];
   variables: ProgramVariable[];
+  /** Points that belong to this program (taught from the Program page). */
+  points: Point[];
   isRoutine: boolean;
   isBackground: boolean;
   killBackgroundOnStop: boolean;
@@ -21,6 +23,7 @@ export const EMPTY_DOC: EditorDoc = {
   description: "",
   steps: [],
   variables: [],
+  points: [],
   isRoutine: false,
   isBackground: false,
   killBackgroundOnStop: true,
@@ -44,6 +47,7 @@ export function docFromProgram(p: BuiltProgram, overrides?: Partial<EditorDoc>):
     description:          p.description ?? "",
     steps:                rehydrateIds(p.steps ?? []),
     variables:            p.variables ?? [],
+    points:               p.points ?? [],
     isRoutine:            p.isRoutine ?? false,
     isBackground:         p.isBackground ?? false,
     killBackgroundOnStop: p.killBackgroundOnStop ?? true,
@@ -59,6 +63,7 @@ export function programFromDoc(d: EditorDoc, id: string | undefined, lastUpdated
     description: d.description.trim(),
     steps: d.steps,
     variables: d.variables.length > 0 ? d.variables : undefined,
+    points: d.points.length > 0 ? d.points : undefined,
     lastUpdatedUnixMs,
     isRoutine: d.isRoutine,
     isBackground: d.isBackground || undefined,

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { CELL3D_BUNDLE_JS } from "@/src/components/ui/cell3d/cell3dHtml";
+import { useCell3DFeed, useCell3DSync } from "@/src/components/ui/cell3d/useCell3DFeed";
 import { imageDataUri } from "@/src/models/robotModels";
 import { useProgramSummaries } from "@/src/providers/RobotProvider";
 import { robotClient } from "@/src/services/RobotConnectService";
@@ -17,7 +19,11 @@ import { robotClient } from "@/src/services/RobotConnectService";
  * Message envelope (both directions), JSON strings tagged `__rb:1`:
  *  • page → host request:   { __rb, id, method, args }      → host replies { __rb, id, result, error? }
  *  • page → host "ready":   { __rb, event:"ready" }         (host pushes a fresh snapshot back)
- *  • host → page events:    { __rb, event:"vars"|"state"|"history", … }
+ *  • host → page events:    { __rb, event:"vars"|"state"|"history"|"exprs"|"c3d", … }
+ *
+ * A page carrying `data-cell3d` (the "3D view" widget) also gets the 3D viewer bundle
+ * (`window.Cell3D`), and `robot.onCell3d(cb)` streams it viewer commands (cell, status, tool,
+ * points…) from the same feed Cell3DView uses.
  */
 
 export type DisplayState = {
@@ -34,7 +40,7 @@ export const BRIDGE_JS = `
 (function () {
   if (window.robot) return;
   var pending = {}, seq = 0;
-  var subs = { vars: [], state: [], history: {}, expr: {} };
+  var subs = { vars: [], state: [], history: {}, expr: {}, c3d: [] };
 
   function send(msg) {
     var s = JSON.stringify(msg);
@@ -59,6 +65,7 @@ export const BRIDGE_JS = `
     if (m.event === 'vars') subs.vars.forEach(function (cb) { try { cb(m.values || {}, m.bools || {}); } catch (e) {} });
     else if (m.event === 'state') subs.state.forEach(function (cb) { try { cb(m.state); } catch (e) {} });
     else if (m.event === 'history') (subs.history[m.channel] || []).forEach(function (cb) { try { cb(m.samples || []); } catch (e) {} });
+    else if (m.event === 'c3d') subs.c3d.forEach(function (cb) { try { cb(m.cmds || []); } catch (e) {} });
     else if (m.event === 'exprs') {
       var vals = m.values || {};
       Object.keys(vals).forEach(function (ex) {
@@ -102,6 +109,8 @@ export const BRIDGE_JS = `
         if (a.length === 0) call('unsubscribeExpr', [expr]);
       };
     },
+    /** Feed a 3D viewer (window.Cell3D): cb(commands) with the live cell, status, tool, points. */
+    onCell3d: function (cb) { subs.c3d.push(cb); call('subscribeCell3d', []); return unsub(subs.c3d, cb); },
     /** Subscribe to program state changes. cb(state). Returns an unsubscribe function. */
     onState: function (cb) { subs.state.push(cb); return unsub(subs.state, cb); },
     /** Stream a load cell's live samples. cb(samples) with [{ t, v, r }]. Returns unsubscribe. */
@@ -120,11 +129,17 @@ export const BRIDGE_JS = `
 })();
 `;
 
-/** Wrap body-level user HTML in a full document with the bridge script in the head. */
+/**
+ * Wrap body-level user HTML in a full document with the bridge script in the head (plus the 3D
+ * viewer bundle when the page has a `data-cell3d` element — added here, at view time, so saved
+ * pages stay small).
+ */
 export function wrapDisplayHtml(userHtml: string): string {
+  const cell3d = (userHtml || "").includes("data-cell3d") ? `<script>${CELL3D_BUNDLE_JS}</script>` : "";
   return `<!doctype html><html><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">`
     + `<script>${BRIDGE_JS}</script>`
+    + cell3d
     + `<style>html,body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif;}</style>`
     + `</head><body>${userHtml || ""}</body></html>`;
 }
@@ -162,6 +177,13 @@ export function useDisplayHost({ programName, programId, post }: UseDisplayHostO
   const push = useCallback((obj: Record<string, unknown>) => {
     try { postRef.current(JSON.stringify({ __rb: 1, ...obj })); } catch { /* transport gone */ }
   }, []);
+
+  // ── 3D view widgets: the viewer feed, live only while the page has subscribed ─────
+  // Bumped per subscribe (each new widget gets the full picture), reset when the page reloads.
+  const [c3dGen, setC3dGen] = useState(0);
+  const c3dFeed = useCell3DFeed(c3dGen > 0);
+  const sendC3d = useCallback((cmds: unknown[]) => push({ event: "c3d", cmds }), [push]);
+  useCell3DSync(c3dFeed, sendC3d, c3dGen > 0, { generation: c3dGen });
 
   // ── Variable polling (the same round-trip the monitor uses) ──────────────────
   useEffect(() => {
@@ -246,6 +268,7 @@ export function useDisplayHost({ programName, programId, post }: UseDisplayHostO
         Object.values(historyStreams.current).forEach((close) => close());
         historyStreams.current = {};
         exprSubs.current.clear();
+        setC3dGen(0);
         // Hand the fresh page the current snapshot immediately.
         push({ event: "vars", values: latestVars.current.values, bools: latestVars.current.bools });
         push({ event: "state", state: JSON.parse(stateKey) as DisplayState });
@@ -305,6 +328,10 @@ export function useDisplayHost({ programName, programId, post }: UseDisplayHostO
           reply(true);
           break;
         }
+        case "subscribeCell3d":
+          setC3dGen((g) => g + 1);
+          reply(true);
+          break;
         case "subscribeExpr": {
           const expr = String(m.args?.[0] ?? "");
           if (expr) exprSubs.current.set(expr, (exprSubs.current.get(expr) ?? 0) + 1);

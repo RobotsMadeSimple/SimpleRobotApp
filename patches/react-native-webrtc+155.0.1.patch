@@ -138,10 +138,26 @@ index 0000000..6577710
 +    }
 +}
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
-index a2e5098..4a9a7b7 100644
+index a2e5098..d8992f6 100644
 --- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/GetUserMediaImpl.java
-@@ -488,7 +488,7 @@ class GetUserMediaImpl {
+@@ -278,6 +278,15 @@ class GetUserMediaImpl {
+         }
+     }
+ 
++    // Stops every capturer and releases every track (camera/mic). Used when the JS context goes
++    // away (dev reload) while the process lives on, so no orphaned capturer keeps the camera.
++    void disposeAllTracks() {
++        for (TrackPrivate track : new ArrayList<>(tracks.values())) {
++            try { track.dispose(); } catch (Exception e) { Log.w(TAG, "disposeAllTracks: " + e); }
++        }
++        tracks.clear();
++    }
++
+     void applyConstraints(String trackId, ReadableMap constraints, Promise promise) {
+         TrackPrivate track = tracks.get(trackId);
+         if (track != null && track.videoCaptureController instanceof AbstractVideoCaptureController) {
+@@ -488,7 +497,7 @@ class GetUserMediaImpl {
          videoCaptureController.setCapturerEventsListener(eventsEmitter);
  
          VideoSource videoSource = pcFactory.createVideoSource(videoCapturer.isScreencast());
@@ -197,7 +213,7 @@ index 0000000..b4e8f8b
 +    }
 +}
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
-index d3bfe07..914c0ec 100644
+index d3bfe07..f51b5d2 100644
 --- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCModule.java
 @@ -979,7 +979,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
@@ -220,31 +236,35 @@ index d3bfe07..914c0ec 100644
  
              if (peerConnection == null) {
                  Log.d(TAG, "peerConnectionSetRemoteDescription() peerConnection is null");
-diff --git a/node_modules/react-native-webrtc/src/RTCUtil.ts b/node_modules/react-native-webrtc/src/RTCUtil.ts
-index 10e8499..77bb0f5 100644
---- a/node_modules/react-native-webrtc/src/RTCUtil.ts
-+++ b/node_modules/react-native-webrtc/src/RTCUtil.ts
-@@ -85,9 +85,15 @@ function normalizeMediaConstraints(constraints, mediaType) {
-                 facingMode: extractString(constraints, 'facingMode'),
-                 frameRate: extractNumber(constraints, 'frameRate'),
-                 height: extractNumber(constraints, 'height'),
--                width: extractNumber(constraints, 'width')
-+                width: extractNumber(constraints, 'width'),
-+                // Extra clockwise turn (0/90/180/270) applied to every frame before encoding (Android).
-+                rotation: extractNumber(constraints, 'rotation')
-             };
+@@ -1349,6 +1351,23 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
+         });
+     }
  
-+            if (!c.rotation) {
-+                delete c.rotation;
++    // A dev reload tears down the JS context but keeps the process, and nothing on the JS side runs
++    // to stop its streams. Without this the old capturer keeps the camera running and every later
++    // getUserMedia times out until the app is force-stopped.
++    @Override
++    public void invalidate() {
++        ThreadUtils.runOnExecutor(() -> {
++            for (int i = 0, size = mPeerConnectionObservers.size(); i < size; i++) {
++                PeerConnectionObserver pco = mPeerConnectionObservers.valueAt(i);
++                try { if (pco != null) pco.dispose(); } catch (Exception e) { Log.w(TAG, "invalidate: " + e); }
 +            }
++            mPeerConnectionObservers.clear();
++            localStreams.clear();
++            getUserMediaImpl.disposeAllTracks();
++        });
++        super.invalidate();
++    }
 +
-             if (!c.deviceId) {
-                 delete c.deviceId;
-             }
+     @ReactMethod
+     public void peerConnectionDispose(int id) {
+         ThreadUtils.runOnExecutor(() -> {
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
+index 9a6c81f..f0d5d76 100644
 --- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/webrtcutils/H264AndSoftwareVideoEncoderFactory.java
-@@ -32,7 +32,10 @@
+@@ -32,7 +32,10 @@ public class H264AndSoftwareVideoEncoderFactory implements VideoEncoderFactory {
      @Override
      public VideoEncoder createEncoder(VideoCodecInfo codecInfo) {
          if (codecInfo.name.equalsIgnoreCase("H264")) {
@@ -362,3 +382,24 @@ index 0000000..da8c60f
 +        return inner.getEncoderInfo();
 +    }
 +}
+diff --git a/node_modules/react-native-webrtc/src/RTCUtil.ts b/node_modules/react-native-webrtc/src/RTCUtil.ts
+index 10e8499..77bb0f5 100644
+--- a/node_modules/react-native-webrtc/src/RTCUtil.ts
++++ b/node_modules/react-native-webrtc/src/RTCUtil.ts
+@@ -85,9 +85,15 @@ function normalizeMediaConstraints(constraints, mediaType) {
+                 facingMode: extractString(constraints, 'facingMode'),
+                 frameRate: extractNumber(constraints, 'frameRate'),
+                 height: extractNumber(constraints, 'height'),
+-                width: extractNumber(constraints, 'width')
++                width: extractNumber(constraints, 'width'),
++                // Extra clockwise turn (0/90/180/270) applied to every frame before encoding (Android).
++                rotation: extractNumber(constraints, 'rotation')
+             };
+ 
++            if (!c.rotation) {
++                delete c.rotation;
++            }
++
+             if (!c.deviceId) {
+                 delete c.deviceId;
+             }

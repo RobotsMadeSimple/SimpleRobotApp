@@ -1,4 +1,4 @@
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Gauge, RefreshCw } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
@@ -10,6 +10,7 @@ import {
 } from "@/src/components/ui/kit";
 import type { IoRecordingMeta } from "@/src/models/robotModels";
 import { robotClient } from "@/src/services/RobotConnectService";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 
 /** Browse past IO recordings (optionally filtered to one channel). Lazy sample loading
  * happens in the detail screen — this list holds only lightweight metadata. */
@@ -17,6 +18,7 @@ export default function RecordingsScreen() {
   const { channelKey } = useLocalSearchParams<{ channelKey?: string }>();
   const [recs, setRecs] = useState<IoRecordingMeta[]>([]);
   const [loading, setLoading] = useState(false);
+  const pushOnce = usePushOnce();
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -73,7 +75,7 @@ export default function RecordingsScreen() {
                     icon={<Gauge size={20} color={colors.accent} />}
                     iconColor={colors.accentSoft}
                     chevron
-                    onPress={() => router.push({ pathname: "/(tabs)/io/recording-detail", params: { id: r.id } })}
+                    onPress={() => pushOnce({ pathname: "/(tabs)/io/recording-detail", params: { id: r.id } })}
                     right={
                       r.active
                         ? <StatusPill label="Live" tone="success" dot />

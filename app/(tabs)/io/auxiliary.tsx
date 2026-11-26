@@ -12,17 +12,21 @@ import {
   deviceSupports,
 } from "@/src/models/robotModels";
 import {
+  ArrowUpFromLine,
   ChevronLeft,
   ChevronRight,
   Crosshair,
   Gauge,
+  House,
   Pencil,
+  RefreshCw,
   Settings2,
   Square,
 } from "lucide-react-native";
 import { auxRoleMeta } from "@/src/components/ui/io/auxRoles";
 import { useKeyboardHeight } from "@/src/platform/keyboard";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
+import { usePushOnce } from "@/src/hooks/usePushOnce";
 import React, { ReactNode, useEffect, useState } from "react";
 import {
   Modal,
@@ -38,6 +42,7 @@ import { runOnJS, useSharedValue } from "react-native-reanimated";
 import {
   accents,
   Button,
+  buttonTextColor,
   Card,
   colors,
   Divider,
@@ -50,8 +55,8 @@ import {
   Screen,
   SectionHeader,
   shadows,
+  StatusPill,
   spacing,
-  StatTile,
   type,
 } from "@/src/components/ui/kit";
 
@@ -69,9 +74,52 @@ const clampStepHz = (hz: number) => Math.max(1, Math.min(AUX_MAX_STEP_HZ, Math.r
 
 // Aux Stepper Axis device-type tint (matches the purple used for this device
 // type on the IO index page's icon tile), via the kit's purple accent family.
+// Identity only (the role icon tiles): interactive controls use the app accent, so the
+// colour of a control always means "you can press this" (display-design §1.2).
 const AUX_TINT       = accents.purple;
 const AUX_TINT_SOFT  = accents.purpleSoft;
-const AUX_TINT_TRACK = "#c4b5fd"; // lighter purple for the motor-enable switch track — no kit token for this shade
+
+/** Height of every axis control (jog / action buttons): above the 44 px touch minimum. */
+const CONTROL_H = 52;
+
+// ── AxisReadout ───────────────────────────────────────────────────────────────
+// The axis's live value as the card's content: small uppercase label, large tabular value,
+// lighter unit at its baseline (display-design §3.1). `right` holds an optional inline action.
+
+function AxisReadout({ label, value, unit, right }: {
+  label: string;
+  value: string;
+  unit?: string;
+  right?: ReactNode;
+}) {
+  return (
+    <View style={styles.readout}>
+      <View style={styles.readoutMain}>
+        <Text style={styles.readoutLabel}>{label}</Text>
+        <View style={styles.readoutValueRow}>
+          <Text style={styles.readoutValue} numberOfLines={1}>{value}</Text>
+          {!!unit && <Text style={styles.readoutUnit}>{unit}</Text>}
+        </View>
+      </View>
+      {right}
+    </View>
+  );
+}
+
+// ── OverviewStat ──────────────────────────────────────────────────────────────
+// A compact label-over-value pair inside the device overview card.
+
+function OverviewStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <View style={styles.overviewStat}>
+      <Text style={styles.readoutLabel}>{label}</Text>
+      <View style={styles.readoutValueRow}>
+        <Text style={styles.overviewValue}>{value}</Text>
+        {!!unit && <Text style={styles.readoutUnit}>{unit}</Text>}
+      </View>
+    </View>
+  );
+}
 
 // ── AuxJogButton ──────────────────────────────────────────────────────────────
 
@@ -110,18 +158,28 @@ function AuxJogButton({
   const stopJog = () =>
     robotClient.jogAux({ deviceId, axis: axisIndex, velocity: 0, decel });
 
+  // Tonal hold-to-jog button that shares the row's width: accent text on the soft accent
+  // fill (interactive, never the page's one filled primary), firming to an accent border
+  // while held.
   return (
     <JogButton
-      label={label ?? (direction === -1 ? "−" : "+")}
+      label={label ?? (direction === -1 ? "Jog −" : "Jog +")}
       icon={
         icon ?? (direction === -1
-          ? <ChevronLeft  size={26} color={AUX_TINT} />
-          : <ChevronRight size={26} color={AUX_TINT} />)
+          ? <ChevronLeft  size={22} color={colors.accent} />
+          : <ChevronRight size={22} color={colors.accent} />)
       }
       iconPosition={direction === -1 ? "left" : "right"}
       onStart={startJog}
       onStop={stopJog}
-      size={64}
+      size={CONTROL_H}
+      fill
+      labelSize={15}
+      color={colors.accent}
+      restBg={colors.accentSoft}
+      restBorder={colors.accentSoft}
+      activeBg={colors.accentSoft}
+      activeColor={colors.accent}
     />
   );
 }
@@ -138,6 +196,17 @@ function actionSteps(axis: AuxAxisChannelState): number {
     : Math.round(axis.actionDistance || 0);
 }
 
+/** The configured action velocity as motor steps/s. actionVelocity is in the axis unit/s
+ *  (mm/s Linear, deg/s Rotary — as the aux-axis settings label it); untyped axes treat it as
+ *  raw steps/s. Unset falls back to 800 steps/s. */
+function actionStepsPerSec(axis: AuxAxisChannelState): number {
+  if (!(axis.actionVelocity > 0)) return 800;
+  const spu = auxStepsPerUnit(axis);
+  return axis.axisType && spu > 0
+    ? Math.max(1, Math.round(axis.actionVelocity * spu))
+    : Math.round(axis.actionVelocity);
+}
+
 // ── AuxActionButton ───────────────────────────────────────────────────────────
 // Tap (one-shot) companion to AuxJogButton — used for role actions like gripper
 // Open/Close, conveyor Run/Stop and rotary indexing.
@@ -147,18 +216,30 @@ function AuxActionButton({
   icon,
   onPress,
   tone = "default",
+  disabled = false,
 }: {
   label: string;
   icon?: ReactNode;
   onPress: () => void;
   tone?: "default" | "danger";
+  disabled?: boolean;
 }) {
-  const tint = tone === "danger" ? colors.danger : AUX_TINT;
+  // Same footprint as the jog buttons (row-filling, CONTROL_H tall). Tonal accent for
+  // actions; Stop is soft red — clear, one tap, never a big filled block.
+  const danger = tone === "danger";
   return (
-    <AnimatedPressable style={[styles.actionBtn, { borderColor: tint }]} onPress={onPress}>
-      <View style={styles.actionBtnContent}>
+    <AnimatedPressable
+      style={[styles.actionBtn, danger ? styles.actionBtnDanger : styles.actionBtnTonal]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+    >
+      <View style={[styles.actionBtnContent, disabled && styles.actionBtnDisabled]}>
         {icon}
-        <Text style={[styles.actionBtnText, { color: tint }]} numberOfLines={1}>{label}</Text>
+        <Text style={[styles.actionBtnText, { color: danger ? colors.danger : colors.accent }]} numberOfLines={1}>
+          {label}
+        </Text>
       </View>
     </AnimatedPressable>
   );
@@ -253,7 +334,7 @@ function AuxSetPositionModal({
             <Button
               label="Set"
               onPress={() => apply(toSteps(value))}
-              style={[styles.setPosBtn, { backgroundColor: AUX_TINT }]}
+              style={styles.setPosBtn}
             />
           </View>
         </View>
@@ -329,7 +410,7 @@ function GripperGapModal({ lo, hi, currentMm, onMove, onClose }: {
               label="Move"
               disabled={!valid}
               onPress={() => { onMove(n); onClose(); }}
-              style={[styles.setPosBtn, { backgroundColor: AUX_TINT }]}
+              style={styles.setPosBtn}
             />
           </View>
         </View>
@@ -340,14 +421,15 @@ function GripperGapModal({ lo, hi, currentMm, onMove, onClose }: {
 
 // Drag-to-position slider for the gripper gap. The thumb follows the tracked jaw gap
 // when idle and the finger while dragging; it reports the chosen mm value once, on release.
-// Tapping the mm readout opens the exact-gap entry.
-function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onPressValue }: {
+// The gap readout lives in the axis card's readout row (GripperControls); `onDrag` feeds it
+// the target under the finger while dragging (null when released).
+function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onDrag }: {
   lo: number;
   hi: number;
   trackedMm: number;
   tint: string;
   onEnd: (mm: number) => void;
-  onPressValue: () => void;
+  onDrag: (mm: number | null) => void;
 }) {
   const [barW, setBarW]       = useState(1);
   const [dragFrac, setDragFrac] = useState<number | null>(null);
@@ -360,8 +442,8 @@ function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onPressValue }: {
   const frac     = dragFrac ?? idleFrac;
   const toMm     = (f: number) => lo + Math.max(0, Math.min(1, f)) * span;
 
-  const update   = (f: number) => setDragFrac(f);
-  const finishAt = (f: number) => { setDragFrac(null); onEnd(toMm(f)); };
+  const update   = (f: number) => { setDragFrac(f); onDrag(toMm(f)); };
+  const finishAt = (f: number) => { setDragFrac(null); onDrag(null); onEnd(toMm(f)); };
 
   const pan = Gesture.Pan()
     .onBegin(e  => { "worklet"; const f = Math.max(0, Math.min(1, e.x / barW)); lastFrac.value = f; runOnJS(update)(f); })
@@ -370,14 +452,6 @@ function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onPressValue }: {
 
   return (
     <View style={styles.sliderWrap}>
-      <View style={styles.sliderHeader}>
-        <Text style={styles.sliderLabel}>GAP</Text>
-        <TouchableOpacity onPress={onPressValue} hitSlop={8} activeOpacity={0.6} style={styles.sliderValueBtn}
-          accessibilityRole="button" accessibilityLabel="Move to an exact gap">
-          <Text style={[styles.sliderValue, { color: tint }]}>{toMm(frac).toFixed(1)} mm</Text>
-          <Pencil size={12} color={tint} />
-        </TouchableOpacity>
-      </View>
       <GestureDetector gesture={pan}>
         <View style={styles.sliderHit} onLayout={e => setBarW(e.nativeEvent.layout.width)}>
           <View style={styles.sliderTrack}>
@@ -397,6 +471,7 @@ function GripperSlider({ lo, hi, trackedMm, tint, onEnd, onPressValue }: {
 function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAxisChannelState }) {
   const g = gripperGeom(axis);
   const [gapModal, setGapModal] = useState(false);
+  const [dragMm, setDragMm]     = useState<number | null>(null);
 
   if (!g.ok) {
     return (
@@ -430,8 +505,25 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
     robotClient.moveAux(device.deviceId, axis.axisIndex, delta, velSteps, accelSteps, accelSteps);
   };
 
+  const trackedMm = axis.position / g.spm;
+
   return (
     <View style={styles.gripperControls}>
+      <AxisReadout
+        label={dragMm != null ? "Gap · target" : "Gap"}
+        value={(dragMm ?? trackedMm).toFixed(1)}
+        unit="mm"
+        right={
+          <Button
+            label="Exact gap"
+            variant="ghost"
+            size="md"
+            style={styles.exactGapBtn}
+            icon={<Pencil size={14} color={buttonTextColor("ghost")} />}
+            onPress={() => setGapModal(true)}
+          />
+        }
+      />
       <View style={styles.jogRow}>
         <AuxJogButton
           deviceId={device.deviceId}
@@ -455,10 +547,10 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
       <GripperSlider
         lo={lo}
         hi={hi}
-        trackedMm={axis.position / g.spm}
-        tint={AUX_TINT}
+        trackedMm={trackedMm}
+        tint={colors.accent}
         onEnd={driveToGap}
-        onPressValue={() => setGapModal(true)}
+        onDrag={setDragMm}
       />
       {gapModal && (
         <GripperGapModal
@@ -473,10 +565,167 @@ function GripperControls({ device, axis }: { device: AuxDeviceState; axis: AuxAx
   );
 }
 
+// ── Silo ──────────────────────────────────────────────────────────────────────
+// A stack of identical parts on a platform this axis lifts (controller docs/aux-silo.md). The
+// controller owns the count and the homed flag; the buttons send SiloAction, which acks once the
+// motion has finished. An older controller doesn't report siloCount and rejects the command —
+// the card then says so instead of failing silently.
+
+type SiloActionName = "Home" | "Present" | "Refill" | "SetCount";
+
+/** A rejected SiloAction as one readable line. */
+function siloErrorText(e: unknown): string {
+  const msg = typeof e === "string" ? e : e instanceof Error ? e.message : "Silo action failed";
+  if (/unknown command|not supported|unsupported/i.test(msg)) return "This controller doesn't support silo actions yet — update it.";
+  if (/siloNotHomed/i.test(msg)) return "Home the silo first.";
+  if (/siloEmpty/i.test(msg)) return "The silo is empty — refill it.";
+  if (/siloTimeout/i.test(msg)) return "The silo move did not finish in time.";
+  if (/siloStopped/i.test(msg)) return "The silo move was stopped before it finished — home it again.";
+  return msg;
+}
+
+// Type the number of parts now in the silo (no motion).
+function SiloSetCountModal({ capacity, current, onSet, onClose }: {
+  capacity: number;
+  current: number;
+  onSet: (count: number) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(String(current));
+  const n     = Number(value);
+  const valid = value.trim() !== "" && Number.isInteger(n) && n >= 0 && (capacity <= 0 || n <= capacity);
+  const kb    = useKeyboardHeight(); // lift the sheet clear of the keyboard (Modals aren't resized)
+  const submit = () => { if (valid) { onSet(n); onClose(); } };
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={[styles.modalBackdrop, { paddingBottom: kb }]}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalTitleRow}>
+              <Text style={styles.modalTitle}>Set Part Count</Text>
+              <InfoTip text="Tells the controller how many parts are in the silo now, without moving the platform. Use it after loading or removing parts by hand." />
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <FormRow label={capacity > 0 ? `Parts in the silo (0–${capacity})` : "Parts in the silo"}>
+            <Input
+              value={value}
+              onChangeText={setValue}
+              placeholder={String(current)}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              autoFocus
+              selectTextOnFocus
+              onSubmitEditing={submit}
+            />
+          </FormRow>
+          <View style={styles.setPosBtnRow}>
+            <Button label="Cancel" variant="secondary" onPress={onClose} style={styles.setPosBtn} />
+            <Button label="Set count" disabled={!valid} onPress={submit} style={styles.setPosBtn} />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function SiloControls({ device, axis }: { device: AuxDeviceState; axis: AuxAxisChannelState }) {
+  const [busy, setBusy]           = useState<SiloActionName | null>(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [countModal, setCountModal] = useState(false);
+
+  // Older controllers don't report the silo fields at all.
+  const reported = axis.siloCount != null || axis.siloHomed != null;
+  const count    = axis.siloCount ?? 0;
+  const capacity = axis.siloCapacity ?? 0;
+  const homed    = axis.siloHomed === true;
+  const configured = (axis.siloPitchMm ?? 0) > 0 && capacity > 0 && auxStepsPerUnit(axis) > 0;
+
+  const run = async (action: SiloActionName, n?: number) => {
+    setBusy(action);
+    setError(null);
+    try {
+      await robotClient.siloAction(device.deviceId, axis.axisIndex, action, n);
+    } catch (e) {
+      setError(siloErrorText(e));
+    } finally {
+      setBusy(null);
+      robotClient.getAuxState().catch(() => {});
+    }
+  };
+
+  const label = (action: SiloActionName, idle: string, working: string) => (busy === action ? working : idle);
+
+  return (
+    <View style={styles.gripperControls}>
+      <AxisReadout
+        label="Parts"
+        value={reported ? String(count) : "—"}
+        unit={capacity > 0 ? `of ${capacity}` : undefined}
+        right={
+          <View style={styles.siloRight}>
+            {reported && (
+              <StatusPill label={homed ? "Homed" : "Not homed"} tone={homed ? "success" : "warning"} dot />
+            )}
+            <Button
+              label="Set count"
+              variant="ghost"
+              size="md"
+              style={styles.exactGapBtn}
+              icon={<Pencil size={14} color={buttonTextColor("ghost")} />}
+              onPress={() => setCountModal(true)}
+              disabled={busy != null}
+            />
+          </View>
+        }
+      />
+      <View style={styles.jogRow}>
+        <AuxActionButton
+          label={label("Home", "Home", "Homing…")}
+          icon={<House size={16} color={colors.accent} />}
+          onPress={() => run("Home")}
+          disabled={busy != null}
+        />
+        <AuxActionButton
+          label={label("Present", "Present next", "Lifting…")}
+          icon={<ArrowUpFromLine size={16} color={colors.accent} />}
+          onPress={() => run("Present")}
+          disabled={busy != null || (reported && (!homed || count < 1))}
+        />
+        <AuxActionButton
+          label={label("Refill", "Refill", "Refilling…")}
+          icon={<RefreshCw size={16} color={colors.accent} />}
+          onPress={() => run("Refill")}
+          disabled={busy != null}
+        />
+      </View>
+      {error ? (
+        <Text style={styles.siloError} numberOfLines={2}>{error}</Text>
+      ) : !configured ? (
+        <Text style={styles.needsConfig} numberOfLines={2}>
+          Set the part pitch, capacity and mm per rev in configuration (gear icon) before homing.
+        </Text>
+      ) : reported && !homed ? (
+        <Text style={styles.needsConfig} numberOfLines={2}>Home the silo before presenting a part.</Text>
+      ) : null}
+      {countModal && (
+        <SiloSetCountModal
+          capacity={capacity}
+          current={count}
+          onSet={n => run("SetCount", n)}
+          onClose={() => setCountModal(false)}
+        />
+      )}
+    </View>
+  );
+}
+
 // ── AuxDeviceDetail ───────────────────────────────────────────────────────────
 
 function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: boolean }) {
-  const router = useRouter();
+  const pushOnce = usePushOnce();
   const [setPosAxis, setSetPosAxis] = useState<AuxAxisChannelState | null>(null);
 
   // The Uno's spare-pin digital IO rides the shared IO-device stream under this device's id.
@@ -486,69 +735,86 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
   // legacy firmware (no capability report) is assumed able, as before.
   const ioSupported = deviceSupports(device, "io");
   const configureIo = () =>
-    router.push({ pathname: "/(tabs)/io/configure", params: { deviceId: device.deviceId, kind: "aux" } });
+    pushOnce({ pathname: "/(tabs)/io/configure", params: { deviceId: device.deviceId, kind: "aux" } });
 
-  // Role-specific action controls that replace the default ± jog buttons.
+  // Position readout in the axis's configured unit (raw steps when untyped), as value + unit
+  // so the unit can sit lighter beside the number.
+  const posParts = (axis: AuxAxisChannelState): { value: string; unit: string } => {
+    const spu = auxStepsPerUnit(axis);
+    if (axis.axisType && spu > 0) {
+      return { value: (axis.position / spu).toFixed(2), unit: auxUnitLabel(axis) };
+    }
+    return { value: String(axis.position ?? 0), unit: "steps" };
+  };
+
+  // Card body per role: the live readout, then the role's controls in a full-width row.
+  // Gripper owns its readout (it tracks the slider's drag target).
   const renderAxisControls = (axis: AuxAxisChannelState) => {
     const axisIndex = axis.axisIndex;
-    const vel       = axis.actionVelocity || 800;
+    const vel       = actionStepsPerSec(axis);   // steps/s — JogAux/MoveAux velocities are in steps
     const steps     = actionSteps(axis);
+    const pos       = posParts(axis);
+    const readout   = <AxisReadout label="Position" value={pos.value} unit={pos.unit} />;
 
     switch (axis.role) {
       case "Gripper":
         return <GripperControls device={device} axis={axis} />;
+      case "Silo":
+        return <SiloControls device={device} axis={axis} />;
       case "Conveyor":
         return (
-          <View style={styles.jogRow}>
-            <AuxActionButton
-              label="Run"
-              icon={<ChevronLeft size={20} color={AUX_TINT} />}
-              onPress={() => robotClient.jogAux({ deviceId: device.deviceId, axis: axisIndex, velocity: -vel })}
-            />
-            <AuxActionButton
-              label="Stop"
-              tone="danger"
-              icon={<Square size={16} color={colors.danger} />}
-              onPress={() => robotClient.stopAux(device.deviceId, axisIndex)}
-            />
-            <AuxActionButton
-              label="Run"
-              icon={<ChevronRight size={20} color={AUX_TINT} />}
-              onPress={() => robotClient.jogAux({ deviceId: device.deviceId, axis: axisIndex, velocity: vel })}
-            />
-          </View>
+          <>
+            {readout}
+            <View style={styles.jogRow}>
+              <AuxActionButton
+                label="Reverse"
+                icon={<ChevronLeft size={20} color={colors.accent} />}
+                onPress={() => robotClient.jogAux({ deviceId: device.deviceId, axis: axisIndex, velocity: -vel })}
+              />
+              <AuxActionButton
+                label="Stop"
+                tone="danger"
+                icon={<Square size={14} color={colors.danger} />}
+                onPress={() => robotClient.stopAux(device.deviceId, axisIndex)}
+              />
+              <AuxActionButton
+                label="Forward"
+                icon={<ChevronRight size={20} color={colors.accent} />}
+                onPress={() => robotClient.jogAux({ deviceId: device.deviceId, axis: axisIndex, velocity: vel })}
+              />
+            </View>
+          </>
         );
       case "RotaryTable":
         return (
-          <View style={styles.jogRow}>
-            <AuxActionButton
-              label="Index −"
-              onPress={() => robotClient.moveAux(device.deviceId, axisIndex, -steps, vel)}
-            />
-            <AuxActionButton
-              label="Index +"
-              onPress={() => robotClient.moveAux(device.deviceId, axisIndex, steps, vel)}
-            />
-          </View>
+          <>
+            {readout}
+            <View style={styles.jogRow}>
+              <AuxActionButton
+                label="Index −"
+                onPress={() => robotClient.moveAux(device.deviceId, axisIndex, -steps, vel)}
+              />
+              <AuxActionButton
+                label="Index +"
+                onPress={() => robotClient.moveAux(device.deviceId, axisIndex, steps, vel)}
+              />
+            </View>
+          </>
         );
       default: // Generic and unconfigured ("") — hold-to-jog.
         return (
-          <View style={styles.jogRow}>
-            <AuxJogButton deviceId={device.deviceId} axisIndex={axisIndex} direction={-1} />
-            <AuxJogButton deviceId={device.deviceId} axisIndex={axisIndex} direction={1} />
-          </View>
+          <>
+            {readout}
+            <View style={styles.jogRow}>
+              <AuxJogButton deviceId={device.deviceId} axisIndex={axisIndex} direction={-1} />
+              <AuxJogButton deviceId={device.deviceId} axisIndex={axisIndex} direction={1} />
+            </View>
+          </>
         );
     }
   };
 
-  // Position readout in the axis's configured unit (raw steps when untyped).
-  const posLabel = (axis: AuxAxisChannelState): string => {
-    const spu = auxStepsPerUnit(axis);
-    if (axis.axisType && spu > 0) {
-      return `${(axis.position / spu).toFixed(2)} ${auxUnitLabel(axis)}`;
-    }
-    return `${axis.position ?? 0} steps`;
-  };
+  const configuredAxes = device.axes.filter(a => !!a.axisType).length;
 
   // Optimistic override for the enable toggle. The Switch is otherwise driven
   // entirely by server state, so a tap would snap back until the next poll —
@@ -581,23 +847,37 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
         />
       )}
 
-      <View style={{ gap: spacing.md }}>
-        <SectionHeader
-          title="Motor Drivers"
-          right={<InfoTip text="Enabling motor drivers powers the stepper output for every axis on this device. Axes won't move while disabled, and the switch is locked out until the device is connected." />}
-        />
-        <Card>
-          <FormRow label="Motor Drivers" hint={shownEnabled ? "Enabled" : "Disabled"} inline>
+      {/* Device overview: the one device-wide control (motor drivers) plus the axis summary,
+          in a single card — replaces a stat row that repeated the switch's state. */}
+      <Card padded={false}>
+        <View style={[styles.overview, isWide && styles.overviewWide]}>
+          <View style={[styles.overviewMotor, isWide && styles.overviewMotorWide]}>
+            <View style={styles.readoutMain}>
+              <View style={styles.overviewLabelRow}>
+                <Text style={styles.readoutLabel}>Motor drivers</Text>
+                <InfoTip size={12} text="Enabling motor drivers powers the stepper output for every axis on this device. Axes won't move while disabled, and the switch is locked out until the device is connected." />
+              </View>
+              <Text style={styles.overviewValue}>{shownEnabled ? "Enabled" : "Disabled"}</Text>
+              <Text style={styles.overviewMeta} numberOfLines={2}>
+                {device.connected ? "Powers every axis on this device" : "Connect the device to change"}
+              </Text>
+            </View>
             <Switch
               value={shownEnabled}
               onValueChange={toggleEnable}
               disabled={!device.connected}
-              trackColor={{ false: colors.border, true: AUX_TINT_TRACK }}
-              thumbColor={shownEnabled ? AUX_TINT : colors.textFaint}
+              trackColor={{ false: colors.border, true: colors.accentFaded }}
+              thumbColor={shownEnabled ? colors.accent : colors.surface}
+              accessibilityLabel="Motor drivers"
             />
-          </FormRow>
-        </Card>
-      </View>
+          </View>
+          <Divider vertical={isWide} style={isWide ? styles.overviewVDivider : styles.overviewHDivider} />
+          <View style={styles.overviewStats}>
+            <OverviewStat label="Axes" value={String(device.axes.length)} />
+            <OverviewStat label="Configured" value={String(configuredAxes)} unit={`of ${device.axes.length}`} />
+          </View>
+        </View>
+      </Card>
 
       <View style={{ gap: spacing.md }}>
         <SectionHeader
@@ -615,40 +895,41 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
               const RoleIcon  = meta.icon;
               const hasRole   = !!axis.role && axis.role !== "Generic";
               const roleLabel = hasRole ? meta.label : "Generic";
-              // Each axis is its own self-contained card: an icon + identity header,
-              // then its role-specific controls below. Reads as an independent piece.
+              const subLabel  = axis.axisType ? roleLabel : `${roleLabel} · not configured`;
+              // Each axis is its own self-contained card: an identity header (role tile, name,
+              // role; set-position + configure as quiet icon buttons), then its live readout
+              // and controls. In the wide grid, cards in a row share a height and the controls
+              // sit on the bottom edge, so rows line up.
               const card = (
-                <Card padded={false}>
+                <Card padded={false} style={isWide && styles.axisCardWide}>
                   <View style={styles.axisHeader}>
                     <View style={styles.roleIcon}>
-                      <RoleIcon size={20} color={AUX_TINT} />
+                      <RoleIcon size={18} color={AUX_TINT} />
                     </View>
                     <View style={styles.axisHeaderInfo}>
                       <Text style={styles.axisName} numberOfLines={1}>
                         {axis.name || `Axis ${axis.axisIndex}`}
                       </Text>
-                      <Text style={styles.axisSub} numberOfLines={1}>
-                        {`${roleLabel}  ·  ${posLabel(axis)}`}
-                      </Text>
+                      <Text style={styles.axisSub} numberOfLines={1}>{subLabel}</Text>
                     </View>
-                    <AnimatedPressable
-                      style={styles.axisConfigBtn}
+                    <Button
+                      label="Set position"
+                      variant="ghost"
+                      size="md"
+                      iconOnly
+                      icon={<Crosshair size={18} color={colors.textMuted} />}
                       onPress={() => setSetPosAxis(axis)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Set position"
-                    >
-                      <Crosshair size={16} color={colors.textFaint} />
-                    </AnimatedPressable>
-                    <AnimatedPressable
-                      style={styles.axisConfigBtn}
-                      onPress={() => router.push({ pathname: "/io/aux-axis", params: { deviceId: device.deviceId, axis: String(axis.axisIndex) } })}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Settings2 size={16} color={colors.textFaint} />
-                    </AnimatedPressable>
+                    />
+                    <Button
+                      label="Configure axis"
+                      variant="ghost"
+                      size="md"
+                      iconOnly
+                      icon={<Settings2 size={18} color={colors.textMuted} />}
+                      onPress={() => pushOnce({ pathname: "/io/aux-axis", params: { deviceId: device.deviceId, axis: String(axis.axisIndex) } })}
+                    />
                   </View>
-                  <Divider inset />
+                  <Divider style={styles.axisDivider} />
                   <View style={styles.axisControls}>
                     {renderAxisControls(axis)}
                   </View>
@@ -666,8 +947,8 @@ function AuxDeviceDetail({ device, isWide }: { device: AuxDeviceState; isWide: b
         <SectionHeader
           title="IO Pins"
           right={ioSupported ? (
-            <AnimatedPressable style={styles.ioConfigLink} onPress={configureIo} hitSlop={8}>
-              <Settings2 size={15} color={AUX_TINT} />
+            <AnimatedPressable style={styles.ioConfigLink} onPress={configureIo} hitSlop={8} accessibilityRole="button">
+              <Settings2 size={15} color={colors.accent} />
               <Text style={styles.ioConfigText}>Configure</Text>
             </AnimatedPressable>
           ) : undefined}
@@ -726,7 +1007,6 @@ export default function AuxPage() {
   }, []);
 
   const device = deviceId ? (auxDevices.find(d => d.deviceId === deviceId) ?? null) : null;
-  const configuredAxes = device?.axes.filter(a => !!a.axisType).length ?? 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -738,15 +1018,6 @@ export default function AuxPage() {
         {device ? (
           <>
             <DeviceStatusBar connected={device.connected} chips={<FirmwareChip device={device} />} />
-            <View style={styles.statRow}>
-              <StatTile label="Axes" value={device.axes.length} icon={Gauge}
-                        tint={[AUX_TINT, AUX_TINT_SOFT]} style={styles.statTile} />
-              <StatTile label="Configured" value={`${configuredAxes}/${device.axes.length}`}
-                        style={styles.statTile} />
-              <StatTile label="Motors" value={device.motorEnabled ? "Enabled" : "Disabled"}
-                        tint={device.motorEnabled ? [colors.success, colors.successSoft] : undefined}
-                        style={styles.statTile} />
-            </View>
             <AuxDeviceDetail device={device} isWide={isWide} />
           </>
         ) : (
@@ -765,25 +1036,56 @@ export default function AuxPage() {
 
 const styles = StyleSheet.create({
   jogRow:        { flexDirection: "row", gap: spacing.sm },
-  axisConfigBtn: { padding: spacing.xs, marginLeft: 2 },
 
-  // ── Per-axis card: icon + identity header, then its controls below ──────────
+  // ── Readouts: small uppercase label, large tabular value, lighter unit ──────
+  readout:         { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm },
+  readoutMain:     { flex: 1, minWidth: 0, gap: 2 },
+  readoutLabel:    type.sectionLabel,
+  readoutValueRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.xs },
+  readoutValue: {
+    fontSize: 26, lineHeight: 32, fontWeight: "600", color: colors.text,
+    fontVariant: ["tabular-nums"], letterSpacing: -0.3,
+  },
+  readoutUnit: { fontSize: 13, color: colors.textFaint, fontWeight: "500" },
+
+  // ── Device overview card: motor drivers + axis summary ──────────────────────
+  overview:          { padding: spacing.lg },
+  overviewWide:      { flexDirection: "row", alignItems: "center" },
+  overviewMotor:     { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  overviewMotorWide: { flex: 1 },
+  overviewLabelRow:  { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  overviewValue: {
+    fontSize: 22, lineHeight: 28, fontWeight: "600", color: colors.text,
+    fontVariant: ["tabular-nums"],
+  },
+  overviewMeta:      { ...type.subtitle, color: colors.textMuted },
+  overviewHDivider:  { marginVertical: spacing.md },
+  overviewVDivider:  { marginHorizontal: spacing.xl },
+  overviewStats:     { flexDirection: "row", gap: spacing.xl },
+  overviewStat:      { gap: 2, minWidth: 88 },
+
+  // ── Per-axis card: identity header, then readout + controls ─────────────────
   axisStack:       { gap: spacing.md },
+  axisCardWide:    { flex: 1 },
   axisHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    gap: spacing.sm + 2,
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.xs,
+    paddingVertical: spacing.sm,
+    gap: 0,
   },
-  axisHeaderInfo: { flex: 1, minWidth: 0 },
-  axisName: { ...type.body, fontWeight: "700", color: colors.text },
-  axisSub:  { ...type.caption, color: colors.textMuted },
-  axisControls: { padding: spacing.md, gap: spacing.sm },
+  axisHeaderInfo: { flex: 1, minWidth: 0, marginLeft: spacing.sm },
+  axisName: type.title,
+  axisSub:  { ...type.subtitle, color: colors.textMuted, marginTop: 1 },
+  axisDivider: { marginVertical: 0 },
+  // Fills the card in the wide grid; space-between keeps the controls on the bottom edge.
+  axisControls: { flex: 1, padding: spacing.lg, gap: spacing.md, justifyContent: "space-between" },
 
-  // Role icon tile on each axis card (what the motor drives, at a glance).
+  // Role icon tile on each axis card (what the motor drives, at a glance) — the device-type
+  // purple is identity, not interaction.
   roleIcon: {
-    width: 38, height: 38,
+    width: 36, height: 36,
     borderRadius: radii.sm,
     justifyContent: "center", alignItems: "center",
     backgroundColor: AUX_TINT_SOFT,
@@ -791,15 +1093,14 @@ const styles = StyleSheet.create({
 
   // Gripper controls: Open/Close jog row + live gap slider.
   gripperControls: { gap: spacing.md },
+  // Ghost button pulled to the card's padding edge so its text lines up with the controls.
+  exactGapBtn:     { marginRight: -spacing.lg + spacing.xs },
   needsConfig: { ...type.caption, color: colors.textFaint, lineHeight: 16 },
+  siloRight:   { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  siloError:   { ...type.caption, color: colors.danger, lineHeight: 16 },
 
   // ── Gripper gap slider (live drag-to-position) ──────────────────────────────
-  sliderWrap:   { gap: 4 },
-  sliderHeader: { flexDirection: "row", alignItems: "center" },
-  sliderLabel:  { fontSize: 12, fontWeight: "700", color: colors.textSecondary, letterSpacing: 0.5 },
-  sliderValueBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: radii.sm, backgroundColor: colors.surfaceMuted },
-  sliderValue:  { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  sliderWrap:   { gap: 0 },
   sliderHit:    { height: 40, justifyContent: "center" },
   sliderTrack:  { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden" },
   sliderFill:   { height: 6, borderRadius: 3 },
@@ -812,37 +1113,37 @@ const styles = StyleSheet.create({
     borderWidth: 3,
   },
   sliderEnds: { flexDirection: "row", justifyContent: "space-between" },
-  sliderEnd:  { fontSize: 11, color: colors.textFaint },
+  sliderEnd:  { fontSize: 12, color: colors.textFaint, fontVariant: ["tabular-nums"] },
 
   // ── IO Pins section ─────────────────────────────────────────────────────────
-  ioConfigLink: { flexDirection: "row", alignItems: "center", gap: 4 },
-  ioConfigText: { fontSize: 13, fontWeight: "700", color: AUX_TINT },
-  ioEmpty:      { ...type.caption, color: colors.textMuted, lineHeight: 17 },
+  ioConfigLink: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 32 },
+  ioConfigText: { fontSize: 13, fontWeight: "600", color: colors.accent },
+  ioEmpty:      { ...type.body, color: colors.textMuted, lineHeight: 20 },
 
   reRefHint:    { ...type.caption, color: colors.textMuted, lineHeight: 16 },
   reRefDivider: { marginVertical: spacing.md },
 
-  // Tap action buttons (gripper / conveyor / rotary) — sized to match the 64px jog buttons.
+  // Tap action buttons (conveyor / rotary) — same row-filling footprint as the jog buttons.
   actionBtn: {
-    minWidth: 64, height: 64,
+    flex: 1, height: CONTROL_H,
     borderWidth: 1.5,
     borderRadius: radii.sm,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.sm,
   },
+  actionBtnTonal:   { backgroundColor: colors.accentSoft, borderColor: colors.accentSoft },
+  actionBtnDanger:  { backgroundColor: colors.dangerSoft, borderColor: colors.dangerBorder },
   actionBtnContent: { flexDirection: "row", alignItems: "center", gap: 4 },
-  actionBtnText:    { fontSize: 13, fontWeight: "700" },
+  actionBtnText:    { fontSize: 14, fontWeight: "600" },
+  actionBtnDisabled: { opacity: 0.45 },
 
   setPosBtnRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
   setPosBtn:    { flex: 1 },
 
   // Wide: axes grid — 2 columns of small cards instead of one long list.
   axisGrid:     { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
-  axisGridItem: { flexBasis: "48%", flexGrow: 1, minWidth: 320 },
-
-  statRow:       { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
-  statTile:      { flex: 1, minWidth: 130 },
+  axisGridItem: { flexBasis: "48%", flexGrow: 1, minWidth: 300 },
 
   modalBackdrop: {
     flex: 1, backgroundColor: colors.overlay,

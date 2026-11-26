@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { appAlert } from "@/src/components/ui/AppAlert";
 import { accents, colors, spacing, radii, shadows, cautionRowStyle, CautionTriangle, InfoTip, PageHeader, StatusPill } from "@/src/components/ui/kit";
-import { wide, usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
+import { usePaneLayout, useWideContent } from "@/src/components/ui/responsive";
 import { DragHandle } from "@/src/components/ui/builder/StepRow";
 import { useDragReorder } from "@/src/components/ui/useDragReorder";
 import { CameraPickerModal } from "@/src/components/ui/vision-editor/CameraPickerModal";
@@ -444,6 +444,21 @@ export default function VisionEditorScreen() {
     </View>
   );
 
+  const resultBlock = showResults && visionResult && (
+    <>
+      <View style={styles.sectionLabelRow}>
+        <Text style={styles.sectionLabel}>RESULT</Text>
+        <View style={{ flex: 1 }} />
+        <InfoTip text="The latest result of every enabled tool. A tool whose fixture was not found is not run, and counts as failed. Overall passes when every tool set to count toward it passes." />
+      </View>
+      <VisionResults result={visionResult} tools={program.tools} />
+    </>
+  );
+  const waitingNote = showResults && !visionResult && isRunning && (
+    <Text style={styles.waiting}>Waiting for the first result…</Text>
+  );
+
+  // Narrow (stacked) layout: a fixed-height feed in the shared scroll.
   const infoSection = (
     <>
       <VisionFeedViewer
@@ -458,18 +473,33 @@ export default function VisionEditorScreen() {
         placeholder={program.cameraId ? "Connecting to camera…" : "Select a camera above"}
       />
       <RunVisionButton isRunning={isRunning} transitioning={transitioning} onPress={toggleRunning} />
-      {showResults && visionResult && (
-        <>
-          <View style={styles.sectionLabelRow}>
-            <Text style={styles.sectionLabel}>RESULT</Text>
-            <View style={{ flex: 1 }} />
-            <InfoTip text="The latest result of every enabled tool. A tool whose fixture was not found is not run, and counts as failed. Overall passes when every tool set to count toward it passes." />
-          </View>
-          <VisionResults result={visionResult} tools={program.tools} />
-        </>
-      )}
-      {showResults && !visionResult && isRunning && (
-        <Text style={styles.waiting}>Waiting for the first result…</Text>
+      {resultBlock}
+      {waitingNote}
+    </>
+  );
+
+  // Wide layout: the feed is the hero — it grows to fill the side pane's height, with the
+  // Run button and (while running) a scrollable result list beneath it, so no space is wasted.
+  const wideInfoPane = (
+    <>
+      <VisionFeedViewer
+        ref={feedWebViewRef}
+        feedUrl={feedSourceUrl}
+        overlay={overlay}
+        isWide={isWide}
+        aspect={feedAspect}
+        fill
+        onMessage={onFeedMessage}
+        onTapImagePoint={onFeedTap}
+        title={program.name || "Camera"}
+        placeholder={program.cameraId ? "Connecting to camera…" : "Select a camera above"}
+      />
+      <RunVisionButton isRunning={isRunning} transitioning={transitioning} onPress={toggleRunning} />
+      {(resultBlock || waitingNote) && (
+        <ScrollView style={styles.wideResults} contentContainerStyle={styles.wideResultsContent} showsVerticalScrollIndicator={false}>
+          {resultBlock}
+          {waitingNote}
+        </ScrollView>
       )}
     </>
   );
@@ -636,7 +666,7 @@ export default function VisionEditorScreen() {
           {isWide ? (
             <View style={styles.wideRow}>
               <ScrollView
-                style={styles.widePaneRight}
+                style={[styles.widePaneRight, isSplit ? styles.paneHalf : styles.editorSidebar]}
                 contentContainerStyle={[styles.content, styles.wideEditorContent]}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
@@ -647,14 +677,9 @@ export default function VisionEditorScreen() {
                 {layersSection}
                 {toolsSection}
               </ScrollView>
-              <ScrollView
-                style={[styles.widePaneLeft, isSplit && wide.paneSplit]}
-                contentContainerStyle={styles.widePaneLeftContent}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {infoSection}
-              </ScrollView>
+              <View style={[styles.widePaneLeft, isSplit ? styles.paneHalf : styles.feedHero]}>
+                {wideInfoPane}
+              </View>
             </View>
           ) : (
             <ScrollView
@@ -729,12 +754,21 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.sm },
 
   wideRow: { flex: 1, flexDirection: "row", width: "100%" },
+  // The feed (hero) pane — a vertical column so the feed can fill its height.
   widePaneLeft: {
-    width: "46%", minWidth: 420, maxWidth: 820, flexGrow: 0, flexShrink: 0,
     borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border,
+    flexDirection: "column", gap: spacing.sm,
+    paddingHorizontal: 20, paddingTop: 18, paddingBottom: spacing.lg,
   },
-  widePaneLeftContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: spacing.xxl, gap: spacing.sm },
-  widePaneRight: { flex: 1 },
+  widePaneRight: { minWidth: 0 },
+  // split tier (foldable/landscape phone): equal halves so the divider lands on the hinge.
+  paneHalf: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  // desktop tier: the editor is a steady reading column, the feed takes the rest as the hero.
+  editorSidebar: { width: 460, flexGrow: 0, flexShrink: 0 },
+  feedHero: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  // Result list under the hero feed: takes only the room left over, scrolls if longer.
+  wideResults: { flexShrink: 1, flexGrow: 0 },
+  wideResultsContent: { gap: spacing.sm, paddingBottom: spacing.sm },
   wideEditorContent: { width: "100%", maxWidth: 720, alignSelf: "center" },
 
   saveStatusRow:  { flexDirection: "row", alignItems: "center", gap: 5 },

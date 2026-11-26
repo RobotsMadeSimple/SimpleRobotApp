@@ -1,12 +1,12 @@
-import { Brackets, Cog, MoveHorizontal, RotateCw, type LucideIcon } from "lucide-react-native";
+import { Brackets, Cog, Cylinder, MoveHorizontal, RotateCw, type LucideIcon } from "lucide-react-native";
 
 // Shared metadata for aux-axis roles — keeps the role picker (config page) and the
 // per-axis controls (auxiliary device page) using the same icons and labels.
 
-export type AuxRole = "Generic" | "Gripper" | "Conveyor" | "RotaryTable";
+export type AuxRole = "Generic" | "Gripper" | "Conveyor" | "RotaryTable" | "Silo";
 
 /** Selectable roles, in display order. */
-export const AUX_ROLES: AuxRole[] = ["Generic", "Gripper", "Conveyor", "RotaryTable"];
+export const AUX_ROLES: AuxRole[] = ["Generic", "Gripper", "Conveyor", "RotaryTable", "Silo"];
 
 type RoleMeta = { label: string; icon: LucideIcon };
 
@@ -15,6 +15,7 @@ const META: Record<AuxRole, RoleMeta> = {
   Gripper:     { label: "Gripper",  icon: Brackets },
   Conveyor:    { label: "Conveyor", icon: MoveHorizontal },
   RotaryTable: { label: "Rotary",   icon: RotateCw },
+  Silo:        { label: "Silo",     icon: Cylinder },
 };
 
 /** Icon + label for a role string (unknown/empty falls back to Generic). */
